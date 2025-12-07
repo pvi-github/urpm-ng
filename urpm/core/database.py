@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Iterator
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -132,6 +132,20 @@ CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- Package pinning (per-package priority overrides)
+-- Similar to APT pinning: allows devs/testers to prefer specific media for specific packages
+CREATE TABLE IF NOT EXISTS pins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_pattern TEXT NOT NULL,  -- glob pattern: 'firefox', 'lib64*', '*'
+    media_pattern TEXT,             -- media name pattern (NULL = any media)
+    priority INTEGER DEFAULT 100,   -- higher = preferred (overrides media.priority)
+    version_pattern TEXT,           -- optional version constraint: '>=120.0', '<2.0'
+    comment TEXT,                   -- user note
+    added_timestamp INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_pins_pattern ON pins(package_pattern);
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_pkg_name_lower ON packages(name_lower);
@@ -457,3 +471,133 @@ class PackageDatabase:
             (key, value)
         )
         self.conn.commit()
+
+    # =========================================================================
+    # Pinning (per-package priority overrides)
+    # =========================================================================
+
+    def add_pin(self, package_pattern: str, media_pattern: str = None,
+                priority: int = 100, version_pattern: str = None,
+                comment: str = None) -> int:
+        """Add a pin rule for package priority.
+
+        Examples:
+            # Prefer firefox from 'Cauldron' media
+            add_pin('firefox', 'Cauldron', priority=500)
+
+            # All lib64* packages from 'Core Updates Testing' for testing
+            add_pin('lib64*', 'Core Updates Testing', priority=600)
+
+            # Pin all packages from stable with low priority (allow overrides)
+            add_pin('*', 'Core Release', priority=50)
+
+        Returns:
+            Pin ID
+        """
+        cursor = self.conn.execute("""
+            INSERT INTO pins (package_pattern, media_pattern, priority,
+                            version_pattern, comment, added_timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (package_pattern, media_pattern, priority, version_pattern,
+              comment, int(time.time())))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def remove_pin(self, pin_id: int):
+        """Remove a pin rule."""
+        self.conn.execute("DELETE FROM pins WHERE id = ?", (pin_id,))
+        self.conn.commit()
+
+    def list_pins(self) -> List[Dict]:
+        """List all pin rules."""
+        cursor = self.conn.execute("""
+            SELECT id, package_pattern, media_pattern, priority,
+                   version_pattern, comment
+            FROM pins ORDER BY priority DESC
+        """)
+        return [dict(row) for row in cursor]
+
+    def get_pin_priority(self, package_name: str, media_name: str) -> int:
+        """Get effective priority for a package from a media, considering pins.
+
+        Returns the highest matching pin priority, or media default priority.
+        """
+        import fnmatch
+
+        # Get all pins that could match
+        cursor = self.conn.execute("SELECT * FROM pins ORDER BY priority DESC")
+        pins = [dict(row) for row in cursor]
+
+        for pin in pins:
+            pkg_match = fnmatch.fnmatch(package_name.lower(),
+                                        pin['package_pattern'].lower())
+            media_match = (pin['media_pattern'] is None or
+                         fnmatch.fnmatch(media_name, pin['media_pattern']))
+
+            if pkg_match and media_match:
+                return pin['priority']
+
+        # No pin match - return media default priority
+        media = self.get_media(media_name)
+        return media['priority'] if media else 50
+
+    # =========================================================================
+    # Multi-media package resolution
+    # =========================================================================
+
+    def get_all_versions(self, name: str) -> List[Dict]:
+        """Get all versions of a package from all media.
+
+        Returns packages sorted by effective priority (pins + media priority),
+        then by version (newest first).
+        """
+        cursor = self.conn.execute("""
+            SELECT p.*, m.name as media_name, m.priority as media_priority
+            FROM packages p
+            LEFT JOIN media m ON p.media_id = m.id
+            WHERE p.name_lower = ?
+            ORDER BY p.epoch DESC, p.version DESC, p.release DESC
+        """, (name.lower(),))
+
+        packages = [dict(row) for row in cursor]
+
+        # Add effective priority considering pins
+        for pkg in packages:
+            pkg['effective_priority'] = self.get_pin_priority(
+                pkg['name'],
+                pkg.get('media_name', '')
+            )
+
+        # Sort by effective priority (desc), then version
+        packages.sort(key=lambda p: (
+            -p['effective_priority'],
+            -p.get('epoch', 0),
+            p.get('version', ''),
+            p.get('release', '')
+        ), reverse=False)
+
+        # Re-sort properly: priority desc, then EVR desc
+        packages.sort(key=lambda p: p['effective_priority'], reverse=True)
+
+        return packages
+
+    def get_best_package(self, name: str) -> Optional[Dict]:
+        """Get the best version of a package considering priorities.
+
+        Takes into account:
+        1. Pin rules (highest priority)
+        2. Media priority
+        3. Package version (EVR comparison)
+        """
+        versions = self.get_all_versions(name)
+        if not versions:
+            return None
+
+        # First package is best (sorted by priority, then version)
+        best = versions[0]
+        best['requires'] = self._get_deps(best['id'], 'requires')
+        best['provides'] = self._get_deps(best['id'], 'provides')
+        best['conflicts'] = self._get_deps(best['id'], 'conflicts')
+        best['obsoletes'] = self._get_deps(best['id'], 'obsoletes')
+
+        return best
