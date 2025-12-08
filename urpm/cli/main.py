@@ -535,10 +535,12 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
     from ..core.sync import sync_media, sync_all_media
 
     def progress(media_name, stage, current, total):
+        # Clear line with ANSI escape code, then print
         if total > 0:
-            print(f"\r  {media_name}: {stage} ({current}/{total})", end='', flush=True)
+            msg = f"  {media_name}: {stage} ({current}/{total})"
         else:
-            print(f"\r  {media_name}: {stage}                    ", end='', flush=True)
+            msg = f"  {media_name}: {stage}"
+        print(f"\r\033[K{msg}", end='', flush=True)
 
     if args.name:
         # Update specific media
