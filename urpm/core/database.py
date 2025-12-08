@@ -264,93 +264,136 @@ class PackageDatabase:
     # =========================================================================
     # Package import
     # =========================================================================
-    
+
     def import_packages(self, packages: Iterator[Dict], media_id: int = None,
-                        source: str = 'synthesis', progress_callback=None):
+                        source: str = 'synthesis', progress_callback=None,
+                        batch_size: int = 1000):
         """Import packages from a parsed synthesis or hdlist.
-        
+
+        Uses bulk inserts for performance.
+
         Args:
             packages: Iterator of package dictionaries
             media_id: Associated media ID (optional)
             source: Source type ('synthesis' or 'hdlist')
             progress_callback: Optional callback(count, pkg_name)
+            batch_size: Number of packages per batch
         """
+        timestamp = int(time.time())
+        count = 0
+
+        # Accumulators for batch inserts
+        pkg_rows = []
+        # We'll need to track nevra -> pkg_id mapping for deps
+        # So we insert packages first, then query their IDs
+
+        # Collect all packages first
+        all_packages = list(packages)
+        total = len(all_packages)
+
+        if progress_callback:
+            progress_callback(0, "preparing...")
+
+        # Begin transaction
         self.conn.execute("BEGIN TRANSACTION")
-        
+
         try:
-            count = 0
-            for pkg in packages:
-                self._insert_package(pkg, media_id, source)
-                count += 1
-                
-                if progress_callback and count % 100 == 0:
-                    progress_callback(count, pkg.get('name', ''))
-            
+            # Bulk insert packages
+            pkg_rows = []
+            for pkg in all_packages:
+                hash_data = f"{pkg['nevra']}|{pkg.get('summary', '')}"
+                pkg_hash = hashlib.sha256(hash_data.encode()).hexdigest()[:16]
+
+                pkg_rows.append((
+                    media_id,
+                    pkg['name'],
+                    pkg.get('epoch', 0),
+                    pkg['version'],
+                    pkg['release'],
+                    pkg['arch'],
+                    pkg['name'].lower(),
+                    pkg['nevra'],
+                    pkg.get('summary', ''),
+                    pkg.get('description', ''),
+                    pkg.get('size', 0),
+                    pkg.get('group', ''),
+                    pkg.get('url', ''),
+                    pkg.get('license', ''),
+                    source,
+                    pkg_hash,
+                    timestamp
+                ))
+
+            self.conn.executemany("""
+                INSERT OR REPLACE INTO packages
+                (media_id, name, epoch, version, release, arch, name_lower, nevra,
+                 summary, description, size, group_name, url, license,
+                 source, pkg_hash, added_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, pkg_rows)
+
+            if progress_callback:
+                progress_callback(total, "packages inserted, indexing deps...")
+
+            # Build nevra -> pkg_id mapping
+            cursor = self.conn.execute(
+                "SELECT id, nevra FROM packages WHERE media_id = ?",
+                (media_id,)
+            )
+            nevra_to_id = {row[1]: row[0] for row in cursor}
+
+            # Collect all dependencies
+            requires_rows = []
+            provides_rows = []
+            conflicts_rows = []
+            obsoletes_rows = []
+
+            for pkg in all_packages:
+                pkg_id = nevra_to_id.get(pkg['nevra'])
+                if not pkg_id:
+                    continue
+
+                for cap in pkg.get('requires', []):
+                    requires_rows.append((pkg_id, cap))
+                for cap in pkg.get('provides', []):
+                    provides_rows.append((pkg_id, cap))
+                for cap in pkg.get('conflicts', []):
+                    conflicts_rows.append((pkg_id, cap))
+                for cap in pkg.get('obsoletes', []):
+                    obsoletes_rows.append((pkg_id, cap))
+
+            # Bulk insert dependencies
+            if requires_rows:
+                self.conn.executemany(
+                    "INSERT INTO requires (pkg_id, capability) VALUES (?, ?)",
+                    requires_rows
+                )
+            if provides_rows:
+                self.conn.executemany(
+                    "INSERT INTO provides (pkg_id, capability) VALUES (?, ?)",
+                    provides_rows
+                )
+            if conflicts_rows:
+                self.conn.executemany(
+                    "INSERT INTO conflicts (pkg_id, capability) VALUES (?, ?)",
+                    conflicts_rows
+                )
+            if obsoletes_rows:
+                self.conn.executemany(
+                    "INSERT INTO obsoletes (pkg_id, capability) VALUES (?, ?)",
+                    obsoletes_rows
+                )
+
             self.conn.commit()
-            return count
-            
+
+            if progress_callback:
+                progress_callback(total, "done")
+
+            return total
+
         except Exception as e:
             self.conn.rollback()
             raise e
-    
-    def _insert_package(self, pkg: Dict, media_id: int, source: str):
-        """Insert a single package."""
-        # Calculate hash
-        hash_data = f"{pkg['nevra']}|{pkg.get('summary', '')}"
-        pkg_hash = hashlib.sha256(hash_data.encode()).hexdigest()[:16]
-        
-        cursor = self.conn.execute("""
-            INSERT OR REPLACE INTO packages
-            (media_id, name, epoch, version, release, arch, name_lower, nevra,
-             summary, description, size, group_name, url, license,
-             source, pkg_hash, added_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            media_id,
-            pkg['name'],
-            pkg.get('epoch', 0),
-            pkg['version'],
-            pkg['release'],
-            pkg['arch'],
-            pkg['name'].lower(),
-            pkg['nevra'],
-            pkg.get('summary', ''),
-            pkg.get('description', ''),
-            pkg.get('size', 0),
-            pkg.get('group', ''),
-            pkg.get('url', ''),
-            pkg.get('license', ''),
-            source,
-            pkg_hash,
-            int(time.time())
-        ))
-        
-        pkg_id = cursor.lastrowid
-        
-        # Insert dependencies
-        for cap in pkg.get('requires', []):
-            self.conn.execute(
-                "INSERT INTO requires (pkg_id, capability) VALUES (?, ?)",
-                (pkg_id, cap)
-            )
-        
-        for cap in pkg.get('provides', []):
-            self.conn.execute(
-                "INSERT INTO provides (pkg_id, capability) VALUES (?, ?)",
-                (pkg_id, cap)
-            )
-        
-        for cap in pkg.get('conflicts', []):
-            self.conn.execute(
-                "INSERT INTO conflicts (pkg_id, capability) VALUES (?, ?)",
-                (pkg_id, cap)
-            )
-        
-        for cap in pkg.get('obsoletes', []):
-            self.conn.execute(
-                "INSERT INTO obsoletes (pkg_id, capability) VALUES (?, ?)",
-                (pkg_id, cap)
-            )
     
     def clear_media_packages(self, media_id: int):
         """Remove all packages from a media."""
