@@ -24,6 +24,25 @@ SYNTHESIS_PATH = "media_info/synthesis.hdlist.cz"
 HDLIST_PATH = "media_info/hdlist.cz"
 MD5SUM_PATH = "media_info/MD5SUM"
 
+# Local cache directory (mirrors structure)
+DEFAULT_CACHE_DIR = Path.home() / ".cache" / "urpm"
+
+
+def get_hostname_from_url(url: str) -> str:
+    """Extract hostname from a URL for cache organization."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    return parsed.netloc or "local"
+
+
+def get_media_cache_dir(media_name: str, media_url: str) -> Path:
+    """Get cache directory for a media.
+
+    Structure: ~/.cache/urpm/medias/<hostname>/<media_name>/
+    """
+    hostname = get_hostname_from_url(media_url)
+    return DEFAULT_CACHE_DIR / "medias" / hostname / media_name
+
 
 @dataclass
 class DownloadResult:
@@ -296,6 +315,28 @@ def sync_media(db: PackageDatabase, media_name: str,
                 success=False,
                 error=f"Failed to parse synthesis: {e}"
             )
+
+        # Copy files to permanent cache (mirrors structure)
+        # Structure: ~/.cache/urpm/medias/<hostname>/<media_name>/media_info/
+        cache_media_dir = get_media_cache_dir(media_name, media_url)
+        cache_media_info = cache_media_dir / "media_info"
+        cache_media_info.mkdir(parents=True, exist_ok=True)
+
+        # Copy synthesis
+        cache_synthesis = cache_media_info / "synthesis.hdlist.cz"
+        shutil.copy2(synthesis_path, cache_synthesis)
+
+        # Copy hdlist if downloaded
+        if hdlist_downloaded:
+            cache_hdlist = cache_media_info / "hdlist.cz"
+            shutil.copy2(tmpdir / "hdlist.cz", cache_hdlist)
+
+        # Download and copy MD5SUM
+        md5sum_url = build_md5sum_url(media_url)
+        md5sum_path = tmpdir / "MD5SUM"
+        md5_result = download_file(md5sum_url, md5sum_path)
+        if md5_result.success:
+            shutil.copy2(md5sum_path, cache_media_info / "MD5SUM")
 
         # Update media sync info
         import time

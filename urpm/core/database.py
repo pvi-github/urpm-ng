@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Iterator
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -113,19 +113,29 @@ CREATE TABLE IF NOT EXISTS media (
 CREATE TABLE IF NOT EXISTS history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp INTEGER NOT NULL,
-    action TEXT NOT NULL,  -- 'install', 'remove', 'update'
-    command TEXT,
+    action TEXT NOT NULL,      -- 'install', 'remove', 'upgrade', 'undo', 'rollback'
+    status TEXT DEFAULT 'running',  -- 'running', 'complete', 'interrupted'
+    command TEXT,              -- full command line
     user TEXT,
-    return_code INTEGER
+    return_code INTEGER,
+    undone_by INTEGER,         -- transaction ID that undid this one (NULL if not undone)
+    FOREIGN KEY (undone_by) REFERENCES history(id)
 );
 
 CREATE TABLE IF NOT EXISTS history_packages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     history_id INTEGER NOT NULL,
     pkg_nevra TEXT NOT NULL,
-    action TEXT NOT NULL,  -- 'installed', 'removed', 'upgraded'
+    pkg_name TEXT NOT NULL,    -- for easier queries
+    action TEXT NOT NULL,      -- 'install', 'remove', 'upgrade', 'downgrade'
+    reason TEXT NOT NULL,      -- 'explicit', 'dependency'
+    previous_nevra TEXT,       -- for upgrade/downgrade: what was there before
     FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp);
+CREATE INDEX IF NOT EXISTS idx_history_status ON history(status);
+CREATE INDEX IF NOT EXISTS idx_history_pkg_name ON history_packages(pkg_name);
 
 -- Configuration
 CREATE TABLE IF NOT EXISTS config (
@@ -430,17 +440,57 @@ class PackageDatabase:
     # Package queries
     # =========================================================================
     
-    def search(self, pattern: str, limit: int = 50) -> List[Dict]:
-        """Search packages by name pattern."""
+    def search(self, pattern: str, limit: int = 50, search_provides: bool = False) -> List[Dict]:
+        """Search packages by name pattern, optionally also in provides.
+
+        Args:
+            pattern: Search pattern (case-insensitive substring match)
+            limit: Maximum results to return
+            search_provides: If True, also search in provides capabilities
+
+        Returns:
+            List of package dicts. If found via provides, includes 'matched_provide' key.
+        """
+        pattern_lower = f'%{pattern.lower()}%'
+        results = []
+        seen_ids = set()
+
+        # Search by name
         cursor = self.conn.execute("""
             SELECT id, name, version, release, arch, nevra, summary, size
             FROM packages
             WHERE name_lower LIKE ?
             ORDER BY name_lower
             LIMIT ?
-        """, (f'%{pattern.lower()}%', limit))
-        
-        return [dict(row) for row in cursor]
+        """, (pattern_lower, limit))
+
+        for row in cursor:
+            pkg = dict(row)
+            results.append(pkg)
+            seen_ids.add(pkg['id'])
+
+        # Search in provides if requested and we have room for more results
+        if search_provides and len(results) < limit:
+            remaining = limit - len(results)
+            cursor = self.conn.execute("""
+                SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
+                       p.nevra, p.summary, p.size, pr.capability as matched_provide
+                FROM packages p
+                JOIN provides pr ON pr.pkg_id = p.id
+                WHERE LOWER(pr.capability) LIKE ?
+                ORDER BY p.name_lower
+                LIMIT ?
+            """, (pattern_lower, remaining + len(seen_ids)))  # Get extra to filter dupes
+
+            for row in cursor:
+                pkg = dict(row)
+                if pkg['id'] not in seen_ids:
+                    seen_ids.add(pkg['id'])
+                    results.append(pkg)
+                    if len(results) >= limit:
+                        break
+
+        return results
     
     def get_package(self, name: str) -> Optional[Dict]:
         """Get a package by exact name (latest version)."""
@@ -450,18 +500,59 @@ class PackageDatabase:
             ORDER BY epoch DESC, version DESC, release DESC
             LIMIT 1
         """, (name.lower(),))
-        
+
         row = cursor.fetchone()
         if not row:
             return None
-        
+
         pkg = dict(row)
         pkg['requires'] = self._get_deps(pkg['id'], 'requires')
         pkg['provides'] = self._get_deps(pkg['id'], 'provides')
         pkg['conflicts'] = self._get_deps(pkg['id'], 'conflicts')
         pkg['obsoletes'] = self._get_deps(pkg['id'], 'obsoletes')
-        
+
         return pkg
+
+    def get_package_by_nevra(self, nevra: str) -> Optional[Dict]:
+        """Get a package by exact NEVRA."""
+        cursor = self.conn.execute("""
+            SELECT * FROM packages
+            WHERE nevra = ?
+            LIMIT 1
+        """, (nevra,))
+
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        pkg = dict(row)
+        pkg['requires'] = self._get_deps(pkg['id'], 'requires')
+        pkg['provides'] = self._get_deps(pkg['id'], 'provides')
+        pkg['conflicts'] = self._get_deps(pkg['id'], 'conflicts')
+        pkg['obsoletes'] = self._get_deps(pkg['id'], 'obsoletes')
+
+        return pkg
+
+    def get_package_smart(self, identifier: str) -> Optional[Dict]:
+        """Get a package by name or NEVRA.
+
+        If identifier looks like a NEVRA (contains version pattern),
+        try exact NEVRA match first, then fall back to name.
+        """
+        import re
+        # Check if it looks like a NEVRA
+        if re.search(r'-\d+[.:]', identifier):
+            # Try NEVRA first
+            pkg = self.get_package_by_nevra(identifier)
+            if pkg:
+                return pkg
+            # Extract name and try that
+            match = re.match(r'^(.+?)-\d+[.:]', identifier)
+            if match:
+                return self.get_package(match.group(1))
+            return None
+        else:
+            return self.get_package(identifier)
     
     def _get_deps(self, pkg_id: int, table: str) -> List[str]:
         """Get dependencies from a specific table."""
@@ -670,3 +761,153 @@ class PackageDatabase:
         best['obsoletes'] = self._get_deps(best['id'], 'obsoletes')
 
         return best
+
+    # =========================================================================
+    # Transaction History
+    # =========================================================================
+
+    def begin_transaction(self, action: str, command: str = None) -> int:
+        """Start a new transaction and return its ID.
+
+        Args:
+            action: Transaction type ('install', 'remove', 'upgrade', 'undo', 'rollback')
+            command: Full command line that triggered this
+
+        Returns:
+            Transaction ID
+        """
+        import getpass
+
+        cursor = self.conn.execute("""
+            INSERT INTO history (timestamp, action, status, command, user)
+            VALUES (?, ?, 'running', ?, ?)
+        """, (int(time.time()), action, command, getpass.getuser()))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def record_package(self, transaction_id: int, nevra: str, name: str,
+                       action: str, reason: str, previous_nevra: str = None):
+        """Record a package action in a transaction.
+
+        Args:
+            transaction_id: Transaction ID from begin_transaction()
+            nevra: Package NEVRA (name-epoch:version-release.arch)
+            name: Package name (for easier queries)
+            action: 'install', 'remove', 'upgrade', 'downgrade'
+            reason: 'explicit' or 'dependency'
+            previous_nevra: For upgrade/downgrade, the previous version
+        """
+        self.conn.execute("""
+            INSERT INTO history_packages
+            (history_id, pkg_nevra, pkg_name, action, reason, previous_nevra)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (transaction_id, nevra, name, action, reason, previous_nevra))
+        self.conn.commit()
+
+    def complete_transaction(self, transaction_id: int, return_code: int = 0):
+        """Mark a transaction as complete."""
+        self.conn.execute("""
+            UPDATE history SET status = 'complete', return_code = ?
+            WHERE id = ?
+        """, (return_code, transaction_id))
+        self.conn.commit()
+
+    def abort_transaction(self, transaction_id: int):
+        """Mark a transaction as interrupted."""
+        self.conn.execute("""
+            UPDATE history SET status = 'interrupted', return_code = -1
+            WHERE id = ?
+        """, (transaction_id,))
+        self.conn.commit()
+
+    def list_history(self, limit: int = 20, action_filter: str = None) -> List[Dict]:
+        """List recent transactions.
+
+        Args:
+            limit: Max number of transactions to return
+            action_filter: Filter by action type ('install', 'remove', etc.)
+
+        Returns:
+            List of transaction dicts with summary info
+        """
+        if action_filter:
+            cursor = self.conn.execute("""
+                SELECT h.*, COUNT(hp.id) as pkg_count,
+                       GROUP_CONCAT(CASE WHEN hp.reason = 'explicit' THEN hp.pkg_name END) as explicit_pkgs
+                FROM history h
+                LEFT JOIN history_packages hp ON hp.history_id = h.id
+                WHERE h.action = ?
+                GROUP BY h.id
+                ORDER BY h.timestamp DESC
+                LIMIT ?
+            """, (action_filter, limit))
+        else:
+            cursor = self.conn.execute("""
+                SELECT h.*, COUNT(hp.id) as pkg_count,
+                       GROUP_CONCAT(CASE WHEN hp.reason = 'explicit' THEN hp.pkg_name END) as explicit_pkgs
+                FROM history h
+                LEFT JOIN history_packages hp ON hp.history_id = h.id
+                GROUP BY h.id
+                ORDER BY h.timestamp DESC
+                LIMIT ?
+            """, (limit,))
+
+        return [dict(row) for row in cursor]
+
+    def get_transaction(self, transaction_id: int) -> Optional[Dict]:
+        """Get details of a specific transaction.
+
+        Returns:
+            Transaction dict with packages list, or None if not found
+        """
+        cursor = self.conn.execute(
+            "SELECT * FROM history WHERE id = ?", (transaction_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        trans = dict(row)
+
+        # Get packages
+        cursor = self.conn.execute("""
+            SELECT * FROM history_packages WHERE history_id = ?
+            ORDER BY reason DESC, pkg_name
+        """, (transaction_id,))
+        trans['packages'] = [dict(r) for r in cursor]
+
+        # Separate explicit vs dependency
+        trans['explicit'] = [p for p in trans['packages'] if p['reason'] == 'explicit']
+        trans['dependencies'] = [p for p in trans['packages'] if p['reason'] == 'dependency']
+
+        return trans
+
+    def mark_undone(self, transaction_id: int, undone_by_id: int):
+        """Mark a transaction as undone by another transaction."""
+        self.conn.execute("""
+            UPDATE history SET undone_by = ? WHERE id = ?
+        """, (undone_by_id, transaction_id))
+        self.conn.commit()
+
+    def get_interrupted_transactions(self) -> List[Dict]:
+        """Get transactions that were interrupted (for cleandeps)."""
+        cursor = self.conn.execute("""
+            SELECT h.*, COUNT(hp.id) as pkg_count
+            FROM history h
+            LEFT JOIN history_packages hp ON hp.history_id = h.id
+            WHERE h.status = 'interrupted'
+            GROUP BY h.id
+            ORDER BY h.timestamp DESC
+        """)
+        return [dict(row) for row in cursor]
+
+    def get_orphan_deps(self, transaction_id: int) -> List[str]:
+        """Get dependency packages from an interrupted transaction.
+
+        Returns list of NEVRAs that were installed as deps but transaction didn't complete.
+        """
+        cursor = self.conn.execute("""
+            SELECT pkg_nevra FROM history_packages
+            WHERE history_id = ? AND reason = 'dependency' AND action = 'install'
+        """, (transaction_id,))
+        return [row[0] for row in cursor]

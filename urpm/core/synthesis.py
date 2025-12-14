@@ -72,52 +72,88 @@ def parse_dependency(dep: str) -> Tuple[str, str, str]:
     return dep, '', ''
 
 
+def _split_synthesis_line(line: str) -> List[str]:
+    """Split a synthesis line on @ separators, handling nested parentheses.
+
+    The synthesis format uses @ as separator, but some provides contain @
+    inside parentheses like bundled(npm(@xterm/addon-canvas)).
+    We need to only split on @ that are NOT inside parentheses.
+
+    Args:
+        line: A synthesis line starting with @
+
+    Returns:
+        List of parts (first element is empty since line starts with @)
+    """
+    parts = []
+    current = ""
+    paren_depth = 0
+
+    for char in line:
+        if char == '(':
+            paren_depth += 1
+            current += char
+        elif char == ')':
+            paren_depth -= 1
+            current += char
+        elif char == '@' and paren_depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+
+    if current:
+        parts.append(current)
+
+    return parts
+
+
 def parse_synthesis(filename: Path) -> Iterator[Dict[str, Any]]:
     """Parse a synthesis file and yield package dictionaries.
-    
+
     The synthesis format has tags BEFORE @info. When we encounter @info,
     we create the package with all accumulated tags.
-    
+
     Args:
         filename: Path to synthesis.hdlist.cz file
-        
+
     Yields:
         Package dictionaries
     """
     content = decompress(filename)
-    
+
     current_tags: Dict[str, Any] = {}
-    
+
     for line in content.split('\n'):
         line = line.strip()
         if not line or not line.startswith('@'):
             continue
-        
-        parts = line.split('@')
+
+        parts = _split_synthesis_line(line)
         if len(parts) < 2:
             continue
-        
+
         tag = parts[1]
-        
+
         if tag == 'info':
             # @info terminates the package definition
             nevra = parts[2] if len(parts) > 2 else ''
             epoch_str = parts[3] if len(parts) > 3 else '0'
             size_str = parts[4] if len(parts) > 4 else '0'
             group = parts[5] if len(parts) > 5 else ''
-            
+
             name, version, release, arch = parse_nevra(nevra)
-            
+
             try:
                 epoch = int(epoch_str)
             except ValueError:
                 epoch = 0
-            
+
             try:
                 size = int(size_str)
             except ValueError:
                 size = 0
-            
+
             pkg = {
                 'name': name,
                 'version': version,
@@ -135,10 +171,10 @@ def parse_synthesis(filename: Path) -> Iterator[Dict[str, Any]]:
                 'suggests': current_tags.get('suggests', []),
                 'recommends': current_tags.get('recommends', []),
             }
-            
+
             yield pkg
             current_tags = {}
-        
+
         else:
             # Accumulate tags for the next @info
             if tag == 'summary':

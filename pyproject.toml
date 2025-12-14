@@ -26,7 +26,10 @@ classifiers = [
     "Topic :: System :: Software Distribution",
 ]
 dependencies = [
-    "zstandard>=0.21.0",
+    # Note: zstd support is required but package name varies:
+    # - pip: zstandard
+    # - Mageia: python3-zstd (provides 'zstd' module)
+    # We don't list it here to avoid conflicts on Mageia
 ]
 
 [project.optional-dependencies]

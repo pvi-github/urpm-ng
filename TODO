@@ -1,0 +1,225 @@
+# urpm-ng TODO
+
+## Tests à faire
+
+- [ ] Détection des orphelins lors de l'upgrade
+  - Attendre qu'il y ait des mises à jour disponibles
+  - Tester `urpm upgrade --test` pour voir si des orphelins sont détectés
+  - Vérifier que le diff requires fonctionne correctement
+  - Tester `--noerase-orphans` pour garder les orphelins
+
+
+## Sécurité - Clés GPG (P1)
+
+Gestion des clés de signature des paquets :
+  - Vérification des signatures lors de l'installation
+  - Refuser l'installation si signature invalide/absente (sauf --force)
+  - Import des clés (urpmi --import-all-keys ou équivalent)
+  - Gestion du trousseau (liste, ajout, suppression)
+
+
+## autoremove (P1)
+
+### Architecture unifiée
+
+Commande unique pour tout le nettoyage système avec sélecteurs :
+
+```
+urpm autoremove                      # équivaut à --orphans (compat apt/dnf)
+urpm autoremove --orphans            # paquets orphelins
+urpm autoremove --kernels            # anciens kernels
+urpm autoremove --faildeps           # deps de transactions interrompues
+urpm autoremove --all                # tout d'un coup
+urpm autoremove --orphans --kernels  # combinable
+```
+
+Alias : `cleandeps` → `autoremove --faildeps` (rétrocompat)
+
+### Sélecteur --orphans
+
+Détection des orphelins :
+  - Utilise /var/lib/rpm/installed-through-deps.list (compatible urpmi)
+  - Mise à jour du fichier lors de chaque opération install/erase/upgrade
+  - Un orphelin = paquet installé comme dépendance + plus requis par personne
+
+### Sélecteur --kernels
+
+Comportement :
+  - Garder le kernel en cours d'exécution (obligatoire, liste noire)
+  - Garder les N versions les plus récentes (configurable, défaut: 2)
+  - Proposer la suppression des anciens kernels
+  - Supprimer aussi les modules associés (kernel-*-devel, kernel-*-modules-*, etc.)
+
+Configuration :
+  - `urpm config kernel-keep N` - nombre de kernels à conserver (en plus de l'actif)
+
+### Sélecteur --faildeps
+
+Nettoie les dépendances orphelines laissées par des transactions interrompues.
+Remplace la commande `cleandeps` (qui devient un alias).
+
+### Architecture à deux niveaux de protection
+
+**Liste noire (blocage)** - Suppression = machine morte :
+  - glibc, basesystem, filesystem, systemd, coreutils, rpm, bash
+  - grub2 (bootloader)
+  - Le kernel EN COURS D'EXÉCUTION (détection : `uname -r`)
+  - Support filesystem du root (détection : `findmnt -n -o FSTYPE /`)
+
+Comportement : refuser la suppression avec message explicatif.
+
+**Liste rouge (avertissement)** - Demander confirmation :
+  - acl, attr, parted, gdisk, cryptsetup, lvm2
+  - fuse, fuse3, udisks2, xfsprogs, e2fsprogs, btrfs-progs
+  - wireless-tools, networkmanager, wpa_supplicant
+  - Outils système : msec, msec-gui, drakxtools, drakguard
+  - Drivers X11 : x11-driver-input, x11-driver-video et variantes
+  - Impression : cups, system-config-printer, hplip
+  - Desktop portals : xdg-desktop-portal-*
+  - Polices de base : fonts-ttf-dejavu, fonts-ttf-liberation
+
+Comportement : "Package X est généralement utile. Supprimer quand même ? [y/N]"
+
+**TODO: Revoir le contenu des listes**
+Les listes actuelles sont un premier jet. À affiner avec la communauté Mageia :
+  - Vérifier que tous les paquets critiques sont dans la blacklist
+  - Vérifier les noms exacts des paquets Mageia (ex: NetworkManager vs networkmanager)
+  - Compléter la redlist avec les paquets couramment utiles
+  - Tester sur une vraie Mageia pour valider
+
+**TODO: Permettre de modifier la blacklist built-in**
+Cas d'usage : installation avancée où l'utilisateur sélectionne manuellement les paquets.
+La liste "critique" peut différer du défaut (ex: pas de grub si autre bootloader).
+Prévoir une option pour désactiver/remplacer des entrées built-in :
+  - `urpm config blacklist override <pkg>` - ignorer une entrée built-in
+  - Ou fichier /etc/urpm/autoremove.conf avec section [blacklist-override]
+  - Avec avertissement très explicite sur les risques
+
+### Gestion des listes de protection
+
+Fichier de configuration : /etc/urpm/autoremove.conf (ou dans la BDD)
+
+Commandes de gestion :
+  - `urpm config blacklist list` - afficher la liste noire
+  - `urpm config blacklist add <pkg>` - ajouter à la liste noire
+  - `urpm config blacklist remove <pkg>` - retirer de la liste noire
+  - `urpm config redlist list/add/remove` - idem pour liste rouge
+
+### Extension future
+
+  - `urpm autoremove --cache` - nettoyage du cache RPM (P2)
+
+
+## Compatibilité Legacy (P2)
+
+### Wrappers urpmi/urpme/urpmq/urpmf
+Créer des wrappers ou alias pour que les utilisateurs puissent continuer à utiliser
+les commandes legacy avec les mêmes options :
+  - urpmi → urpm install (avec mapping des options)
+  - urpme → urpm erase
+  - urpmq → urpm search / show / whatprovides
+  - urpmf → urpm find (recherche fichiers)
+  - urpmi.update → urpm media update
+  - urpmi.addmedia → urpm media add
+
+Options à mapper :
+  - urpmi --auto → urpm install --auto
+  - urpmi --test → urpm install --test
+  - urpme --auto-orphans → urpm autoremove
+  - etc.
+
+
+## Parsing hdlist.cz (P2)
+
+Les synthesis.hdlist.cz ne contiennent pas toutes les métadonnées.
+Implémenter le parsing des hdlist.cz pour récupérer les headers RPM complets :
+  - Liste des fichiers contenus dans le paquet
+  - Description longue
+  - Changelog
+  - Scripts (pre/post install/uninstall)
+  - Etc.
+
+Note: urpm/core/hdlist.py existe mais à compléter/vérifier.
+
+
+## Recherche de fichiers - urpmf (P2)
+
+Actuellement `urpm find` cherche quel paquet INSTALLÉ contient un fichier.
+Il faut aussi pouvoir chercher dans les paquets disponibles (non installés).
+
+Cela nécessite :
+  1. Parser les hdlist.cz (voir ci-dessus)
+  2. Indexer les fichiers dans la BDD ou les chercher à la volée
+  3. Supporter les patterns/regex comme urpmf
+
+
+## Gestion du cache (P2)
+
+### Nettoyage intelligent
+Les RPM qui ne sont plus référencés dans les synthesis → les virer.
+Les "bons" on les garde selon la politique choisie :
+  - Miroir complet : tout garder
+  - Miroir partiel : garder ce qui a été installé (défaut)
+  - Miroir minimal : garder le nécessaire pour une Mageia fonctionnelle
+    (Plasma ? Gnome ? À définir)
+
+
+## Affichage couleur (P2)
+
+Ajouter un mode d'affichage avec couleurs :
+  - Détection automatique si terminal supporte les couleurs
+  - Option --color=auto|always|never
+  - Couleurs cohérentes : vert=installé/succès, rouge=erreur/suppression,
+    jaune=warning, bleu=info, etc.
+
+
+## Internationalisation (P2)
+
+### Traductions de l'interface
+Tous les messages de urpm doivent être traduisibles :
+  - Utiliser gettext dans les règles de l'art
+  - Extraire les chaînes traduisibles
+  - Fichiers .po/.mo pour chaque langue
+
+### Langues à supporter (au minimum celles de urpmi)
+  - Français
+  - Anglais
+  - Allemand
+  - Espagnol
+  - Italien
+  - Portugais (Brésil)
+  - Russe
+  - Autres selon communauté Mageia
+
+
+## Documentation (P3)
+
+### Pages man
+  - urpm(8) - commande principale
+  - urpm-install(8), urpm-erase(8), etc. ou une seule page complète
+  - Traduire dans toutes les langues supportées par urpmi
+
+### Documentation utilisateur
+  - urpm rdepends : expliquer que les nombres entre parenthèses =
+    nombre de paquets qui dépendent de ce paquet (reverse deps directes)
+  - urpm depends : expliquer la notation "capability -> package_fournisseur"
+  - Manuel complet de toutes les commandes et options
+  - Guide de migration urpmi → urpm
+
+
+## Fait (référence)
+
+- [x] Recherche dans les provides (urpm search cherche aussi dans provides)
+- [x] Affichage liste complète dans upgrade (plus de limite à 20 paquets)
+- [x] Affichage liste complète dans autoremove
+- [x] history --delete pour supprimer des transactions
+- [x] Détection des familles versionnées (php8.4, php8.5, etc.)
+- [x] Résolution des paquets virtuels avec préférence famille installée
+- [x] Undo/rollback en transaction unique (gestion dépendances)
+- [x] cleandeps pour nettoyer après transactions interrompues
+- [x] Utilisation de installed-through-deps.list (compatible urpme)
+- [x] Mise à jour de installed-through-deps.list sur install/erase/upgrade/etc.
+- [x] Architecture unifiée autoremove (--orphans, --kernels, --faildeps, --all)
+- [x] Blacklist/redlist avec protection à deux niveaux
+- [x] Commandes config blacklist/redlist/kernel-keep
+- [x] Détection et suppression des orphelins lors de l'upgrade (--noerase-orphans pour garder)
