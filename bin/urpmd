@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""urpmd - urpm daemon for intelligent cache management.
+
+Usage:
+    urpmd [-f|--foreground] [-p PORT] [-H HOST] [-v]
+    urpmd --help
+
+Options:
+    -f, --foreground    Run in foreground (don't daemonize)
+    -p, --port PORT     HTTP port (default: 9876)
+    -H, --host HOST     HTTP host (default: 127.0.0.1)
+    -d, --db PATH       Database path
+    -c, --cache PATH    Cache directory
+    -v, --verbose       Verbose logging
+
+Endpoints:
+    GET  /ping          Health check
+    GET  /status        Daemon status
+    GET  /media         List configured media
+    GET  /available?pkg=NAME  Check package availability
+    POST /available     Check availability (JSON body: {"packages": [...]})
+    GET  /updates       List available updates
+    POST /refresh       Trigger metadata refresh
+"""
+
+import os
+import sys
+
+# Add the project root to the path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, project_root)
+
+from urpm.daemon.daemon import main
+
+if __name__ == '__main__':
+    main()
