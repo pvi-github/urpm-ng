@@ -3058,10 +3058,11 @@ def cmd_undo(args, db: PackageDatabase) -> int:
     import platform
     from ..core.install import Installer, check_root
     from ..core.resolver import Resolver
+    from . import colors
 
     # Check root
     if not check_root():
-        print("Error: undo requires root privileges")
+        print(colors.error("Error: undo requires root privileges"))
         return 1
 
     # Determine which transaction to undo
@@ -3075,22 +3076,22 @@ def cmd_undo(args, db: PackageDatabase) -> int:
                 target_id = h['id']
                 break
         if target_id is None:
-            print("No undoable transaction found in history")
+            print(colors.warning("No undoable transaction found in history"))
             return 1
     else:
         target_id = args.transaction_id
 
     trans = db.get_transaction(target_id)
     if not trans:
-        print(f"Transaction #{target_id} not found")
+        print(colors.error(f"Transaction #{target_id} not found"))
         return 1
 
     if trans['status'] != 'complete':
-        print(f"Transaction #{target_id} is not complete (status: {trans['status']})")
+        print(colors.error(f"Transaction #{target_id} is not complete (status: {trans['status']})"))
         return 1
 
     if trans['undone_by']:
-        print(f"Transaction #{target_id} was already undone by #{trans['undone_by']}")
+        print(colors.warning(f"Transaction #{target_id} was already undone by #{trans['undone_by']}"))
         return 1
 
     # Build reverse actions for THIS transaction only
@@ -3117,20 +3118,20 @@ def cmd_undo(args, db: PackageDatabase) -> int:
                 to_install.append(previous)
 
     # Show summary
-    print(f"\nUndo transaction #{target_id} ({trans['action']})")
+    print(f"\n{colors.bold(f'Undo transaction #{target_id}')} ({colors.warning(trans['action'])})")
 
     if to_remove:
-        print(f"\nPackages to remove ({len(to_remove)}):")
+        print(f"\n{colors.warning(f'Packages to remove ({len(to_remove)}):')}")
         for name in sorted(to_remove):
-            print(f"  - {name}")
+            print(f"  {colors.pkg_remove('-')} {name}")
 
     if to_install:
-        print(f"\nPackages to reinstall ({len(to_install)}):")
+        print(f"\n{colors.success(f'Packages to reinstall ({len(to_install)}):')}")
         for nevra in sorted(to_install):
-            print(f"  + {nevra}")
+            print(f"  {colors.pkg_install('+')} {nevra}")
 
     if not to_remove and not to_install:
-        print("Nothing to undo")
+        print(colors.info("Nothing to undo"))
         return 0
 
     if not args.auto:
@@ -3160,7 +3161,7 @@ def cmd_undo(args, db: PackageDatabase) -> int:
 
         # First remove packages that were installed (all at once for dependency handling)
         if to_remove and not interrupted:
-            print(f"\nRemoving {len(to_remove)} package(s)...")
+            print(colors.info(f"\nRemoving {len(to_remove)} package(s)..."))
 
             def erase_progress(name, current, total):
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
@@ -3169,36 +3170,35 @@ def cmd_undo(args, db: PackageDatabase) -> int:
             print()  # newline after progress
 
             if not result.success:
-                print(f"\nErase failed:")
+                print(colors.error("\nErase failed:"))
                 for err in result.errors[:10]:
-                    print(f"  {err}")
+                    print(f"  {colors.error(err)}")
                 db.abort_transaction(undo_trans_id)
                 return 1
 
             if interrupted:
                 db.abort_transaction(undo_trans_id)
-                print(f"\nUndo interrupted after {result.erased} packages")
+                print(colors.warning(f"\nUndo interrupted after {result.erased} packages"))
                 return 130
 
             # Record removed packages
             for name in to_remove:
                 db.record_package(undo_trans_id, name, name, 'remove', 'explicit')
 
-            print(f"  {result.erased} packages removed")
+            print(colors.success(f"  {result.erased} packages removed"))
 
         # Then reinstall packages that were removed
         if to_install and not interrupted:
-            print(f"\nReinstalling {len(to_install)} package(s)...")
+            print(colors.info(f"\nReinstalling {len(to_install)} package(s)..."))
             for nevra in to_install:
                 if interrupted:
                     break
-                name = _extract_pkg_name(nevra)
-                print(f"  Note: {nevra} needs to be downloaded/installed")
+                print(f"  {colors.warning('Note:')} {nevra} needs to be downloaded/installed")
                 # TODO: integrate with resolver/downloader for proper reinstall
 
         if interrupted:
             db.abort_transaction(undo_trans_id)
-            print("\nUndo interrupted")
+            print(colors.warning("\nUndo interrupted"))
             return 130
 
         # Mark original transaction as undone
@@ -3212,12 +3212,12 @@ def cmd_undo(args, db: PackageDatabase) -> int:
             resolver = Resolver(db, arch=arch)
             resolver.unmark_packages(to_remove)
 
-        print(f"\nUndo complete (transaction #{undo_trans_id})")
+        print(colors.success(f"\nUndo complete (transaction #{undo_trans_id})"))
         return 0
 
     except Exception as e:
         db.abort_transaction(undo_trans_id)
-        print(f"\nUndo failed: {e}")
+        print(colors.error(f"\nUndo failed: {e}"))
         return 1
 
     finally:
@@ -3266,10 +3266,11 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
     import platform
     from ..core.install import Installer, check_root
     from ..core.resolver import Resolver
+    from . import colors
 
     # Check root
     if not check_root():
-        print("Error: rollback requires root privileges")
+        print(colors.error("Error: rollback requires root privileges"))
         return 1
 
     rollback_args = args.args if hasattr(args, 'args') else []
@@ -3298,7 +3299,7 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
             try:
                 target_timestamp = _parse_date(target_str)
             except ValueError as e:
-                print(f"Error: {e}")
+                print(colors.error(f"Error: {e}"))
                 print("Usage: rollback to <transaction_id|date>")
                 print("Date formats: DD/MM/YYYY, DD/MM/YYYY HH:MM, YYYY-MM-DD")
                 return 1
@@ -3307,17 +3308,17 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
         try:
             count = int(rollback_args[0])
             if count < 1:
-                print("Count must be at least 1")
+                print(colors.error("Count must be at least 1"))
                 return 1
         except ValueError:
-            print(f"Invalid argument: {rollback_args[0]}")
+            print(colors.error(f"Invalid argument: {rollback_args[0]}"))
             print("Usage: rollback [N] | rollback to <id|date>")
             return 1
 
     # Get history
     history = db.list_history(limit=200)
     if not history:
-        print("No transactions in history")
+        print(colors.warning("No transactions in history"))
         return 1
 
     # Determine which transactions to undo
@@ -3325,7 +3326,7 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
         # Undo the last N transactions
         to_undo = [h for h in history if h['status'] == 'complete'][:count]
         if not to_undo:
-            print("No completed transactions to rollback")
+            print(colors.info("No completed transactions to rollback"))
             return 0
         target_desc = f"last {count} transaction(s)"
     else:
@@ -3335,7 +3336,7 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
             to_undo = [h for h in history
                        if h['id'] > target_id and h['status'] == 'complete']
             if not to_undo:
-                print(f"Already at or before transaction #{target_id}")
+                print(colors.info(f"Already at or before transaction #{target_id}"))
                 return 0
             target_desc = f"state after transaction #{target_id}"
         else:
@@ -3345,7 +3346,7 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
             if not to_undo:
                 from datetime import datetime
                 date_str = datetime.fromtimestamp(target_timestamp).strftime('%d/%m/%Y %H:%M')
-                print(f"No transactions after {date_str}")
+                print(colors.info(f"No transactions after {date_str}"))
                 return 0
             target_desc = f"state at {datetime.fromtimestamp(target_timestamp).strftime('%d/%m/%Y %H:%M')}"
 
@@ -3388,26 +3389,28 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
                         to_remove.append(name)
 
     # Show summary
-    print(f"\nRollback to {target_desc}")
-    print(f"  Undoing {len(to_undo)} transaction(s):\n")
+    print(f"\n{colors.bold(f'Rollback to {target_desc}')}")
+    print(f"  {colors.info(f'Undoing {len(to_undo)} transaction(s):')}\n")
 
     for h in to_undo:
         from datetime import datetime
         date_str = datetime.fromtimestamp(h['timestamp']).strftime('%d/%m/%Y %H:%M')
-        print(f"    #{h['id']} {date_str} {h['action']} - {h['explicit_pkgs'] or '(deps)'}")
+        action = h['action']
+        action_color = colors.warning(action)
+        print(f"    #{h['id']} {date_str} {action_color} - {h['explicit_pkgs'] or '(deps)'}")
 
     if to_remove:
-        print(f"\nPackages to remove ({len(to_remove)}):")
+        print(f"\n{colors.warning(f'Packages to remove ({len(to_remove)}):')}")
         for name in sorted(to_remove):
-            print(f"  - {name}")
+            print(f"  {colors.pkg_remove('-')} {name}")
 
     if to_install:
-        print(f"\nPackages to reinstall ({len(to_install)}):")
+        print(f"\n{colors.success(f'Packages to reinstall ({len(to_install)}):')}")
         for nevra in sorted(to_install):
-            print(f"  + {nevra}")
+            print(f"  {colors.pkg_install('+')} {nevra}")
 
     if not to_remove and not to_install:
-        print("\nNothing to do")
+        print(colors.info("\nNothing to do"))
         return 0
 
     if not args.auto:
@@ -3437,7 +3440,7 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
 
         # First remove packages that were installed (all at once for dependency handling)
         if to_remove and not interrupted:
-            print(f"\nRemoving {len(to_remove)} package(s)...")
+            print(colors.info(f"\nRemoving {len(to_remove)} package(s)..."))
 
             def erase_progress(name, current, total):
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
@@ -3446,36 +3449,35 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
             print()  # newline after progress
 
             if not result.success:
-                print(f"\nErase failed:")
+                print(colors.error("\nErase failed:"))
                 for err in result.errors[:10]:
-                    print(f"  {err}")
+                    print(f"  {colors.error(err)}")
                 db.abort_transaction(trans_id)
                 return 1
 
             if interrupted:
                 db.abort_transaction(trans_id)
-                print(f"\nRollback interrupted after {result.erased} packages")
+                print(colors.warning(f"\nRollback interrupted after {result.erased} packages"))
                 return 130
 
             # Record removed packages
             for name in to_remove:
                 db.record_package(trans_id, name, name, 'remove', 'explicit')
 
-            print(f"  {result.erased} packages removed")
+            print(colors.success(f"  {result.erased} packages removed"))
 
         # Then reinstall packages that were removed
         if to_install and not interrupted:
-            print(f"\nReinstalling {len(to_install)} package(s)...")
+            print(colors.info(f"\nReinstalling {len(to_install)} package(s)..."))
             for nevra in to_install:
                 if interrupted:
                     break
-                name = _extract_pkg_name(nevra)
-                print(f"  Note: {nevra} needs to be downloaded/installed")
+                print(f"  {colors.warning('Note:')} {nevra} needs to be downloaded/installed")
                 # TODO: integrate with resolver/downloader for proper reinstall
 
         if interrupted:
             db.abort_transaction(trans_id)
-            print("\nRollback interrupted")
+            print(colors.warning("\nRollback interrupted"))
             return 130
 
         # Mark all undone transactions
@@ -3490,12 +3492,12 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
             resolver = Resolver(db, arch=arch)
             resolver.unmark_packages(to_remove)
 
-        print(f"\nRollback complete (transaction #{trans_id})")
+        print(colors.success(f"\nRollback complete (transaction #{trans_id})"))
         return 0
 
     except Exception as e:
         db.abort_transaction(trans_id)
-        print(f"\nRollback failed: {e}")
+        print(colors.error(f"\nRollback failed: {e}"))
         return 1
 
     finally:
