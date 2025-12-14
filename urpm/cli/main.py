@@ -73,7 +73,13 @@ def create_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='JSON output for scripting'
     )
-    
+
+    parser.add_argument(
+        '--nocolor',
+        action='store_true',
+        help='Disable colored output'
+    )
+
     # Register custom action for aliases
     parser.register('action', 'parsers', AliasedSubParsersAction)
     
@@ -826,56 +832,84 @@ def _resolve_virtual_package(db: PackageDatabase, pkg_name: str, auto: bool, ins
 
 def cmd_search(args, db: PackageDatabase) -> int:
     """Handle search command."""
+    import re
+    from . import colors
+
     results = db.search(args.pattern, search_provides=True)
 
     if not results:
-        print(f"No packages found for '{args.pattern}'")
+        print(colors.warning(f"No packages found for '{args.pattern}'"))
         return 1
 
+    def highlight(text, pattern):
+        """Highlight pattern occurrences in text with green."""
+        if not colors.enabled():
+            return text
+        try:
+            regex = re.compile(f'({re.escape(pattern)})', re.IGNORECASE)
+            return regex.sub(colors.success(r'\1'), text)
+        except re.error:
+            return text
+
+    pattern = args.pattern
+
     for pkg in results:
-        nevra = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}"
+        # Name in bold, version normal, release.arch in dim
+        name = colors.bold(highlight(pkg['name'], pattern))
+        version = highlight(pkg['version'], pattern)
+        release_arch = colors.dim(f"{pkg['release']}.{pkg['arch']}")
+        nevra_display = f"{name}-{version}-{release_arch}"
+
         summary = pkg.get('summary', '')[:60]
+        summary = highlight(summary, pattern)
+
         # Show which provide matched if found via provides
         if pkg.get('matched_provide'):
-            print(f"{nevra:50} (provides: {pkg['matched_provide']})")
+            matched = highlight(pkg['matched_provide'], pattern)
+            print(f"{nevra_display}  {colors.dim(f'(provides: {matched})')}")
         else:
-            print(f"{nevra:50} {summary}")
+            print(f"{nevra_display}  {summary}")
 
+    print(colors.dim(f"\n{len(results)} package(s) found"))
     return 0
 
 
 def cmd_show(args, db: PackageDatabase) -> int:
     """Handle show/info command."""
+    from . import colors
+
     pkg = db.get_package_smart(args.package)
 
     if not pkg:
-        print(f"Package '{args.package}' not found")
+        print(colors.error(f"Package '{args.package}' not found"))
         return 1
-    
-    print(f"\nName:         {pkg['name']}")
-    print(f"Version:      {pkg['version']}-{pkg['release']}")
-    print(f"Architecture: {pkg['arch']}")
-    print(f"Size:         {pkg['size'] / 1024 / 1024:.1f} MB")
-    
+
+    print(f"\n{colors.bold('Name:')}         {colors.info(pkg['name'])}")
+    print(f"{colors.bold('Version:')}      {pkg['version']}-{pkg['release']}")
+    print(f"{colors.bold('Architecture:')} {pkg['arch']}")
+    print(f"{colors.bold('Size:')}         {pkg['size'] / 1024 / 1024:.1f} MB")
+
     if pkg.get('group_name'):
-        print(f"Group:        {pkg['group_name']}")
+        print(f"{colors.bold('Group:')}        {pkg['group_name']}")
     if pkg.get('summary'):
-        print(f"Summary:      {pkg['summary']}")
-    
+        print(f"{colors.bold('Summary:')}      {pkg['summary']}")
+
     if pkg.get('requires'):
-        print(f"\nRequires ({len(pkg['requires'])}):")
+        req_count = len(pkg['requires'])
+        print(f"\n{colors.bold(f'Requires ({req_count}):')} ")
         for dep in pkg['requires'][:10]:
-            print(f"  - {dep}")
-        if len(pkg['requires']) > 10:
-            print(f"  ... and {len(pkg['requires']) - 10} more")
-    
+            print(f"  {colors.dim('-')} {dep}")
+        if req_count > 10:
+            print(colors.dim(f"  ... and {req_count - 10} more"))
+
     if pkg.get('provides'):
-        print(f"\nProvides ({len(pkg['provides'])}):")
+        prov_count = len(pkg['provides'])
+        print(f"\n{colors.bold(f'Provides ({prov_count}):')} ")
         for prov in pkg['provides'][:5]:
-            print(f"  - {prov}")
-        if len(pkg['provides']) > 5:
-            print(f"  ... and {len(pkg['provides']) - 5} more")
-    
+            print(f"  {colors.dim('-')} {prov}")
+        if prov_count > 5:
+            print(colors.dim(f"  ... and {prov_count - 5} more"))
+
     print()
     return 0
 
@@ -958,6 +992,7 @@ def cmd_media_disable(args, db: PackageDatabase) -> int:
 
 def cmd_media_update(args, db: PackageDatabase) -> int:
     """Handle media update command."""
+    from . import colors
     from ..core.sync import sync_media, sync_all_media
 
     def progress(media_name, stage, current, total):
@@ -972,7 +1007,7 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
         # Update specific media
         media = db.get_media(args.name)
         if not media:
-            print(f"Media '{args.name}' not found")
+            print(colors.error(f"Media '{args.name}' not found"))
             return 1
 
         print(f"Updating {args.name}...")
@@ -984,10 +1019,10 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
         print()  # newline after progress
 
         if result.success:
-            print(f"  {result.packages_count} packages")
+            print(colors.success(f"  {result.packages_count} packages"))
             return 0
         else:
-            print(f"  Error: {result.error}")
+            print(f"  {colors.error('Error')}: {result.error}")
             return 1
     else:
         # Update all media
@@ -1000,13 +1035,18 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
 
         for name, result in results:
             if result.success:
-                print(f"  {name}: {result.packages_count} packages")
-                total_packages += result.packages_count
+                count = result.packages_count
+                count_str = colors.success(str(count)) if count > 0 else str(count)
+                print(f"  {colors.info(name)}: {count_str} packages")
+                total_packages += count
             else:
-                print(f"  {name}: ERROR - {result.error}")
+                print(f"  {colors.error(name)}: ERROR - {result.error}")
                 errors += 1
 
-        print(f"\nTotal: {total_packages} packages from {len(results)} media")
+        if errors:
+            print(f"\n{colors.info('Total')}: {colors.success(str(total_packages))} packages from {len(results)} media ({colors.error(str(errors))} errors)")
+        else:
+            print(f"\n{colors.info('Total')}: {colors.success(str(total_packages))} packages from {len(results)} media")
         return 1 if errors else 0
 
 
@@ -1300,11 +1340,21 @@ def cmd_install(args, db: PackageDatabase) -> int:
     explicit_names.update(p.lower() for p in resolved_packages)
 
     # Show transaction summary
-    print(f"\n{len(result.actions)} packages to install ({format_size(result.install_size)})\n")
+    from . import colors
+    print(f"\n{colors.bold(f'{len(result.actions)} packages to install')} ({format_size(result.install_size)})\n")
 
     for action in result.actions:
         marker = "*" if action.name.lower() in explicit_names else " "
-        print(f"  {marker} {action.action.value:10} {action.nevra}")
+        action_str = action.action.value
+        if action_str == 'install':
+            action_colored = colors.info(f"{action_str:10}")
+        elif action_str == 'upgrade':
+            action_colored = colors.info(f"{action_str:10}")
+        elif action_str == 'remove':
+            action_colored = colors.error(f"{action_str:10}")
+        else:
+            action_colored = f"{action_str:10}"
+        print(f"  {marker} {action_colored} {action.nevra}")
 
     if not args.auto:
         print()
@@ -1322,7 +1372,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
         return 0
 
     # Build download items
-    print("\nDownloading packages...")
+    print(colors.info("\nDownloading packages..."))
     download_items = []
     media_cache = {}
 
@@ -1366,12 +1416,13 @@ def cmd_install(args, db: PackageDatabase) -> int:
     # Check for failures
     failed = [r for r in dl_results if not r.success]
     if failed:
-        print(f"\n{len(failed)} download(s) failed:")
+        print(colors.error(f"\n{len(failed)} download(s) failed:"))
         for r in failed[:5]:
-            print(f"  {r.item.name}: {r.error}")
+            print(f"  {colors.error(r.item.name)}: {r.error}")
         return 1
 
-    print(f"  {downloaded} downloaded, {cached} from cache")
+    cache_str = colors.warning(str(cached)) if cached > 0 else colors.dim(str(cached))
+    print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache")
 
     # Collect RPM paths for installation
     rpm_paths = [r.path for r in dl_results if r.success and r.path]
@@ -1384,7 +1435,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
     from ..core.install import Installer, check_root
 
     if not check_root():
-        print("\nError: root privileges required for installation")
+        print(colors.error("\nError: root privileges required for installation"))
         print("Try: sudo urpm install", ' '.join(args.packages))
         return 1
 
@@ -1421,7 +1472,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
 
     signal.signal(signal.SIGINT, sigint_handler)
 
-    print(f"\nInstalling {len(rpm_paths)} packages...")
+    print(colors.info(f"\nInstalling {len(rpm_paths)} packages..."))
     installer = Installer()
 
     def install_progress(name, current, total):
@@ -1433,18 +1484,18 @@ def cmd_install(args, db: PackageDatabase) -> int:
         print()  # newline after progress
 
         if not install_result.success:
-            print(f"\nInstallation failed:")
+            print(colors.error(f"\nInstallation failed:"))
             for err in install_result.errors[:5]:
-                print(f"  {err}")
+                print(f"  {colors.error(err)}")
             db.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
-            print(f"\n  Installation interrupted after {install_result.installed} packages")
+            print(colors.warning(f"\n  Installation interrupted after {install_result.installed} packages"))
             db.abort_transaction(transaction_id)
             return 130
 
-        print(f"  {install_result.installed} packages installed")
+        print(colors.success(f"  {install_result.installed} packages installed"))
         db.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
@@ -1475,8 +1526,10 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     from ..core.install import Installer, EraseResult, check_root
 
     # Check root
+    from . import colors
+
     if not check_root():
-        print("Error: erase requires root privileges")
+        print(colors.error("Error: erase requires root privileges"))
         return 1
 
     # Resolve what to remove
@@ -1486,13 +1539,13 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     result = resolver.resolve_remove(args.packages, clean_deps=clean_deps)
 
     if not result.success:
-        print("Resolution failed:")
+        print(colors.error("Resolution failed:"))
         for prob in result.problems:
-            print(f"  {prob}")
+            print(f"  {colors.error(prob)}")
         return 1
 
     if not result.actions:
-        print("Nothing to erase.")
+        print(colors.info("Nothing to erase."))
         return 0
 
     # Separate explicit requests from reverse dependencies
@@ -1509,20 +1562,20 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     total_size = result.remove_size
 
     # Show what will be erased
-    print(f"\nThe following {len(all_actions)} package(s) will be erased:")
+    print(f"\n{colors.bold(f'The following {len(all_actions)} package(s) will be erased:')}")
 
     if explicit:
-        print(f"\n  Requested ({len(explicit)}):")
+        print(f"\n  {colors.info(f'Requested ({len(explicit)}):')}")
         for action in explicit:
             print(f"    {action.nevra}")
 
     if deps:
-        print(f"\n  Dependencies ({len(deps)}):")
+        print(f"\n  {colors.warning(f'Dependencies ({len(deps)}):')}")
         for action in deps:
             print(f"    {action.nevra}")
 
     if total_size > 0:
-        print(f"\nDisk space freed: {format_size(total_size)}")
+        print(f"\nDisk space freed: {colors.success(format_size(total_size))}")
 
     # Confirmation
     if not args.auto:
@@ -1561,7 +1614,7 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     signal.signal(signal.SIGINT, sigint_handler)
 
     # Erase packages (all from resolution, including reverse deps and orphans)
-    print(f"\nErasing {len(all_actions)} packages...")
+    print(colors.info(f"\nErasing {len(all_actions)} packages..."))
     packages_to_erase = [action.name for action in all_actions]
 
     installer = Installer()
@@ -1585,18 +1638,18 @@ def cmd_erase(args, db: PackageDatabase) -> int:
         print()  # newline after progress
 
         if not erase_result.success:
-            print(f"\nErase failed:")
+            print(colors.error(f"\nErase failed:"))
             for err in erase_result.errors[:5]:
-                print(f"  {err}")
+                print(f"  {colors.error(err)}")
             db.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
-            print(f"\n  Erase interrupted after {erase_result.erased} packages")
+            print(colors.warning(f"\n  Erase interrupted after {erase_result.erased} packages"))
             db.abort_transaction(transaction_id)
             return 130
 
-        print(f"  {erase_result.erased} packages erased")
+        print(colors.success(f"  {erase_result.erased} packages erased"))
         db.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
@@ -1616,6 +1669,8 @@ def cmd_update(args, db: PackageDatabase) -> int:
     """Handle update/upgrade command."""
     import platform
     import signal
+
+    from . import colors
 
     # If --lists, just update media metadata
     if getattr(args, 'lists', False):
@@ -1638,7 +1693,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
     # Check root
     if not check_root():
-        print("Error: upgrade requires root privileges")
+        print(colors.error("Error: upgrade requires root privileges"))
         return 1
 
     # Resolve upgrades
@@ -1653,13 +1708,13 @@ def cmd_update(args, db: PackageDatabase) -> int:
         result = resolver.resolve_upgrade(packages)
 
     if not result.success:
-        print("Resolution failed:")
+        print(colors.error("Resolution failed:"))
         for prob in result.problems:
-            print(f"  {prob}")
+            print(f"  {colors.error(prob)}")
         return 1
 
     if not result.actions:
-        print("All packages are up to date.")
+        print(colors.success("All packages are up to date."))
         return 0
 
     # Categorize actions
@@ -1674,27 +1729,28 @@ def cmd_update(args, db: PackageDatabase) -> int:
         orphans = resolver.find_upgrade_orphans(upgrades)
 
     # Show packages by category
-    print(f"\nTransaction summary:")
+    from . import colors
+    print(f"\n{colors.bold('Transaction summary:')}")
     if upgrades:
-        print(f"\n  Upgrade ({len(upgrades)}):")
+        print(f"\n  {colors.info(f'Upgrade ({len(upgrades)}):')}")
         for a in sorted(upgrades, key=lambda x: x.name.lower()):
-            print(f"    {a.nevra}")
+            print(f"    {colors.info(a.nevra)}")
     if installs:
-        print(f"\n  Install ({len(installs)}) - new dependencies:")
+        print(f"\n  {colors.success(f'Install ({len(installs)}) - new dependencies:')}")
         for a in sorted(installs, key=lambda x: x.name.lower()):
-            print(f"    {a.nevra}")
+            print(f"    {colors.success(a.nevra)}")
     if removes:
-        print(f"\n  Remove ({len(removes)}) - obsoleted:")
+        print(f"\n  {colors.error(f'Remove ({len(removes)}) - obsoleted:')}")
         for a in sorted(removes, key=lambda x: x.name.lower()):
-            print(f"    {a.nevra}")
+            print(f"    {colors.error(a.nevra)}")
     if downgrades:
-        print(f"\n  Downgrade ({len(downgrades)}):")
+        print(f"\n  {colors.warning(f'Downgrade ({len(downgrades)}):')}")
         for a in sorted(downgrades, key=lambda x: x.name.lower()):
-            print(f"    {a.nevra}")
+            print(f"    {colors.warning(a.nevra)}")
     if orphans:
-        print(f"\n  Remove ({len(orphans)}) - orphaned dependencies:")
+        print(f"\n  {colors.error(f'Remove ({len(orphans)}) - orphaned dependencies:')}")
         for a in sorted(orphans, key=lambda x: x.name.lower()):
-            print(f"    {a.nevra}")
+            print(f"    {colors.error(a.nevra)}")
 
     if result.install_size > 0:
         print(f"\nDownload size: {format_size(result.install_size)}")
@@ -1761,12 +1817,13 @@ def cmd_update(args, db: PackageDatabase) -> int:
         # Check failures
         failed = [r for r in dl_results if not r.success]
         if failed:
-            print(f"\n{len(failed)} download(s) failed:")
+            print(colors.error(f"\n{len(failed)} download(s) failed:"))
             for r in failed[:5]:
-                print(f"  {r.item.name}: {r.error}")
+                print(f"  {colors.error(r.item.name)}: {r.error}")
             return 1
 
-        print(f"  {downloaded} downloaded, {cached} from cache")
+        cache_str = colors.warning(str(cached)) if cached > 0 else colors.dim(str(cached))
+        print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache")
 
         rpm_paths = [r.path for r in dl_results if r.success and r.path]
     else:
@@ -1820,28 +1877,28 @@ def cmd_update(args, db: PackageDatabase) -> int:
             print()
 
             if not install_result.success:
-                print(f"\nUpgrade failed:")
+                print(colors.error(f"\nUpgrade failed:"))
                 for err in install_result.errors[:5]:
-                    print(f"  {err}")
+                    print(f"  {colors.error(err)}")
                 db.abort_transaction(transaction_id)
                 return 1
 
             if interrupted[0]:
-                print(f"\n  Upgrade interrupted after {install_result.installed} packages")
+                print(colors.warning(f"\n  Upgrade interrupted after {install_result.installed} packages"))
                 db.abort_transaction(transaction_id)
                 return 130
 
-            print(f"  {install_result.installed} packages upgraded")
+            print(colors.success(f"  {install_result.installed} packages upgraded"))
 
         # Remove orphaned dependencies
         if orphans and not interrupted[0]:
-            print(f"\nRemoving {len(orphans)} orphaned dependencies...")
+            print(f"\nRemoving {colors.warning(str(len(orphans)))} orphaned dependencies...")
             orphan_names = [a.name for a in orphans]
 
             orphan_installer = Installer()
             erase_result = orphan_installer.erase(orphan_names)
             if erase_result.success:
-                print(f"  {erase_result.removed} packages removed")
+                print(colors.success(f"  {erase_result.removed} packages removed"))
                 # Record orphan removals in transaction
                 for a in orphans:
                     db.record_package(
@@ -1854,9 +1911,9 @@ def cmd_update(args, db: PackageDatabase) -> int:
                 # Unmark from installed-through-deps.list
                 resolver.unmark_packages(orphan_names)
             else:
-                print(f"  Warning: failed to remove some orphans")
+                print(colors.warning(f"  Warning: failed to remove some orphans"))
                 for err in erase_result.errors[:3]:
-                    print(f"    {err}")
+                    print(f"    {colors.warning(err)}")
 
         db.complete_transaction(transaction_id)
 
@@ -2339,6 +2396,7 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
     import platform
     import signal
 
+    from . import colors
     from ..core.resolver import Resolver, format_size
     from ..core.install import Installer, check_root
 
@@ -2370,9 +2428,9 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
         for o in orphans:
             packages_to_remove.append((o.name, o.nevra, o.size, 'orphan'))
         if orphans:
-            print(f"  Found {len(orphans)} orphaned package(s)")
+            print(f"  Found {colors.warning(str(len(orphans)))} orphaned package(s)")
         else:
-            print("  No orphaned packages found")
+            print(colors.success("  No orphaned packages found"))
 
     # --kernels: old kernels
     if do_kernels:
@@ -2381,9 +2439,9 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
         for name, nevra, size in old_kernels:
             packages_to_remove.append((name, nevra, size, 'old-kernel'))
         if old_kernels:
-            print(f"  Found {len(old_kernels)} old kernel package(s)")
+            print(f"  Found {colors.warning(str(len(old_kernels)))} old kernel package(s)")
         else:
-            print("  No old kernels found")
+            print(colors.success("  No old kernels found"))
 
     # --faildeps: orphan deps from interrupted transactions
     if do_faildeps:
@@ -2392,9 +2450,9 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
         for name, nevra in faildeps:
             packages_to_remove.append((name, nevra, 0, 'faildep'))
         if faildeps:
-            print(f"  Found {len(faildeps)} failed dependency package(s)")
+            print(f"  Found {colors.warning(str(len(faildeps)))} failed dependency package(s)")
         else:
-            print("  No failed dependencies found")
+            print(colors.success("  No failed dependencies found"))
 
     # Remove duplicates (keep first occurrence)
     seen = set()
@@ -2406,7 +2464,7 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
     packages_to_remove = unique_packages
 
     if not packages_to_remove:
-        print("\nNothing to remove.")
+        print(colors.success("\nNothing to remove."))
         return 0
 
     # Apply blacklist and redlist protection
@@ -2428,16 +2486,16 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
 
     # Report blocked packages
     if blocked:
-        print(f"\n  BLOCKED ({len(blocked)}) - critical system packages:")
+        print(f"\n  {colors.error(f'BLOCKED ({len(blocked)})')} - critical system packages:")
         for name, nevra, _, _ in blocked:
-            print(f"    {nevra}")
-        print("  These packages cannot be removed (system would be unusable)")
+            print(f"    {colors.error(nevra)}")
+        print(colors.error("  These packages cannot be removed (system would be unusable)"))
 
     # Handle warned packages
     if warned and not getattr(args, 'auto', False):
-        print(f"\n  WARNING ({len(warned)}) - generally useful packages:")
+        print(f"\n  {colors.warning(f'WARNING ({len(warned)})')} - generally useful packages:")
         for name, nevra, _, _ in warned:
-            print(f"    {nevra}")
+            print(f"    {colors.warning(nevra)}")
         try:
             response = input("\n  Remove these warned packages anyway? [y/N] ")
             if response.lower() in ('y', 'yes', 'o', 'oui'):
@@ -2450,12 +2508,12 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
     packages_to_remove = safe
 
     if not packages_to_remove:
-        print("\nNothing safe to remove.")
+        print(colors.success("\nNothing safe to remove."))
         return 0
 
     # Display summary
     total_size = sum(size for _, _, size, _ in packages_to_remove)
-    print(f"\nThe following {len(packages_to_remove)} package(s) will be removed:")
+    print(f"\n{colors.bold(f'The following {len(packages_to_remove)} package(s) will be removed:')}")
 
     # Group by reason for display
     by_reason = {}
@@ -2472,9 +2530,9 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
 
     for reason, nevras in by_reason.items():
         label = reason_labels.get(reason, reason)
-        print(f"\n  {label} ({len(nevras)}):")
+        print(f"\n  {colors.error(f'{label} ({len(nevras)}):')}")
         for nevra in sorted(nevras):
-            print(f"    {nevra}")
+            print(f"    {colors.error(nevra)}")
 
     print(f"\nDisk space to free: {format_size(total_size)}")
 
@@ -2491,7 +2549,7 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
 
     # Check root
     if not check_root():
-        print("Error: autoremove requires root privileges")
+        print(colors.error("Error: autoremove requires root privileges"))
         return 1
 
     # Build command line for history
@@ -2541,18 +2599,18 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
         print()
 
         if not result.success:
-            print(f"\nRemoval failed:")
+            print(colors.error(f"\nRemoval failed:"))
             for err in result.errors[:5]:
-                print(f"  {err}")
+                print(f"  {colors.error(err)}")
             db.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
-            print(f"\n  Interrupted after {result.erased} packages")
+            print(colors.warning(f"\n  Interrupted after {result.erased} packages"))
             db.abort_transaction(transaction_id)
             return 130
 
-        print(f"  {result.erased} packages removed")
+        print(colors.success(f"  {result.erased} packages removed"))
 
         # Mark faildeps transactions as cleaned
         if faildeps_trans_ids:
@@ -2580,6 +2638,35 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
 def cmd_history(args, db: PackageDatabase) -> int:
     """Handle history command."""
     from datetime import datetime
+    from . import colors
+
+    def _color_action(action):
+        """Color an action string."""
+        action_stripped = action.strip()
+        if action_stripped in ('install', 'reinstall'):
+            return colors.success(action)
+        elif action_stripped in ('remove', 'erase', 'autoremove'):
+            return colors.error(action)
+        elif action_stripped in ('upgrade', 'update'):
+            return colors.info(action)
+        elif action_stripped == 'downgrade':
+            return colors.warning(action)
+        elif action_stripped == 'undo':
+            return colors.warning(action)
+        elif action_stripped == 'rollback':
+            return colors.warning(action)
+        return action
+
+    def _color_status(status):
+        """Color a status string."""
+        status_stripped = status.strip()
+        if status_stripped == 'completed':
+            return colors.success(status)
+        elif status_stripped == 'aborted':
+            return colors.error(status)
+        elif status_stripped.startswith('undone'):
+            return colors.dim(status)
+        return status
 
     # Delete specific transactions
     if getattr(args, 'delete', None):
@@ -2588,7 +2675,7 @@ def cmd_history(args, db: PackageDatabase) -> int:
             # Check if transaction exists
             trans = db.get_transaction(tid)
             if not trans:
-                print(f"Transaction #{tid} not found")
+                print(colors.error(f"Transaction #{tid} not found"))
                 continue
 
             # Clear undone_by references to this transaction FIRST
@@ -2601,36 +2688,41 @@ def cmd_history(args, db: PackageDatabase) -> int:
             print(f"Deleted transaction #{tid}")
 
         db.conn.commit()
-        print(f"\n{deleted} transaction(s) deleted")
+        print(colors.success(f"\n{deleted} transaction(s) deleted"))
         return 0
 
     # Show details of specific transaction
     if args.detail:
         trans = db.get_transaction(args.detail)
         if not trans:
-            print(f"Transaction #{args.detail} not found")
+            print(colors.error(f"Transaction #{args.detail} not found"))
             return 1
 
         dt = datetime.fromtimestamp(trans['timestamp'])
-        print(f"\nTransaction #{trans['id']} - {dt.strftime('%Y-%m-%d %H:%M')}")
-        print(f"  Action: {trans['action']}")
-        print(f"  Status: {trans['status']}")
+        trans_id = trans['id']
+        print(f"\n{colors.bold(f'Transaction #{trans_id}')} - {dt.strftime('%Y-%m-%d %H:%M')}")
+        print(f"  {colors.bold('Action:')} {_color_action(trans['action'])}")
+        print(f"  {colors.bold('Status:')} {_color_status(trans['status'])}")
         if trans['command']:
-            print(f"  Command: {trans['command']}")
+            print(f"  {colors.bold('Command:')} {trans['command']}")
         if trans['undone_by']:
-            print(f"  Undone by: #{trans['undone_by']}")
+            print(f"  {colors.bold('Undone by:')} #{trans['undone_by']}")
 
         if trans['explicit']:
-            print(f"\n  Explicit ({len(trans['explicit'])}):")
+            exp_count = len(trans['explicit'])
+            print(f"\n  {colors.bold(f'Explicit ({exp_count}):')} ")
             for p in trans['explicit']:
-                print(f"    {p['action']:10} {p['pkg_nevra']}")
+                action = p['action']
+                print(f"    {_color_action(f'{action:10}')} {p['pkg_nevra']}")
 
         if trans['dependencies']:
-            print(f"\n  Dependencies ({len(trans['dependencies'])}):")
+            dep_count = len(trans['dependencies'])
+            print(f"\n  {colors.bold(f'Dependencies ({dep_count}):')} ")
             for p in trans['dependencies'][:20]:
-                print(f"    {p['action']:10} {p['pkg_nevra']}")
-            if len(trans['dependencies']) > 20:
-                print(f"    ... and {len(trans['dependencies']) - 20} more")
+                action = p['action']
+                print(f"    {_color_action(f'{action:10}')} {colors.dim(p['pkg_nevra'])}")
+            if dep_count > 20:
+                print(colors.dim(f"    ... and {dep_count - 20} more"))
 
         print()
         return 0
@@ -2645,10 +2737,10 @@ def cmd_history(args, db: PackageDatabase) -> int:
     history = db.list_history(limit=args.count, action_filter=action_filter)
 
     if not history:
-        print("No transaction history")
+        print(colors.info("No transaction history"))
         return 0
 
-    print(f"\n{'ID':>4} | {'Date':10} | {'Action':8} | {'Status':11} | Packages")
+    print(f"\n{colors.bold('ID'):>4} | {colors.bold('Date'):10} | {colors.bold('Action'):8} | {colors.bold('Status'):11} | {colors.bold('Packages')}")
     print("-" * 70)
 
     for h in history:
@@ -2666,9 +2758,10 @@ def cmd_history(args, db: PackageDatabase) -> int:
         if h['pkg_count'] > 1 and explicit:
             dep_count = h['pkg_count'] - len(explicit.split(','))
             if dep_count > 0:
-                pkg_info += f" (+{dep_count} deps)"
+                pkg_info += colors.dim(f" (+{dep_count} deps)")
 
-        print(f"{h['id']:>4} | {date_str:10} | {h['action']:8} | {status:11} | {pkg_info}")
+        action = h['action']
+        print(f"{h['id']:>4} | {date_str:10} | {_color_action(f'{action:8}')} | {_color_status(f'{status:11}')} | {pkg_info}")
 
     print()
     return 0
@@ -4129,11 +4222,15 @@ def main(argv=None) -> int:
     """Main CLI entry point."""
     parser = create_parser()
     args = parser.parse_args(argv)
-    
+
+    # Initialize color support
+    from . import colors
+    colors.init(nocolor=getattr(args, 'nocolor', False))
+
     if not args.command:
         parser.print_help()
         return 1
-    
+
     # Open database
     db = PackageDatabase()
     
