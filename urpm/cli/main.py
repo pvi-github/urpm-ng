@@ -130,6 +130,11 @@ def create_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Skip GPG signature verification (not recommended)'
     )
+    install_parser.add_argument(
+        '--no-peers',
+        action='store_true',
+        help='Disable P2P download from LAN peers'
+    )
 
     # =========================================================================
     # erase / e (like rpm -e, urpme)
@@ -343,6 +348,11 @@ def create_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Skip GPG signature verification (not recommended)'
     )
+    update_parser.add_argument(
+        '--no-peers',
+        action='store_true',
+        help='Disable P2P download from LAN peers'
+    )
 
     # =========================================================================
     # upgrade (alias for update --all)
@@ -375,6 +385,11 @@ def create_parser() -> argparse.ArgumentParser:
         '--no-recommends',
         action='store_true',
         help='Skip recommended packages'
+    )
+    upgrade_parser.add_argument(
+        '--no-peers',
+        action='store_true',
+        help='Disable P2P download from LAN peers'
     )
 
     # =========================================================================
@@ -409,7 +424,46 @@ def create_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='No confirmation'
     )
-    
+
+    # =========================================================================
+    # mark
+    # =========================================================================
+    mark_parser = subparsers.add_parser(
+        'mark',
+        help='Mark packages as manual or auto-installed'
+    )
+    mark_subparsers = mark_parser.add_subparsers(
+        dest='mark_command',
+        metavar='<subcommand>'
+    )
+
+    mark_manual = mark_subparsers.add_parser(
+        'manual', aliases=['m', 'explicit'],
+        help='Mark package as manually installed (protects from autoremove)'
+    )
+    mark_manual.add_argument(
+        'packages', nargs='+', metavar='PACKAGE',
+        help='Package names to mark as manual'
+    )
+
+    mark_auto = mark_subparsers.add_parser(
+        'auto', aliases=['a', 'dep'],
+        help='Mark package as auto-installed (can be autoremoved)'
+    )
+    mark_auto.add_argument(
+        'packages', nargs='+', metavar='PACKAGE',
+        help='Package names to mark as auto'
+    )
+
+    mark_show = mark_subparsers.add_parser(
+        'show', aliases=['s', 'list'],
+        help='Show install reason for packages'
+    )
+    mark_show.add_argument(
+        'packages', nargs='*', metavar='PACKAGE',
+        help='Package names to check (or all if empty)'
+    )
+
     # =========================================================================
     # media / m
     # =========================================================================
@@ -1702,13 +1756,14 @@ def cmd_install(args, db: PackageDatabase) -> int:
         ))
 
     # Download with progress
-    downloader = Downloader()
+    use_peers = not getattr(args, 'no_peers', False)
+    downloader = Downloader(use_peers=use_peers)
 
     def progress(name, pkg_num, pkg_total, bytes_done, bytes_total):
         pct = (bytes_done * 100 // bytes_total) if bytes_total > 0 else 0
         print(f"\r\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name}", end='', flush=True)
 
-    dl_results, downloaded, cached = downloader.download_all(download_items, progress)
+    dl_results, downloaded, cached, peer_stats = downloader.download_all(download_items, progress)
     print()  # newline after progress
 
     # Check for failures
@@ -1719,8 +1774,14 @@ def cmd_install(args, db: PackageDatabase) -> int:
             print(f"  {colors.error(r.item.name)}: {r.error}")
         return 1
 
+    # Download summary with P2P stats
     cache_str = colors.warning(str(cached)) if cached > 0 else colors.dim(str(cached))
-    print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache")
+    from_peers = peer_stats.get('from_peers', 0)
+    from_upstream = peer_stats.get('from_upstream', 0)
+    if from_peers > 0:
+        print(f"  {colors.success(f'{downloaded} downloaded')} ({from_peers} from peers, {from_upstream} from mirrors), {cache_str} from cache")
+    else:
+        print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache")
 
     # Collect RPM paths for installation
     rpm_paths = [r.path for r in dl_results if r.success and r.path]
@@ -1774,8 +1835,19 @@ def cmd_install(args, db: PackageDatabase) -> int:
     print(colors.info(f"\nInstalling {len(rpm_paths)} packages..."))
     installer = Installer()
 
+    last_shown = [None]
+
     def install_progress(name, current, total):
-        print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+        if name == '(updating rpmdb)':
+            if last_shown[0] != name:
+                print(f"\r\033[K  [{current}/{total}] done")
+                print(f"  Updating RPM database...", end='', flush=True)
+                last_shown[0] = name
+        elif name == '(rpmdb progress)':
+            pass  # Ignore progress updates
+        elif last_shown[0] != name:
+            print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+            last_shown[0] = name
 
     try:
         verify_sigs = not getattr(args, 'nosignature', False)
@@ -1867,7 +1939,7 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     explicit = [a for a in result.actions if a.name.lower() in explicit_names]
     deps = [a for a in result.actions if a.name.lower() not in explicit_names]
 
-    # Find orphaned dependencies that will be left behind
+    # Find orphaned dependencies (packages in unrequested that are no longer needed)
     erase_names = [a.name for a in result.actions]
     orphans = resolver.find_erase_orphans(erase_names)
 
@@ -1943,8 +2015,17 @@ def cmd_erase(args, db: PackageDatabase) -> int:
 
     installer = Installer()
 
+    last_erase_shown = [None]
+
     def erase_progress(name, current, total):
-        print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+        if name == '(updating rpmdb)':
+            if last_erase_shown[0] != name:
+                print(f"\r\033[K  [{current}/{total}] done")
+                print(f"  Updating RPM database...", end='', flush=True)
+                last_erase_shown[0] = name
+        elif last_erase_shown[0] != name:
+            print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+            last_erase_shown[0] = name
 
     try:
         # Record packages being erased (with correct reason)
@@ -2130,13 +2211,14 @@ def cmd_update(args, db: PackageDatabase) -> int:
             ))
 
         # Download
-        downloader = Downloader()
+        use_peers = not getattr(args, 'no_peers', False)
+        downloader = Downloader(use_peers=use_peers)
 
         def progress(name, pkg_num, pkg_total, bytes_done, bytes_total):
             pct = (bytes_done * 100 // bytes_total) if bytes_total > 0 else 0
             print(f"\r\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name}", end='', flush=True)
 
-        dl_results, downloaded, cached = downloader.download_all(download_items, progress)
+        dl_results, downloaded, cached, peer_stats = downloader.download_all(download_items, progress)
         print()
 
         # Check failures
@@ -2147,8 +2229,14 @@ def cmd_update(args, db: PackageDatabase) -> int:
                 print(f"  {colors.error(r.item.name)}: {r.error}")
             return 1
 
+        # Download summary with P2P stats
         cache_str = colors.warning(str(cached)) if cached > 0 else colors.dim(str(cached))
-        print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache")
+        from_peers = peer_stats.get('from_peers', 0)
+        from_upstream = peer_stats.get('from_upstream', 0)
+        if from_peers > 0:
+            print(f"  {colors.success(f'{downloaded} downloaded')} ({from_peers} from peers, {from_upstream} from mirrors), {cache_str} from cache")
+        else:
+            print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache")
 
         rpm_paths = [r.path for r in dl_results if r.success and r.path]
     else:
@@ -2194,8 +2282,19 @@ def cmd_update(args, db: PackageDatabase) -> int:
             print(f"\nUpgrading {len(rpm_paths)} packages...")
             installer = Installer()
 
+            last_shown = [None]
+
             def install_progress(name, current, total):
-                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                if name == '(updating rpmdb)':
+                    if last_shown[0] != name:
+                        print(f"\r\033[K  [{current}/{total}] done")
+                        print(f"  Updating RPM database...", end='', flush=True)
+                        last_shown[0] = name
+                elif name == '(rpmdb progress)':
+                    pass
+                elif last_shown[0] != name:
+                    print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                    last_shown[0] = name
 
             verify_sigs = not getattr(args, 'nosignature', False)
             install_result = installer.install(rpm_paths, install_progress, verify_signatures=verify_sigs)
@@ -2917,8 +3016,17 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
 
         installer = Installer()
 
+        last_erase_shown = [None]
+
         def erase_progress(name, current, total):
-            print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+            if name == '(updating rpmdb)':
+                if last_erase_shown[0] != name:
+                    print(f"\r\033[K  [{current}/{total}] done")
+                    print(f"  Updating RPM database...", end='', flush=True)
+                    last_erase_shown[0] = name
+            elif last_erase_shown[0] != name:
+                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                last_erase_shown[0] = name
 
         result = installer.erase(package_names, erase_progress)
         print()
@@ -2958,6 +3066,138 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
         raise
     finally:
         signal.signal(signal.SIGINT, original_handler)
+
+
+def cmd_mark(args, db: PackageDatabase) -> int:
+    """Handle mark command - mark packages as manual or auto-installed."""
+    from . import colors
+    from ..core.resolver import Resolver
+
+    resolver = Resolver(db)
+
+    if args.mark_command in ('manual', 'm', 'explicit'):
+        # Mark packages as explicitly installed (remove from unrequested)
+        packages = args.packages
+        unrequested = resolver._get_unrequested_packages()
+
+        marked = []
+        already_manual = []
+        not_installed = []
+
+        # Check which packages are installed
+        try:
+            import rpm
+            ts = rpm.TransactionSet()
+            installed = set()
+            for hdr in ts.dbMatch():
+                installed.add(hdr[rpm.RPMTAG_NAME].lower())
+        except ImportError:
+            print(colors.error("Error: rpm module not available"))
+            return 1
+
+        for pkg in packages:
+            pkg_lower = pkg.lower()
+            if pkg_lower not in installed:
+                not_installed.append(pkg)
+            elif pkg_lower not in unrequested:
+                already_manual.append(pkg)
+            else:
+                marked.append(pkg)
+
+        if not_installed:
+            print(colors.warning(f"Not installed: {', '.join(not_installed)}"))
+
+        if already_manual:
+            print(f"Already manual: {', '.join(already_manual)}")
+
+        if marked:
+            resolver.mark_as_explicit(marked)
+            print(colors.success(f"Marked as manual: {', '.join(marked)}"))
+            print("These packages are now protected from autoremove.")
+
+        return 0 if marked or already_manual else 1
+
+    elif args.mark_command in ('auto', 'a', 'dep'):
+        # Mark packages as auto-installed (add to unrequested)
+        packages = args.packages
+        unrequested = resolver._get_unrequested_packages()
+
+        marked = []
+        already_auto = []
+        not_installed = []
+
+        # Check which packages are installed
+        try:
+            import rpm
+            ts = rpm.TransactionSet()
+            installed = set()
+            for hdr in ts.dbMatch():
+                installed.add(hdr[rpm.RPMTAG_NAME].lower())
+        except ImportError:
+            print(colors.error("Error: rpm module not available"))
+            return 1
+
+        for pkg in packages:
+            pkg_lower = pkg.lower()
+            if pkg_lower not in installed:
+                not_installed.append(pkg)
+            elif pkg_lower in unrequested:
+                already_auto.append(pkg)
+            else:
+                marked.append(pkg)
+
+        if not_installed:
+            print(colors.warning(f"Not installed: {', '.join(not_installed)}"))
+
+        if already_auto:
+            print(f"Already auto: {', '.join(already_auto)}")
+
+        if marked:
+            resolver.mark_as_dependency(marked)
+            print(colors.success(f"Marked as auto: {', '.join(marked)}"))
+            print("These packages can now be autoremoved if no longer needed.")
+
+        return 0 if marked or already_auto else 1
+
+    elif args.mark_command in ('show', 's', 'list'):
+        # Show install reason for packages
+        unrequested = resolver._get_unrequested_packages()
+
+        try:
+            import rpm
+            ts = rpm.TransactionSet()
+            installed = {}
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                installed[name.lower()] = name
+        except ImportError:
+            print(colors.error("Error: rpm module not available"))
+            return 1
+
+        packages = args.packages if args.packages else sorted(installed.keys())
+
+        manual_count = 0
+        auto_count = 0
+
+        for pkg in packages:
+            pkg_lower = pkg.lower()
+            if pkg_lower not in installed:
+                print(f"{pkg}: {colors.warning('not installed')}")
+            elif pkg_lower in unrequested:
+                print(f"{installed[pkg_lower]}: {colors.info('auto')}")
+                auto_count += 1
+            else:
+                print(f"{installed[pkg_lower]}: {colors.success('manual')}")
+                manual_count += 1
+
+        if not args.packages:
+            print(f"\nTotal: {manual_count} manual, {auto_count} auto")
+
+        return 0
+
+    else:
+        print("Usage: urpm mark <manual|auto|show> [packages...]")
+        return 1
 
 
 def cmd_history(args, db: PackageDatabase) -> int:
@@ -3450,11 +3690,20 @@ def cmd_undo(args, db: PackageDatabase) -> int:
         if to_remove and not interrupted:
             print(colors.info(f"\nRemoving {len(to_remove)} package(s)..."))
 
+            last_erase_shown = [None]
+
             def erase_progress(name, current, total):
-                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                if name == '(updating rpmdb)':
+                    if last_erase_shown[0] != name:
+                        print(f"\r\033[K  [{current}/{total}] done")
+                        print(f"  Updating RPM database...", end='', flush=True)
+                        last_erase_shown[0] = name
+                elif last_erase_shown[0] != name:
+                    print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                    last_erase_shown[0] = name
 
             result = installer.erase(to_remove, erase_progress)
-            print()  # newline after progress
+            print()
 
             if not result.success:
                 print(colors.error("\nErase failed:"))
@@ -3729,11 +3978,20 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
         if to_remove and not interrupted:
             print(colors.info(f"\nRemoving {len(to_remove)} package(s)..."))
 
+            last_erase_shown = [None]
+
             def erase_progress(name, current, total):
-                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                if name == '(updating rpmdb)':
+                    if last_erase_shown[0] != name:
+                        print(f"\r\033[K  [{current}/{total}] done")
+                        print(f"  Updating RPM database...", end='', flush=True)
+                        last_erase_shown[0] = name
+                elif last_erase_shown[0] != name:
+                    print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                    last_erase_shown[0] = name
 
             result = installer.erase(to_remove, erase_progress)
-            print()  # newline after progress
+            print()
 
             if not result.success:
                 print(colors.error("\nErase failed:"))
@@ -3881,8 +4139,17 @@ def cmd_cleandeps(args, db: PackageDatabase) -> int:
         print(f"\nErasing {len(packages_to_erase)} orphan dependencies...")
         installer = Installer()
 
+        last_erase_shown = [None]
+
         def erase_progress(name, current, total):
-            print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+            if name == '(updating rpmdb)':
+                if last_erase_shown[0] != name:
+                    print(f"\r\033[K  [{current}/{total}] done")
+                    print(f"  Updating RPM database...", end='', flush=True)
+                    last_erase_shown[0] = name
+            elif last_erase_shown[0] != name:
+                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                last_erase_shown[0] = name
 
         erase_result = installer.erase(packages_to_erase, erase_progress)
         print()
@@ -4253,6 +4520,9 @@ def cmd_depends(args, db: PackageDatabase) -> int:
     for dep in deps:
         provider = find_provider(dep)
         if provider:
+            # Skip self-dependencies (package provides something it also requires)
+            if provider == pkg_name:
+                continue
             if provider not in by_provider:
                 by_provider[provider] = []
             by_provider[provider].append(dep)
@@ -4628,6 +4898,9 @@ def main(argv=None) -> int:
 
         elif args.command in ('autoremove', 'ar'):
             return cmd_autoremove(args, db)
+
+        elif args.command == 'mark':
+            return cmd_mark(args, db)
 
         elif args.command in ('provides', 'p'):
             return cmd_provides(args, db)

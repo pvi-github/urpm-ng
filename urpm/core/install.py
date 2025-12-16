@@ -133,6 +133,14 @@ class Installer:
                 fd = os.open(path, os.O_RDONLY)
                 open_fds[path] = fd
                 return fd
+            elif reason == rpm.RPMCALLBACK_TRANS_STOP:
+                # Transaction finished, RPM is updating database
+                if progress_callback and current[0] == total:
+                    progress_callback("(updating rpmdb)", total, total)
+            elif reason == rpm.RPMCALLBACK_TRANS_PROGRESS:
+                # Progress during transaction (db updates)
+                if progress_callback and current[0] == total:
+                    progress_callback("(rpmdb progress)", total, total)
             elif reason == rpm.RPMCALLBACK_INST_CLOSE_FILE:
                 # Close the file descriptor
                 path = key
@@ -215,6 +223,7 @@ class Installer:
         # Progress tracking
         current = [0]
         seen = set()
+        rpmdb_notified = [False]
 
         def callback(reason, amount, total_pkg, key, client_data):
             if reason == rpm.RPMCALLBACK_UNINST_START:
@@ -224,6 +233,12 @@ class Installer:
                     current[0] += 1
                     if progress_callback:
                         progress_callback(name, current[0], found)
+            elif reason == rpm.RPMCALLBACK_UNINST_STOP:
+                # After last package is uninstalled, RPM updates database
+                if current[0] == found and not rpmdb_notified[0]:
+                    rpmdb_notified[0] = True
+                    if progress_callback:
+                        progress_callback("(updating rpmdb)", found, found)
 
         # Run transaction
         problems = ts.run(callback, '')
