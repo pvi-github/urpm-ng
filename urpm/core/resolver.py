@@ -110,6 +110,14 @@ class PackageAction:
 
 
 @dataclass
+class Alternative:
+    """An alternative choice for a dependency."""
+    capability: str  # The capability being satisfied (e.g., "task-sound")
+    required_by: str  # Package that requires this capability
+    providers: List[str]  # Package names that can satisfy it
+
+
+@dataclass
 class Resolution:
     """Result of dependency resolution."""
     success: bool
@@ -117,6 +125,11 @@ class Resolution:
     problems: List[str]
     install_size: int = 0
     remove_size: int = 0
+    alternatives: List[Alternative] = None  # Choices that need user input
+
+    def __post_init__(self):
+        if self.alternatives is None:
+            self.alternatives = []
 
 
 class Resolver:
@@ -447,20 +460,33 @@ class Resolver:
             solv_flags |= solv.REL_EQ
         return solv_flags
 
-    def resolve_install(self, package_names: List[str]) -> Resolution:
+    def resolve_install(self, package_names: List[str],
+                        choices: Dict[str, str] = None) -> Resolution:
         """Resolve packages to install.
 
         Args:
             package_names: List of package names to install
+            choices: Optional dict mapping capability -> chosen package name
+                     for resolving alternatives (e.g., {"task-sound": "task-pulseaudio"})
 
         Returns:
-            Resolution with success status and package actions
+            Resolution with success status and package actions.
+            If alternatives need user input, success=False and alternatives is populated.
         """
+        if choices is None:
+            choices = {}
+
         self._solvable_to_pkg = {}
         self.pool = self._create_pool()
 
         jobs = []
         not_found = []
+
+        # Add explicit choices first (higher priority)
+        for cap, pkg_name in choices.items():
+            sel = self.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
+            if not sel.isempty():
+                jobs += sel.jobs(solv.Job.SOLVER_INSTALL)
 
         for name in package_names:
             # Use multiple selection flags for flexibility
@@ -568,6 +594,21 @@ class Resolver:
                 reason=reason,
             ))
 
+        # Detect alternatives: packages that could satisfy the same dependency
+        # Filter out alternatives where user already made a choice
+        all_alternatives = self._find_alternatives(solver, trans, actions)
+        alternatives = [alt for alt in all_alternatives if alt.capability not in choices]
+
+        # If there are unresolved alternatives, return them for user choice
+        if alternatives:
+            return Resolution(
+                success=False,
+                actions=actions,
+                problems=[],
+                install_size=install_size,
+                alternatives=alternatives
+            )
+
         return Resolution(
             success=True,
             actions=actions,
@@ -575,7 +616,213 @@ class Resolver:
             install_size=install_size
         )
 
-    def find_available_suggests(self, package_names: List[str]) -> List[PackageAction]:
+    def _find_alternatives(self, solver, trans, actions: List[PackageAction],
+                           max_providers: int = 10) -> List[Alternative]:
+        """Find cases where multiple packages could satisfy a dependency.
+
+        Uses two approaches:
+        1. PROVIDES-based: for virtual provides like task-sound, check what each
+           package provides and if multiple packages provide the same capability
+        2. REQUIRES-based: for each package's requirements, check if multiple
+           packages can satisfy them
+
+        Args:
+            solver: The libsolv solver
+            trans: The transaction
+            actions: List of package actions
+            max_providers: Maximum number of providers to show per alternative
+        """
+        alternatives = []
+        seen_caps = set()  # Avoid duplicate alternatives
+
+        # Get names of packages being installed
+        installing = {a.name for a in actions if a.action == TransactionType.INSTALL}
+
+        for s in trans.steps():
+            step_type = trans.steptype(s, solv.Transaction.SOLVER_TRANSACTION_SHOW_ACTIVE)
+            if step_type != solv.Transaction.SOLVER_TRANSACTION_INSTALL:
+                continue
+
+            # APPROACH 1: Check what this package PROVIDES (for virtual provides)
+            for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                cap_str = str(dep)
+
+                # Skip if it's the package name itself or already seen
+                if cap_str == s.name or cap_str in seen_caps:
+                    continue
+
+                # Skip versioned provides and arch-specific
+                if '[' in cap_str or '(' in cap_str:
+                    continue
+
+                # Find all providers of this capability
+                providers = self.pool.whatprovides(dep)
+
+                # Skip if capability is already satisfied by an installed package
+                if any(p.repo == self.pool.installed for p in providers):
+                    continue
+
+                provider_names = set()
+                for p in providers:
+                    if p.repo and p.repo != self.pool.installed:
+                        provider_names.add(p.name)
+
+                # If multiple different packages provide this, it's an alternative
+                if len(provider_names) > 1:
+                    if not self._is_valid_alternative(cap_str, provider_names, installing):
+                        continue
+
+                    seen_caps.add(cap_str)
+
+                    # Find what requires this capability
+                    required_by = self._find_requirer(cap_str, installing)
+                    if required_by:
+                        sorted_providers = self._prioritize_providers(
+                            list(provider_names), max_providers
+                        )
+                        alternatives.append(Alternative(
+                            capability=cap_str,
+                            required_by=required_by,
+                            providers=sorted_providers
+                        ))
+
+            # APPROACH 2: Check what this package REQUIRES (and RECOMMENDS)
+            dep_types = [solv.SOLVABLE_REQUIRES, solv.SOLVABLE_RECOMMENDS]
+            for dep_type in dep_types:
+                for dep in s.lookup_deparray(dep_type):
+                    cap_str = str(dep)
+
+                    if cap_str in seen_caps:
+                        continue
+
+                    base_cap = cap_str.split()[0] if ' ' in cap_str else cap_str
+
+                    if '(' in base_cap or '[' in base_cap:
+                        continue
+
+                    if base_cap in seen_caps:
+                        continue
+
+                    providers = self.pool.whatprovides(dep)
+
+                    # Skip if capability is already satisfied by an installed package
+                    if any(p.repo == self.pool.installed for p in providers):
+                        continue
+
+                    provider_names = set()
+                    for p in providers:
+                        if p.repo and p.repo != self.pool.installed:
+                            provider_names.add(p.name)
+
+                    if len(provider_names) > 1:
+                        if not self._is_valid_alternative(base_cap, provider_names, installing):
+                            continue
+
+                        seen_caps.add(base_cap)
+                        seen_caps.add(cap_str)
+
+                        sorted_providers = self._prioritize_providers(
+                            list(provider_names), max_providers
+                        )
+                        alternatives.append(Alternative(
+                            capability=base_cap,
+                            required_by=s.name,
+                            providers=sorted_providers
+                        ))
+
+        return alternatives
+
+    def _is_valid_alternative(self, capability: str, provider_names: set,
+                              installing: set) -> bool:
+        """Check if this is a valid user-facing alternative."""
+        # Filter: capability name matches a provider (not a virtual provide)
+        if capability in provider_names:
+            return False
+
+        # Filter: all providers are library packages
+        if all(self._is_library_package(p) for p in provider_names):
+            return False
+
+        # Filter: provider name contains the capability (e.g., lib64digikamcore for digikam-core)
+        cap_normalized = capability.replace('-', '').replace('_', '').lower()
+        if any(cap_normalized in p.replace('-', '').replace('_', '').lower()
+               for p in provider_names):
+            return False
+
+        return True
+
+    def _find_requirer(self, capability: str, installing: set) -> Optional[str]:
+        """Find which package being installed requires a capability."""
+        dep = self.pool.Dep(capability)
+
+        # Check packages that require this capability
+        for req in self.pool.whatmatchesdep(solv.SOLVABLE_REQUIRES, dep):
+            if req.name in installing:
+                return req.name
+
+        # Also check recommends
+        for req in self.pool.whatmatchesdep(solv.SOLVABLE_RECOMMENDS, dep):
+            if req.name in installing:
+                return req.name
+
+        return None
+
+    def _prioritize_providers(self, providers: List[str], max_count: int) -> List[str]:
+        """Prioritize providers based on locale and common usage.
+
+        Args:
+            providers: List of provider package names
+            max_count: Maximum number to return
+
+        Returns:
+            Sorted and limited list of providers
+        """
+        import locale
+        import os
+
+        # Get system locale
+        try:
+            lang = os.environ.get('LANG', 'en_US.UTF-8').split('_')[0].lower()
+        except Exception:
+            lang = 'en'
+
+        # Common/popular language codes to prioritize
+        common_langs = ['en', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'zh', 'ja', 'ko']
+
+        def sort_key(name: str) -> tuple:
+            name_lower = name.lower()
+
+            # Check if it matches system locale (highest priority)
+            if f'-{lang}' in name_lower or name_lower.endswith(f'_{lang}'):
+                return (0, name)
+
+            # Check if it's a common language
+            for i, common in enumerate(common_langs):
+                if f'-{common}' in name_lower or name_lower.endswith(f'_{common}'):
+                    return (1, i, name)
+
+            # Everything else alphabetically
+            return (2, 0, name)
+
+        sorted_providers = sorted(providers, key=sort_key)
+        return sorted_providers[:max_count]
+
+    def _is_library_package(self, name: str) -> bool:
+        """Check if a package name looks like a library package.
+
+        Library packages are typically not user-facing choices for alternatives.
+        """
+        name_lower = name.lower()
+        # Common library prefixes
+        if name_lower.startswith(('lib64', 'lib32', 'libx')):
+            return True
+        # Libraries with version suffixes like libfoo1, libbar2.0
+        if name_lower.startswith('lib') and any(c.isdigit() for c in name_lower[3:]):
+            return True
+        return False
+
+    def find_available_suggests(self, package_names: List[str],
+                                choices: Dict[str, str] = None) -> List[PackageAction]:
         """Find packages that are suggested by the given packages.
 
         Suggests are not automatically installed by libsolv, so we need to
@@ -583,12 +830,17 @@ class Resolver:
 
         Args:
             package_names: List of package names to check suggests for
+            choices: Dict mapping capability -> chosen package name.
+                     Used to filter out suggests that conflict with choices.
 
         Returns:
             List of PackageAction for available suggested packages
         """
         if not self.pool:
             return []
+
+        if choices is None:
+            choices = {}
 
         suggests = []
         seen = set()
@@ -598,6 +850,37 @@ class Resolver:
         if self.pool.installed:
             for s in self.pool.installed.solvables:
                 installed_names.add(s.name.lower())
+
+        # Build set of "rejected" packages - alternatives that weren't chosen
+        # e.g., if user chose pulseaudio for pulseaudio-daemon, reject pipewire-pulseaudio
+        rejected_packages = set()
+        for cap, chosen in choices.items():
+            # Find all providers of this capability
+            dep = self.pool.Dep(cap)
+            for p in self.pool.whatprovides(dep):
+                if p.name != chosen:
+                    rejected_packages.add(p.name.lower())
+
+        # Also reject alternatives for capabilities already satisfied by installed packages
+        # e.g., if pulseaudio is installed and provides pulseaudio-daemon, reject pipewire-pulseaudio
+        if self.pool.installed:
+            for s in self.pool.installed.solvables:
+                for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                    cap_str = str(dep)
+                    # Skip versioned provides and the package name itself
+                    if '[' in cap_str or '(' in cap_str or cap_str == s.name:
+                        continue
+                    # Find all providers of this capability
+                    providers = self.pool.whatprovides(dep)
+                    provider_names = set()
+                    for p in providers:
+                        if p.repo and p.repo != self.pool.installed:
+                            provider_names.add(p.name.lower())
+                    # If there are multiple providers, reject the ones not installed
+                    if len(provider_names) > 1:
+                        for pname in provider_names:
+                            if pname != s.name.lower():
+                                rejected_packages.add(pname)
 
         # For each package, find its suggests
         for pkg_name in package_names:
@@ -620,6 +903,10 @@ class Resolver:
                         # Skip if it's a src package
                         if provider.arch in ('src', 'nosrc'):
                             continue
+                        # Skip suggests that require rejected packages
+                        # (packages that conflict with user's choices)
+                        if self._requires_rejected(provider, rejected_packages):
+                            continue
 
                         seen.add(provider.name.lower())
                         pkg_info = self._solvable_to_pkg.get(provider.id, {})
@@ -636,6 +923,36 @@ class Resolver:
                         ))
 
         return suggests
+
+    def _requires_rejected(self, solvable, rejected_packages: set) -> bool:
+        """Check if a solvable requires any rejected package.
+
+        A package is "rejected" if it was an alternative that the user
+        did not choose. For example, if user chose pulseaudio over
+        pipewire-pulseaudio, then pipewire-pulseaudio is rejected.
+
+        Args:
+            solvable: The solvable to check
+            rejected_packages: Set of rejected package names (lowercase)
+
+        Returns:
+            True if the solvable requires a rejected package
+        """
+        for dep in solvable.lookup_deparray(solv.SOLVABLE_REQUIRES):
+            # Check if any provider of this dependency is rejected
+            providers = self.pool.whatprovides(dep)
+            provider_names = {p.name.lower() for p in providers}
+
+            # If ALL providers are rejected, or if the only provider is rejected
+            if provider_names and provider_names.issubset(rejected_packages):
+                return True
+
+            # Also check if the dependency itself is a rejected package name
+            dep_name = str(dep).split()[0].lower()
+            if dep_name in rejected_packages:
+                return True
+
+        return False
 
     def resolve_upgrade(self, package_names: List[str] = None) -> Resolution:
         """Resolve packages to upgrade.
@@ -1489,7 +1806,7 @@ class Resolver:
 
         return orphans
 
-    def find_erase_orphans(self, erase_names: List[str]) -> List[PackageAction]:
+    def find_erase_orphans(self, erase_names: List[str], erase_recommends: bool = False, keep_suggests: bool = False) -> List[PackageAction]:
         """Find packages that will become orphans after erasing packages.
 
         Strategy:
@@ -1500,6 +1817,8 @@ class Resolver:
 
         Args:
             erase_names: List of package names being erased (including reverse deps)
+            erase_recommends: If True, RECOMMENDS don't block removal (only REQUIRES do)
+            keep_suggests: If True, SUGGESTS also block removal (like RECOMMENDS)
 
         Returns:
             List of PackageAction for packages that will become orphans
@@ -1515,6 +1834,8 @@ class Resolver:
         # Build maps for all installed packages
         pkg_provides = {}  # name -> set of capability names
         pkg_requires = {}  # name -> set of capability names (raw, not resolved)
+        pkg_recommends = {}  # name -> set of recommended capability names
+        pkg_suggests = {}  # name -> set of suggested capability names
         cap_to_pkg = {}    # capability -> set of package names providing it
         name_to_original = {}  # lowercase name -> original case name
         pkg_headers = {}   # name -> rpm header
@@ -1544,6 +1865,20 @@ class Resolver:
                     requires.add(self._extract_cap_name(req))
             pkg_requires[name] = requires
 
+            # Also collect RECOMMENDS for dep_tree building
+            recommends = set()
+            for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
+                if not rec.startswith('rpmlib(') and not rec.startswith('/'):
+                    recommends.add(self._extract_cap_name(rec))
+            pkg_recommends[name] = recommends
+
+            # Also collect SUGGESTS for dep_tree building
+            suggests = set()
+            for sug in (hdr[rpm.RPMTAG_SUGGESTNAME] or []):
+                if not sug.startswith('rpmlib(') and not sug.startswith('/'):
+                    suggests.add(self._extract_cap_name(sug))
+            pkg_suggests[name] = suggests
+
         # Helper: resolve a capability to the installed package that provides it
         def resolve_cap_to_pkg(cap: str) -> Optional[str]:
             """Find which installed package provides this capability."""
@@ -1555,9 +1890,10 @@ class Resolver:
                 return next(iter(providers))
             return None
 
+
         # Helper: get direct dependencies of a package (as package names)
         def get_direct_deps(pkg_name: str) -> set:
-            """Get packages that pkg_name directly depends on."""
+            """Get packages that pkg_name directly depends on (REQUIRES only)."""
             deps = set()
             for cap in pkg_requires.get(pkg_name, set()):
                 provider = resolve_cap_to_pkg(cap)
@@ -1565,19 +1901,58 @@ class Resolver:
                     deps.add(provider)
             return deps
 
+        # Helper: get deps including recommends and suggests (for dep_tree building)
+        def get_all_deps(pkg_name: str) -> set:
+            """Get packages that pkg_name depends on, recommends, or suggests."""
+            deps = set()
+            # REQUIRES
+            for cap in pkg_requires.get(pkg_name, set()):
+                provider = resolve_cap_to_pkg(cap)
+                if provider and provider != pkg_name:
+                    deps.add(provider)
+            # RECOMMENDS
+            for cap in pkg_recommends.get(pkg_name, set()):
+                provider = resolve_cap_to_pkg(cap)
+                if provider and provider != pkg_name:
+                    deps.add(provider)
+            # SUGGESTS
+            for cap in pkg_suggests.get(pkg_name, set()):
+                provider = resolve_cap_to_pkg(cap)
+                if provider and provider != pkg_name:
+                    deps.add(provider)
+            return deps
+
         # Helper: get reverse dependencies of a package (as package names)
-        def get_reverse_deps(pkg_name: str) -> set:
-            """Get packages that depend on pkg_name."""
-            rdeps = set()
+        def get_reverse_deps(pkg_name: str) -> dict:
+            """Get packages that depend on pkg_name (respecting erase_recommends/keep_suggests).
+
+            Default: REQUIRES + RECOMMENDS block removal, SUGGESTS does NOT
+            erase_recommends=True: only REQUIRES blocks removal
+            keep_suggests=True: REQUIRES + RECOMMENDS + SUGGESTS all block removal
+
+            Returns: dict of {pkg_name: dep_type} where dep_type is 'R', 'M', or 'S'
+            """
+            rdeps = {}  # pkg_name -> dep_type ('R'equires, 'M'=recoMmends, 'S'uggests)
             my_provides = pkg_provides.get(pkg_name, set())
             for other_name in all_installed:
                 if other_name == pkg_name:
                     continue
                 other_requires = pkg_requires.get(other_name, set())
-                # Check if other_name requires any capability that pkg_name provides
+                other_recommends = pkg_recommends.get(other_name, set())
+                other_suggests = pkg_suggests.get(other_name, set())
+                # Check if other_name requires, recommends, or suggests any capability that pkg_name provides
                 for cap in my_provides:
+                    # REQUIRES always blocks removal
                     if cap in other_requires:
-                        rdeps.add(other_name)
+                        rdeps[other_name] = 'R'
+                        break
+                    # RECOMMENDS blocks removal unless --erase-recommends is set
+                    if not erase_recommends and cap in other_recommends:
+                        rdeps[other_name] = 'M'
+                        break
+                    # SUGGESTS blocks removal only if --keep-suggests is set
+                    if keep_suggests and cap in other_suggests:
+                        rdeps[other_name] = 'S'
                         break
             return rdeps
 
@@ -1588,50 +1963,121 @@ class Resolver:
             if orig:
                 erase_set_original.add(orig)
 
-        # STEP 1: Build the forward dependency tree
-        # Start from packages being erased and follow their dependencies recursively
+        # STEP 1: Build the forward dependency tree (including RECOMMENDS)
+        # Start from packages being erased and follow their deps + recommends recursively
         dep_tree = set(erase_set_original)
         to_process = list(erase_set_original)
 
         while to_process:
             pkg = to_process.pop()
-            for dep in get_direct_deps(pkg):
+            for dep in get_all_deps(pkg):
                 if dep not in dep_tree:
                     dep_tree.add(dep)
                     to_process.append(dep)
 
-        # STEP 2: Find orphans using "top-down" approach
-        # Start with all candidates (packages in dep_tree that are in unrequested)
-        # Then remove packages that have reverse-deps OUTSIDE the candidate set
-        # Iterate until stable
+        # STEP 2: Find orphans
+        # A package is an orphan if:
+        # 1. It's in dep_tree (dependency of something being removed)
+        # 2. It's in unrequested (was installed as a dependency)
+        # 3. No package that will REMAIN installed requires it
 
-        # Candidates = packages that COULD be removed
-        # (in dep_tree AND in unrequested, OR explicitly requested)
-        candidates = set(erase_set_original)  # Always include explicitly requested
+        # Initial set of packages to remove
+        to_remove = set(erase_set_original)  # Always include explicitly requested
         for pkg in dep_tree:
             if pkg.lower() in unrequested:
-                candidates.add(pkg)
+                to_remove.add(pkg)
 
-        # Iteratively remove packages that have rdeps OUTSIDE candidates
+        # Debug: write initial state
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Orphan detection: dep_tree={len(dep_tree)}, unrequested={len(unrequested)}, initial to_remove={len(to_remove)}")
+
+        # DEBUG: Write to file for analysis
+        try:
+            with open('.debug-orphans.log', 'w') as f:
+                f.write(f"dep_tree size: {len(dep_tree)}\n")
+                f.write(f"unrequested size: {len(unrequested)}\n")
+                f.write(f"initial to_remove size: {len(to_remove)}\n")
+                f.write(f"all_installed size: {len(all_installed)}\n")
+                f.write(f"cap_to_pkg size: {len(cap_to_pkg)}\n\n")
+
+                # Check .so capability resolution
+                test_cap = "libKF6CoreAddons.so.6()(64bit)"
+                if test_cap in cap_to_pkg:
+                    f.write(f"'{test_cap}' -> {cap_to_pkg[test_cap]}\n")
+                else:
+                    f.write(f"'{test_cap}' NOT in cap_to_pkg\n")
+                    similar = [c for c in cap_to_pkg.keys() if 'KF6CoreAddons' in c]
+                    f.write(f"Similar caps: {similar[:10]}\n")
+                f.write("\n")
+
+                # Check if lib64kf6coreaddons6 is in dep_tree and to_remove
+                f.write(f"lib64kf6coreaddons6 in dep_tree: {'lib64kf6coreaddons6' in dep_tree}\n")
+                f.write(f"kcoreaddons in dep_tree: {'kcoreaddons' in dep_tree}\n")
+                f.write(f"lib64kf6coreaddons6 in to_remove: {'lib64kf6coreaddons6' in to_remove}\n")
+                f.write(f"kcoreaddons in to_remove: {'kcoreaddons' in to_remove}\n")
+                f.write(f"'lib64kf6coreaddons6' in unrequested: {'lib64kf6coreaddons6' in unrequested}\n\n")
+
+                # Check which dep_tree packages are NOT in unrequested
+                not_in_unrequested = [p for p in dep_tree if p.lower() not in unrequested]
+                f.write(f"dep_tree packages NOT in unrequested ({len(not_in_unrequested)}):\n")
+                for p in sorted(not_in_unrequested)[:50]:
+                    f.write(f"  {p}\n")
+                if len(not_in_unrequested) > 50:
+                    f.write(f"  ... and {len(not_in_unrequested) - 50} more\n")
+                f.write("\n")
+        except:
+            pass
+
+        # Orphan detection algorithm:
+        # A package can be removed if ALL its reverse deps are also being removed.
+        # We iteratively remove packages from candidates that have rdeps outside candidates.
+
+        candidates = set(to_remove)
+        candidates_lower = {p.lower() for p in candidates}
+        removed_from_candidates = {}  # For debug: pkg -> (blocker, dep_type)
+
+        # Iterate until stable
         changed = True
+        iteration = 0
         while changed:
             changed = False
+            iteration += 1
             for pkg_name in list(candidates):
                 if pkg_name in erase_set_original:
-                    continue  # Never remove explicitly requested packages
+                    continue  # Always remove explicitly requested packages
 
-                # Get all reverse dependencies of this package
-                rdeps = get_reverse_deps(pkg_name)
+                rdeps = get_reverse_deps(pkg_name)  # dict: pkg -> dep_type
 
-                # Check if any rdep is OUTSIDE candidates (meaning it needs this pkg)
-                rdeps_outside = rdeps - candidates
-
-                if rdeps_outside:
-                    # Someone outside candidates needs this package -> can't remove
-                    candidates.remove(pkg_name)
-                    changed = True
+                for rdep, dep_type in rdeps.items():
+                    rdep_lower = rdep.lower()
+                    # Package must stay if it has a rdep that will remain installed.
+                    # A rdep remains installed if it's NOT in candidates.
+                    if rdep_lower not in candidates_lower:
+                        candidates.remove(pkg_name)
+                        candidates_lower.remove(pkg_name.lower())
+                        removed_from_candidates[pkg_name] = (rdep, dep_type)
+                        changed = True
+                        break
 
         to_remove = candidates
+
+        # DEBUG
+        try:
+            with open('.debug-orphans.log', 'a') as f:
+                f.write(f"Options: erase_recommends={erase_recommends}, keep_suggests={keep_suggests}\n")
+                f.write(f"Iterations: {iteration}\n")
+                f.write(f"Initial candidates: {len(to_remove) + len(removed_from_candidates)}\n")
+                f.write(f"Removed from candidates: {len(removed_from_candidates)}\n")
+                f.write(f"Final to_remove: {len(to_remove)}\n\n")
+                f.write(f"Packages that must stay (R=Requires, M=Recommends, S=Suggests):\n")
+                for pkg in sorted(removed_from_candidates.keys()):
+                    blocker, dep_type = removed_from_candidates[pkg]
+                    f.write(f"  {pkg} <-[{dep_type}]- {blocker}\n")
+        except:
+            pass
+
+        logger.debug(f"Orphan detection: iterations={iteration}, kept={len(removed_from_candidates)}, final={len(to_remove)}")
 
         # Build PackageAction list (exclude the explicitly erased packages)
         erase_set_lower = set(n.lower() for n in erase_names)

@@ -19,6 +19,80 @@ from .. import __version__
 from ..core.database import PackageDatabase
 
 
+def check_dependencies() -> list:
+    """Check for required Python modules.
+
+    Returns:
+        List of missing module names (empty if all OK)
+    """
+    missing = []
+
+    # Check libsolv (required for dependency resolution)
+    try:
+        import solv
+    except ImportError:
+        missing.append(('python3-libsolv', 'dependency resolution'))
+
+    # Check zstandard (required for .cz decompression)
+    try:
+        import zstandard
+    except ImportError:
+        missing.append(('python3-zstandard', 'synthesis decompression'))
+
+    return missing
+
+
+def print_missing_dependencies(missing: list):
+    """Print error message for missing dependencies."""
+    print("ERROR: Missing required Python modules:\n", file=sys.stderr)
+    for pkg, purpose in missing:
+        print(f"  - {pkg} ({purpose})", file=sys.stderr)
+    print(f"\nInstall with:", file=sys.stderr)
+    print(f"  dnf install {' '.join(pkg for pkg, _ in missing)}", file=sys.stderr)
+    print(f"  # or", file=sys.stderr)
+    print(f"  urpmi {' '.join(pkg for pkg, _ in missing)}", file=sys.stderr)
+
+
+# Debug file paths (in current working directory)
+DEBUG_LAST_INSTALLED_DEPS = Path('.last-installed-through-deps.list')
+DEBUG_LAST_REMOVED_DEPS = Path('.last-removed-as-deps.list')
+DEBUG_INSTALLED_DEPS_COPY = Path('.installed-through-deps.list')
+DEBUG_PREV_INSTALLED_DEPS = Path('.prev-installed-through-deps.list')
+
+
+def _write_debug_file(path: Path, packages: list, append: bool = False):
+    """Write package names to a debug file."""
+    mode = 'a' if append else 'w'
+    try:
+        with open(path, mode) as f:
+            for pkg in sorted(packages):
+                f.write(f"{pkg}\n")
+    except (IOError, OSError):
+        pass  # Ignore errors for debug files
+
+
+def _clear_debug_file(path: Path):
+    """Clear a debug file."""
+    try:
+        path.write_text('')
+    except (IOError, OSError):
+        pass
+
+
+def _copy_installed_deps_list(root: str = '/', dest: Path = None):
+    """Copy installed-through-deps.list to working directory for debug."""
+    src = Path(root) / 'var/lib/rpm/installed-through-deps.list'
+    if dest is None:
+        dest = DEBUG_INSTALLED_DEPS_COPY
+    try:
+        if src.exists():
+            dest.write_text(src.read_text())
+        else:
+            dest.write_text('')
+    except (IOError, OSError):
+        pass
+
+
 class AliasedSubParsersAction(argparse._SubParsersAction):
     """Custom action to support command aliases in argparse."""
     
@@ -111,7 +185,7 @@ def create_parser() -> argparse.ArgumentParser:
         help='Dry run (simulation)'
     )
     install_parser.add_argument(
-        '--no-recommends',
+        '--without-recommends',
         action='store_true',
         help='Skip recommended packages'
     )
@@ -134,6 +208,16 @@ def create_parser() -> argparse.ArgumentParser:
         '--no-peers',
         action='store_true',
         help='Disable P2P download from LAN peers'
+    )
+    install_parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Force install despite dependency problems or conflicts'
+    )
+    install_parser.add_argument(
+        '--reinstall',
+        action='store_true',
+        help='Reinstall already installed packages (repair)'
     )
 
     # =========================================================================
@@ -161,6 +245,21 @@ def create_parser() -> argparse.ArgumentParser:
         '--auto-orphans',
         action='store_true',
         help='Also remove orphan dependencies'
+    )
+    erase_parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Force erase despite dependency problems'
+    )
+    erase_parser.add_argument(
+        '--erase-recommends',
+        action='store_true',
+        help='Also erase packages recommended by remaining packages'
+    )
+    erase_parser.add_argument(
+        '--keep-suggests',
+        action='store_true',
+        help='Keep packages suggested by remaining packages'
     )
 
     # =========================================================================
@@ -382,14 +481,24 @@ def create_parser() -> argparse.ArgumentParser:
         help='Skip GPG signature verification (not recommended)'
     )
     upgrade_parser.add_argument(
-        '--no-recommends',
+        '--without-recommends',
         action='store_true',
         help='Skip recommended packages'
+    )
+    upgrade_parser.add_argument(
+        '--with-suggests',
+        action='store_true',
+        help='Also install suggested packages'
     )
     upgrade_parser.add_argument(
         '--no-peers',
         action='store_true',
         help='Disable P2P download from LAN peers'
+    )
+    upgrade_parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Force upgrade despite dependency problems or conflicts'
     )
 
     # =========================================================================
@@ -540,7 +649,28 @@ def create_parser() -> argparse.ArgumentParser:
         'name', nargs='?',
         help='Media name (empty = all)'
     )
-    
+
+    # media import
+    media_import = media_subparsers.add_parser(
+        'import',
+        help='Import media from urpmi.cfg'
+    )
+    media_import.add_argument(
+        'file', nargs='?',
+        default='/etc/urpmi/urpmi.cfg',
+        help='Path to urpmi.cfg (default: /etc/urpmi/urpmi.cfg)'
+    )
+    media_import.add_argument(
+        '--replace',
+        action='store_true',
+        help='Replace existing media with same name'
+    )
+    media_import.add_argument(
+        '--auto', '-y',
+        action='store_true',
+        help='No confirmation'
+    )
+
     # =========================================================================
     # cache / c
     # =========================================================================
@@ -841,7 +971,7 @@ def _resolve_virtual_package(db: PackageDatabase, pkg_name: str, auto: bool, ins
                 return []
             try:
                 answer = input(f"\nInstall anyway? [y/N] ").strip()
-                if answer.lower() not in ('y', 'yes', 'o', 'oui'):
+                if answer.lower() not in ('y', 'yes'):
                     return []
             except (EOFError, KeyboardInterrupt):
                 return []
@@ -1172,7 +1302,7 @@ def cmd_media_add(args, db: PackageDatabase) -> int:
                     else:
                         try:
                             response = input("Import this key? [Y/n] ")
-                            do_import = response.lower() in ('', 'y', 'yes', 'o', 'oui')
+                            do_import = response.lower() in ('', 'y', 'yes')
                         except (KeyboardInterrupt, EOFError):
                             print("\nAborted")
                             return 1
@@ -1303,6 +1433,177 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
         return 1 if errors else 0
 
 
+def parse_urpmi_cfg(filepath: str) -> list:
+    """Parse urpmi.cfg file and return list of media configurations.
+
+    Returns:
+        List of dicts with keys: name, url, enabled, update
+    """
+    import re
+
+    media_list = []
+
+    with open(filepath, 'r') as f:
+        content = f.read()
+
+    # Pattern to match media blocks:
+    # Name\ With\ Spaces URL {
+    #   options...
+    # }
+    # The name can have escaped spaces (\ ) and the URL follows
+    pattern = r'([^\s{]+(?:\\ [^\s{]+)*)\s+(https?://[^\s{]+)\s*\{([^}]*)\}'
+
+    for match in re.finditer(pattern, content):
+        raw_name = match.group(1)
+        url = match.group(2)
+        options_block = match.group(3)
+
+        # Unescape the name (replace '\ ' with ' ')
+        name = raw_name.replace('\\ ', ' ')
+
+        # Parse options
+        enabled = True
+        update = False
+
+        for line in options_block.split('\n'):
+            line = line.strip()
+            if line == 'ignore':
+                enabled = False
+            elif line == 'update':
+                update = True
+            # key-ids is informational, we don't use it currently
+
+        media_list.append({
+            'name': name,
+            'url': url,
+            'enabled': enabled,
+            'update': update,
+        })
+
+    return media_list
+
+
+def cmd_media_import(args, db: PackageDatabase) -> int:
+    """Handle media import command - import from urpmi.cfg."""
+    from . import colors
+    import os
+
+    filepath = args.file
+
+    if not os.path.exists(filepath):
+        print(colors.error(f"File not found: {filepath}"))
+        return 1
+
+    try:
+        media_list = parse_urpmi_cfg(filepath)
+    except Exception as e:
+        print(colors.error(f"Failed to parse {filepath}: {e}"))
+        return 1
+
+    if not media_list:
+        print(colors.warning("No media found in file"))
+        return 0
+
+    # Get existing media names
+    existing = {m['name'].lower(): m['name'] for m in db.list_media()}
+
+    # Categorize media
+    to_add = []
+    to_skip = []
+    to_replace = []
+
+    for media in media_list:
+        if media['name'].lower() in existing:
+            if args.replace:
+                to_replace.append(media)
+            else:
+                to_skip.append(media)
+        else:
+            to_add.append(media)
+
+    # Show summary
+    print(f"\n{colors.bold('Import from:')} {filepath}")
+    print(f"  Found: {len(media_list)} media")
+
+    if to_add:
+        print(f"\n  {colors.success('To add:')} {len(to_add)}")
+        for m in to_add:
+            status = ""
+            if not m['enabled']:
+                status = " (disabled)"
+            if m['update']:
+                status += " [update]"
+            print(f"    {m['name']}{status}")
+
+    if to_replace:
+        print(f"\n  {colors.warning('To replace:')} {len(to_replace)}")
+        for m in to_replace:
+            print(f"    {m['name']}")
+
+    if to_skip:
+        print(f"\n  {colors.info('Skipped (already exist):')} {len(to_skip)}")
+        for m in to_skip:
+            print(f"    {m['name']}")
+
+    if not to_add and not to_replace:
+        print(colors.info("\nNothing to import"))
+        return 0
+
+    # Confirmation
+    if not args.auto:
+        try:
+            response = input(f"\nImport {len(to_add) + len(to_replace)} media? [y/N] ")
+            if response.lower() not in ('y', 'yes'):
+                print("Aborted.")
+                return 0
+        except (KeyboardInterrupt, EOFError):
+            print("\nAborted.")
+            return 130
+
+    # Import media
+    added = 0
+    replaced = 0
+    errors = 0
+
+    for media in to_replace:
+        try:
+            # Remove existing first
+            orig_name = existing[media['name'].lower()]
+            db.remove_media(orig_name)
+            db.add_media(
+                name=media['name'],
+                url=media['url'],
+                enabled=media['enabled'],
+                update=media['update']
+            )
+            replaced += 1
+            print(f"  {colors.warning('Replaced:')} {media['name']}")
+        except Exception as e:
+            print(f"  {colors.error('Error:')} {media['name']}: {e}")
+            errors += 1
+
+    for media in to_add:
+        try:
+            db.add_media(
+                name=media['name'],
+                url=media['url'],
+                enabled=media['enabled'],
+                update=media['update']
+            )
+            added += 1
+            print(f"  {colors.success('Added:')} {media['name']}")
+        except Exception as e:
+            print(f"  {colors.error('Error:')} {media['name']}: {e}")
+            errors += 1
+
+    print(f"\n{colors.bold('Summary:')} {added} added, {replaced} replaced, {errors} errors")
+
+    if added + replaced > 0:
+        print(colors.info("\nRun 'urpm media update' to fetch package lists"))
+
+    return 1 if errors else 0
+
+
 def cmd_cache_info(args, db: PackageDatabase) -> int:
     """Handle cache info command."""
     stats = db.get_stats()
@@ -1379,7 +1680,7 @@ def cmd_cache_clean(args, db: PackageDatabase) -> int:
     if not args.auto:
         try:
             answer = input(f"\nRemove {len(orphans)} files ({size_str})? [y/N] ")
-            if answer.lower() not in ('y', 'yes', 'o', 'oui'):
+            if answer.lower() not in ('y', 'yes'):
                 print("Aborted")
                 return 1
         except EOFError:
@@ -1544,11 +1845,64 @@ def cmd_cache_stats(args, db: PackageDatabase) -> int:
     return 0
 
 
+def _resolve_with_alternatives(resolver, packages: list, choices: dict,
+                               auto_mode: bool) -> tuple:
+    """Resolve packages, handling alternatives interactively.
+
+    Args:
+        resolver: Resolver instance
+        packages: List of package names to resolve
+        choices: Dict mapping capability -> chosen package (modified in place)
+        auto_mode: If True, use first choice automatically; if False, ask user
+
+    Returns:
+        Tuple of (result, aborted) where result is the Resolution and aborted
+        is True if user cancelled during alternative selection.
+    """
+    while True:
+        result = resolver.resolve_install(packages, choices=choices)
+
+        # Handle alternatives (multiple providers for same capability)
+        if result.alternatives and not auto_mode:
+            for alt in result.alternatives:
+                print(f"\nTo satisfy dependency '{alt.capability}' of '{alt.required_by}', one of these packages is needed:")
+                for i, provider in enumerate(alt.providers, 1):
+                    print(f"  {i}- {provider}")
+                while True:
+                    try:
+                        choice = input(f"What is your choice? (1-{len(alt.providers)}) ")
+                        idx = int(choice) - 1
+                        if 0 <= idx < len(alt.providers):
+                            choices[alt.capability] = alt.providers[idx]
+                            break
+                        print(f"Please enter a number between 1 and {len(alt.providers)}")
+                    except ValueError:
+                        print(f"Please enter a number between 1 and {len(alt.providers)}")
+                    except (EOFError, KeyboardInterrupt):
+                        print("\nAborted")
+                        return result, True
+            # Re-resolve with new choices
+            continue
+        elif result.alternatives and auto_mode:
+            # In auto mode, use first choice
+            for alt in result.alternatives:
+                choices[alt.capability] = alt.providers[0]
+            continue
+
+        break  # No more alternatives, exit loop
+
+    return result, False
+
+
 def cmd_install(args, db: PackageDatabase) -> int:
     """Handle install command."""
     import signal
     from ..core.resolver import Resolver, Resolution, format_size
     from ..core.download import Downloader, DownloadItem
+
+    # Debug: save previous state and clear debug files at start
+    _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
+    _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
 
     # Resolve virtual packages to concrete packages
     # This handles cases like php-opcache → php8.5-opcache based on what's installed
@@ -1577,12 +1931,25 @@ def cmd_install(args, db: PackageDatabase) -> int:
     from . import colors
     from ..core.resolver import InstallReason
 
-    # Initial resolution with recommends
-    no_recommends = getattr(args, 'no_recommends', False)
+    # Get CLI options for recommends/suggests
+    without_recommends = getattr(args, 'without_recommends', False)
     with_suggests = getattr(args, 'with_suggests', False)
 
-    resolver = Resolver(db, install_recommends=not no_recommends)
-    result = resolver.resolve_install(resolved_packages)
+    # Determine initial recommends behavior:
+    # - Auto mode: no recommends (never ask)
+    # - Interactive mode: yes unless --without-recommends (will ask user)
+    if args.auto:
+        initial_recommends = False
+    else:
+        initial_recommends = not without_recommends
+
+    resolver = Resolver(db, install_recommends=initial_recommends)
+    choices = {}
+
+    # Resolve with user choices for alternatives
+    result, aborted = _resolve_with_alternatives(resolver, resolved_packages, choices, args.auto)
+    if aborted:
+        return 1
 
     if not result.success:
         print("Resolution failed:")
@@ -1595,29 +1962,103 @@ def cmd_install(args, db: PackageDatabase) -> int:
         return 0
 
     # Categorize packages by install reason
-    explicit_pkgs = [a for a in result.actions if a.reason == InstallReason.EXPLICIT]
-    dep_pkgs = [a for a in result.actions if a.reason == InstallReason.DEPENDENCY]
     rec_pkgs = [a for a in result.actions if a.reason == InstallReason.RECOMMENDED]
+
+    # Find available suggests only if --with-suggests is specified
+    all_to_install = [a.name for a in result.actions]
+    if with_suggests:
+        suggests = resolver.find_available_suggests(all_to_install, choices=choices)
+    else:
+        suggests = []
+
+    # Calculate sizes for initial display
+    rec_size = sum(a.size for a in rec_pkgs)
+    sug_size = sum(a.size for a in suggests)
+
+    # Determine final recommends/suggests behavior
+    install_recommends_final = initial_recommends
+    install_suggests = with_suggests
+
+    # In interactive mode: ask about recommends (unless --without-recommends)
+    if rec_pkgs and not args.auto and not without_recommends:
+        print(f"\n{colors.success(f'Recommended packages ({len(rec_pkgs)})')} - {format_size(rec_size)}")
+        for a in rec_pkgs[:5]:
+            print(f"  {a.name}-{a.evr}")
+        if len(rec_pkgs) > 5:
+            print(f"  ... and {len(rec_pkgs) - 5} more")
+        try:
+            answer = input(f"\nInstall recommended packages? [Y/n] ")
+            install_recommends_final = answer.lower() not in ('n', 'no')
+        except EOFError:
+            print("\nAborted")
+            return 1
+
+    # In interactive mode with --with-suggests: ask about suggests
+    if suggests and not args.auto:
+        print(f"\n{colors.warning(f'Suggested packages ({len(suggests)})')} - {format_size(sug_size)}")
+        for a in suggests[:5]:
+            print(f"  {a.name}-{a.evr}")
+        if len(suggests) > 5:
+            print(f"  ... and {len(suggests) - 5} more")
+        try:
+            answer = input(f"\nInstall suggested packages? [Y/n] ")
+            install_suggests = answer.lower() not in ('n', 'no')
+        except EOFError:
+            print("\nAborted")
+            return 1
+
+    # Re-resolve with final preferences (recommends + suggests)
+    need_reresolve = False
+    final_packages = list(resolved_packages)
+
+    if not install_recommends_final and rec_pkgs:
+        need_reresolve = True
+
+    if install_suggests and suggests:
+        suggest_names = [s.name for s in suggests]
+        final_packages = resolved_packages + suggest_names
+        need_reresolve = True
+
+    if need_reresolve:
+        resolver = Resolver(db, install_recommends=install_recommends_final)
+        result, aborted = _resolve_with_alternatives(resolver, final_packages, choices, args.auto)
+        if aborted:
+            return 1
+        if not result.success:
+            print("Resolution failed:")
+            for p in result.problems:
+                print(f"  {p}")
+            return 1
+        # Mark the suggest packages with the right reason
+        if install_suggests and suggests:
+            for action in result.actions:
+                if action.name in suggest_names:
+                    action.reason = InstallReason.SUGGESTED
+
+    final_actions = list(result.actions)
+
+    # Categorize final packages by install reason
+    explicit_pkgs = [a for a in final_actions if a.reason == InstallReason.EXPLICIT]
+    dep_pkgs = [a for a in final_actions if a.reason == InstallReason.DEPENDENCY]
+    rec_pkgs = [a for a in final_actions if a.reason == InstallReason.RECOMMENDED]
+    sug_pkgs = [a for a in final_actions if a.reason == InstallReason.SUGGESTED]
 
     # Build set of explicit package names for history recording
     explicit_names = set(a.name.lower() for a in explicit_pkgs)
 
-    # Find available suggests (not in transaction yet)
-    all_to_install = [a.name for a in result.actions]
-    suggests = resolver.find_available_suggests(all_to_install)
-
-    # Calculate sizes
+    # Calculate final sizes
     explicit_size = sum(a.size for a in explicit_pkgs)
     dep_size = sum(a.size for a in dep_pkgs)
     rec_size = sum(a.size for a in rec_pkgs)
-    sug_size = sum(a.size for a in suggests)
+    sug_size = sum(a.size for a in sug_pkgs)
+    total_size = sum(a.size for a in final_actions if a.action.value in ('install', 'upgrade'))
 
-    # Show grouped summary
+    # Show final transaction summary
     print(f"\n{colors.bold('Transaction summary:')}\n")
 
     if explicit_pkgs:
         print(f"  {colors.info(f'Requested ({len(explicit_pkgs)})')} - {format_size(explicit_size)}")
-        for a in explicit_pkgs[:5]:  # Show first 5
+        for a in explicit_pkgs[:5]:
             print(f"    {a.name}-{a.evr}")
         if len(explicit_pkgs) > 5:
             print(f"    ... and {len(explicit_pkgs) - 5} more")
@@ -1629,82 +2070,27 @@ def cmd_install(args, db: PackageDatabase) -> int:
         if len(dep_pkgs) > 5:
             print(f"    ... and {len(dep_pkgs) - 5} more")
 
-    # Ask about recommends if there are any and not auto mode
-    install_recommends_final = True
-    if rec_pkgs and not args.auto and not no_recommends:
-        print(f"\n  {colors.success(f'Recommended ({len(rec_pkgs)})')} - {format_size(rec_size)}")
+    if rec_pkgs:
+        print(f"  {colors.success(f'Recommended ({len(rec_pkgs)})')} - {format_size(rec_size)}")
         for a in rec_pkgs[:5]:
             print(f"    {a.name}-{a.evr}")
         if len(rec_pkgs) > 5:
             print(f"    ... and {len(rec_pkgs) - 5} more")
-        try:
-            answer = input(f"\n  Install recommended packages? [O/n] ")
-            install_recommends_final = answer.lower() not in ('n', 'no', 'non')
-        except EOFError:
-            print("\nAborted")
-            return 1
-    elif rec_pkgs and no_recommends:
-        install_recommends_final = False
-        print(f"  {colors.dim(f'Recommended ({len(rec_pkgs)}) - skipped (--no-recommends)')}")
-    elif rec_pkgs:
-        # Auto mode - show but don't ask
-        print(f"  {colors.success(f'Recommended ({len(rec_pkgs)})')} - {format_size(rec_size)}")
 
-    # Ask about suggests if there are any and not auto mode
-    install_suggests = with_suggests
-    if suggests and not args.auto and not with_suggests:
-        print(f"\n  {colors.warning(f'Suggested ({len(suggests)})')} - {format_size(sug_size)}")
-        for a in suggests[:5]:
+    if sug_pkgs:
+        print(f"  {colors.warning(f'Suggested ({len(sug_pkgs)})')} - {format_size(sug_size)}")
+        for a in sug_pkgs[:5]:
             print(f"    {a.name}-{a.evr}")
-        if len(suggests) > 5:
-            print(f"    ... and {len(suggests) - 5} more")
-        try:
-            answer = input(f"\n  Install suggested packages? [o/N] ")
-            install_suggests = answer.lower() in ('o', 'oui', 'y', 'yes')
-        except EOFError:
-            print("\nAborted")
-            return 1
-    elif suggests and with_suggests:
-        print(f"  {colors.warning(f'Suggested ({len(suggests)})')} - {format_size(sug_size)}")
-
-    # Re-resolve if user changed their mind about recommends
-    if not install_recommends_final and rec_pkgs:
-        resolver = Resolver(db, install_recommends=False)
-        result = resolver.resolve_install(resolved_packages)
-        if not result.success:
-            print("Resolution failed:")
-            for p in result.problems:
-                print(f"  {p}")
-            return 1
-
-    # Re-resolve with suggests if user wants them (to get their dependencies)
-    if install_suggests and suggests:
-        suggest_names = [s.name for s in suggests]
-        all_packages = resolved_packages + suggest_names
-        resolver = Resolver(db, install_recommends=install_recommends_final)
-        result = resolver.resolve_install(all_packages)
-        if not result.success:
-            print("Resolution failed:")
-            for p in result.problems:
-                print(f"  {p}")
-            return 1
-        # Mark the suggest packages with the right reason
-        for action in result.actions:
-            if action.name in suggest_names:
-                action.reason = InstallReason.SUGGESTED
-
-    final_actions = list(result.actions)
-
-    # Recalculate total
-    total_size = sum(a.size for a in final_actions if a.action.value in ('install', 'upgrade'))
+        if len(sug_pkgs) > 5:
+            print(f"    ... and {len(sug_pkgs) - 5} more")
 
     # Final confirmation
     print(f"\n{colors.bold(f'Total: {len(final_actions)} packages')} ({format_size(total_size)})")
 
     if not args.auto:
         try:
-            answer = input("\nProceed with installation? [o/N] ")
-            if answer.lower() not in ('o', 'oui', 'y', 'yes'):
+            answer = input("\nProceed with installation? [y/N] ")
+            if answer.lower() not in ('y', 'yes'):
                 print("Aborted")
                 return 1
         except EOFError:
@@ -1838,7 +2224,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
     last_shown = [None]
 
     def install_progress(name, current, total):
-        if name == '(updating rpmdb)':
+        if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
             if last_shown[0] != name:
                 print(f"\r\033[K  [{current}/{total}] done")
                 print(f"  Updating RPM database...", end='', flush=True)
@@ -1851,7 +2237,9 @@ def cmd_install(args, db: PackageDatabase) -> int:
 
     try:
         verify_sigs = not getattr(args, 'nosignature', False)
-        install_result = installer.install(rpm_paths, install_progress, verify_signatures=verify_sigs)
+        force = getattr(args, 'force', False)
+        reinstall = getattr(args, 'reinstall', False)
+        install_result = installer.install_batched(rpm_paths, progress_callback=install_progress, verify_signatures=verify_sigs, force=force, reinstall=reinstall)
         print()  # newline after progress
 
         if not install_result.success:
@@ -1877,8 +2265,13 @@ def cmd_install(args, db: PackageDatabase) -> int:
                             if a.reason == InstallReason.EXPLICIT]
         if dep_packages:
             resolver.mark_as_dependency(dep_packages)
+            # Debug: write what we marked as deps
+            _write_debug_file(DEBUG_LAST_INSTALLED_DEPS, dep_packages)
         if explicit_packages:
             resolver.mark_as_explicit(explicit_packages)
+
+        # Debug: copy the installed-through-deps.list for inspection
+        _copy_installed_deps_list()
 
         return 0
 
@@ -1896,6 +2289,10 @@ def cmd_erase(args, db: PackageDatabase) -> int:
 
     from ..core.resolver import Resolver, format_size
     from ..core.install import Installer, EraseResult, check_root
+
+    # Debug: save previous state and clear debug files at start
+    _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
+    _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
     # Check root
     from . import colors
@@ -1941,7 +2338,11 @@ def cmd_erase(args, db: PackageDatabase) -> int:
 
     # Find orphaned dependencies (packages in unrequested that are no longer needed)
     erase_names = [a.name for a in result.actions]
-    orphans = resolver.find_erase_orphans(erase_names)
+    orphans = resolver.find_erase_orphans(
+        erase_names,
+        erase_recommends=args.erase_recommends,
+        keep_suggests=args.keep_suggests
+    )
 
     all_actions = result.actions
     total_size = result.remove_size
@@ -2039,13 +2440,16 @@ def cmd_erase(args, db: PackageDatabase) -> int:
                 reason
             )
 
-        erase_result = installer.erase(packages_to_erase, erase_progress)
+        force = getattr(args, 'force', False)
+        erase_result = installer.erase(packages_to_erase, erase_progress, force=force)
         print()  # newline after progress
 
         if not erase_result.success:
             print(colors.error(f"\nErase failed:"))
             for err in erase_result.errors[:5]:
                 print(f"  {colors.error(err)}")
+            if not force:
+                print(colors.dim("  Use --force to ignore dependency problems"))
             db.abort_transaction(transaction_id)
             return 1
 
@@ -2060,6 +2464,14 @@ def cmd_erase(args, db: PackageDatabase) -> int:
         # Update installed-through-deps.list for urpmi compatibility
         erased_packages = [action.name for action in all_actions]
         resolver.unmark_packages(erased_packages)
+
+        # Debug: write orphans that were removed
+        orphan_names = [o.name for o in orphans]
+        if orphan_names:
+            _write_debug_file(DEBUG_LAST_REMOVED_DEPS, orphan_names)
+
+        # Debug: copy the installed-through-deps.list for inspection
+        _copy_installed_deps_list()
 
         return 0
 
@@ -2076,6 +2488,11 @@ def cmd_update(args, db: PackageDatabase) -> int:
     import signal
 
     from . import colors
+
+    # Debug: save previous state and clear debug files at start
+    _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
+    _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
+    _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
     # If --lists, just update media metadata
     if getattr(args, 'lists', False):
@@ -2103,7 +2520,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
     # Resolve upgrades
     arch = platform.machine()
-    install_recommends = not getattr(args, 'no_recommends', False)
+    install_recommends = not getattr(args, 'without_recommends', False)
     resolver = Resolver(db, arch=arch, install_recommends=install_recommends)
 
     if upgrade_all:
@@ -2165,7 +2582,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
     if not getattr(args, 'auto', False):
         try:
             response = input("\nProceed with upgrade? [y/N] ")
-            if response.lower() not in ('y', 'yes', 'o', 'oui'):
+            if response.lower() not in ('y', 'yes'):
                 print("Aborted.")
                 return 0
         except (KeyboardInterrupt, EOFError):
@@ -2285,7 +2702,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
             last_shown = [None]
 
             def install_progress(name, current, total):
-                if name == '(updating rpmdb)':
+                if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
                     if last_shown[0] != name:
                         print(f"\r\033[K  [{current}/{total}] done")
                         print(f"  Updating RPM database...", end='', flush=True)
@@ -2297,7 +2714,8 @@ def cmd_update(args, db: PackageDatabase) -> int:
                     last_shown[0] = name
 
             verify_sigs = not getattr(args, 'nosignature', False)
-            install_result = installer.install(rpm_paths, install_progress, verify_signatures=verify_sigs)
+            force = getattr(args, 'force', False)
+            install_result = installer.install_batched(rpm_paths, progress_callback=install_progress, verify_signatures=verify_sigs, force=force)
             print()
 
             if not install_result.success:
@@ -2346,10 +2764,20 @@ def cmd_update(args, db: PackageDatabase) -> int:
         new_deps = [a.name for a in result.actions if a.action.value == 'install']
         if new_deps:
             resolver.mark_as_dependency(new_deps)
+            # Debug: write what we marked as deps
+            _write_debug_file(DEBUG_LAST_INSTALLED_DEPS, new_deps)
         # Removed packages (obsoleted) should be unmarked
         removed = [a.name for a in result.actions if a.action.value == 'remove']
         if removed:
             resolver.unmark_packages(removed)
+
+        # Debug: write orphans that were removed
+        orphan_names = [o.name for o in orphans]
+        if orphan_names:
+            _write_debug_file(DEBUG_LAST_REMOVED_DEPS, orphan_names)
+
+        # Debug: copy the installed-through-deps.list for inspection
+        _copy_installed_deps_list()
 
         return 0
 
@@ -2922,7 +3350,7 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
             print(f"    {colors.warning(nevra)}")
         try:
             response = input("\n  Remove these warned packages anyway? [y/N] ")
-            if response.lower() in ('y', 'yes', 'o', 'oui'):
+            if response.lower() in ('y', 'yes'):
                 safe.extend(warned)
             else:
                 print("  Warned packages will be kept")
@@ -2964,7 +3392,7 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
     if not getattr(args, 'auto', False):
         try:
             response = input("\nRemove these packages? [y/N] ")
-            if response.lower() not in ('y', 'yes', 'o', 'oui'):
+            if response.lower() not in ('y', 'yes'):
                 print("Aborted.")
                 return 0
         except (KeyboardInterrupt, EOFError):
@@ -3556,7 +3984,7 @@ def cmd_key(args) -> int:
         print(f"Removing key: {found}")
         try:
             response = input("Are you sure? [y/N] ")
-            if response.lower() not in ('y', 'yes', 'o', 'oui'):
+            if response.lower() not in ('y', 'yes'):
                 print("Aborted")
                 return 0
         except (KeyboardInterrupt, EOFError):
@@ -3664,7 +4092,7 @@ def cmd_undo(args, db: PackageDatabase) -> int:
     if not args.auto:
         try:
             answer = input("\nProceed? [y/N] ")
-            if answer.lower() not in ('y', 'yes', 'o', 'oui'):
+            if answer.lower() not in ('y', 'yes'):
                 print("Aborted")
                 return 1
         except EOFError:
@@ -3952,7 +4380,7 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
     if not args.auto:
         try:
             answer = input("\nProceed? [y/N] ")
-            if answer.lower() not in ('y', 'yes', 'o', 'oui'):
+            if answer.lower() not in ('y', 'yes'):
                 print("Aborted")
                 return 1
         except EOFError:
@@ -4093,7 +4521,7 @@ def cmd_cleandeps(args, db: PackageDatabase) -> int:
     if not args.auto:
         try:
             answer = input("\nRemove these packages? [y/N] ")
-            if answer.lower() not in ('y', 'yes', 'o', 'oui'):
+            if answer.lower() not in ('y', 'yes'):
                 print("Aborted")
                 return 1
         except EOFError:
@@ -4817,6 +5245,12 @@ def cmd_not_implemented(args, db: PackageDatabase) -> int:
 
 def main(argv=None) -> int:
     """Main CLI entry point."""
+    # Check required dependencies first
+    missing = check_dependencies()
+    if missing:
+        print_missing_dependencies(missing)
+        return 1
+
     parser = create_parser()
     args = parser.parse_args(argv)
 
@@ -4864,6 +5298,8 @@ def main(argv=None) -> int:
                 return cmd_media_disable(args, db)
             elif args.media_command in ('update', 'u'):
                 return cmd_media_update(args, db)
+            elif args.media_command == 'import':
+                return cmd_media_import(args, db)
             else:
                 return cmd_not_implemented(args, db)
         

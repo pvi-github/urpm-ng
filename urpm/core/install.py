@@ -49,7 +49,9 @@ class Installer:
     def install(self, rpm_paths: List[Path],
                 progress_callback: Callable[[str, int, int], None] = None,
                 test: bool = False,
-                verify_signatures: bool = True) -> InstallResult:
+                verify_signatures: bool = True,
+                force: bool = False,
+                reinstall: bool = False) -> InstallResult:
         """Install RPM packages.
 
         Args:
@@ -57,6 +59,8 @@ class Installer:
             progress_callback: Optional callback(name, current, total)
             test: If True, only check, don't install
             verify_signatures: If True, verify GPG signatures (default: True)
+            force: If True, ignore dependency problems and conflicts
+            reinstall: If True, reinstall already installed packages
 
         Returns:
             InstallResult with status
@@ -101,18 +105,33 @@ class Installer:
                 errors.append("Use --nosignature to skip signature verification (not recommended)")
             return InstallResult(success=False, errors=errors)
 
-        # Check dependencies
-        unresolved = ts.check()
-        if unresolved:
-            for prob in unresolved:
-                errors.append(f"Dependency problem: {prob}")
-            return InstallResult(success=False, errors=errors)
+        # Check dependencies (skip if force)
+        if not force:
+            unresolved = ts.check()
+            if unresolved:
+                for prob in unresolved:
+                    errors.append(f"Dependency problem: {prob}")
+                return InstallResult(success=False, errors=errors)
 
         # Order the transaction
         ts.order()
 
         if test:
             return InstallResult(success=True, installed=len(rpm_paths))
+
+        # Set problem filters for force/reinstall mode
+        prob_filter = 0
+        if force:
+            prob_filter |= (
+                rpm.RPMPROB_FILTER_REPLACEPKG |
+                rpm.RPMPROB_FILTER_OLDPACKAGE |
+                rpm.RPMPROB_FILTER_REPLACENEWFILES |
+                rpm.RPMPROB_FILTER_REPLACEOLDFILES
+            )
+        if reinstall:
+            prob_filter |= rpm.RPMPROB_FILTER_REPLACEPKG
+        if prob_filter:
+            ts.setProbFilter(prob_filter)
 
         # Prepare callback
         total = len(rpm_paths)
@@ -170,15 +189,291 @@ class Installer:
 
         return InstallResult(success=True, installed=current[0])
 
+    def _find_sccs(self, graph: dict) -> List[List[str]]:
+        """Find strongly connected components using Tarjan's algorithm.
+
+        Returns list of SCCs, each SCC is a list of package names.
+        SCCs are returned in reverse topological order (dependencies last).
+        """
+        index_counter = [0]
+        stack = []
+        lowlinks = {}
+        index = {}
+        on_stack = {}
+        sccs = []
+
+        def strongconnect(node):
+            index[node] = index_counter[0]
+            lowlinks[node] = index_counter[0]
+            index_counter[0] += 1
+            stack.append(node)
+            on_stack[node] = True
+
+            for successor in graph.get(node, []):
+                if successor not in index:
+                    strongconnect(successor)
+                    lowlinks[node] = min(lowlinks[node], lowlinks[successor])
+                elif on_stack.get(successor, False):
+                    lowlinks[node] = min(lowlinks[node], index[successor])
+
+            if lowlinks[node] == index[node]:
+                scc = []
+                while True:
+                    w = stack.pop()
+                    on_stack[w] = False
+                    scc.append(w)
+                    if w == node:
+                        break
+                sccs.append(scc)
+
+        for node in graph:
+            if node not in index:
+                strongconnect(node)
+
+        return sccs
+
+    def _sort_by_dependencies(self, rpm_paths: List[Path]) -> List[Path]:
+        """Sort RPM paths by dependencies (dependencies first).
+
+        Uses RPM headers to build a dependency graph. Handles circular
+        dependencies by finding strongly connected components (SCCs)
+        and keeping them together.
+        """
+        if len(rpm_paths) <= 1:
+            return rpm_paths
+
+        # Read headers and build provides/requires maps
+        path_to_name = {}  # path -> package name
+        name_to_path = {}  # package name -> path
+        provides = {}  # capability -> package name
+        requires = {}  # package name -> set of required capabilities
+
+        ts = rpm.TransactionSet(self.root)
+        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)  # Skip sig check for sorting
+
+        for path in rpm_paths:
+            try:
+                fd = os.open(str(path), os.O_RDONLY)
+                try:
+                    hdr = ts.hdrFromFdno(fd)
+                    name = hdr[rpm.RPMTAG_NAME]
+                    path_to_name[path] = name
+                    name_to_path[name] = path
+
+                    # Package provides itself
+                    provides[name] = name
+
+                    # Get explicit provides
+                    pkg_provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
+                    for prov in pkg_provides:
+                        provides[prov] = name
+
+                    # Get requires
+                    pkg_requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
+                    requires[name] = set(pkg_requires)
+                finally:
+                    os.close(fd)
+            except rpm.error:
+                # If we can't read header, keep original position
+                continue
+
+        # Build dependency graph (only for packages in our set)
+        graph = {name: set() for name in name_to_path}
+        for name, reqs in requires.items():
+            for req in reqs:
+                provider = provides.get(req)
+                if provider and provider in graph and provider != name:
+                    graph[name].add(provider)
+
+        # Find strongly connected components (handles cycles)
+        sccs = self._find_sccs(graph)
+
+        # SCCs are in reverse topological order, so reverse them
+        # to get dependencies first
+        sccs.reverse()
+
+        # Flatten SCCs to get sorted package names
+        sorted_names = []
+        for scc in sccs:
+            # Sort within SCC for determinism
+            scc.sort()
+            sorted_names.extend(scc)
+
+        # Convert back to paths
+        sorted_paths = []
+        for name in sorted_names:
+            if name in name_to_path:
+                sorted_paths.append(name_to_path[name])
+
+        # Add any paths we couldn't process
+        processed = set(sorted_paths)
+        for path in rpm_paths:
+            if path not in processed:
+                sorted_paths.append(path)
+
+        return sorted_paths
+
+    def _build_dependency_graph(self, rpm_paths: List[Path]) -> tuple:
+        """Build dependency graph from RPM files.
+
+        Returns:
+            Tuple of (graph, name_to_path, path_to_name)
+            graph: dict mapping package name to set of dependency names
+        """
+        path_to_name = {}
+        name_to_path = {}
+        provides = {}
+        requires = {}
+
+        ts = rpm.TransactionSet(self.root)
+        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
+
+        for path in rpm_paths:
+            try:
+                fd = os.open(str(path), os.O_RDONLY)
+                try:
+                    hdr = ts.hdrFromFdno(fd)
+                    name = hdr[rpm.RPMTAG_NAME]
+                    path_to_name[path] = name
+                    name_to_path[name] = path
+                    provides[name] = name
+                    for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                        provides[prov] = name
+                    requires[name] = set(hdr[rpm.RPMTAG_REQUIRENAME] or [])
+                finally:
+                    os.close(fd)
+            except rpm.error:
+                continue
+
+        graph = {name: set() for name in name_to_path}
+        for name, reqs in requires.items():
+            for req in reqs:
+                provider = provides.get(req)
+                if provider and provider in graph and provider != name:
+                    graph[name].add(provider)
+
+        return graph, name_to_path, path_to_name
+
+    def install_batched(self, rpm_paths: List[Path],
+                         batch_size: int = 50,
+                         progress_callback: Callable[[str, int, int], None] = None,
+                         test: bool = False,
+                         verify_signatures: bool = True,
+                         force: bool = False,
+                         reinstall: bool = False) -> InstallResult:
+        """Install RPM packages in batches for better UX.
+
+        Splits packages into smaller batches and runs separate transactions.
+        Circular dependencies are kept together in the same batch.
+
+        Args:
+            rpm_paths: List of paths to RPM files
+            batch_size: Maximum packages per batch (default: 50)
+            progress_callback: Optional callback(name, current, total)
+            test: If True, only check, don't install
+            verify_signatures: If True, verify GPG signatures (default: True)
+            force: If True, ignore dependency problems and conflicts
+            reinstall: If True, reinstall already installed packages
+
+        Returns:
+            InstallResult with status
+        """
+        if not rpm_paths:
+            return InstallResult(success=True, installed=0)
+
+        # Batching disabled - see TODO for details
+        # The SCC algorithm doesn't correctly handle virtual provides (e.g., libksysguard
+        # provides "ksysguard" but graph only maps package names, not virtual provides)
+        return self.install(rpm_paths, progress_callback, test, verify_signatures, force, reinstall)
+
+        # Build dependency graph and find SCCs
+        graph, name_to_path, path_to_name = self._build_dependency_graph(rpm_paths)
+        sccs = self._find_sccs(graph)
+        sccs.reverse()  # Dependencies first
+
+        # Convert SCCs to path lists, keeping cycles together
+        scc_paths = []
+        for scc in sccs:
+            paths = [name_to_path[name] for name in scc if name in name_to_path]
+            if paths:
+                scc_paths.append(paths)
+
+        # Build batches respecting SCC boundaries
+        batches = []
+        current_batch = []
+        for scc in scc_paths:
+            # If SCC is larger than batch_size, it becomes its own batch
+            if len(scc) > batch_size:
+                if current_batch:
+                    batches.append(current_batch)
+                    current_batch = []
+                batches.append(scc)
+            # If adding SCC would exceed batch_size, start new batch
+            elif len(current_batch) + len(scc) > batch_size:
+                if current_batch:
+                    batches.append(current_batch)
+                current_batch = list(scc)
+            else:
+                current_batch.extend(scc)
+
+        if current_batch:
+            batches.append(current_batch)
+
+        # Add any paths not in graph
+        processed = set()
+        for batch in batches:
+            processed.update(batch)
+        remaining = [p for p in rpm_paths if p not in processed]
+        if remaining:
+            batches.append(remaining)
+
+        total_packages = len(rpm_paths)
+        installed_count = 0
+        all_errors = []
+
+        num_batches = len(batches)
+        for batch_num, batch in enumerate(batches, 1):
+            # Capture values in default args to avoid closure issues
+            def batch_callback(name, current, batch_total,
+                               _batch_num=batch_num, _num_batches=num_batches,
+                               _installed=installed_count, _total=total_packages):
+                if progress_callback:
+                    if name == "(updating rpmdb)":
+                        progress_callback(f"(rpmdb {_batch_num}/{_num_batches})",
+                                          _installed + current, _total)
+                    else:
+                        progress_callback(name, _installed + current, _total)
+
+            result = self.install(
+                batch,
+                progress_callback=batch_callback,
+                test=test,
+                verify_signatures=verify_signatures
+            )
+
+            installed_count += result.installed
+
+            if not result.success:
+                all_errors.extend(result.errors)
+                return InstallResult(
+                    success=False,
+                    installed=installed_count,
+                    errors=all_errors
+                )
+
+        return InstallResult(success=True, installed=installed_count)
+
     def erase(self, package_names: List[str],
               progress_callback: Callable[[str, int, int], None] = None,
-              test: bool = False) -> EraseResult:
+              test: bool = False,
+              force: bool = False) -> EraseResult:
         """Erase (remove) installed packages.
 
         Args:
             package_names: List of package names to erase
             progress_callback: Optional callback(name, current, total)
             test: If True, only check, don't erase
+            force: If True, ignore dependency problems
 
         Returns:
             EraseResult with status
@@ -207,18 +502,23 @@ class Installer:
         if errors and found == 0:
             return EraseResult(success=False, errors=errors)
 
-        # Check dependencies (what would break)
-        unresolved = ts.check()
-        if unresolved:
-            for prob in unresolved:
-                errors.append(f"Dependency problem: {prob}")
-            return EraseResult(success=False, errors=errors)
+        # Check dependencies (skip if force)
+        if not force:
+            unresolved = ts.check()
+            if unresolved:
+                for prob in unresolved:
+                    errors.append(f"Dependency problem: {prob}")
+                return EraseResult(success=False, errors=errors)
 
         # Order the transaction
         ts.order()
 
         if test:
             return EraseResult(success=True, erased=found)
+
+        # Set problem filters for force mode
+        if force:
+            ts.setProbFilter(rpm.RPMPROB_FILTER_REPLACEPKG)
 
         # Progress tracking
         current = [0]
