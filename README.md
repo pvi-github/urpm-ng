@@ -17,14 +17,11 @@ urpmi python3-libsolv python3-zstandard
 
 ### Firewall ports (for P2P sharing)
 
-If you want to use P2P package sharing between LAN machines:
+If you want to use P2P package sharing between LAN machines, open these ports:
+- **TCP 9876** (production) or **TCP 9877** (dev mode) - urpmd HTTP API
+- **UDP 5353** - mDNS for peer discovery
 
-```bash
-# Open port 9876 (production) or 9877 (dev mode)
-firewall-cmd --add-port=9876/tcp --permanent
-firewall-cmd --add-port=5353/udp --permanent  # mDNS for peer discovery
-firewall-cmd --reload
-```
+Use the Mageia Control Center (MCC) > Security > Firewall, or edit `/etc/shorewall/rules` directly.
 
 ## Installation
 
