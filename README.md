@@ -9,10 +9,6 @@ urpm-ng is a complete rewrite of the classic urpmi toolset, providing faster per
 ### Required packages
 
 ```bash
-# Install with dnf (if available)
-dnf install python3-libsolv python3-zstandard
-
-# Or with urpmi
 urpmi python3-libsolv python3-zstandard
 ```
 
