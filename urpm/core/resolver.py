@@ -1452,9 +1452,10 @@ class Resolver:
     def find_all_orphans(self) -> List[PackageAction]:
         """Find ALL orphan packages in the system.
 
-        Uses the urpmi-compatible algorithm: a package is an orphan if:
-        1. It was installed as a dependency (in installed-through-deps.list)
-        2. No other non-orphan package requires it anymore
+        Algorithm: For each package in unrequested (installed as dependency):
+        - Walk UP reverse dependencies (who requires/recommends this package)
+        - If any path leads to a package NOT in unrequested → keep it
+        - If ALL paths only lead to other unrequested packages → orphan
 
         Returns:
             List of PackageAction for orphan packages
@@ -1470,95 +1471,106 @@ class Resolver:
 
         ts = rpm.TransactionSet(self.root)
 
-        # Build package info for all installed packages
-        installed_pkgs = {}
+        # Build package info and reverse dependency map
+        installed_pkgs = {}  # name -> {provides, hdr}
+        provides_map = {}    # capability -> set of package names providing it
+        reverse_deps = {}    # name -> set of names that require/recommend it
 
         for hdr in ts.dbMatch():
             name = hdr[rpm.RPMTAG_NAME]
             if name == 'gpg-pubkey':
                 continue
 
+            # Collect provides
             provides = set()
             for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                # Keep full provide name for matching
                 provides.add(prov)
-                # Also add base name without version
                 base_prov = prov.split('(')[0] if '(' in prov else prov
                 provides.add(base_prov)
-
-            requires = set()
-            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                if req.startswith('rpmlib(') or req.startswith('/'):
-                    continue
-                requires.add(req)
-                # Also add base name
-                base_req = req.split('(')[0] if '(' in req else req
-                requires.add(base_req)
+                # Map capability -> provider
+                if base_prov not in provides_map:
+                    provides_map[base_prov] = set()
+                provides_map[base_prov].add(name)
 
             installed_pkgs[name] = {
                 'provides': provides,
-                'requires': requires,
                 'hdr': hdr,
             }
+            reverse_deps[name] = set()
 
-        # Find orphans iteratively (cascade)
+        # Build reverse dependency graph (who requires/recommends each package)
+        for hdr in ts.dbMatch():
+            name = hdr[rpm.RPMTAG_NAME]
+            if name == 'gpg-pubkey':
+                continue
+
+            # Process Requires
+            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
+                if req.startswith('rpmlib(') or req.startswith('/'):
+                    continue
+                base_req = req.split('(')[0] if '(' in req else req
+                # Find who provides this
+                for provider in provides_map.get(base_req, set()):
+                    if provider != name:
+                        reverse_deps[provider].add(name)
+
+            # Process Recommends
+            for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
+                base_rec = rec.split('(')[0] if '(' in rec else rec
+                for provider in provides_map.get(base_rec, set()):
+                    if provider != name:
+                        reverse_deps[provider].add(name)
+
+        # Build lowercase -> actual name mapping for unrequested lookup
+        name_to_lower = {name: name.lower() for name in installed_pkgs}
+
+        # For each unrequested package, check if it leads to an explicit package
+        def has_explicit_ancestor(pkg_name: str, visited: set) -> bool:
+            """Walk up reverse deps to find if any explicit package depends on this."""
+            if pkg_name in visited:
+                return False
+            visited.add(pkg_name)
+
+            for dep_name in reverse_deps.get(pkg_name, set()):
+                # Found an explicitly installed package that needs this
+                if name_to_lower.get(dep_name, dep_name.lower()) not in unrequested:
+                    return True
+                # Recurse up
+                if has_explicit_ancestor(dep_name, visited):
+                    return True
+
+            return False
+
+        # Find orphans - iterate through installed packages that are in unrequested
         orphans = []
-        to_remove = set()
-        max_iterations = 100
+        for name in installed_pkgs:
+            if name.lower() not in unrequested:
+                # Not a dependency - explicitly installed
+                continue
 
-        for iteration in range(max_iterations):
-            new_orphans = []
+            # Check if any explicit package depends on this (directly or indirectly)
+            if not has_explicit_ancestor(name, set()):
+                # No explicit package needs this -> orphan
+                hdr = installed_pkgs[name]['hdr']
+                epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+                version = hdr[rpm.RPMTAG_VERSION]
+                release = hdr[rpm.RPMTAG_RELEASE]
+                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                size = hdr[rpm.RPMTAG_SIZE] or 0
 
-            for name in unrequested:
-                if name in to_remove:
-                    continue
-                if name not in installed_pkgs:
-                    # Package no longer installed
-                    continue
+                if epoch and epoch > 0:
+                    evr = f"{epoch}:{version}-{release}"
+                else:
+                    evr = f"{version}-{release}"
 
-                pkg = installed_pkgs[name]
-
-                # Check if required by any non-orphan package
-                is_required = False
-                for prov in pkg['provides']:
-                    for other_name, other_pkg in installed_pkgs.items():
-                        if other_name == name:
-                            continue
-                        if other_name in to_remove:
-                            continue
-                        if prov in other_pkg['requires']:
-                            is_required = True
-                            break
-                    if is_required:
-                        break
-
-                if not is_required:
-                    hdr = pkg['hdr']
-                    epoch = hdr[rpm.RPMTAG_EPOCH] or 0
-                    version = hdr[rpm.RPMTAG_VERSION]
-                    release = hdr[rpm.RPMTAG_RELEASE]
-                    arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                    size = hdr[rpm.RPMTAG_SIZE] or 0
-
-                    if epoch and epoch > 0:
-                        evr = f"{epoch}:{version}-{release}"
-                    else:
-                        evr = f"{version}-{release}"
-
-                    new_orphans.append(PackageAction(
-                        action=TransactionType.REMOVE,
-                        name=name,
-                        evr=evr,
-                        arch=arch,
-                        nevra=f"{name}-{evr}.{arch}",
-                        size=size,
-                    ))
-                    to_remove.add(name)
-
-            if not new_orphans:
-                break
-
-            orphans.extend(new_orphans)
+                orphans.append(PackageAction(
+                    action=TransactionType.REMOVE,
+                    name=name,
+                    evr=evr,
+                    arch=arch,
+                    nevra=f"{name}-{evr}.{arch}",
+                    size=size,
+                ))
 
         return orphans
 

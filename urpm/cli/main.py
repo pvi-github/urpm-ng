@@ -3516,7 +3516,19 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
 
     from . import colors
     from ..core.resolver import Resolver, format_size
-    from ..core.install import Installer, check_root
+    from ..core.install import check_root
+    from ..core.background_install import (
+        run_erase_background, check_background_error, clear_background_error,
+        InstallLock
+    )
+
+    # Check for previous background errors
+    prev_error = check_background_error()
+    if prev_error:
+        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning(f"  {prev_error}"))
+        print(colors.dim("  (This message will not appear again)"))
+        clear_background_error()
 
     # Determine which selectors are active
     do_orphans = getattr(args, 'orphans', False)
@@ -3708,39 +3720,47 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
         print(f"\nRemoving {len(packages_to_remove)} packages...")
         package_names = [name for name, _, _, _ in packages_to_remove]
 
-        installer = Installer()
+        # Check if another operation is in progress
+        lock = InstallLock()
+        if not lock.acquire(blocking=False):
+            print(colors.warning("  RPM database is locked by another process."))
+            print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+            lock.acquire(blocking=True)
+        lock.release()  # Release - child will acquire its own lock
 
         last_erase_shown = [None]
 
         def erase_progress(name, current, total):
-            if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
+            if name == '(rpmdb)':
                 if last_erase_shown[0] != '(rpmdb)' and last_erase_shown[0] is not None:
                     print(f" [Waiting for RPM database...]", end='', flush=True)
-                    last_erase_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
+                    last_erase_shown[0] = '(rpmdb)'
             elif last_erase_shown[0] != name:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_erase_shown[0] = name
 
-        result = installer.erase_batched(package_names, progress_callback=erase_progress)
-        # Print clean "done" line if we ended on rpmdb update, otherwise just newline
-        if last_erase_shown[0] == '(rpmdb)':
-            print(f"\r\033[K  [{len(package_names)}/{len(package_names)}] done")
-        else:
-            print()
+        # Use background erase - parent returns when packages are removed,
+        # rpmdb sync continues in background
+        success, error_msg = run_erase_background(
+            package_names,
+            progress_callback=erase_progress
+        )
 
-        if not result.success:
+        # Print done
+        print(f"\r\033[K  [{len(package_names)}/{len(package_names)}] done")
+
+        if not success:
             print(colors.error(f"\nRemoval failed:"))
-            for err in result.errors[:5]:
-                print(f"  {colors.error(err)}")
+            print(f"  {colors.error(error_msg)}")
             db.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Interrupted after {result.erased} packages"))
+            print(colors.warning(f"\n  Autoremove interrupted"))
             db.abort_transaction(transaction_id)
             return 130
 
-        print(colors.success(f"  {result.erased} packages removed"))
+        print(colors.success(f"  {len(package_names)} packages removed"))
 
         # Mark faildeps transactions as cleaned
         if faildeps_trans_ids:
