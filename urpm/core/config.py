@@ -8,13 +8,13 @@ Mode detection:
     4. Otherwise → DEV mode (development)
 
 PROD mode: /var/lib/urpm/
-DEV mode:  ~/.cache/urpm/
+DEV mode:  /var/lib/urpm-dev/
 
 Structure:
     <base_dir>/packages.db                              - Package database
-    <base_dir>/medias/<hostname>/<media>/               - Media cache
+    <base_dir>/medias/<hostname>/<media>/               - Media mirror
     <base_dir>/medias/<hostname>/<media>/media_info/    - Synthesis, hdlist, MD5SUM
-    <base_dir>/medias/<hostname>/<media>/*.rpm          - Cached RPMs
+    <base_dir>/medias/<hostname>/<media>/*.rpm          - Mirrored RPMs (served to peers)
 
 .urpm.local format (optional, one setting per line):
     base_dir=/path/to/custom/dir
@@ -35,8 +35,8 @@ PROD_DB_PATH = PROD_BASE_DIR / "packages.db"
 PROD_PID_FILE = Path("/run/urpmd.pid")
 PROD_PORT = 9876
 
-# DEV paths (user home, no root needed)
-DEV_BASE_DIR = Path.home() / ".cache" / "urpm"
+# DEV paths (separate directory, also requires root but isolated from prod)
+DEV_BASE_DIR = Path("/var/lib/urpm-dev")
 DEV_DB_PATH = DEV_BASE_DIR / "packages.db"
 DEV_PID_FILE = DEV_BASE_DIR / "urpmd.pid"
 DEV_PORT = 9877  # Different port so both daemons can coexist

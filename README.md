@@ -40,7 +40,7 @@ cd urpm-ng
 ./bin/urpmd
 ```
 
-In dev mode, data is stored in `~/.cache/urpm/` and the daemon uses port 9877.
+In dev mode, data is stored in `/var/lib/urpm-dev/` and the daemon uses port 9877.
 
 ### Production mode
 
