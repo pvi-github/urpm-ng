@@ -457,11 +457,15 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # =========================================================================
-    # upgrade (alias for update --all)
+    # upgrade / u
     # =========================================================================
     upgrade_parser = subparsers.add_parser(
         'upgrade', aliases=['u'],
-        help='Upgrade all packages (alias for update --all)'
+        help='Upgrade packages (all if none specified)'
+    )
+    upgrade_parser.add_argument(
+        'packages', nargs='*',
+        help='Packages to upgrade (empty = all)'
     )
     upgrade_parser.add_argument(
         '--auto', '-y',
@@ -2747,7 +2751,8 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
     # Determine what to upgrade
     packages = getattr(args, 'packages', []) or []
-    upgrade_all = getattr(args, 'all', False) or args.command in ('upgrade', 'u')
+    # --all flag OR (upgrade/u command with no packages) = full system upgrade
+    upgrade_all = getattr(args, 'all', False) or (args.command in ('upgrade', 'u') and not packages)
 
     if not packages and not upgrade_all:
         print("Specify packages to update, or use --all/-a for full system upgrade")

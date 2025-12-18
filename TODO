@@ -1,18 +1,83 @@
 # urpm-ng TODO
 
-## Tests à faire
+## Prérequis
 
-- [ ] Détection des orphelins lors de l'upgrade
-  - Attendre qu'il y ait des mises à jour disponibles
-  - Tester `urpm upgrade --test` pour voir si des orphelins sont détectés
-  - Vérifier que le diff requires fonctionne correctement
-  - Tester `--noerase-orphans` pour garder les orphelins
+Pour utiliser urpm, les paquets suivants doivent être installés :
 
-- [ ] Vérification des signatures GPG
-  - Tester installation d'un paquet signé (doit fonctionner)
-  - Tester installation avec clé manquante (doit échouer)
-  - Tester `--nosignature` pour bypass
-  - Tester `urpm key import <url>` avec URL HTTPS
+```
+dnf install python3-libsolv python3-zstandard
+# ou
+urpmi python3-libsolv python3-zstandard
+```
+
+- **python3-libsolv** : résolution des dépendances (obligatoire)
+- **python3-zstandard** : décompression des fichiers synthesis.hdlist.cz (obligatoire)
+
+Note : Ne pas utiliser python3-zstd (paquet Mageia) qui a des bugs de décompression.
+
+
+## Tests
+
+Voir [TESTS_TODO.md](TESTS_TODO.md) pour les tests manuels et l'infrastructure de tests automatisés.
+
+
+## Installation par lots (P2) - FAIT
+
+L'installation par lots (batched install) améliore l'UX en découpant
+les grosses installations en lots de 50 paquets, permettant un feedback plus
+fréquent lors de la mise à jour de la base RPM.
+
+### Implémentation
+
+- `Installer._find_sccs()` : algorithme de Tarjan pour détecter les cycles
+- `Installer._build_dependency_graph()` : construit le graphe requires/provides
+  - Mappe TOUS les provides (y compris virtuels) vers le paquet fournisseur
+- `Installer.install_batched()` : découpe en lots respectant les SCCs
+
+### Bug corrigé
+
+Le code original faisait `sccs.reverse()` pensant mettre les dépendances en premier,
+mais Tarjan retourne DÉJÀ les dépendances en premier (feuilles avant racines).
+Le reverse inversait l'ordre et causait des erreurs de dépendances RPM.
+
+
+## Alternatives (OR deps) (P1) - EN COURS
+
+Quand plusieurs paquets peuvent satisfaire une même dépendance (ex: task-sound
+fourni par task-pulseaudio OU task-pipewire), demander à l'utilisateur.
+
+### Implémenté
+
+- `Alternative` dataclass dans resolver.py
+- `Resolution.alternatives` pour retourner les choix
+- `resolve_install(choices={})` accepte les choix utilisateur
+- CLI demande interactivement (ou prend le premier en mode --auto)
+
+### À tester
+
+- [ ] Install avec alternatives (ex: task-plasma qui tire task-sound)
+- [ ] Mode --auto prend le premier choix automatiquement
+- [ ] Re-résolution après choix utilisateur
+
+
+## Options manquantes (P1) - FAIT
+
+### --force - FAIT
+
+Forcer l'installation/suppression malgré les conflits ou dépendances cassées.
+
+Implémenté :
+- [x] `urpm install --force` - ignore problèmes deps et conflits
+- [x] `urpm erase --force` - ignore problèmes deps
+- [x] `urpm upgrade --force` - idem install
+
+### --reinstall - FAIT
+
+Réinstaller un paquet déjà installé (même version).
+Utile pour réparer des fichiers corrompus.
+
+Implémenté :
+- [x] `urpm install --reinstall <pkg>`
 
 
 ## Sécurité - Clés GPG (P1) - FAIT
@@ -118,23 +183,166 @@ Commandes de gestion :
   - `urpm autoremove --cache` - nettoyage du cache RPM (P2)
 
 
-## Compatibilité Legacy (P2)
+## Affichage couleur (P2)
 
-### Wrappers urpmi/urpme/urpmq/urpmf
-Créer des wrappers ou alias pour que les utilisateurs puissent continuer à utiliser
-les commandes legacy avec les mêmes options :
-  - urpmi → urpm install (avec mapping des options)
-  - urpme → urpm erase
-  - urpmq → urpm search / show / whatprovides
-  - urpmf → urpm find (recherche fichiers)
-  - urpmi.update → urpm media update
-  - urpmi.addmedia → urpm media add
+### Palette de couleurs
+  - Rouge = erreurs et alertes
+  - Orange = warnings
+  - Vert = ok/réussite
+  - Bleu = information contextuelle
 
-Options à mapper :
-  - urpmi --auto → urpm install --auto
-  - urpmi --test → urpm install --test
-  - urpme --auto-orphans → urpm autoremove
-  - etc.
+### Options
+  - Détection automatique si terminal supporte les couleurs
+  - `--nocolor` : désactiver les couleurs
+  - `--batch` : mode script, format de sortie parsable (À SPÉCIFIER)
+
+### Mode batch (à spécifier)
+Le mode --batch doit produire une sortie exploitable par des scripts.
+Travail de spécification à faire :
+  - Définir le format de sortie (JSON ? TSV ? autre ?)
+  - Quelles commandes supportent --batch
+  - Quelles informations sont exposées
+  - Codes de retour standardisés
+
+
+## Service urpmd et réseau P2P (P2)
+
+### Vision globale
+
+Chaque machine Mageia avec urpmd peut servir de miroir pour ses voisines.
+Objectif : réduire drastiquement la bande passante vers les miroirs distants
+en favorisant le téléchargement local (LAN >> WAN).
+
+### Phase 1 : urpmd miroir local (MVP)
+
+**Scheduler (FAIT) :**
+  - [x] Mise à jour intelligente des métadonnées (HTTP HEAD)
+  - [x] Pré-téléchargement des paquets quand système idle
+  - [x] Nettoyage cache basique (fichiers > 30 jours)
+  - [x] Détection idle CPU/réseau
+  - [x] Jitter anti-thundering herd
+
+**Serveur HTTP - Endpoints API (FAIT) :**
+  - [x] `/ping` : health check
+  - [x] `/status` : état du daemon
+  - [x] `/updates` : liste des mises à jour disponibles
+  - [x] `/available?pkg=xxx` : vérifier disponibilité d'un paquet
+  - [x] `/refresh` (POST) : forcer rafraîchissement metadata
+
+**Serveur HTTP - Servir les fichiers (FAIT) :**
+  - [x] `/media/` : navigation des répertoires (liste JSON ou HTML)
+  - [x] `/media/<hostname>/<media_name>/` : répertoire d'un média
+  - [x] `/media/<hostname>/<media_name>/*.rpm` : téléchargement RPM
+  - [x] `/media/<hostname>/<media_name>/media_info/` : synthesis, hdlist, MD5SUM
+  - [ ] Support HTTP Range pour reprise de téléchargement (P3)
+
+**Configuration miroir :**
+  - Mode "complet" : tout garder (machine dédiée miroir)
+  - Mode "partiel" : garder ce qui a été téléchargé (défaut)
+  - Option taille max du cache
+
+### Phase 2 : Découverte des peers (FAIT)
+
+**Découverte automatique (implémenté) :**
+  - [x] Broadcast UDP sur le LAN (port 9878) pour trouver les urpmd voisins
+  - [x] Maintien d'une liste de peers actifs avec leur état
+  - [x] Timeout pour détecter peers down (180s prod, 45s dev)
+  - [x] Jitter sur les broadcasts pour éviter synchronisation (thundering herd)
+
+**Endpoints peer discovery (implémenté) :**
+  - [x] `GET /api/peers` : liste des peers connus et leur état
+  - [x] `POST /api/announce` : un peer s'annonce
+
+**Sécurité peers (FAIT) :**
+  - [x] Blacklist automatique si un peer fournit des paquets mal signés/non signés
+  - [x] Log d'alerte sécurité si paquet invalide reçu d'un peer
+  - [x] Persistence de la blacklist entre redémarrages (SQLite)
+  - [x] Commande pour gérer la blacklist (`urpm peer blacklist/unblacklist <host>`)
+  - [x] Filtrage des peers blacklistés avant téléchargement
+  - Note : pas de signature des broadcasts (n'importe qui peut s'annoncer) - sécurité
+    assurée par vérification GPG au téléchargement, pas à la découverte
+
+### Phase 3 : Téléchargement P2P (FAIT)
+
+**Pré-téléchargement intelligent (implémenté) :**
+  - [x] Avant de télécharger depuis miroir distant, vérifier si un peer l'a
+  - [x] Load-balancing sur les peers disponibles
+  - [x] Fallback sur miroir distant si aucun peer n'a le paquet
+  - [x] Reassignment dynamique si un peer échoue
+
+**Priorité de téléchargement (implémentée) :**
+  1. Cache local (déjà téléchargé)
+  2. Peers LAN (urpmd voisins)
+  3. Miroirs distants
+
+### Phase 4 : urpm standalone P2P (FAIT)
+
+**urpm sans urpmd (implémenté) :**
+  - [x] PeerClient intégré directement dans urpm
+  - [x] Découverte des peers via broadcast UDP
+  - [x] `urpm install/upgrade` utilise les peers disponibles automatiquement
+
+### Phase 5 : Installeur Mageia
+
+**Support P2P dans l'installeur :**
+  - Détection des urpmd sur le LAN pendant l'installation
+  - Téléchargement des paquets depuis les voisines Mageia
+  - Accélération drastique des installations en environnement multi-machines
+
+### Phase 6 : Mode Proxy/Relais (P3)
+
+Cas d'usage : machine connectée à internet (ex: connexion mobile) + LAN avec
+machines sans accès internet. La machine connectée peut servir de relais.
+
+**Fonctionnement désactivé par défaut** - opt-in via configuration.
+
+**Endpoints proxy :**
+  - `GET /api/hasupstream` : le peer peut-il atteindre les miroirs upstream ?
+    Réponse : `{"available": true, "mirrors": ["mirror1.mageia.org", ...]}`
+  - `POST /api/request` : demander à un peer de récupérer des paquets
+    Requête : `{"packages": ["foo-1.0.rpm", ...], "callback": "http://requester:port/api/done"}`
+    Réponse : `{"accepted": true, "request_id": "uuid", "queue_position": 3}`
+  - `POST /api/done` (sur le demandeur) : notification de complétion
+    Requête : `{"request_id": "uuid", "ready": ["foo-1.0.rpm"], "failed": []}`
+
+**Côté client (urpm install) :**
+  - Si miroirs upstream injoignables → chercher peers avec `/api/hasupstream`
+  - Si trouvé → `/api/request` puis attendre callback (ou polling `/api/have`)
+  - Fallback : afficher erreur si aucun peer proxy disponible
+
+**Sécurité :**
+  - Rate limiting par peer (configurable)
+  - Taille max de requête
+  - Whitelist optionnelle des peers autorisés à demander
+  - File d'attente avec limite
+
+**Configuration :**
+  - `urpm config proxy-mode enable/disable` : activer le mode relais
+  - `urpm config proxy-ratelimit N` : max requêtes par minute par peer
+  - `urpm config proxy-maxqueue N` : taille max de la file d'attente
+  - `urpm config proxy-whitelist add/remove/list` : peers autorisés (vide = tous)
+
+
+### Endpoints futurs (désactivés par défaut)
+
+  - `/auth` : authentification (à spécifier)
+  - `/run/<task>` : déclencher tâche scheduler
+  - `/upgrade`, `/install`, `/erase` : pilotage à distance
+  → Permettra administration centralisée d'un parc
+
+
+## Dépendances faibles : Recommends / Suggests (P2) - FAIT
+
+Implémenté :
+  - [x] Tables BDD : `recommends`, `suggests`, `supplements`, `enhances` (schema v6)
+  - [x] Stockage dans import_packages()
+  - [x] Parsing synthesis : supplements et enhances
+  - [x] Resolver : InstallReason enum (explicit/dependency/recommended/suggested)
+  - [x] Resolver : find_available_suggests() pour découvrir les suggestions
+  - [x] CLI : --no-recommends (ignorer les recommandés)
+  - [x] CLI : --with-suggests (inclure les suggestions)
+  - [x] Prompts interactifs groupés (requested/deps/recommends/suggests)
+  - [x] Erase : détection des suggests/recommends installés comme orphelins
 
 
 ## Parsing hdlist.cz (P2)
@@ -161,26 +369,6 @@ Cela nécessite :
   3. Supporter les patterns/regex comme urpmf
 
 
-## Gestion du cache (P2)
-
-### Nettoyage intelligent
-Les RPM qui ne sont plus référencés dans les synthesis → les virer.
-Les "bons" on les garde selon la politique choisie :
-  - Miroir complet : tout garder
-  - Miroir partiel : garder ce qui a été installé (défaut)
-  - Miroir minimal : garder le nécessaire pour une Mageia fonctionnelle
-    (Plasma ? Gnome ? À définir)
-
-
-## Affichage couleur (P2)
-
-Ajouter un mode d'affichage avec couleurs :
-  - Détection automatique si terminal supporte les couleurs
-  - Option --color=auto|always|never
-  - Couleurs cohérentes : vert=installé/succès, rouge=erreur/suppression,
-    jaune=warning, bleu=info, etc.
-
-
 ## Internationalisation (P2)
 
 ### Traductions de l'interface
@@ -198,6 +386,25 @@ Tous les messages de urpm doivent être traduisibles :
   - Portugais (Brésil)
   - Russe
   - Autres selon communauté Mageia
+
+
+## Compatibilité Legacy (P2)
+
+### Wrappers urpmi/urpme/urpmq/urpmf
+Créer des wrappers ou alias pour que les utilisateurs puissent continuer à utiliser
+les commandes legacy avec les mêmes options :
+  - urpmi → urpm install (avec mapping des options)
+  - urpme → urpm erase
+  - urpmq → urpm search / show / whatprovides
+  - urpmf → urpm find (recherche fichiers)
+  - urpmi.update → urpm media update
+  - urpmi.addmedia → urpm media add
+
+Options à mapper :
+  - urpmi --auto → urpm install --auto
+  - urpmi --test → urpm install --test
+  - urpme --auto-orphans → urpm autoremove
+  - etc.
 
 
 ## Documentation (P3)
@@ -233,3 +440,5 @@ Tous les messages de urpm doivent être traduisibles :
 - [x] Détection et suppression des orphelins lors de l'upgrade (--noerase-orphans pour garder)
 - [x] Vérification GPG des signatures par défaut (--nosignature pour bypass)
 - [x] Gestion des clés GPG (urpm key list/import/remove)
+- [x] Dépendances faibles (Recommends/Suggests) avec prompts interactifs
+- [x] Erase détecte suggests/recommends installés comme orphelins
