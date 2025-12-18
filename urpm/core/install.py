@@ -4,11 +4,14 @@ RPM installation module
 Handles package installation using python3-rpm bindings.
 """
 
+import logging
 import os
 import rpm
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -209,7 +212,8 @@ class Installer:
             stack.append(node)
             on_stack[node] = True
 
-            for successor in graph.get(node, []):
+            # Sort successors for deterministic order
+            for successor in sorted(graph.get(node, [])):
                 if successor not in index:
                     strongconnect(successor)
                     lowlinks[node] = min(lowlinks[node], lowlinks[successor])
@@ -226,7 +230,8 @@ class Installer:
                         break
                 sccs.append(scc)
 
-        for node in graph:
+        # Sort nodes for deterministic order
+        for node in sorted(graph.keys()):
             if node not in index:
                 strongconnect(node)
 
@@ -287,10 +292,7 @@ class Installer:
 
         # Find strongly connected components (handles cycles)
         sccs = self._find_sccs(graph)
-
-        # SCCs are in reverse topological order, so reverse them
-        # to get dependencies first
-        sccs.reverse()
+        # Tarjan outputs SCCs with dependencies first, no reverse needed
 
         # Flatten SCCs to get sorted package names
         sorted_names = []
@@ -313,8 +315,10 @@ class Installer:
 
         return sorted_paths
 
-    def _build_dependency_graph(self, rpm_paths: List[Path]) -> tuple:
+    def _build_dependency_graph(self, rpm_paths: List[Path], debug: bool = False) -> tuple:
         """Build dependency graph from RPM files.
+
+        Maps ALL provides (including virtual provides) to their provider package.
 
         Returns:
             Tuple of (graph, name_to_path, path_to_name)
@@ -322,8 +326,8 @@ class Installer:
         """
         path_to_name = {}
         name_to_path = {}
-        provides = {}
-        requires = {}
+        provides = {}  # capability -> provider package name
+        requires = {}  # package name -> set of required capabilities
 
         ts = rpm.TransactionSet(self.root)
         ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
@@ -336,21 +340,52 @@ class Installer:
                     name = hdr[rpm.RPMTAG_NAME]
                     path_to_name[path] = name
                     name_to_path[name] = path
+
+                    # Package provides itself
                     provides[name] = name
-                    for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                        provides[prov] = name
+
+                    # Get ALL explicit provides (includes virtual provides)
+                    pkg_provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
+                    for prov in pkg_provides:
+                        # Don't overwrite if already provided by another package
+                        # (first provider wins - deterministic based on processing order)
+                        if prov not in provides:
+                            provides[prov] = name
+                        elif debug:
+                            logger.debug(f"Provide '{prov}' already mapped to {provides[prov]}, "
+                                        f"ignoring {name}")
+
                     requires[name] = set(hdr[rpm.RPMTAG_REQUIRENAME] or [])
+
+                    if debug:
+                        logger.debug(f"Package {name}: {len(pkg_provides)} provides, "
+                                    f"{len(requires[name])} requires")
                 finally:
                     os.close(fd)
-            except rpm.error:
+            except rpm.error as e:
+                logger.warning(f"Failed to read {path}: {e}")
                 continue
 
+        # Build dependency graph: edges point from package to its dependencies
         graph = {name: set() for name in name_to_path}
+        unresolved_count = 0
+
         for name, reqs in requires.items():
             for req in reqs:
                 provider = provides.get(req)
                 if provider and provider in graph and provider != name:
                     graph[name].add(provider)
+                elif debug and not req.startswith('rpmlib(') and not req.startswith('/'):
+                    # Log unresolved deps (ignore rpmlib features and file deps)
+                    if provider is None:
+                        unresolved_count += 1
+                    elif provider not in graph:
+                        logger.debug(f"{name} requires '{req}' -> {provider} (not in install set)")
+
+        if debug:
+            total_edges = sum(len(deps) for deps in graph.values())
+            logger.debug(f"Dependency graph: {len(graph)} packages, {total_edges} edges, "
+                        f"{unresolved_count} unresolved deps (external)")
 
         return graph, name_to_path, path_to_name
 
@@ -381,15 +416,18 @@ class Installer:
         if not rpm_paths:
             return InstallResult(success=True, installed=0)
 
-        # Batching disabled - see TODO for details
-        # The SCC algorithm doesn't correctly handle virtual provides (e.g., libksysguard
-        # provides "ksysguard" but graph only maps package names, not virtual provides)
-        return self.install(rpm_paths, progress_callback, test, verify_signatures, force, reinstall)
+        # For small sets, don't bother with batching overhead
+        if len(rpm_paths) <= batch_size:
+            return self.install(rpm_paths, progress_callback, test, verify_signatures, force, reinstall)
 
         # Build dependency graph and find SCCs
-        graph, name_to_path, path_to_name = self._build_dependency_graph(rpm_paths)
+        # debug=True logs details about provides mapping
+        graph, name_to_path, path_to_name = self._build_dependency_graph(rpm_paths, debug=True)
         sccs = self._find_sccs(graph)
-        sccs.reverse()  # Dependencies first
+        # Tarjan returns SCCs in reverse topological order:
+        # - dependencies (leaves) are output FIRST
+        # - dependents (roots) are output LAST
+        # This is the correct order for installation, no reverse needed!
 
         # Convert SCCs to path lists, keeping cycles together
         scc_paths = []
@@ -432,15 +470,22 @@ class Installer:
         all_errors = []
 
         num_batches = len(batches)
+        logger.info(f"Batched install: {total_packages} packages in {num_batches} batches")
+        for i, b in enumerate(batches, 1):
+            logger.debug(f"  Batch {i}: {len(b)} packages")
+
         for batch_num, batch in enumerate(batches, 1):
+            is_last_batch = (batch_num == num_batches)
+
             # Capture values in default args to avoid closure issues
             def batch_callback(name, current, batch_total,
                                _batch_num=batch_num, _num_batches=num_batches,
-                               _installed=installed_count, _total=total_packages):
+                               _installed=installed_count, _total=total_packages,
+                               _is_last=is_last_batch):
                 if progress_callback:
-                    if name == "(updating rpmdb)":
-                        progress_callback(f"(rpmdb {_batch_num}/{_num_batches})",
-                                          _installed + current, _total)
+                    if name == "(updating rpmdb)" or name == "(rpmdb progress)":
+                        # Show rpmdb update for all batches so user sees why it pauses
+                        progress_callback("(updating rpmdb)", _installed + current, _total)
                     else:
                         progress_callback(name, _installed + current, _total)
 
@@ -448,7 +493,9 @@ class Installer:
                 batch,
                 progress_callback=batch_callback,
                 test=test,
-                verify_signatures=verify_signatures
+                verify_signatures=verify_signatures,
+                force=force,
+                reinstall=reinstall
             )
 
             installed_count += result.installed
@@ -549,6 +596,206 @@ class Installer:
             return EraseResult(success=False, erased=current[0], errors=errors)
 
         return EraseResult(success=True, erased=current[0])
+
+    def _build_erase_dependency_graph(self, package_names: List[str]) -> tuple:
+        """Build dependency graph for packages to erase.
+
+        For erase, we need reverse order: dependents before dependencies.
+        Edge A -> B means "A requires B", so A must be erased before B.
+
+        Returns:
+            Tuple of (graph, valid_names)
+            graph: dict mapping package name to set of packages it requires
+            valid_names: list of package names that exist in rpmdb
+        """
+        ts = rpm.TransactionSet(self.root)
+
+        # Get all packages being erased and their requires
+        requires = {}  # package -> set of required capabilities
+        # capability -> list of package names (multiple packages can provide same cap)
+        providers = {}
+        valid_names = []
+
+        def normalize_cap(cap):
+            """Normalize capability name - extract base soname without version symbols.
+            e.g., 'libFoo.so.6(Qt_6)(64bit)' -> 'libFoo.so.6(64bit)'
+            """
+            # Remove version symbols like (Qt_6), (Qt_6_PRIVATE_API) but keep (64bit)
+            import re
+            # Match patterns like (Qt_6), (VERS_1), etc. but not (64bit)
+            return re.sub(r'\([^)]*[A-Z_][^)]*\)', '', cap)
+
+        for name in package_names:
+            matches = list(ts.dbMatch('name', name))
+            if not matches:
+                continue
+
+            valid_names.append(name)
+            hdr = matches[0]  # Take first match
+
+            # This package provides itself
+            if name not in providers:
+                providers[name] = []
+            providers[name].append(name)
+
+            # Get all provides - track ALL providers for each capability
+            # Store both original and normalized names for matching
+            for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                norm_prov = normalize_cap(prov)
+                for p in [prov, norm_prov]:
+                    if p not in providers:
+                        providers[p] = []
+                    if name not in providers[p]:
+                        providers[p].append(name)
+
+            # Get requires - store normalized versions for matching
+            pkg_reqs = set()
+            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
+                pkg_reqs.add(req)
+                pkg_reqs.add(normalize_cap(req))
+            requires[name] = pkg_reqs
+
+        # Build REVERSE graph for erase: edge from B to A means "A requires B"
+        # So B must be erased AFTER A (B points to its dependents)
+        # This way Tarjan outputs dependents first, which is what we need for erase
+        graph = {name: set() for name in valid_names}
+        for name, reqs in requires.items():
+            for req in reqs:
+                for provider in providers.get(req, []):
+                    if provider in graph and provider != name:
+                        # Reverse edge: provider points to the package that requires it
+                        graph[provider].add(name)
+
+        return graph, valid_names
+
+    def erase_batched(self, package_names: List[str],
+                      batch_size: int = 50,
+                      progress_callback: Callable[[str, int, int], None] = None,
+                      test: bool = False,
+                      force: bool = False) -> EraseResult:
+        """Erase packages in batches for better UX.
+
+        Orders packages so dependents are erased before dependencies.
+
+        Args:
+            package_names: List of package names to erase
+            batch_size: Maximum packages per batch (default: 50)
+            progress_callback: Optional callback(name, current, total)
+            test: If True, only check, don't erase
+            force: If True, ignore dependency problems
+
+        Returns:
+            EraseResult with status
+        """
+        if not package_names:
+            return EraseResult(success=True, erased=0)
+
+        # For small sets, don't bother with batching
+        if len(package_names) <= batch_size:
+            return self.erase(package_names, progress_callback, test, force)
+
+        # Build dependency graph (reversed: provider -> dependents)
+        graph, valid_names = self._build_erase_dependency_graph(package_names)
+
+        if not valid_names:
+            return EraseResult(success=False, errors=["No valid packages to erase"])
+
+        # Step 1: Find SCCs using Tarjan - packages in same SCC must be erased together
+        sccs = self._find_sccs(graph)
+
+        # Step 2: Build SCC graph for ordering
+        # Map each package to its SCC index
+        pkg_to_scc = {}
+        for scc_idx, scc in enumerate(sccs):
+            for pkg in scc:
+                pkg_to_scc[pkg] = scc_idx
+
+        # Build DAG of SCCs: scc_graph[i] = set of SCC indices that depend on SCC i
+        scc_graph = {i: set() for i in range(len(sccs))}
+        for provider, dependents in graph.items():
+            if provider not in pkg_to_scc:
+                continue
+            provider_scc = pkg_to_scc[provider]
+            for dep in dependents:
+                if dep in pkg_to_scc:
+                    dep_scc = pkg_to_scc[dep]
+                    if dep_scc != provider_scc:
+                        scc_graph[provider_scc].add(dep_scc)
+
+        # Step 3: Order SCCs using Kahn's algorithm
+        batches = []
+        remaining_sccs = set(range(len(sccs)))
+
+        while remaining_sccs:
+            # Find SCCs that no remaining SCC depends on
+            level_sccs = []
+            for scc_idx in sorted(remaining_sccs):
+                dependents_remaining = scc_graph.get(scc_idx, set()) & remaining_sccs
+                if not dependents_remaining:
+                    level_sccs.append(scc_idx)
+
+            if not level_sccs:
+                # Shouldn't happen with SCCs, but handle it
+                logger.warning(f"Unexpected cycle in SCC graph, forcing {len(remaining_sccs)} SCCs")
+                level_sccs = sorted(remaining_sccs)
+
+            # Process SCCs - keep each SCC intact (circular deps must be erased together)
+            # Collect small SCCs (size 1) that can be combined
+            small_sccs = []
+            for scc_idx in level_sccs:
+                scc = sccs[scc_idx]
+                if len(scc) == 1:
+                    small_sccs.append(scc[0])
+                else:
+                    # Large SCC - must stay together as one batch
+                    batches.append(sorted(scc))
+
+            # Combine small SCCs into batches of batch_size
+            small_sccs.sort()
+            for i in range(0, len(small_sccs), batch_size):
+                batches.append(small_sccs[i:i + batch_size])
+
+            remaining_sccs -= set(level_sccs)
+
+        total_packages = len(valid_names)
+        erased_count = 0
+        all_errors = []
+
+        num_batches = len(batches)
+        logger.info(f"Batched erase: {total_packages} packages in {num_batches} batches")
+
+        for batch_num, batch in enumerate(batches, 1):
+            is_last_batch = (batch_num == num_batches)
+
+            def batch_callback(name, current, batch_total,
+                               _batch_num=batch_num, _num_batches=num_batches,
+                               _erased=erased_count, _total=total_packages,
+                               _is_last=is_last_batch):
+                if progress_callback:
+                    if name == "(updating rpmdb)":
+                        # Show rpmdb update for all batches so user sees why it pauses
+                        progress_callback("(updating rpmdb)", _erased + current, _total)
+                    else:
+                        progress_callback(name, _erased + current, _total)
+
+            result = self.erase(
+                batch,
+                progress_callback=batch_callback,
+                test=test,
+                force=force
+            )
+
+            erased_count += result.erased
+
+            if not result.success:
+                all_errors.extend(result.errors)
+                return EraseResult(
+                    success=False,
+                    erased=erased_count,
+                    errors=all_errors
+                )
+
+        return EraseResult(success=True, erased=erased_count)
 
 
 def check_rpm_available() -> bool:

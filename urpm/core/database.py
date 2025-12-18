@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Iterator
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -186,6 +186,33 @@ CREATE TABLE IF NOT EXISTS pins (
 
 CREATE INDEX IF NOT EXISTS idx_pins_pattern ON pins(package_pattern);
 
+-- Peer tracking for P2P downloads (provenance)
+CREATE TABLE IF NOT EXISTS peer_downloads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    file_path TEXT NOT NULL,          -- Full path to the downloaded file
+    peer_host TEXT NOT NULL,
+    peer_port INTEGER NOT NULL,
+    download_time INTEGER NOT NULL,
+    file_size INTEGER,
+    checksum_sha256 TEXT,
+    verified INTEGER DEFAULT 0,       -- 1 if GPG/checksum verified
+    UNIQUE(file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_peer_downloads_host ON peer_downloads(peer_host);
+CREATE INDEX IF NOT EXISTS idx_peer_downloads_filename ON peer_downloads(filename);
+
+-- Peer blacklist
+CREATE TABLE IF NOT EXISTS peer_blacklist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_host TEXT NOT NULL,
+    peer_port INTEGER,                -- NULL = all ports for this host
+    reason TEXT,
+    blacklist_time INTEGER NOT NULL,
+    UNIQUE(peer_host, peer_port)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_pkg_name_lower ON packages(name_lower);
 CREATE INDEX IF NOT EXISTS idx_pkg_nevra ON packages(nevra);
@@ -199,6 +226,37 @@ CREATE INDEX IF NOT EXISTS idx_conflicts_pkg ON conflicts(pkg_id);
 CREATE INDEX IF NOT EXISTS idx_obsoletes_cap ON obsoletes(capability);
 CREATE INDEX IF NOT EXISTS idx_obsoletes_pkg ON obsoletes(pkg_id);
 """
+
+# Migrations: dict of from_version -> (to_version, sql_script)
+# Each migration upgrades from one version to the next
+MIGRATIONS = {
+    6: (7, """
+        -- Migration v6 -> v7: Add peer tracking tables
+        CREATE TABLE IF NOT EXISTS peer_downloads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            peer_host TEXT NOT NULL,
+            peer_port INTEGER NOT NULL,
+            download_time INTEGER NOT NULL,
+            file_size INTEGER,
+            checksum_sha256 TEXT,
+            verified INTEGER DEFAULT 0,
+            UNIQUE(file_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_peer_downloads_host ON peer_downloads(peer_host);
+        CREATE INDEX IF NOT EXISTS idx_peer_downloads_filename ON peer_downloads(filename);
+
+        CREATE TABLE IF NOT EXISTS peer_blacklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_host TEXT NOT NULL,
+            peer_port INTEGER,
+            reason TEXT,
+            blacklist_time INTEGER NOT NULL,
+            UNIQUE(peer_host, peer_port)
+        );
+    """),
+}
 
 
 class PackageDatabase:
@@ -226,7 +284,7 @@ class PackageDatabase:
         self._init_schema()
     
     def _init_schema(self):
-        """Initialize database schema, recreating if version mismatch."""
+        """Initialize or migrate database schema."""
         # Check existing schema version
         try:
             cursor = self.conn.execute("SELECT version FROM schema_info LIMIT 1")
@@ -235,22 +293,64 @@ class PackageDatabase:
         except sqlite3.OperationalError:
             current_version = 0
 
-        if current_version != SCHEMA_VERSION:
-            # Schema mismatch - recreate database
-            self.conn.close()
-            self.db_path.unlink(missing_ok=True)
-            self.conn = sqlite3.connect(str(self.db_path))
-            self.conn.row_factory = sqlite3.Row
-            self.conn.execute("PRAGMA journal_mode=WAL")
-            self.conn.execute("PRAGMA synchronous=NORMAL")
-            self.conn.execute("PRAGMA foreign_keys=ON")
+        if current_version == 0:
+            # Fresh database - create full schema
+            self.conn.executescript(SCHEMA)
+            self.conn.execute(
+                "INSERT OR REPLACE INTO schema_info (version) VALUES (?)",
+                (SCHEMA_VERSION,)
+            )
+            self.conn.commit()
+        elif current_version < SCHEMA_VERSION:
+            # Apply migrations incrementally
+            self._apply_migrations(current_version)
+        elif current_version > SCHEMA_VERSION:
+            # Future version - warn but try to continue
+            import logging
+            logging.warning(
+                f"Database schema version {current_version} is newer than "
+                f"supported version {SCHEMA_VERSION}. Consider upgrading urpm."
+            )
 
-        self.conn.executescript(SCHEMA)
-        self.conn.execute(
-            "INSERT OR REPLACE INTO schema_info (version) VALUES (?)",
-            (SCHEMA_VERSION,)
-        )
-        self.conn.commit()
+    def _apply_migrations(self, from_version: int):
+        """Apply all migrations from from_version to SCHEMA_VERSION."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        version = from_version
+        while version < SCHEMA_VERSION:
+            if version not in MIGRATIONS:
+                # No migration path - must recreate (shouldn't happen with proper migrations)
+                logger.error(
+                    f"No migration from version {version}. "
+                    f"Database will be recreated (data loss!)."
+                )
+                self.conn.close()
+                self.db_path.unlink(missing_ok=True)
+                self.conn = sqlite3.connect(str(self.db_path))
+                self.conn.row_factory = sqlite3.Row
+                self.conn.execute("PRAGMA journal_mode=WAL")
+                self.conn.execute("PRAGMA synchronous=NORMAL")
+                self.conn.execute("PRAGMA foreign_keys=ON")
+                self.conn.executescript(SCHEMA)
+                version = SCHEMA_VERSION
+                break
+
+            to_version, migration_sql = MIGRATIONS[version]
+            logger.info(f"Migrating database schema v{version} -> v{to_version}")
+
+            try:
+                self.conn.executescript(migration_sql)
+                self.conn.execute(
+                    "UPDATE schema_info SET version = ?", (to_version,)
+                )
+                self.conn.commit()
+                version = to_version
+            except sqlite3.Error as e:
+                logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
+                raise RuntimeError(f"Database migration failed: {e}")
+
+        logger.info(f"Database schema is now at version {SCHEMA_VERSION}")
     
     def close(self):
         """Close database connection."""
@@ -967,3 +1067,127 @@ class PackageDatabase:
             WHERE history_id = ? AND reason = 'dependency' AND action = 'install'
         """, (transaction_id,))
         return [row[0] for row in cursor]
+
+    # =========================================================================
+    # Peer tracking (P2P provenance)
+    # =========================================================================
+
+    def record_peer_download(self, filename: str, file_path: str, peer_host: str,
+                             peer_port: int, file_size: int = None,
+                             checksum_sha256: str = None, verified: bool = False):
+        """Record a package downloaded from a peer for provenance tracking."""
+        self.conn.execute("""
+            INSERT OR REPLACE INTO peer_downloads
+            (filename, file_path, peer_host, peer_port, download_time, file_size,
+             checksum_sha256, verified)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (filename, file_path, peer_host, peer_port, int(time.time()),
+              file_size, checksum_sha256, int(verified)))
+        self.conn.commit()
+
+    def get_peer_downloads(self, peer_host: str = None, limit: int = 100) -> List[Dict]:
+        """Get list of packages downloaded from peers.
+
+        Args:
+            peer_host: Filter by peer host (None = all peers)
+            limit: Max results to return
+        """
+        if peer_host:
+            cursor = self.conn.execute("""
+                SELECT * FROM peer_downloads
+                WHERE peer_host = ?
+                ORDER BY download_time DESC
+                LIMIT ?
+            """, (peer_host, limit))
+        else:
+            cursor = self.conn.execute("""
+                SELECT * FROM peer_downloads
+                ORDER BY download_time DESC
+                LIMIT ?
+            """, (limit,))
+        return [dict(row) for row in cursor]
+
+    def get_peer_stats(self) -> List[Dict]:
+        """Get download statistics per peer."""
+        cursor = self.conn.execute("""
+            SELECT peer_host, peer_port,
+                   COUNT(*) as download_count,
+                   SUM(file_size) as total_bytes,
+                   MIN(download_time) as first_download,
+                   MAX(download_time) as last_download,
+                   SUM(CASE WHEN verified = 1 THEN 1 ELSE 0 END) as verified_count
+            FROM peer_downloads
+            GROUP BY peer_host, peer_port
+            ORDER BY download_count DESC
+        """)
+        return [dict(row) for row in cursor]
+
+    def delete_peer_downloads(self, peer_host: str) -> int:
+        """Delete download records for a peer.
+
+        Returns:
+            Number of records deleted
+        """
+        cursor = self.conn.execute(
+            "DELETE FROM peer_downloads WHERE peer_host = ?", (peer_host,)
+        )
+        self.conn.commit()
+        return cursor.rowcount
+
+    def get_files_from_peer(self, peer_host: str) -> List[str]:
+        """Get list of file paths downloaded from a specific peer."""
+        cursor = self.conn.execute(
+            "SELECT file_path FROM peer_downloads WHERE peer_host = ?",
+            (peer_host,)
+        )
+        return [row[0] for row in cursor]
+
+    # =========================================================================
+    # Peer blacklist
+    # =========================================================================
+
+    def blacklist_peer(self, peer_host: str, peer_port: int = None, reason: str = None):
+        """Add a peer to the blacklist."""
+        self.conn.execute("""
+            INSERT OR REPLACE INTO peer_blacklist
+            (peer_host, peer_port, reason, blacklist_time)
+            VALUES (?, ?, ?, ?)
+        """, (peer_host, peer_port, reason, int(time.time())))
+        self.conn.commit()
+
+    def unblacklist_peer(self, peer_host: str, peer_port: int = None):
+        """Remove a peer from the blacklist."""
+        if peer_port is not None:
+            self.conn.execute(
+                "DELETE FROM peer_blacklist WHERE peer_host = ? AND peer_port = ?",
+                (peer_host, peer_port)
+            )
+        else:
+            self.conn.execute(
+                "DELETE FROM peer_blacklist WHERE peer_host = ?",
+                (peer_host,)
+            )
+        self.conn.commit()
+
+    def is_peer_blacklisted(self, peer_host: str, peer_port: int = None) -> bool:
+        """Check if a peer is blacklisted."""
+        # Check exact match first
+        if peer_port is not None:
+            cursor = self.conn.execute("""
+                SELECT 1 FROM peer_blacklist
+                WHERE peer_host = ? AND (peer_port = ? OR peer_port IS NULL)
+            """, (peer_host, peer_port))
+        else:
+            cursor = self.conn.execute(
+                "SELECT 1 FROM peer_blacklist WHERE peer_host = ?",
+                (peer_host,)
+            )
+        return cursor.fetchone() is not None
+
+    def list_blacklisted_peers(self) -> List[Dict]:
+        """Get list of blacklisted peers."""
+        cursor = self.conn.execute("""
+            SELECT * FROM peer_blacklist
+            ORDER BY blacklist_time DESC
+        """)
+        return [dict(row) for row in cursor]

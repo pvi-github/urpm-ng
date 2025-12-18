@@ -2,17 +2,20 @@
 Package download manager
 
 Downloads RPM packages from media sources with progress reporting.
-Inspired by apt's download handling - simple and efficient.
+Uses a queue-based architecture for robust parallel downloads with
+dynamic peer failure tracking and reassignment.
 """
 
 import hashlib
+import logging
 import os
+import queue
+import threading
 import urllib.request
 import urllib.error
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Callable, Tuple
+from typing import List, Optional, Callable, Tuple, Dict, Set
 
 from .database import PackageDatabase
 from .config import get_base_dir
@@ -20,6 +23,34 @@ from .peer_client import (
     PeerClient, Peer, create_download_plan, summarize_download_plan,
     DownloadAssignment
 )
+
+logger = logging.getLogger(__name__)
+
+
+def verify_rpm_signature(rpm_path: Path) -> tuple:
+    """Verify GPG signature of an RPM file.
+
+    Args:
+        rpm_path: Path to RPM file
+
+    Returns:
+        Tuple of (success: bool, error_message: str or None)
+    """
+    import rpm
+
+    ts = rpm.TransactionSet()
+    # Enable all signature/digest verification
+    ts.setVSFlags(0)
+
+    try:
+        with open(rpm_path, 'rb') as f:
+            # hdrFromFdno verifies signature when VSFlags allows it
+            hdr = ts.hdrFromFdno(f.fileno())
+            return (True, None)
+    except rpm.error as e:
+        return (False, str(e))
+    except Exception as e:
+        return (False, f"Verification error: {e}")
 
 
 def get_hostname_from_url(url: str) -> str:
@@ -57,6 +88,24 @@ class DownloadItem:
 
 
 @dataclass
+class PeerProvenance:
+    """Provenance info for P2P download."""
+    peer_host: str
+    peer_port: int
+    checksum_sha256: str
+    file_size: int
+    verified: bool
+
+
+@dataclass
+class PeerToBlacklist:
+    """Info about a peer to blacklist (deferred to main thread)."""
+    host: str
+    port: int
+    reason: str
+
+
+@dataclass
 class DownloadResult:
     """Result of a download operation."""
     item: DownloadItem
@@ -64,24 +113,391 @@ class DownloadResult:
     path: Optional[Path] = None
     error: Optional[str] = None
     cached: bool = False
+    peer_info: Optional[PeerProvenance] = None  # Set if downloaded from peer
+    blacklist_peer: Optional[PeerToBlacklist] = None  # Set if peer should be blacklisted
+    from_peer: bool = False  # True if downloaded from peer (not upstream)
+
+
+@dataclass
+class PeerAvailability:
+    """Tracks which peers have which files."""
+    # Map: filename -> list of (peer, path) tuples
+    file_to_peers: Dict[str, List[Tuple[Peer, str]]] = field(default_factory=dict)
+
+    def get_peers_for_file(self, filename: str, exclude: Set[Tuple[str, int]] = None
+                          ) -> List[Tuple[Peer, str]]:
+        """Get peers that have a file, excluding failed ones."""
+        peers = self.file_to_peers.get(filename, [])
+        if not exclude:
+            return peers
+        return [(p, path) for p, path in peers if (p.host, p.port) not in exclude]
+
+
+class DownloadCoordinator:
+    """Coordinates parallel downloads with queue-based architecture.
+
+    Key features:
+    - Central queue of packages to download
+    - Thread-safe failed peer tracking (immediate propagation)
+    - Dynamic peer reassignment when a peer fails
+    - Workers pull work from queue and check peer status before each download
+    """
+
+    def __init__(self, downloader: 'Downloader', max_workers: int = 4):
+        self.downloader = downloader
+        self.max_workers = max_workers
+
+        # Work queue: (DownloadItem, Optional[DownloadAssignment])
+        self._work_queue: queue.Queue = queue.Queue()
+
+        # Results queue: DownloadResult
+        self._results_queue: queue.Queue = queue.Queue()
+
+        # Failed peers tracking (thread-safe)
+        self._failed_peers_lock = threading.Lock()
+        self._failed_peers: Set[Tuple[str, int]] = set()
+
+        # Peer availability for reassignment
+        self._peer_availability: Optional[PeerAvailability] = None
+
+        # Pending DB operations (collected in main thread after workers finish)
+        self._pending_blacklist: List[PeerToBlacklist] = []
+
+        # Stats
+        self._from_peer_count = 0
+        self._from_upstream_count = 0
+        self._stats_lock = threading.Lock()
+
+        # Real-time download progress tracking (thread-safe)
+        # Each worker has a fixed slot (0 to max_workers-1) for stable display
+        self._current_progress_lock = threading.Lock()
+        self._current_downloads: Dict[int, Tuple[str, int, int]] = {}  # slot -> (name, bytes_done, bytes_total)
+
+    def is_peer_failed(self, peer: Peer) -> bool:
+        """Check if peer has failed (thread-safe)."""
+        with self._failed_peers_lock:
+            return (peer.host, peer.port) in self._failed_peers
+
+    def mark_peer_failed(self, peer: Peer, reason: str):
+        """Mark peer as failed (thread-safe, immediate propagation)."""
+        with self._failed_peers_lock:
+            peer_key = (peer.host, peer.port)
+            if peer_key not in self._failed_peers:
+                self._failed_peers.add(peer_key)
+                logger.warning(f"Peer {peer.host}:{peer.port} marked as failed: {reason}")
+                self._pending_blacklist.append(
+                    PeerToBlacklist(peer.host, peer.port, reason)
+                )
+
+    def get_failed_peers(self) -> Set[Tuple[str, int]]:
+        """Get current set of failed peers (thread-safe copy)."""
+        with self._failed_peers_lock:
+            return self._failed_peers.copy()
+
+    def find_alternative_peer(self, item: DownloadItem,
+                              exclude_peer: Peer = None) -> Optional[Tuple[Peer, str]]:
+        """Find an alternative peer for a file, excluding failed ones."""
+        if not self._peer_availability:
+            return None
+
+        excluded = self.get_failed_peers()
+        if exclude_peer:
+            excluded.add((exclude_peer.host, exclude_peer.port))
+
+        alternatives = self._peer_availability.get_peers_for_file(
+            item.filename, exclude=excluded
+        )
+        return alternatives[0] if alternatives else None
+
+    def update_download_progress(self, slot: int, item_name: str, bytes_done: int, bytes_total: int):
+        """Update real-time download progress for a worker slot (thread-safe)."""
+        with self._current_progress_lock:
+            self._current_downloads[slot] = (item_name, bytes_done, bytes_total)
+
+    def clear_download_progress(self, slot: int):
+        """Clear download progress when item completes (thread-safe)."""
+        with self._current_progress_lock:
+            self._current_downloads.pop(slot, None)
+
+    def get_all_active_downloads(self) -> List[Tuple[int, str, int, int]]:
+        """Get all active downloads progress (thread-safe).
+
+        Returns list of (slot, name, bytes_done, bytes_total) sorted by slot number.
+        """
+        with self._current_progress_lock:
+            if not self._current_downloads:
+                return []
+            # Sort by slot number for stable display order
+            return [(slot, name, done, total)
+                    for slot, (name, done, total) in sorted(self._current_downloads.items())]
+
+    def _worker(self, slot: int):
+        """Worker thread: dequeue, download, report, repeat.
+
+        Args:
+            slot: Fixed slot number (0 to max_workers-1) for stable progress display
+        """
+        while True:
+            try:
+                # Short timeout to allow checking for shutdown
+                work = self._work_queue.get(timeout=0.5)
+            except queue.Empty:
+                # Check if we're done (no more work coming)
+                if self._work_queue.empty():
+                    break
+                continue
+
+            item, assignment = work
+
+            try:
+                result = self._download_item(item, assignment, slot)
+                self._results_queue.put(result)
+
+                # Update stats
+                with self._stats_lock:
+                    if result.success:
+                        if result.from_peer:
+                            self._from_peer_count += 1
+                        else:
+                            self._from_upstream_count += 1
+
+            except Exception as e:
+                # Unexpected error - report failure
+                logger.error(f"Worker error downloading {item.filename}: {e}")
+                self._results_queue.put(DownloadResult(
+                    item=item,
+                    success=False,
+                    error=str(e)
+                ))
+            finally:
+                self._work_queue.task_done()
+
+    def _download_item(self, item: DownloadItem,
+                       assignment: Optional[DownloadAssignment],
+                       slot: int) -> DownloadResult:
+        """Download an item, handling peer failures with reassignment.
+
+        Args:
+            item: Item to download
+            assignment: Optional peer assignment
+            slot: Worker slot number for progress tracking
+        """
+
+        # Check cache first
+        if self.downloader.is_cached(item):
+            return DownloadResult(
+                item=item,
+                success=True,
+                path=self.downloader.get_cache_path(item),
+                cached=True
+            )
+
+        # Create progress callback for real-time tracking
+        def progress_cb(bytes_done: int, bytes_total: int):
+            self.update_download_progress(slot, item.name, bytes_done, bytes_total)
+
+        try:
+            # Try peer download if assigned
+            if assignment and assignment.source == 'peer' and assignment.peer:
+                peer = assignment.peer
+                peer_path = assignment.peer_path
+
+                # Check if this peer has already failed
+                if self.is_peer_failed(peer):
+                    logger.debug(f"Skipping failed peer {peer.host} for {item.filename}")
+                    # Try alternative peer
+                    alt = self.find_alternative_peer(item, exclude_peer=peer)
+                    if alt:
+                        peer, peer_path = alt
+                        logger.debug(f"Using alternative peer {peer.host} for {item.filename}")
+                    else:
+                        # No alternative - fall through to upstream
+                        assignment = None
+                        peer = None
+
+                if peer:
+                    result = self.downloader.download_from_peer(item, peer, peer_path, progress_callback=progress_cb)
+
+                    if result.success:
+                        result.from_peer = True
+                        return result
+
+                    # Peer failed - check if GPG issue (should blacklist)
+                    if result.blacklist_peer:
+                        self.mark_peer_failed(peer, result.blacklist_peer.reason)
+
+                    # Try alternative peer before upstream
+                    alt = self.find_alternative_peer(item, exclude_peer=peer)
+                    if alt:
+                        alt_peer, alt_path = alt
+                        logger.debug(f"Retrying {item.filename} with alternative peer {alt_peer.host}")
+                        result = self.downloader.download_from_peer(item, alt_peer, alt_path, progress_callback=progress_cb)
+                        if result.success:
+                            result.from_peer = True
+                            return result
+                        if result.blacklist_peer:
+                            self.mark_peer_failed(alt_peer, result.blacklist_peer.reason)
+
+            # Fall back to upstream
+            result = self.downloader.download_one(item, progress_callback=progress_cb)
+            result.from_peer = False
+            return result
+        finally:
+            # Clear progress when download completes
+            self.clear_download_progress(slot)
+
+    def download_all(self, items: List[DownloadItem],
+                     peer_availability: Dict,
+                     progress_callback: Callable = None) -> Tuple[List[DownloadResult], dict]:
+        """Download all items using queue-based parallel processing.
+
+        Args:
+            items: List of items to download
+            peer_availability: Dict[filename, List[PeerPackageInfo]] from query_peers_have()
+            progress_callback: Optional callback(name, pkg_num, total, bytes, total_bytes)
+
+        Returns:
+            Tuple of (results, stats)
+        """
+        # Build peer availability index from PeerPackageInfo format
+        # Input: {filename: [PeerPackageInfo(peer, path, ...), ...], ...}
+        # Output: {filename: [(peer, path), ...], ...}
+        self._peer_availability = PeerAvailability()
+        for filename, peer_infos in peer_availability.items():
+            for info in peer_infos:
+                if filename not in self._peer_availability.file_to_peers:
+                    self._peer_availability.file_to_peers[filename] = []
+                self._peer_availability.file_to_peers[filename].append((info.peer, info.path))
+
+        # Create download plan
+        filenames = [item.filename for item in items]
+        assignments_list = create_download_plan(
+            filenames,
+            peer_availability
+        ) if peer_availability else []
+
+        # Map filename to assignment
+        assignments = {a.filename: a for a in assignments_list}
+
+        # Queue all work
+        for item in items:
+            assignment = assignments.get(item.filename)
+            self._work_queue.put((item, assignment))
+
+        # Start workers with fixed slot numbers for stable display
+        workers = []
+        for slot in range(self.max_workers):
+            t = threading.Thread(target=self._worker, args=(slot,), daemon=True)
+            t.start()
+            workers.append(t)
+
+        # Collect results in real-time with progress reporting
+        results = []
+        total_bytes = sum(item.size for item in items)
+        completed_bytes = 0  # Bytes from fully completed downloads
+        total_items = len(items)
+        last_active_name = None
+
+        # Poll results queue in real-time instead of waiting for join()
+        while len(results) < total_items:
+            try:
+                # Short timeout to stay responsive and allow progress updates
+                result = self._results_queue.get(timeout=0.1)
+                results.append(result)
+
+                if result.success:
+                    completed_bytes += result.item.size
+
+                if progress_callback:
+                    # Get remaining active downloads to show consistent multi-line display
+                    active_downloads = self.get_all_active_downloads()
+                    if active_downloads:
+                        # Format: (slot, name, bytes_done, bytes_total)
+                        partial_bytes = sum(item[2] for item in active_downloads)
+                        current_bytes = completed_bytes + partial_bytes
+                        _slot, name, item_bytes, item_total = active_downloads[0]
+                        progress_callback(
+                            name,
+                            len(results),
+                            total_items,
+                            current_bytes,
+                            total_bytes,
+                            item_bytes,
+                            item_total,
+                            active_downloads
+                        )
+                    else:
+                        # No more active downloads - just show completion
+                        progress_callback(
+                            result.item.name,
+                            len(results),
+                            total_items,
+                            completed_bytes,
+                            total_bytes
+                        )
+                last_active_name = None  # Reset after completion
+            except queue.Empty:
+                # Check if workers are still alive
+                if not any(t.is_alive() for t in workers):
+                    # All workers dead but we don't have all results - something went wrong
+                    logger.warning(f"Workers finished early: got {len(results)}/{total_items} results")
+                    break
+
+                # Report real-time progress for all active downloads
+                if progress_callback:
+                    active_downloads = self.get_all_active_downloads()
+                    if active_downloads:
+                        # Calculate real-time total including all partial downloads
+                        # Format: (slot, name, bytes_done, bytes_total)
+                        partial_bytes = sum(item[2] for item in active_downloads)
+                        current_bytes = completed_bytes + partial_bytes
+                        # Use first for backward compat, pass all as extra
+                        _slot, name, item_bytes, item_total = active_downloads[0]
+                        progress_callback(
+                            name,
+                            len(results),
+                            total_items,
+                            current_bytes,
+                            total_bytes,
+                            item_bytes,  # Extra: item bytes downloaded
+                            item_total,  # Extra: item total bytes
+                            active_downloads  # Extra: all active downloads
+                        )
+                        last_active_name = name
+                continue
+
+        # Wait for workers to finish cleanly
+        for t in workers:
+            t.join(timeout=1.0)
+
+        stats = {
+            'from_peers': self._from_peer_count,
+            'from_upstream': self._from_upstream_count,
+            'failed_peers': list(self._failed_peers),
+            'pending_blacklist': self._pending_blacklist,
+        }
+
+        return results, stats
 
 
 class Downloader:
     """Download manager for RPM packages."""
 
     def __init__(self, cache_dir: Path = None, max_workers: int = 4,
-                 use_peers: bool = True):
+                 use_peers: bool = True, db: 'PackageDatabase' = None):
         """Initialize downloader.
 
         Args:
             cache_dir: Directory to store downloaded RPMs
             max_workers: Max parallel downloads
             use_peers: Whether to use P2P peer discovery for downloads
+            db: Database for provenance tracking and blacklist (optional)
         """
         self.cache_dir = cache_dir or get_base_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_workers = max_workers
         self.use_peers = use_peers
+        self.db = db
         self._peer_client: Optional[PeerClient] = None
 
     def get_cache_path(self, item: DownloadItem) -> Path:
@@ -219,6 +635,7 @@ class Downloader:
                 downloaded = 0
 
                 temp_path = cache_path.with_suffix('.tmp')
+                sha256 = hashlib.sha256()
 
                 with open(temp_path, 'wb') as f:
                     while True:
@@ -226,17 +643,54 @@ class Downloader:
                         if not chunk:
                             break
                         f.write(chunk)
+                        sha256.update(chunk)
                         downloaded += len(chunk)
 
                         if progress_callback:
                             progress_callback(downloaded, total_size)
 
+                checksum = sha256.hexdigest()
+
+                # Verify GPG signature before accepting the file
+                import logging
+                logger = logging.getLogger(__name__)
+
+                sig_ok, sig_error = verify_rpm_signature(temp_path)
+                if not sig_ok:
+                    # Signature verification failed - reject file from peer
+                    logger.warning(
+                        f"GPG verification failed for {item.filename} from peer "
+                        f"{peer.host}:{peer.port}: {sig_error}"
+                    )
+                    temp_path.unlink(missing_ok=True)
+
+                    # Return with blacklist info (actual blacklist happens in main thread)
+                    return DownloadResult(
+                        item=item,
+                        success=False,
+                        error=f"GPG verification failed: {sig_error}",
+                        blacklist_peer=PeerToBlacklist(
+                            host=peer.host,
+                            port=peer.port,
+                            reason=f"Failed GPG verification: {item.filename}"
+                        )
+                    )
+
+                # Verification passed - move to final location
                 temp_path.rename(cache_path)
 
+                # Return result with provenance info (DB write happens in main thread)
                 return DownloadResult(
                     item=item,
                     success=True,
-                    path=cache_path
+                    path=cache_path,
+                    peer_info=PeerProvenance(
+                        peer_host=peer.host,
+                        peer_port=peer.port,
+                        checksum_sha256=checksum,
+                        file_size=downloaded,
+                        verified=True
+                    )
                 )
 
         except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
@@ -253,7 +707,12 @@ class Downloader:
     def download_all(self, items: List[DownloadItem],
                      progress_callback: Callable[[str, int, int, int, int], None] = None
                      ) -> Tuple[List[DownloadResult], int, int, dict]:
-        """Download multiple packages in parallel, using P2P when available.
+        """Download multiple packages using queue-based parallel processing.
+
+        Uses DownloadCoordinator for robust handling:
+        - Thread-safe failed peer tracking (immediate propagation)
+        - Dynamic peer reassignment when a peer fails GPG verification
+        - Each worker checks peer status before each download
 
         Args:
             items: List of packages to download
@@ -263,20 +722,15 @@ class Downloader:
             Tuple of (results, total_downloaded, total_cached, peer_stats)
             peer_stats contains P2P download statistics
         """
-        import logging
-        logger = logging.getLogger(__name__)
+        import time as _time
 
         results = []
         cached_count = 0
-        downloaded_count = 0
-        from_peer_count = 0
-        from_upstream_count = 0
         total_bytes = sum(item.size for item in items)
         downloaded_bytes = 0
 
         # Check what's already cached
         to_download = []
-        items_by_filename = {}  # Map filename -> DownloadItem
         for item in items:
             if self.is_cached(item):
                 results.append(DownloadResult(
@@ -289,18 +743,16 @@ class Downloader:
                 downloaded_bytes += item.size
             else:
                 to_download.append(item)
-                items_by_filename[item.filename] = item
 
         if progress_callback and cached_count > 0:
             progress_callback("(cache)", cached_count, len(items), downloaded_bytes, total_bytes)
 
         if not to_download:
-            return results, downloaded_count, cached_count, {'from_peers': 0, 'from_upstream': 0}
+            return results, 0, cached_count, {'from_peers': 0, 'from_upstream': 0}
 
-        # P2P: Discover peers and create download plan
-        download_plan = {}  # filename -> DownloadAssignment
+        # P2P: Discover peers and get availability
+        peer_availability = {}  # peer -> {filename: path}
         if self.use_peers:
-            import time as _time
             try:
                 if self._peer_client is None:
                     self._peer_client = PeerClient()
@@ -310,106 +762,109 @@ class Downloader:
                 t1 = _time.time()
                 logger.debug(f"P2P: peer discovery took {t1-t0:.2f}s, found {len(peers)} peers")
 
+                # Filter out blacklisted peers
+                if peers and self.db:
+                    original_count = len(peers)
+                    peers = [p for p in peers if not self.db.is_peer_blacklisted(p.host, p.port)]
+                    if len(peers) < original_count:
+                        logger.info(f"P2P: filtered out {original_count - len(peers)} blacklisted peers")
+
                 if peers:
                     filenames = [item.filename for item in to_download]
-                    availability = self._peer_client.query_peers_have(peers, filenames)
+                    peer_availability = self._peer_client.query_peers_have(peers, filenames)
                     t2 = _time.time()
                     logger.debug(f"P2P: availability query took {t2-t1:.2f}s")
 
-                    assignments = create_download_plan(filenames, availability)
+                    # Log summary
+                    total_available = sum(len(files) for files in peer_availability.values())
+                    if total_available > 0:
+                        logger.info(f"P2P: {total_available} packages available from {len(peer_availability)} peers")
 
-                    for assignment in assignments:
-                        download_plan[assignment.filename] = assignment
-
-                    summary = summarize_download_plan(assignments)
-                    if summary['from_peers_count'] > 0:
-                        logger.info(f"P2P: {summary['from_peers_count']} packages from peers, "
-                                    f"{summary['from_upstream_count']} from upstream")
             except Exception as e:
                 logger.debug(f"P2P discovery failed: {e}")
+                peer_availability = {}
 
-        # Download in parallel (peers + upstream)
-        import time as _time
+        # Use coordinator for queue-based parallel downloads
         t_dl_start = _time.time()
+        coordinator = DownloadCoordinator(self, max_workers=self.max_workers)
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {}
+        # Create wrapper callback that accounts for cached items
+        # The coordinator reports progress for to_download items only
+        # We need to offset by cached_count and cached bytes
+        if progress_callback:
+            def coordinator_progress(name, pkg_num, pkg_total, dl_bytes, dl_total,
+                                     item_bytes=None, item_total=None, active_downloads=None):
+                # Offset by cached items
+                progress_callback(
+                    name,
+                    cached_count + pkg_num,
+                    len(items),
+                    downloaded_bytes + dl_bytes,  # downloaded_bytes has cached bytes
+                    total_bytes,
+                    item_bytes,  # Per-item progress (optional)
+                    item_total,
+                    active_downloads  # All active downloads
+                )
+            coord_callback = coordinator_progress
+        else:
+            coord_callback = None
 
-            for item in to_download:
-                assignment = download_plan.get(item.filename)
+        dl_results, stats = coordinator.download_all(
+            to_download,
+            peer_availability,
+            progress_callback=coord_callback
+        )
 
-                if assignment and assignment.source == 'peer' and assignment.peer:
-                    # Download from peer
-                    future = executor.submit(
-                        self._download_with_fallback,
-                        item, assignment.peer, assignment.peer_path
-                    )
-                else:
-                    # Download from upstream
-                    future = executor.submit(self.download_one, item)
+        t_dl_end = _time.time()
+        logger.debug(f"Downloads completed in {t_dl_end - t_dl_start:.2f}s")
 
-                futures[future] = (item, assignment)
+        # Merge results
+        results.extend(dl_results)
 
-            t_submitted = _time.time()
-            logger.debug(f"Submitted {len(futures)} download tasks in {t_submitted - t_dl_start:.2f}s")
+        # Count successes
+        downloaded_count = sum(1 for r in dl_results if r.success and not r.cached)
 
-            for future in as_completed(futures):
-                item, assignment = futures[future]
-                future_result = future.result()
+        # Process DB operations in main thread (SQLite is not thread-safe)
+        if self.db:
+            # Blacklist peers that served bad packages
+            blacklisted_count = 0
+            for bl in stats.get('pending_blacklist', []):
+                try:
+                    self.db.blacklist_peer(bl.host, bl.port, bl.reason)
+                    blacklisted_count += 1
+                    logger.warning(f"Auto-blacklisted peer {bl.host}:{bl.port} - {bl.reason}")
+                except Exception as e:
+                    logger.warning(f"Failed to blacklist peer {bl.host}: {e}")
 
-                # Handle both tuple (from _download_with_fallback) and DownloadResult (from download_one)
-                if isinstance(future_result, tuple):
-                    result, from_peer = future_result
-                else:
-                    result = future_result
-                    from_peer = False
+            # Record provenance for successful peer downloads
+            provenance_count = 0
+            for result in dl_results:
+                if result.success and result.peer_info and result.path:
+                    try:
+                        self.db.record_peer_download(
+                            filename=result.item.filename,
+                            file_path=str(result.path),
+                            peer_host=result.peer_info.peer_host,
+                            peer_port=result.peer_info.peer_port,
+                            file_size=result.peer_info.file_size,
+                            checksum_sha256=result.peer_info.checksum_sha256,
+                            verified=result.peer_info.verified
+                        )
+                        provenance_count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to record provenance for {result.item.filename}: {e}")
 
-                results.append(result)
-
-                if result.success:
-                    downloaded_count += 1
-                    downloaded_bytes += item.size
-                    if from_peer:
-                        from_peer_count += 1
-                    else:
-                        from_upstream_count += 1
-
-                if progress_callback:
-                    progress_callback(
-                        item.name,
-                        cached_count + downloaded_count,
-                        len(items),
-                        downloaded_bytes,
-                        total_bytes
-                    )
-
-            t_all_done = _time.time()
-            logger.debug(f"All downloads completed in {t_all_done - t_submitted:.2f}s")
-
-        t_executor_exit = _time.time()
-        logger.debug(f"Executor cleanup took {t_executor_exit - t_all_done:.2f}s")
+            if provenance_count > 0:
+                logger.debug(f"Recorded provenance for {provenance_count} peer downloads")
+            if blacklisted_count > 0:
+                logger.info(f"Auto-blacklisted {blacklisted_count} peers due to GPG failures")
 
         peer_stats = {
-            'from_peers': from_peer_count,
-            'from_upstream': from_upstream_count,
+            'from_peers': stats.get('from_peers', 0),
+            'from_upstream': stats.get('from_upstream', 0),
+            'failed_peers': stats.get('failed_peers', []),
         }
         return results, downloaded_count, cached_count, peer_stats
-
-    def _download_with_fallback(self, item: DownloadItem, peer: Peer, peer_path: str
-                                ) -> Tuple[DownloadResult, bool]:
-        """Try peer download, fallback to upstream on failure.
-
-        Returns:
-            Tuple of (DownloadResult, from_peer_bool)
-        """
-        # Try peer first
-        result = self.download_from_peer(item, peer, peer_path)
-        if result.success:
-            return result, True
-
-        # Fallback to upstream
-        result = self.download_one(item)
-        return result, False
 
 
 def get_download_items(db: PackageDatabase, packages: List[dict]) -> List[DownloadItem]:

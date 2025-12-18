@@ -831,6 +831,76 @@ def create_parser() -> argparse.ArgumentParser:
     key_remove = key_subparsers.add_parser('remove', aliases=['rm', 'del'], help='Remove GPG key')
     key_remove.add_argument('keyid', help='Key ID to remove (e.g., 80420f66)')
 
+    # =========================================================================
+    # peer - P2P peer management
+    # =========================================================================
+    peer_parser = subparsers.add_parser(
+        'peer',
+        help='Manage P2P peers (provenance, blacklist)'
+    )
+    peer_subparsers = peer_parser.add_subparsers(
+        dest='peer_command',
+        metavar='<subcommand>'
+    )
+
+    # peer list / ls - list known peers and their stats
+    peer_list = peer_subparsers.add_parser(
+        'list', aliases=['ls'],
+        help='List peers and download statistics'
+    )
+
+    # peer downloads - list packages downloaded from peers
+    peer_downloads = peer_subparsers.add_parser(
+        'downloads', aliases=['dl'],
+        help='List packages downloaded from peers'
+    )
+    peer_downloads.add_argument(
+        'host', nargs='?',
+        help='Filter by peer host (optional)'
+    )
+    peer_downloads.add_argument(
+        '--limit', '-n', type=int, default=50,
+        help='Max entries to show (default: 50)'
+    )
+
+    # peer blacklist - manage blacklist
+    peer_blacklist = peer_subparsers.add_parser(
+        'blacklist', aliases=['bl', 'block'],
+        help='Blacklist a peer'
+    )
+    peer_blacklist.add_argument('host', help='Peer host to blacklist')
+    peer_blacklist.add_argument(
+        '--port', '-p', type=int,
+        help='Specific port (default: all ports)'
+    )
+    peer_blacklist.add_argument(
+        '--reason', '-r',
+        help='Reason for blacklisting'
+    )
+
+    # peer unblacklist - remove from blacklist
+    peer_unblacklist = peer_subparsers.add_parser(
+        'unblacklist', aliases=['unbl', 'unblock'],
+        help='Remove peer from blacklist'
+    )
+    peer_unblacklist.add_argument('host', help='Peer host to unblacklist')
+    peer_unblacklist.add_argument(
+        '--port', '-p', type=int,
+        help='Specific port (default: all ports)'
+    )
+
+    # peer clean - delete files from a peer and purge records
+    peer_clean = peer_subparsers.add_parser(
+        'clean',
+        help='Delete RPMs downloaded from a peer (use after blacklist)'
+    )
+    peer_clean.add_argument('host', help='Peer host to clean')
+    peer_clean.add_argument(
+        '--yes', '-y',
+        action='store_true',
+        help='Do not prompt for confirmation'
+    )
+
     return parser
 
 
@@ -2141,14 +2211,78 @@ def cmd_install(args, db: PackageDatabase) -> int:
 
     # Download with progress
     use_peers = not getattr(args, 'no_peers', False)
-    downloader = Downloader(use_peers=use_peers)
+    downloader = Downloader(use_peers=use_peers, db=db)
 
-    def progress(name, pkg_num, pkg_total, bytes_done, bytes_total):
+    last_lines_count = [0]  # Track how many lines we displayed last time
+
+    def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
+                 item_bytes=None, item_total=None, active_downloads=None):
         pct = (bytes_done * 100 // bytes_total) if bytes_total > 0 else 0
-        print(f"\r\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name}", end='', flush=True)
+
+        # Move cursor to start of our display block
+        # \033[F = CPL (Cursor Previous Line) - moves up AND to column 0
+        if last_lines_count[0] > 1:
+            # Move up (N-1) lines to get to the first line
+            print(f"\033[{last_lines_count[0] - 1}F", end='')
+        elif last_lines_count[0] == 1:
+            # Just go to beginning of current line
+            print(f"\r", end='')
+
+        # Show all active downloads if available
+        # Format: (slot, name, bytes_done, bytes_total) sorted by slot
+        if active_downloads and len(active_downloads) > 0:
+            num_lines = len(active_downloads)
+            for i, (slot, dl_name, dl_bytes, dl_total) in enumerate(active_downloads):
+                if dl_total and dl_total > 0:
+                    bar_width = 20
+                    filled = dl_bytes * bar_width // dl_total
+                    bar = '█' * filled + '░' * (bar_width - filled)
+                    dl_mb = dl_bytes / (1024 * 1024)
+                    total_mb = dl_total / (1024 * 1024)
+                    line = f"  [{pkg_num}/{pkg_total}] {pct}% #{slot+1} {dl_name} [{bar}] {dl_mb:.1f}/{total_mb:.1f}MB"
+                else:
+                    line = f"  [{pkg_num}/{pkg_total}] {pct}% #{slot+1} {dl_name}"
+
+                # Clear line and print content
+                if i < num_lines - 1:
+                    print(f"\033[K{line}")  # with newline
+                else:
+                    print(f"\033[K{line}", end='', flush=True)  # last line, no newline
+
+            # Clear any extra lines from previous display
+            if last_lines_count[0] > num_lines:
+                for _ in range(last_lines_count[0] - num_lines):
+                    print(f"\n\033[K", end='')
+                # Move back up to end of our content
+                print(f"\033[{last_lines_count[0] - num_lines}F", end='', flush=True)
+
+            last_lines_count[0] = num_lines
+        elif item_bytes is not None and item_total and item_total > 0:
+            # Single download with progress
+            bar_width = 20
+            filled = item_bytes * bar_width // item_total
+            bar = '█' * filled + '░' * (bar_width - filled)
+            item_mb = item_bytes / (1024 * 1024)
+            total_mb = item_total / (1024 * 1024)
+            print(f"\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name} [{bar}] {item_mb:.1f}/{total_mb:.1f}MB", end='', flush=True)
+            # Clear extra lines if we went from multi to single
+            if last_lines_count[0] > 1:
+                for _ in range(last_lines_count[0] - 1):
+                    print(f"\n\033[K", end='')
+                print(f"\033[{last_lines_count[0] - 1}F", end='', flush=True)
+            last_lines_count[0] = 1
+        else:
+            # No active downloads - just show package name
+            print(f"\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name}", end='', flush=True)
+            if last_lines_count[0] > 1:
+                for _ in range(last_lines_count[0] - 1):
+                    print(f"\n\033[K", end='')
+                print(f"\033[{last_lines_count[0] - 1}F", end='', flush=True)
+            last_lines_count[0] = 1
 
     dl_results, downloaded, cached, peer_stats = downloader.download_all(download_items, progress)
-    print()  # newline after progress
+    # Final newline after progress
+    print()
 
     # Check for failures
     failed = [r for r in dl_results if not r.success]
@@ -2223,12 +2357,9 @@ def cmd_install(args, db: PackageDatabase) -> int:
 
     def install_progress(name, current, total):
         if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
-            if last_shown[0] != name:
-                print(f"\r\033[K  [{current}/{total}] done")
-                print(f"  Updating RPM database...", end='', flush=True)
-                last_shown[0] = name
-        elif name == '(rpmdb progress)':
-            pass  # Ignore progress updates
+            if last_shown[0] != '(rpmdb)' and last_shown[0] is not None:
+                print(f" [Waiting for RPM database...]", end='', flush=True)
+                last_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
         elif last_shown[0] != name:
             print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
             last_shown[0] = name
@@ -2238,7 +2369,11 @@ def cmd_install(args, db: PackageDatabase) -> int:
         force = getattr(args, 'force', False)
         reinstall = getattr(args, 'reinstall', False)
         install_result = installer.install_batched(rpm_paths, progress_callback=install_progress, verify_signatures=verify_sigs, force=force, reinstall=reinstall)
-        print()  # newline after progress
+        # Print clean "done" line if we ended on rpmdb update, otherwise just newline
+        if last_shown[0] == '(rpmdb)':
+            print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
+        else:
+            print()
 
         if not install_result.success:
             print(colors.error(f"\nInstallation failed:"))
@@ -2417,11 +2552,10 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     last_erase_shown = [None]
 
     def erase_progress(name, current, total):
-        if name == '(updating rpmdb)':
-            if last_erase_shown[0] != name:
-                print(f"\r\033[K  [{current}/{total}] done")
-                print(f"  Updating RPM database...", end='', flush=True)
-                last_erase_shown[0] = name
+        if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
+            if last_erase_shown[0] != '(rpmdb)' and last_erase_shown[0] is not None:
+                print(f" [Waiting for RPM database...]", end='', flush=True)
+                last_erase_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
         elif last_erase_shown[0] != name:
             print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
             last_erase_shown[0] = name
@@ -2439,8 +2573,12 @@ def cmd_erase(args, db: PackageDatabase) -> int:
             )
 
         force = getattr(args, 'force', False)
-        erase_result = installer.erase(packages_to_erase, erase_progress, force=force)
-        print()  # newline after progress
+        erase_result = installer.erase_batched(packages_to_erase, progress_callback=erase_progress, force=force)
+        # Print clean "done" line if we ended on rpmdb update, otherwise just newline
+        if last_erase_shown[0] == '(rpmdb)':
+            print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
+        else:
+            print()
 
         if not erase_result.success:
             print(colors.error(f"\nErase failed:"))
@@ -2627,11 +2765,65 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
         # Download
         use_peers = not getattr(args, 'no_peers', False)
-        downloader = Downloader(use_peers=use_peers)
+        downloader = Downloader(use_peers=use_peers, db=db)
 
-        def progress(name, pkg_num, pkg_total, bytes_done, bytes_total):
+        last_lines_count = [0]
+
+        def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
+                     item_bytes=None, item_total=None, active_downloads=None):
             pct = (bytes_done * 100 // bytes_total) if bytes_total > 0 else 0
-            print(f"\r\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name}", end='', flush=True)
+
+            # Move cursor to start of our display block
+            if last_lines_count[0] > 1:
+                print(f"\033[{last_lines_count[0] - 1}F", end='')
+            elif last_lines_count[0] == 1:
+                print(f"\r", end='')
+
+            # Show all active downloads if available
+            # Format: (slot, name, bytes_done, bytes_total) sorted by slot
+            if active_downloads and len(active_downloads) > 0:
+                num_lines = len(active_downloads)
+                for i, (slot, dl_name, dl_bytes, dl_total) in enumerate(active_downloads):
+                    if dl_total and dl_total > 0:
+                        bar_width = 20
+                        filled = dl_bytes * bar_width // dl_total
+                        bar = '█' * filled + '░' * (bar_width - filled)
+                        dl_mb = dl_bytes / (1024 * 1024)
+                        total_mb = dl_total / (1024 * 1024)
+                        line = f"  [{pkg_num}/{pkg_total}] {pct}% #{slot+1} {dl_name} [{bar}] {dl_mb:.1f}/{total_mb:.1f}MB"
+                    else:
+                        line = f"  [{pkg_num}/{pkg_total}] {pct}% #{slot+1} {dl_name}"
+
+                    if i < num_lines - 1:
+                        print(f"\033[K{line}")
+                    else:
+                        print(f"\033[K{line}", end='', flush=True)
+
+                if last_lines_count[0] > num_lines:
+                    for _ in range(last_lines_count[0] - num_lines):
+                        print(f"\n\033[K", end='')
+                    print(f"\033[{last_lines_count[0] - num_lines}F", end='', flush=True)
+
+                last_lines_count[0] = num_lines
+            elif item_bytes is not None and item_total and item_total > 0:
+                bar_width = 20
+                filled = item_bytes * bar_width // item_total
+                bar = '█' * filled + '░' * (bar_width - filled)
+                item_mb = item_bytes / (1024 * 1024)
+                total_mb = item_total / (1024 * 1024)
+                print(f"\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name} [{bar}] {item_mb:.1f}/{total_mb:.1f}MB", end='', flush=True)
+                if last_lines_count[0] > 1:
+                    for _ in range(last_lines_count[0] - 1):
+                        print(f"\n\033[K", end='')
+                    print(f"\033[{last_lines_count[0] - 1}F", end='', flush=True)
+                last_lines_count[0] = 1
+            else:
+                print(f"\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name}", end='', flush=True)
+                if last_lines_count[0] > 1:
+                    for _ in range(last_lines_count[0] - 1):
+                        print(f"\n\033[K", end='')
+                    print(f"\033[{last_lines_count[0] - 1}F", end='', flush=True)
+                last_lines_count[0] = 1
 
         dl_results, downloaded, cached, peer_stats = downloader.download_all(download_items, progress)
         print()
@@ -2701,12 +2893,9 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
             def install_progress(name, current, total):
                 if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
-                    if last_shown[0] != name:
-                        print(f"\r\033[K  [{current}/{total}] done")
-                        print(f"  Updating RPM database...", end='', flush=True)
-                        last_shown[0] = name
-                elif name == '(rpmdb progress)':
-                    pass
+                    if last_shown[0] != '(rpmdb)' and last_shown[0] is not None:
+                        print(f" [Waiting for RPM database...]", end='', flush=True)
+                        last_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
                 elif last_shown[0] != name:
                     print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                     last_shown[0] = name
@@ -2714,7 +2903,11 @@ def cmd_update(args, db: PackageDatabase) -> int:
             verify_sigs = not getattr(args, 'nosignature', False)
             force = getattr(args, 'force', False)
             install_result = installer.install_batched(rpm_paths, progress_callback=install_progress, verify_signatures=verify_sigs, force=force)
-            print()
+            # Print clean "done" line if we ended on rpmdb update, otherwise just newline
+            if last_shown[0] == '(rpmdb)':
+                print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
+            else:
+                print()
 
             if not install_result.success:
                 print(colors.error(f"\nUpgrade failed:"))
@@ -2736,7 +2929,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
             orphan_names = [a.name for a in orphans]
 
             orphan_installer = Installer()
-            erase_result = orphan_installer.erase(orphan_names)
+            erase_result = orphan_installer.erase_batched(orphan_names)
             if erase_result.success:
                 print(colors.success(f"  {erase_result.removed} packages removed"))
                 # Record orphan removals in transaction
@@ -3445,17 +3638,20 @@ def cmd_autoremove(args, db: PackageDatabase) -> int:
         last_erase_shown = [None]
 
         def erase_progress(name, current, total):
-            if name == '(updating rpmdb)':
-                if last_erase_shown[0] != name:
-                    print(f"\r\033[K  [{current}/{total}] done")
-                    print(f"  Updating RPM database...", end='', flush=True)
-                    last_erase_shown[0] = name
+            if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
+                if last_erase_shown[0] != '(rpmdb)' and last_erase_shown[0] is not None:
+                    print(f" [Waiting for RPM database...]", end='', flush=True)
+                    last_erase_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
             elif last_erase_shown[0] != name:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_erase_shown[0] = name
 
-        result = installer.erase(package_names, erase_progress)
-        print()
+        result = installer.erase_batched(package_names, progress_callback=erase_progress)
+        # Print clean "done" line if we ended on rpmdb update, otherwise just newline
+        if last_erase_shown[0] == '(rpmdb)':
+            print(f"\r\033[K  [{len(package_names)}/{len(package_names)}] done")
+        else:
+            print()
 
         if not result.success:
             print(colors.error(f"\nRemoval failed:"))
@@ -4005,6 +4201,178 @@ def cmd_key(args) -> int:
         return 1
 
 
+def cmd_peer(args, db: PackageDatabase) -> int:
+    """Handle peer command - manage P2P peers and provenance."""
+    from datetime import datetime
+    from . import colors
+    from pathlib import Path
+
+    if not args.peer_command:
+        print("Usage: urpm peer <subcommand>")
+        print("Subcommands: list, downloads, blacklist, unblacklist, clean")
+        return 1
+
+    # peer list - show peer stats
+    if args.peer_command in ('list', 'ls'):
+        stats = db.get_peer_stats()
+        blacklisted = db.list_blacklisted_peers()
+        blacklisted_hosts = {(b['peer_host'], b['peer_port']) for b in blacklisted}
+
+        if not stats and not blacklisted:
+            print("No peer download history recorded yet.")
+            print("P2P downloads will be tracked after your next package installation.")
+            return 0
+
+        if stats:
+            print(colors.bold("Peer download statistics:\n"))
+            print(f"{'Peer':<30} {'Downloads':>10} {'Size':>12} {'Last download':<20} {'Status'}")
+            print("-" * 90)
+            for s in stats:
+                peer_id = f"{s['peer_host']}:{s['peer_port']}"
+                size_mb = (s['total_bytes'] or 0) / (1024 * 1024)
+                last_dl = datetime.fromtimestamp(s['last_download']).strftime('%Y-%m-%d %H:%M')
+
+                # Check if blacklisted
+                if (s['peer_host'], s['peer_port']) in blacklisted_hosts or \
+                   (s['peer_host'], None) in blacklisted_hosts:
+                    status = colors.error("BLACKLISTED")
+                else:
+                    status = colors.ok("active")
+
+                print(f"{peer_id:<30} {s['download_count']:>10} {size_mb:>10.1f}MB {last_dl:<20} {status}")
+
+        if blacklisted:
+            print(colors.bold("\nBlacklisted peers:\n"))
+            for b in blacklisted:
+                port_str = f":{b['peer_port']}" if b['peer_port'] else " (all ports)"
+                bl_time = datetime.fromtimestamp(b['blacklist_time']).strftime('%Y-%m-%d %H:%M')
+                reason = f" - {b['reason']}" if b['reason'] else ""
+                print(f"  {b['peer_host']}{port_str} (since {bl_time}){reason}")
+
+        return 0
+
+    # peer downloads - list packages downloaded from peers
+    elif args.peer_command in ('downloads', 'dl'):
+        downloads = db.get_peer_downloads(peer_host=args.host, limit=args.limit)
+
+        if not downloads:
+            if args.host:
+                print(f"No downloads recorded from peer: {args.host}")
+            else:
+                print("No peer downloads recorded yet.")
+            return 0
+
+        print(colors.bold(f"Packages downloaded from peers (last {args.limit}):\n"))
+        print(f"{'Filename':<50} {'Peer':<25} {'Date':<20}")
+        print("-" * 95)
+        for d in downloads:
+            peer_id = f"{d['peer_host']}:{d['peer_port']}"
+            dl_time = datetime.fromtimestamp(d['download_time']).strftime('%Y-%m-%d %H:%M')
+            # Truncate filename if too long
+            filename = d['filename']
+            if len(filename) > 48:
+                filename = filename[:45] + "..."
+            print(f"{filename:<50} {peer_id:<25} {dl_time:<20}")
+
+        return 0
+
+    # peer blacklist - add to blacklist
+    elif args.peer_command in ('blacklist', 'bl', 'block'):
+        host = args.host
+        port = getattr(args, 'port', None)
+        reason = getattr(args, 'reason', None)
+
+        # Check if already blacklisted
+        if db.is_peer_blacklisted(host, port):
+            print(f"Peer {host} is already blacklisted.")
+            return 0
+
+        db.blacklist_peer(host, port, reason)
+        port_str = f":{port}" if port else " (all ports)"
+        print(f"Blacklisted peer: {host}{port_str}")
+        print("Note: use 'urpm peer clean <host>' to remove RPMs downloaded from this peer.")
+        return 0
+
+    # peer unblacklist - remove from blacklist
+    elif args.peer_command in ('unblacklist', 'unbl', 'unblock'):
+        host = args.host
+        port = getattr(args, 'port', None)
+
+        if not db.is_peer_blacklisted(host, port):
+            print(f"Peer {host} is not blacklisted.")
+            return 0
+
+        db.unblacklist_peer(host, port)
+        port_str = f":{port}" if port else ""
+        print(f"Removed {host}{port_str} from blacklist.")
+        return 0
+
+    # peer clean - delete files from a peer
+    elif args.peer_command == 'clean':
+        host = args.host
+
+        # Get files from this peer
+        files = db.get_files_from_peer(host)
+        if not files:
+            print(f"No files recorded from peer: {host}")
+            return 0
+
+        # Count existing files
+        existing = []
+        for f in files:
+            p = Path(f)
+            if p.exists():
+                existing.append(p)
+
+        print(f"Found {len(files)} records from peer {host}")
+        print(f"  {len(existing)} files still exist on disk")
+
+        if not existing:
+            # Just clean up records
+            count = db.delete_peer_downloads(host)
+            print(f"Removed {count} download records.")
+            return 0
+
+        # Confirm deletion
+        if not args.yes:
+            print(f"\nFiles to delete:")
+            for p in existing[:10]:
+                print(f"  {p}")
+            if len(existing) > 10:
+                print(f"  ... and {len(existing) - 10} more")
+
+            try:
+                response = input(f"\nDelete {len(existing)} files? [y/N] ")
+                if response.lower() not in ('y', 'yes'):
+                    print("Aborted")
+                    return 0
+            except (KeyboardInterrupt, EOFError):
+                print("\nAborted")
+                return 0
+
+        # Delete files
+        deleted = 0
+        errors = 0
+        for p in existing:
+            try:
+                p.unlink()
+                deleted += 1
+            except OSError as e:
+                print(f"  Error deleting {p}: {e}")
+                errors += 1
+
+        # Clean up records
+        count = db.delete_peer_downloads(host)
+
+        print(f"Deleted {deleted} files ({errors} errors)")
+        print(f"Removed {count} download records.")
+        return 0 if errors == 0 else 1
+
+    else:
+        print(f"Unknown peer command: {args.peer_command}")
+        return 1
+
+
 def cmd_undo(args, db: PackageDatabase) -> int:
     """Handle undo command - undo last or specific transaction."""
     import signal
@@ -4119,17 +4487,20 @@ def cmd_undo(args, db: PackageDatabase) -> int:
             last_erase_shown = [None]
 
             def erase_progress(name, current, total):
-                if name == '(updating rpmdb)':
-                    if last_erase_shown[0] != name:
-                        print(f"\r\033[K  [{current}/{total}] done")
-                        print(f"  Updating RPM database...", end='', flush=True)
-                        last_erase_shown[0] = name
+                if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
+                    if last_erase_shown[0] != '(rpmdb)' and last_erase_shown[0] is not None:
+                        print(f" [Waiting for RPM database...]", end='', flush=True)
+                        last_erase_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
                 elif last_erase_shown[0] != name:
                     print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                     last_erase_shown[0] = name
 
-            result = installer.erase(to_remove, erase_progress)
-            print()
+            result = installer.erase_batched(to_remove, progress_callback=erase_progress)
+            # Print clean "done" line if we ended on rpmdb update, otherwise just newline
+            if last_erase_shown[0] == '(rpmdb)':
+                print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] done")
+            else:
+                print()
 
             if not result.success:
                 print(colors.error("\nErase failed:"))
@@ -4407,17 +4778,20 @@ def cmd_rollback(args, db: PackageDatabase) -> int:
             last_erase_shown = [None]
 
             def erase_progress(name, current, total):
-                if name == '(updating rpmdb)':
-                    if last_erase_shown[0] != name:
-                        print(f"\r\033[K  [{current}/{total}] done")
-                        print(f"  Updating RPM database...", end='', flush=True)
-                        last_erase_shown[0] = name
+                if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
+                    if last_erase_shown[0] != '(rpmdb)' and last_erase_shown[0] is not None:
+                        print(f" [Waiting for RPM database...]", end='', flush=True)
+                        last_erase_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
                 elif last_erase_shown[0] != name:
                     print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                     last_erase_shown[0] = name
 
-            result = installer.erase(to_remove, erase_progress)
-            print()
+            result = installer.erase_batched(to_remove, progress_callback=erase_progress)
+            # Print clean "done" line if we ended on rpmdb update, otherwise just newline
+            if last_erase_shown[0] == '(rpmdb)':
+                print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] done")
+            else:
+                print()
 
             if not result.success:
                 print(colors.error("\nErase failed:"))
@@ -4568,17 +4942,20 @@ def cmd_cleandeps(args, db: PackageDatabase) -> int:
         last_erase_shown = [None]
 
         def erase_progress(name, current, total):
-            if name == '(updating rpmdb)':
-                if last_erase_shown[0] != name:
-                    print(f"\r\033[K  [{current}/{total}] done")
-                    print(f"  Updating RPM database...", end='', flush=True)
-                    last_erase_shown[0] = name
+            if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
+                if last_erase_shown[0] != '(rpmdb)' and last_erase_shown[0] is not None:
+                    print(f" [Waiting for RPM database...]", end='', flush=True)
+                    last_erase_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
             elif last_erase_shown[0] != name:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_erase_shown[0] = name
 
-        erase_result = installer.erase(packages_to_erase, erase_progress)
-        print()
+        erase_result = installer.erase_batched(packages_to_erase, progress_callback=erase_progress)
+        # Print clean "done" line if we ended on rpmdb update, otherwise just newline
+        if last_erase_shown[0] == '(rpmdb)':
+            print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
+        else:
+            print()
 
         if not erase_result.success:
             print(f"\nErase failed:")
@@ -5356,6 +5733,9 @@ def main(argv=None) -> int:
 
         elif args.command in ('key', 'k'):
             return cmd_key(args)
+
+        elif args.command == 'peer':
+            return cmd_peer(args, db)
 
         else:
             return cmd_not_implemented(args, db)
