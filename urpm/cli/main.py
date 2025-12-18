@@ -1967,6 +1967,19 @@ def cmd_install(args, db: PackageDatabase) -> int:
     import signal
     from ..core.resolver import Resolver, Resolution, format_size
     from ..core.download import Downloader, DownloadItem
+    from ..core.background_install import (
+        run_transaction_background, check_background_error, clear_background_error,
+        InstallLock
+    )
+    from . import colors
+
+    # Check for previous background install errors
+    prev_error = check_background_error()
+    if prev_error:
+        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning(f"  {prev_error}"))
+        print(colors.dim("  (This message will not appear again)"))
+        clear_background_error()
 
     # Debug: save previous state and clear debug files at start
     _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
@@ -1996,7 +2009,6 @@ def cmd_install(args, db: PackageDatabase) -> int:
         print("Aborted.")
         return 1
 
-    from . import colors
     from ..core.resolver import InstallReason
 
     # Get CLI options for recommends/suggests
@@ -2309,7 +2321,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
         return 0
 
     # Install packages
-    from ..core.install import Installer, check_root
+    from ..core.install import check_root
 
     if not check_root():
         print(colors.error("\nError: root privileges required for installation"))
@@ -2351,15 +2363,25 @@ def cmd_install(args, db: PackageDatabase) -> int:
     signal.signal(signal.SIGINT, sigint_handler)
 
     print(colors.info(f"\nInstalling {len(rpm_paths)} packages..."))
-    installer = Installer()
+
+    # Check if another install is in progress
+    lock = InstallLock()
+    if not lock.acquire(blocking=False):
+        print(colors.warning("  RPM database is locked by another process."))
+        print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+
+        def wait_cb(pid):
+            pass  # Just wait silently, message already shown
+
+        lock.acquire(blocking=True, wait_callback=wait_cb)
+    lock.release()  # Release - child will acquire its own lock
 
     last_shown = [None]
 
     def install_progress(name, current, total):
-        if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
-            if last_shown[0] != '(rpmdb)' and last_shown[0] is not None:
-                print(f" [Waiting for RPM database...]", end='', flush=True)
-                last_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
+        if name == '(rpmdb)':
+            # rpmdb sync happening in background - don't show anything special
+            pass
         elif last_shown[0] != name:
             print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
             last_shown[0] = name
@@ -2367,27 +2389,33 @@ def cmd_install(args, db: PackageDatabase) -> int:
     try:
         verify_sigs = not getattr(args, 'nosignature', False)
         force = getattr(args, 'force', False)
-        reinstall = getattr(args, 'reinstall', False)
-        install_result = installer.install_batched(rpm_paths, progress_callback=install_progress, verify_signatures=verify_sigs, force=force, reinstall=reinstall)
-        # Print clean "done" line if we ended on rpmdb update, otherwise just newline
-        if last_shown[0] == '(rpmdb)':
-            print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
-        else:
-            print()
+        test_mode = getattr(args, 'test', False)
 
-        if not install_result.success:
+        # Use background install - parent returns when files are installed,
+        # rpmdb sync continues in background
+        success, error_msg = run_transaction_background(
+            rpm_paths,
+            progress_callback=install_progress,
+            verify_signatures=verify_sigs,
+            force=force,
+            test=test_mode
+        )
+
+        # Print done
+        print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
+
+        if not success:
             print(colors.error(f"\nInstallation failed:"))
-            for err in install_result.errors[:5]:
-                print(f"  {colors.error(err)}")
+            print(f"  {colors.error(error_msg)}")
             db.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Installation interrupted after {install_result.installed} packages"))
+            print(colors.warning(f"\n  Installation interrupted"))
             db.abort_transaction(transaction_id)
             return 130
 
-        print(colors.success(f"  {install_result.installed} packages installed"))
+        print(colors.success(f"  {len(rpm_paths)} packages installed"))
         db.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
@@ -2421,14 +2449,26 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     import signal
 
     from ..core.resolver import Resolver, format_size
-    from ..core.install import Installer, EraseResult, check_root
+    from ..core.install import check_root
+    from ..core.background_install import (
+        run_erase_background, check_background_error, clear_background_error,
+        InstallLock
+    )
+    from . import colors
+
+    # Check for previous background errors
+    prev_error = check_background_error()
+    if prev_error:
+        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning(f"  {prev_error}"))
+        print(colors.dim("  (This message will not appear again)"))
+        clear_background_error()
 
     # Debug: save previous state and clear debug files at start
     _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
     _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
     # Check root
-    from . import colors
 
     if not check_root():
         print(colors.error("Error: erase requires root privileges"))
@@ -2547,15 +2587,20 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     print(colors.info(f"\nErasing {len(all_actions)} packages..."))
     packages_to_erase = [action.name for action in all_actions]
 
-    installer = Installer()
+    # Check if another operation is in progress
+    lock = InstallLock()
+    if not lock.acquire(blocking=False):
+        print(colors.warning("  RPM database is locked by another process."))
+        print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+        lock.acquire(blocking=True)
+    lock.release()  # Release - child will acquire its own lock
 
     last_erase_shown = [None]
 
     def erase_progress(name, current, total):
-        if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
-            if last_erase_shown[0] != '(rpmdb)' and last_erase_shown[0] is not None:
-                print(f" [Waiting for RPM database...]", end='', flush=True)
-                last_erase_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
+        if name == '(rpmdb)':
+            # rpmdb sync happening in background - don't show
+            pass
         elif last_erase_shown[0] != name:
             print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
             last_erase_shown[0] = name
@@ -2573,28 +2618,34 @@ def cmd_erase(args, db: PackageDatabase) -> int:
             )
 
         force = getattr(args, 'force', False)
-        erase_result = installer.erase_batched(packages_to_erase, progress_callback=erase_progress, force=force)
-        # Print clean "done" line if we ended on rpmdb update, otherwise just newline
-        if last_erase_shown[0] == '(rpmdb)':
-            print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
-        else:
-            print()
+        test_mode = getattr(args, 'test', False)
 
-        if not erase_result.success:
+        # Use background erase - parent returns when packages are removed,
+        # rpmdb sync continues in background
+        success, error_msg = run_erase_background(
+            packages_to_erase,
+            progress_callback=erase_progress,
+            force=force,
+            test=test_mode
+        )
+
+        # Print done
+        print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
+
+        if not success:
             print(colors.error(f"\nErase failed:"))
-            for err in erase_result.errors[:5]:
-                print(f"  {colors.error(err)}")
+            print(f"  {colors.error(error_msg)}")
             if not force:
                 print(colors.dim("  Use --force to ignore dependency problems"))
             db.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Erase interrupted after {erase_result.erased} packages"))
+            print(colors.warning(f"\n  Erase interrupted"))
             db.abort_transaction(transaction_id)
             return 130
 
-        print(colors.success(f"  {erase_result.erased} packages erased"))
+        print(colors.success(f"  {len(packages_to_erase)} packages erased"))
         db.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
@@ -2624,6 +2675,18 @@ def cmd_update(args, db: PackageDatabase) -> int:
     import signal
 
     from . import colors
+    from ..core.background_install import (
+        run_transaction_background, check_background_error, clear_background_error,
+        InstallLock
+    )
+
+    # Check for previous background install errors
+    prev_error = check_background_error()
+    if prev_error:
+        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning(f"  {prev_error}"))
+        print(colors.dim("  (This message will not appear again)"))
+        clear_background_error()
 
     # Debug: save previous state and clear debug files at start
     _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
@@ -2887,41 +2950,53 @@ def cmd_update(args, db: PackageDatabase) -> int:
     try:
         if rpm_paths:
             print(f"\nUpgrading {len(rpm_paths)} packages...")
-            installer = Installer()
+            # Check if another install is in progress
+            lock = InstallLock()
+            if not lock.acquire(blocking=False):
+                print(colors.warning("  RPM database is locked by another process."))
+                print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+                lock.acquire(blocking=True)
+            lock.release()  # Release - child will acquire its own lock
 
             last_shown = [None]
 
             def install_progress(name, current, total):
-                if name == '(updating rpmdb)' or name.startswith('(rpmdb '):
-                    if last_shown[0] != '(rpmdb)' and last_shown[0] is not None:
-                        print(f" [Waiting for RPM database...]", end='', flush=True)
-                        last_shown[0] = '(rpmdb)'  # Normalize all rpmdb names
+                if name == '(rpmdb)':
+                    # rpmdb sync happening in background - don't show
+                    pass
                 elif last_shown[0] != name:
                     print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                     last_shown[0] = name
 
             verify_sigs = not getattr(args, 'nosignature', False)
             force = getattr(args, 'force', False)
-            install_result = installer.install_batched(rpm_paths, progress_callback=install_progress, verify_signatures=verify_sigs, force=force)
-            # Print clean "done" line if we ended on rpmdb update, otherwise just newline
-            if last_shown[0] == '(rpmdb)':
-                print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
-            else:
-                print()
+            test_mode = getattr(args, 'test', False)
 
-            if not install_result.success:
+            # Use background install - parent returns when files are installed,
+            # rpmdb sync continues in background
+            success, error_msg = run_transaction_background(
+                rpm_paths,
+                progress_callback=install_progress,
+                verify_signatures=verify_sigs,
+                force=force,
+                test=test_mode
+            )
+
+            # Print done
+            print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
+
+            if not success:
                 print(colors.error(f"\nUpgrade failed:"))
-                for err in install_result.errors[:5]:
-                    print(f"  {colors.error(err)}")
+                print(f"  {colors.error(error_msg)}")
                 db.abort_transaction(transaction_id)
                 return 1
 
             if interrupted[0]:
-                print(colors.warning(f"\n  Upgrade interrupted after {install_result.installed} packages"))
+                print(colors.warning(f"\n  Upgrade interrupted"))
                 db.abort_transaction(transaction_id)
                 return 130
 
-            print(colors.success(f"  {install_result.installed} packages upgraded"))
+            print(colors.success(f"  {len(rpm_paths)} packages upgraded"))
 
         # Remove orphaned dependencies
         if orphans and not interrupted[0]:
