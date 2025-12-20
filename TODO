@@ -294,6 +294,9 @@ en favorisant le téléchargement local (LAN >> WAN).
 Cas d'usage : machine connectée à internet (ex: connexion mobile) + LAN avec
 machines sans accès internet. La machine connectée peut servir de relais.
 
+Prévoir aussi le proxying cross versions : une machine en mageia 9 sert de proxy aussi pour mageia 10.
+Ce qui veut dire que certains medias peuvent être sychronisés par urpmd MAIS pas utilisés par urpm.
+
 **Fonctionnement désactivé par défaut** - opt-in via configuration.
 
 **Endpoints proxy :**
