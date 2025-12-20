@@ -7,10 +7,10 @@ Pour utiliser urpm, les paquets suivants doivent être installés :
 ```
 dnf install python3-libsolv python3-zstandard
 # ou
-urpmi python3-libsolv python3-zstandard
+urpmi python3-solv python3-zstandard
 ```
 
-- **python3-libsolv** : résolution des dépendances (obligatoire)
+- **python3-solv** : résolution des dépendances (obligatoire)
 - **python3-zstandard** : décompression des fichiers synthesis.hdlist.cz (obligatoire)
 
 Note : Ne pas utiliser python3-zstd (paquet Mageia) qui a des bugs de décompression.
@@ -18,7 +18,7 @@ Note : Ne pas utiliser python3-zstd (paquet Mageia) qui a des bugs de décompres
 
 ## Tests
 
-Voir [TESTS_TODO.md](TESTS_TODO.md) pour les tests manuels et l'infrastructure de tests automatisés.
+Voir [TESTS_TODO.md](TESTS_TODO.md) pour les tests manuels et l'infrastructure de tests automatisés a venir.
 
 
 ## Installation par lots (P2) - FAIT
@@ -282,14 +282,38 @@ en favorisant le téléchargement local (LAN >> WAN).
   - [x] Découverte des peers via broadcast UDP
   - [x] `urpm install/upgrade` utilise les peers disponibles automatiquement
 
-### Phase 5 : Installeur Mageia
+### Phase 5 : 
+
+**architecture** 
+  - [ ] implémenter le web service /api/upgrade dans urpmd + auth ?
+  - [ ] décider si on utilise urpmd ou pas pour mgaonline-ng  et rpmdrake-ng. Si oui rupmd doit tourner. Si non il faut s'arranger pour ne pas dupliquer le code pour qu'il soit utilisé aussi bien par urpm que mgaonline-ng et rpmdrake-ng
+
+**remplacement de mgaonline par mgaonline-ng**
+  - [ ] développer une applet (icode dans la barre des tâches + ihm)
+    - [ ] avertir des updates
+    - [ ] lister/choisir les updates en gérant les dépendances
+    - [ ] procéder à l'update avaec suivi de l'avancemment visuel (se caler sur mgaonline)
+
+**remplacement de rpmdrake par rpmdrake-ng**
+  - [ ] développer l'application sur la même base
+    - [ ] IHM de base
+    - [ ] recherche et selection de paquets (multicritères)
+    - [ ] installer/mettre à jour/enlever les paquets
+    - [ ] gestion des médias
+    - [ ] gestion des redlists / blacklists
+    - [ ] affichage et gestion des peers
+    - [ ] configuration -> kernels, quotas, fonctions urpmd (activation, types d'auth)...
+
+### Phase 6 : Installeur Mageia
+
+Attentiion que l'installeur est en perl et que tout recoder en python serait une gageure.
 
 **Support P2P dans l'installeur :**
   - Détection des urpmd sur le LAN pendant l'installation
   - Téléchargement des paquets depuis les voisines Mageia
   - Accélération drastique des installations en environnement multi-machines
 
-### Phase 6 : Mode Proxy/Relais (P3)
+### Phase 6 : Mode Proxy/Relais avancé (P3)
 
 Cas d'usage : machine connectée à internet (ex: connexion mobile) + LAN avec
 machines sans accès internet. La machine connectée peut servir de relais.
@@ -352,10 +376,10 @@ Implémenté :
 
 Les synthesis.hdlist.cz ne contiennent pas toutes les métadonnées.
 Implémenter le parsing des hdlist.cz pour récupérer les headers RPM complets :
-  - Liste des fichiers contenus dans le paquet
-  - Description longue
-  - Changelog
-  - Scripts (pre/post install/uninstall)
+  - [ ] Liste des fichiers contenus dans le paquet
+  - [ ] Description longue
+  - [ ] Changelog
+  - [ ] Scripts (pre/post install/uninstall)
   - Etc.
 
 Note: urpm/core/hdlist.py existe mais à compléter/vérifier.
