@@ -27,22 +27,40 @@ Use the Mageia Control Center (MCC) > Security > Firewall, or edit `/etc/shorewa
 
 ### Development mode
 
-Clone the repository and run directly:
+Clone the repository and run directly (as root):
 
 ```bash
 git clone https://github.com/pvi-github/urpm-ng.git
 cd urpm-ng
 
-# Run urpm
-./bin/urpm --help
+# Switch to dev mode
+touch .urpm.local
 
-# Run daemon
-./bin/urpmd
+# Run daemon (without backgorund mode)
+./bin/urpmd --dev
+
+# Run urpm (in an other terminal)
+cd /where/is/urpm-ng
+./bin/urpm --help
 ```
 
 In dev mode, data is stored in `/var/lib/urpm-dev/` and the daemon uses port 9877.
 
 ### Production mode
+
+```bash
+git clone https://github.com/pvi-github/urpm-ng.git
+cd urpm-ng
+
+# just incase make sure dev mode is off
+rm -f .urpm.local
+
+# Run daemon
+./bin/urpmd
+
+# Run urpm 
+./bin/urpm --help
+```
 
 When installed system-wide (in `/usr/bin/`), urpm uses:
 - Database: `/var/lib/urpm/packages.db`
@@ -57,7 +75,7 @@ Create a `.urpm.local` file in the project root to customize dev mode:
 
 ```ini
 # Custom base directory (optional)
-base_dir=/path/to/custom/dir
+base_dir=/path/lib/urpm-dev
 ```
 
 ### Media sources
@@ -68,11 +86,11 @@ Configure package sources (mirrors):
 # List configured media
 urpm media list
 
-# Add a media source
-urpm media add "Core Release" http://mirror.example.com/distrib/10/x86_64/media/core/release
-
 # Import from existing urpmi.cfg
 urpm media import /etc/urpmi/urpmi.cfg
+
+# Add a specific media source
+urpm media add "Core Release" http://mirror.example.com/distrib/10/x86_64/media/core/release
 
 # Update media metadata
 urpm media update
