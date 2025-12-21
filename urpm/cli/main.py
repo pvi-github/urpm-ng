@@ -4411,12 +4411,12 @@ def cmd_peer(args, db: PackageDatabase) -> int:
                 elif p.get('alive', True):
                     status = colors.ok("online")
                 else:
-                    status = colors.warn("offline")
+                    status = colors.warning("offline")
 
                 print(f"{peer_id:<30} {media_count:>8} {last_seen:<20} {status}")
             print()
         else:
-            print(colors.warn("No peers discovered on LAN (is urpmd running?)\n"))
+            print(colors.warning("No peers discovered on LAN (is urpmd running?)\n"))
 
         # Show download statistics
         if stats:
