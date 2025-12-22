@@ -36,11 +36,25 @@ Idée complémentaire ajouter à urpm i :
 
 => oriente les choix automatiquement, et urpm ne pose que les questions restantes s'il y en a...
 
+# Pre-downloading
+
+=> Pas encore vu passer un seul predownload... on est surs que ça marche ça ?
+
+Et idées complémentaires à discuter : 
+  - s'il y a plusieurs peers => election d'un master qui va répartit les tâches de prédownloads ?
+  - il faudrait p'tet aussi faire en sorte qu'un paquet prédownloadé soit sur au moins deux peers au cas où un soit éteint ? Ou alors détecter quand un peer pass offline et récupérer upstream les prédownloads qui étaient chez lui ? 
+
+En fait je suis pas tout à fait sur de quoi et comment, d'où le besoin de discussion, mais l'idée c'est:
+  - 1 de ne pas faire 50 prédownloads de chaque fichier s'il y a 50 peers
+  - si un peer est éteint de ne pas se retrouver à tous les 50 peers devoir télécharger le complément sur le miroir upstream...
+
 # ... and xxx more
 
 Dans urpm i mais aussi urpm h -d, urpm depends et à plein d'autres endroits  on a des listres traonquées.
 
 Il faut pouvoir afficher les listes complètes si on veut.
+
+Et je verrais bien afficher sur plusieurs colonnes... en fonction de la longueur du plus long nom de paquet et de la largeur du terminal pour que ça fasse pas moche.
 
 # Fix dep
 
@@ -106,6 +120,23 @@ Si on arrive à la taille max du quota le scheduler nettoie les fichiers en comm
 
 Pouvoir sur un whatprovides de préciser les contraintes de version (== < <= > <= ) pour filtrer
 
+
+# Packaging php-webinterface (à remonter aux packageurs Mageia)
+
+Problème : `php-webinterface` n'est fourni que par des paquets spécifiques à un webserver :
+- `php8.4-fpm-nginx` (requiert nginx)
+- `php8.4-fpm-apache` (requiert apache)
+- `apache-mod_php8.4` (requiert apache)
+- `php8.4-cgi` (compatible avec tous mais pas fpm)
+
+Conséquence : on ne peut pas avoir `lighttpd + php-fpm` car il n'existe pas de paquet `php8.4-fpm-lighttpd` ou `php8.4-fpm-generic`.
+
+Solutions possibles côté packaging :
+1. `php8.4-fpm` fournit directement `php-webinterface` (config FastCGI générique)
+2. Créer un paquet `php8.4-fpm-fcgi` ou `php8.4-fpm-generic` qui fournit `php-webinterface` sans dépendre d'un webserver spécifique
+3. Les paquets `-nginx` et `-apache` deviennent juste des configs spécifiques optionnelles
+
+Note : ce n'est PAS un problème de l'algo de résolution d'urpm. L'algo ne doit pas "tricher" en ignorant des dépendances requises.
 
 # README
 

@@ -460,6 +460,163 @@ class Resolver:
             solv_flags |= solv.REL_EQ
         return solv_flags
 
+    def get_providers(self, capability: str, include_installed: bool = False) -> List[str]:
+        """Find all packages that provide a capability.
+
+        Args:
+            capability: The capability to search for (e.g., 'php-filter')
+            include_installed: If True, include installed packages
+
+        Returns:
+            List of package names that provide this capability
+        """
+        if self.pool is None:
+            self.pool = self._create_pool()
+
+        dep = self.pool.Dep(capability)
+        providers = self.pool.whatprovides(dep)
+
+        provider_names = set()
+        for p in providers:
+            if p.repo:
+                if include_installed or p.repo.name != '@System':
+                    provider_names.add(p.name)
+
+        return sorted(provider_names)
+
+    def get_package_requires(self, package_name: str) -> List[str]:
+        """Get the requires of a package.
+
+        Args:
+            package_name: The package name
+
+        Returns:
+            List of capability strings that the package requires
+        """
+        if self.pool is None:
+            self.pool = self._create_pool()
+
+        sel = self.pool.select(package_name, solv.Selection.SELECTION_NAME)
+        requires = []
+
+        for s in sel.solvables():
+            for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                dep_str = str(dep)
+                # Skip rpmlib deps and file deps
+                if not dep_str.startswith('rpmlib(') and not dep_str.startswith('/'):
+                    requires.append(dep_str)
+            break  # Just first match
+
+        return requires
+
+    def _get_versioned_requires(self, solvable) -> Dict[str, str]:
+        """Extract versioned requires from a solvable as {capability: version}.
+
+        Only returns requires with exact version matches (=) that look like
+        major.minor version patterns, which typically define blocs.
+        """
+        versioned = {}
+        for dep in solvable.lookup_deparray(solv.SOLVABLE_REQUIRES):
+            dep_str = str(dep)
+
+            # Skip noise (libraries, config, rpmlib, file paths)
+            if dep_str.startswith(('lib', 'ld-', 'config(', 'rpmlib(', '/')):
+                continue
+
+            # Parse "capability = version" or "capability >= version"
+            match = re.match(r'^([a-zA-Z0-9_-]+)\s*(=|>=|<=|>|<)\s*(.+)$', dep_str)
+            if match:
+                cap, op, ver = match.groups()
+                # Normalize version to epoch:major.minor pattern
+                ver_match = re.search(r'(\d+:\d+\.\d+)', ver)
+                if ver_match:
+                    versioned[cap] = ver_match.group(1)
+
+        return versioned
+
+    def detect_blocs(self, capabilities: List[str]) -> Dict[str, Dict]:
+        """Detect blocs (groups of interdependent packages) from capabilities.
+
+        Blocs are detected by finding capabilities that different providers
+        require with different versions. For example, php8.4-filter requires
+        php-common = 3:8.4 while php8.5-filter requires php-common = 3:8.5.
+
+        Args:
+            capabilities: List of capability names to analyze
+
+        Returns:
+            Dict with structure:
+            {
+                'bloc_defining_caps': {cap: [version1, version2, ...]},
+                'blocs': {
+                    version_key: {
+                        capability: [provider_names],
+                        ...
+                    }
+                },
+                'providers_info': {provider_name: {cap: version, ...}}
+            }
+        """
+        if self.pool is None:
+            self.pool = self._create_pool()
+
+        from collections import defaultdict
+
+        # Step 1: Collect all providers and their versioned requires
+        providers_info = {}  # {provider_name: {cap: version}}
+
+        for cap in capabilities:
+            dep = self.pool.Dep(cap)
+            providers = self.pool.whatprovides(dep)
+
+            for p in providers:
+                if p.repo and p.repo.name != '@System':
+                    if p.name not in providers_info:
+                        providers_info[p.name] = self._get_versioned_requires(p)
+
+        # Step 2: Detect bloc-defining capabilities
+        # A capability is bloc-defining if different providers require it with
+        # different versions
+        cap_versions = defaultdict(set)  # {capability: {version1, version2, ...}}
+
+        for prov_name, versioned_reqs in providers_info.items():
+            for cap, ver in versioned_reqs.items():
+                cap_versions[cap].add(ver)
+
+        bloc_defining = {cap: sorted(versions) for cap, versions in cap_versions.items()
+                         if len(versions) > 1}
+
+        # Step 3: Group providers by bloc
+        # Use the first bloc-defining capability's version as bloc key
+        blocs = defaultdict(lambda: defaultdict(list))  # {bloc_key: {capability: [providers]}}
+
+        for cap in capabilities:
+            dep = self.pool.Dep(cap)
+            providers = self.pool.whatprovides(dep)
+
+            for p in providers:
+                if p.repo and p.repo.name != '@System':
+                    versioned_reqs = providers_info.get(p.name, {})
+
+                    # Get bloc key from versioned requires
+                    bloc_key = None
+                    for bc in sorted(bloc_defining.keys()):
+                        if bc in versioned_reqs:
+                            bloc_key = versioned_reqs[bc]
+                            break
+
+                    if bloc_key:
+                        blocs[bloc_key][cap].append(p.name)
+
+        # Convert defaultdicts to regular dicts for cleaner output
+        blocs_dict = {k: dict(v) for k, v in blocs.items()}
+
+        return {
+            'bloc_defining_caps': bloc_defining,
+            'blocs': blocs_dict,
+            'providers_info': providers_info
+        }
+
     def resolve_install(self, package_names: List[str],
                         choices: Dict[str, str] = None) -> Resolution:
         """Resolve packages to install.
@@ -483,10 +640,38 @@ class Resolver:
         not_found = []
 
         # Add explicit choices first (higher priority)
+        favored = set()
         for cap, pkg_name in choices.items():
+            if pkg_name in favored:
+                continue
+            favored.add(pkg_name)
             sel = self.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
             if not sel.isempty():
-                jobs += sel.jobs(solv.Job.SOLVER_INSTALL)
+                # INSTALL forces inclusion, FAVOR affects ordering
+                jobs += sel.jobs(solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_WEAK)
+                jobs += sel.jobs(solv.Job.SOLVER_FAVOR)
+
+        # Exclude alternatives for functionally relevant capabilities (soft exclusion)
+        excluded = set()
+        for cap, pkg_name in choices.items():
+            # Skip technical/auto-generated capabilities
+            if '(' in cap or cap.startswith(('lib', '/')):
+                continue
+
+            # Check if this capability has multiple providers (real alternative)
+            cap_dep = self.pool.Dep(cap)
+            providers = [p for p in self.pool.whatprovides(cap_dep)
+                        if p.repo and p.repo != self.pool.installed]
+            if len(providers) <= 1:
+                continue  # No alternatives to exclude
+
+            # Soft-exclude other providers (ERASE | WEAK = try not to install)
+            for p in providers:
+                if p.name != pkg_name and p.name not in excluded and p.name not in favored:
+                    excluded.add(p.name)
+                    exclude_sel = self.pool.select(p.name, solv.Selection.SELECTION_NAME)
+                    if not exclude_sel.isempty():
+                        jobs += exclude_sel.jobs(solv.Job.SOLVER_ERASE | solv.Job.SOLVER_WEAK)
 
         for name in package_names:
             # Use multiple selection flags for flexibility
@@ -640,6 +825,68 @@ class Resolver:
             install_size=install_size
         )
 
+    def build_dependency_graph(self, resolution: Resolution,
+                               requested_names: List[str]) -> Dict[str, List[str]]:
+        """Build dependency graph from a resolution.
+
+        Only shows relationships between packages that are actually in the resolution.
+        This ensures we don't show fake dependencies.
+
+        Args:
+            resolution: The Resolution from resolve_install()
+            requested_names: List of package names explicitly requested
+
+        Returns:
+            Dict mapping package name to list of package names it depends on
+            (only packages that are in the resolution)
+        """
+        if self.pool is None:
+            self.pool = self._create_pool()
+
+        # Get set of resolved package names
+        resolved_names = {a.name for a in resolution.actions
+                        if a.action in (TransactionType.INSTALL, TransactionType.UPGRADE)}
+
+        # Build map of capability -> resolved provider
+        cap_to_provider = {}
+        for name in resolved_names:
+            sel = self.pool.select(name, solv.Selection.SELECTION_NAME)
+            for s in sel.solvables():
+                if s.repo and s.repo.name != '@System':
+                    # Get all provides of this package
+                    for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                        cap_str = str(dep).split()[0]  # Remove version constraints
+                        # First provider wins (matches solver behavior)
+                        if cap_str not in cap_to_provider:
+                            cap_to_provider[cap_str] = name
+                    break
+
+        # Build dependency graph
+        graph = {name: [] for name in resolved_names}
+        requested_lower = {n.lower() for n in requested_names}
+
+        for name in resolved_names:
+            sel = self.pool.select(name, solv.Selection.SELECTION_NAME)
+            for s in sel.solvables():
+                if s.repo and s.repo.name != '@System':
+                    # Get requires
+                    for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                        dep_str = str(dep)
+                        cap = dep_str.split()[0]  # Remove version constraints
+
+                        # Skip rpmlib and file deps
+                        if cap.startswith('rpmlib(') or cap.startswith('/'):
+                            continue
+
+                        # Find which resolved package provides this
+                        provider = cap_to_provider.get(cap)
+                        if provider and provider != name and provider in resolved_names:
+                            if provider not in graph[name]:
+                                graph[name].append(provider)
+                    break
+
+        return graph
+
     def _find_alternatives(self, solver, trans, actions: List[PackageAction],
                            max_providers: int = 10) -> List[Alternative]:
         """Find cases where multiple packages could satisfy a dependency.
@@ -695,17 +942,9 @@ class Resolver:
                     if p.repo and p.repo != self.pool.installed:
                         provider_names.add(p.name)
 
-                # DEBUG
-                if 'webinterface' in base_cap.lower():
-                    import sys
-                    print(f"DEBUG: Found {base_cap} with {len(provider_names)} providers: {provider_names}", file=sys.stderr)
-
                 # If multiple different packages provide this, it's an alternative
                 if len(provider_names) > 1:
                     is_valid = self._is_valid_alternative(base_cap, provider_names, installing)
-                    # DEBUG
-                    if 'webinterface' in base_cap.lower():
-                        print(f"DEBUG: _is_valid_alternative({base_cap}) = {is_valid}", file=sys.stderr)
                     if not is_valid:
                         continue
 
