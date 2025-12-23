@@ -115,7 +115,27 @@ urpm i <package>              # Short alias
 --with-suggests               # Also install suggested packages
 --force                       # Force despite dependency problems
 --nosignature                 # Skip GPG verification (not recommended)
+--prefer=<prefs>              # Guide alternative choices (see below)
 ```
+
+#### Preference-guided installation
+
+When installing packages with alternatives (e.g., phpmyadmin that can use different PHP versions and web servers), use `--prefer` to guide choices:
+
+```bash
+# Prefer PHP 8.4 with Apache and php-fpm, exclude mod_php
+urpm i phpmyadmin --prefer=php:8.4,apache,php-fpm,-apache-mod_php
+
+# Prefer nginx instead of apache
+urpm i phpmyadmin --prefer=php:8.4,nginx,php-fpm
+```
+
+Preference syntax:
+- `capability:version` - Version constraint (e.g., `php:8.4`)
+- `pattern` - Prefer packages providing this capability (e.g., `apache`, `php-fpm`)
+- `-pattern` - Disfavor packages matching this (e.g., `-apache-mod_php`)
+
+Preferences work by checking package REQUIRES and PROVIDES, not package names.
 
 ### Remove packages
 
@@ -192,6 +212,13 @@ urpm rdepends <package>       # Show what requires a package (reverse deps)
 # Options for depends
 --tree                        # Show dependency tree
 --installed                   # Only show installed dependencies
+--prefer=<prefs>              # Filter by preferences (same syntax as install)
+```
+
+Example with preferences:
+```bash
+# Show phpmyadmin dependencies preferring PHP 8.4
+urpm depends phpmyadmin --prefer=php:8.4
 ```
 
 ### File queries

@@ -21,20 +21,38 @@ Je subodore que c'est parce qu'il ne liste que des requires qui ne sont pas des 
 => Sans doute lié directement ou indirectement au souci de résolution de dépendances.
 => Il faudra trouver une idée pour afficher les alternatives intelligemment (couleurs ?) et les "blocs de dépendances croisées" sans boucler comme des idiots.
 
-# Alternatives
+# Alternatives et --prefer
 
-./bin/urpm i phpmyadmin ne se comporte pas comme urpmi vis à vis des choix à proposer.
+## État actuel (2025-12-23)
+L'option --prefer est fonctionnelle avec :
+- Contraintes de version : `--prefer=php:8.4`
+- Préférences positives : `--prefer=apache,php-fpm`
+- Préférences négatives : `--prefer=-apache-mod_php`
+- Combinaisons : `--prefer=php:8.4,apache,php-fpm,-apache-mod_php`
 
-Déjà il choisit php8.5-cgi d'autorité ce qui est extrêmement chiant. Et pas bon du dout.
+La sélection se fait maintenant sur les REQUIRES/PROVIDES, pas les noms de paquets.
 
-=> Gros travail d'amélioration de cette partie à faire
+## Améliorations à prévoir
 
-Voir à ce sujet le fichier de discussion avec Grok pour servir d'inspiration : libsolv_grok.txt
+### Ordre des choix
+- Quand on choisit au 2ème choix (après la version de PHP) entre cli, cgi et fpm,
+  y'a rien pour permettre de choisir "rien" qui irait avec apache-mod_php
+  (qui n'a besoin d'aucun des 3).
+- Idéalement il faudrait choisir la version de PHP PUIS la webinterface et
+  en dernier le serveur web si le choix de la webinterface n'a pas réglé la question.
 
-Idée complémentaire ajouter à urpm i :
-  --prefer=php8.5,php-fpm,nginx
+### Choix multiples
+- Pour l'instant rien ne permet de faire des choix multiples
+  (genre php8.4 ET 8.5, ou fpm ET cli)
+- Or quand on fait du développement la cli est presque toujours nécessaire
+  et parfois il faut tester sur plusieurs versions de PHP
 
-=> oriente les choix automatiquement, et urpm ne pose que les questions restantes s'il y en a...
+### Debug
+Les flags DEBUG_RESOLVER (resolver.py) et DEBUG_PREFERENCES (main.py)
+permettent d'activer les traces de debug.
+
+## Historique
+Voir le fichier de discussion avec Grok pour servir d'inspiration : libsolv_grok.txt
 
 # Pre-downloading
 

@@ -20,6 +20,9 @@ except ImportError:
 from .database import PackageDatabase
 
 
+# Debug flag for resolver - set to True to enable debug output
+DEBUG_RESOLVER = False
+
 # Regex to parse capability strings like "name[op version]"
 CAP_REGEX = re.compile(r'^([^\[]+)(?:\[([<>=!]+)\s*(.+)\])?$')
 
@@ -619,7 +622,9 @@ class Resolver:
 
     def resolve_install(self, package_names: List[str],
                         choices: Dict[str, str] = None,
-                        favored_packages: set = None) -> Resolution:
+                        favored_packages: set = None,
+                        explicit_disfavor: set = None,
+                        preference_patterns: list = None) -> Resolution:
         """Resolve packages to install.
 
         Args:
@@ -627,6 +632,10 @@ class Resolver:
             choices: Optional dict mapping capability -> chosen package name
                      for resolving alternatives (e.g., {"task-sound": "task-pulseaudio"})
             favored_packages: Optional set of package names to favor (from preferences)
+            explicit_disfavor: Optional set of package names to explicitly disfavor
+                     (from negative preferences like -apache-mod_php)
+            preference_patterns: Optional list of name patterns from user preferences
+                     (packages matching ALL patterns get INSTALL jobs when competing)
 
         Returns:
             Resolution with success status and package actions.
@@ -636,6 +645,10 @@ class Resolver:
             choices = {}
         if favored_packages is None:
             favored_packages = set()
+        if explicit_disfavor is None:
+            explicit_disfavor = set()
+        if preference_patterns is None:
+            preference_patterns = []
 
         # Reuse existing pool if available, otherwise create new one
         if self.pool is None:
@@ -650,7 +663,17 @@ class Resolver:
         disfavored = set()
         chosen_packages = set(choices.values())
 
+        # Add explicit disfavor packages (from negative preferences like -apache-mod_php)
+        for pkg_name in explicit_disfavor:
+            disfavored.add(pkg_name)
+        if DEBUG_RESOLVER and explicit_disfavor:
+            print(f"DEBUG RESOLVER: explicit_disfavor = {explicit_disfavor}")
+
+        # Convert favored_packages to lowercase for comparison
+        favored_packages_lower = {p.lower() for p in favored_packages}
+
         # For each choice, DISFAVOR alternatives (packages providing same capability)
+        # BUT don't disfavor packages that are explicitly in favored_packages
         for cap, pkg_name in choices.items():
             chosen_packages.add(pkg_name)
             cap_dep = self.pool.Dep(cap)
@@ -658,34 +681,77 @@ class Resolver:
                 for provider in self.pool.whatprovides(cap_dep):
                     if provider.repo and provider.repo.name != '@System':
                         if provider.name != pkg_name:
-                            disfavored.add(provider.name)
+                            # Don't disfavor if it's in favored_packages
+                            if provider.name.lower() not in favored_packages_lower:
+                                disfavored.add(provider.name)
 
-        # Add favored packages - but SKIP those that are alternatives to choices
-        favored_provides = {}  # {capability: favored_pkg_name}
+        # Collect capabilities provided by explicitly disfavored packages
+        # We'll use this to know which favored packages should get INSTALL jobs
+        disfavored_caps = set()
+        for pkg_name in explicit_disfavor:
+            sel = self.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
+            for s in sel.solvables():
+                if s.repo and s.repo.name != '@System':
+                    for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                        cap = str(dep).split()[0]
+                        if not cap.startswith(('rpmlib(', '/', 'lib', 'pkgconfig(')):
+                            disfavored_caps.add(cap)
+
+        def pkg_matches_preferences(solvable, patterns: list) -> bool:
+            """Check if package REQUIRES or PROVIDES all preference capabilities.
+
+            A package matches if for each pattern, it either:
+            - REQUIRES a capability matching the pattern, OR
+            - PROVIDES a capability matching the pattern
+            """
+            if not patterns:
+                return False
+
+            # Get package's requires and provides
+            pkg_requires = set()
+            pkg_provides = set()
+            for dep in solvable.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                pkg_requires.add(str(dep).split()[0].lower())
+            for dep in solvable.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                pkg_provides.add(str(dep).split()[0].lower())
+
+            # Check each pattern - package must require OR provide it
+            for pattern in patterns:
+                pattern_lower = pattern.lower()
+                if pattern_lower not in pkg_requires and pattern_lower not in pkg_provides:
+                    return False
+            return True
+
+        # Add favored packages
         for pkg_name in favored_packages:
-            if pkg_name in favored or pkg_name in disfavored:
+            if pkg_name in favored:
                 continue
             favored.add(pkg_name)
             sel = self.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
             if not sel.isempty():
                 jobs += sel.jobs(solv.Job.SOLVER_FAVOR)
-                # Collect what this package provides
+
+                # Only add INSTALL job for packages that:
+                # 1. REQUIRE or PROVIDE all preference capabilities
+                # 2. Share capabilities with disfavored packages
                 for s in sel.solvables():
                     if s.repo and s.repo.name != '@System':
-                        for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
-                            cap = str(dep).split()[0]
-                            if not cap.startswith(('rpmlib(', '/', 'lib', 'pkgconfig(')):
-                                favored_provides[cap] = pkg_name
+                        if preference_patterns and pkg_matches_preferences(s, preference_patterns):
+                            pkg_caps = set()
+                            for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                                cap = str(dep).split()[0]
+                                if not cap.startswith(('rpmlib(', '/', 'lib', 'pkgconfig(')):
+                                    pkg_caps.add(cap)
+                            if pkg_caps & disfavored_caps:
+                                jobs += sel.jobs(solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_WEAK)
+                                if DEBUG_RESOLVER:
+                                    print(f"DEBUG RESOLVER: FAVOR+INSTALL for {pkg_name} (requires/provides all patterns)")
                         break
 
-        # DISFAVOR packages that provide the same capabilities but aren't favored
-        for cap, favored_pkg in favored_provides.items():
-            cap_dep = self.pool.Dep(cap)
-            if cap_dep:
-                for provider in self.pool.whatprovides(cap_dep):
-                    if provider.repo and provider.repo.name != '@System':
-                        if provider.name not in favored and provider.name not in disfavored:
-                            disfavored.add(provider.name)
+        if DEBUG_RESOLVER:
+            apache_mod_in_disfavored = [p for p in disfavored if 'apache-mod_php' in p]
+            if apache_mod_in_disfavored:
+                print(f"DEBUG RESOLVER: apache-mod packages in disfavored: {apache_mod_in_disfavored}")
 
         # Apply DISFAVOR jobs for all disfavored packages
         for pkg_name in disfavored:
@@ -1153,7 +1219,8 @@ class Resolver:
         return False
 
     def find_available_suggests(self, package_names: List[str],
-                                choices: Dict[str, str] = None) -> List[PackageAction]:
+                                choices: Dict[str, str] = None,
+                                resolved_packages: List[str] = None) -> List[PackageAction]:
         """Find packages that are suggested by the given packages.
 
         Suggests are not automatically installed by libsolv, so we need to
@@ -1163,6 +1230,8 @@ class Resolver:
             package_names: List of package names to check suggests for
             choices: Dict mapping capability -> chosen package name.
                      Used to filter out suggests that conflict with choices.
+            resolved_packages: List of package names already in the transaction.
+                     Used to filter out suggests that will be installed anyway.
 
         Returns:
             List of PackageAction for available suggested packages
@@ -1182,36 +1251,39 @@ class Resolver:
             for s in self.pool.installed.solvables:
                 installed_names.add(s.name.lower())
 
+        # Also consider packages already in the transaction as "installed"
+        if resolved_packages:
+            for pkg_name in resolved_packages:
+                installed_names.add(pkg_name.lower())
+
         # Build set of "rejected" packages - alternatives that weren't chosen
         # e.g., if user chose pulseaudio for pulseaudio-daemon, reject pipewire-pulseaudio
         rejected_packages = set()
+
+        # Internal RPM/systemd triggers - not user-facing capabilities
+        # These are provided by many unrelated packages and should not be used
+        # for alternative selection
+        internal_caps = {
+            'should-restart',       # systemd restart trigger (glibc, dbus, systemd...)
+            'postshell',            # post-install shell requirement
+            'config',               # generic config capability
+            'bundled',              # bundled library marker
+            'debuginfo',            # debug info marker
+        }
+
         for cap, chosen in choices.items():
+            # Skip internal triggers - they're not real alternatives
+            if cap in internal_caps:
+                continue
+
             # Find all providers of this capability
             dep = self.pool.Dep(cap)
             for p in self.pool.whatprovides(dep):
                 if p.name != chosen:
                     rejected_packages.add(p.name.lower())
 
-        # Also reject alternatives for capabilities already satisfied by installed packages
-        # e.g., if pulseaudio is installed and provides pulseaudio-daemon, reject pipewire-pulseaudio
-        if self.pool.installed:
-            for s in self.pool.installed.solvables:
-                for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
-                    cap_str = str(dep)
-                    # Skip versioned provides and the package name itself
-                    if '[' in cap_str or '(' in cap_str or cap_str == s.name:
-                        continue
-                    # Find all providers of this capability
-                    providers = self.pool.whatprovides(dep)
-                    provider_names = set()
-                    for p in providers:
-                        if p.repo and p.repo != self.pool.installed:
-                            provider_names.add(p.name.lower())
-                    # If there are multiple providers, reject the ones not installed
-                    if len(provider_names) > 1:
-                        for pname in provider_names:
-                            if pname != s.name.lower():
-                                rejected_packages.add(pname)
+        if DEBUG_RESOLVER and 'phpmyadmin' in package_names:
+            print(f"DEBUG rejected_packages from choices: {sorted(rejected_packages)[:20]}")
 
         # For each package, find its suggests
         for pkg_name in package_names:
@@ -1222,21 +1294,36 @@ class Resolver:
             for s in sel.solvables():
                 # Get suggests deps
                 suggests_deps = s.lookup_deparray(solv.SOLVABLE_SUGGESTS)
+                if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
+                    print(f"DEBUG SUGGESTS: {pkg_name} has {len(suggests_deps)} suggests")
+                    for d in suggests_deps:
+                        print(f"  - {d}")
                 for dep in suggests_deps:
                     # Find packages that satisfy this suggest
                     providers = self.pool.whatprovides(dep)
+                    if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
+                        prov_names = [p.name for p in providers if p.repo and p.repo.name != '@System']
+                        if prov_names:
+                            print(f"  {dep} -> providers: {prov_names[:5]}")
                     for provider in providers:
                         # Skip if already installed or already in our list
                         if provider.name.lower() in installed_names:
+                            if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
+                                print(f"    SKIP {provider.name}: already installed")
                             continue
                         if provider.name.lower() in seen:
+                            if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
+                                print(f"    SKIP {provider.name}: already seen")
                             continue
                         # Skip if it's a src package
                         if provider.arch in ('src', 'nosrc'):
                             continue
                         # Skip suggests that require rejected packages
                         # (packages that conflict with user's choices)
-                        if self._requires_rejected(provider, rejected_packages):
+                        debug_this = (pkg_name == 'phpmyadmin' and provider.name in ('php8.4-bz2', 'php8.4-zip', 'php8.5-bz2', 'php8.5-zip'))
+                        if self._requires_rejected(provider, rejected_packages, debug=debug_this):
+                            if pkg_name == 'phpmyadmin':
+                                print(f"    SKIP {provider.name}: requires rejected package")
                             continue
 
                         seen.add(provider.name.lower())
@@ -1255,7 +1342,7 @@ class Resolver:
 
         return suggests
 
-    def _requires_rejected(self, solvable, rejected_packages: set) -> bool:
+    def _requires_rejected(self, solvable, rejected_packages: set, debug=False) -> bool:
         """Check if a solvable requires any rejected package.
 
         A package is "rejected" if it was an alternative that the user
@@ -1265,6 +1352,7 @@ class Resolver:
         Args:
             solvable: The solvable to check
             rejected_packages: Set of rejected package names (lowercase)
+            debug: If True, print debug info
 
         Returns:
             True if the solvable requires a rejected package
@@ -1276,11 +1364,15 @@ class Resolver:
 
             # If ALL providers are rejected, or if the only provider is rejected
             if provider_names and provider_names.issubset(rejected_packages):
+                if debug:
+                    print(f"      {solvable.name} rejected: dep {dep} has all providers in rejected: {provider_names}")
                 return True
 
             # Also check if the dependency itself is a rejected package name
             dep_name = str(dep).split()[0].lower()
             if dep_name in rejected_packages:
+                if debug:
+                    print(f"      {solvable.name} rejected: dep name {dep_name} is in rejected_packages")
                 return True
 
         return False
@@ -2335,42 +2427,42 @@ class Resolver:
         logger = logging.getLogger(__name__)
         logger.debug(f"Orphan detection: dep_tree={len(dep_tree)}, unrequested={len(unrequested)}, initial to_remove={len(to_remove)}")
 
-        # DEBUG: Write to file for analysis
-        try:
-            with open('.debug-orphans.log', 'w') as f:
-                f.write(f"dep_tree size: {len(dep_tree)}\n")
-                f.write(f"unrequested size: {len(unrequested)}\n")
-                f.write(f"initial to_remove size: {len(to_remove)}\n")
-                f.write(f"all_installed size: {len(all_installed)}\n")
-                f.write(f"cap_to_pkg size: {len(cap_to_pkg)}\n\n")
+        if DEBUG_RESOLVER:
+            try:
+                with open('.debug-orphans.log', 'w') as f:
+                    f.write(f"dep_tree size: {len(dep_tree)}\n")
+                    f.write(f"unrequested size: {len(unrequested)}\n")
+                    f.write(f"initial to_remove size: {len(to_remove)}\n")
+                    f.write(f"all_installed size: {len(all_installed)}\n")
+                    f.write(f"cap_to_pkg size: {len(cap_to_pkg)}\n\n")
 
-                # Check .so capability resolution
-                test_cap = "libKF6CoreAddons.so.6()(64bit)"
-                if test_cap in cap_to_pkg:
-                    f.write(f"'{test_cap}' -> {cap_to_pkg[test_cap]}\n")
-                else:
-                    f.write(f"'{test_cap}' NOT in cap_to_pkg\n")
-                    similar = [c for c in cap_to_pkg.keys() if 'KF6CoreAddons' in c]
-                    f.write(f"Similar caps: {similar[:10]}\n")
-                f.write("\n")
+                    # Check .so capability resolution
+                    test_cap = "libKF6CoreAddons.so.6()(64bit)"
+                    if test_cap in cap_to_pkg:
+                        f.write(f"'{test_cap}' -> {cap_to_pkg[test_cap]}\n")
+                    else:
+                        f.write(f"'{test_cap}' NOT in cap_to_pkg\n")
+                        similar = [c for c in cap_to_pkg.keys() if 'KF6CoreAddons' in c]
+                        f.write(f"Similar caps: {similar[:10]}\n")
+                    f.write("\n")
 
-                # Check if lib64kf6coreaddons6 is in dep_tree and to_remove
-                f.write(f"lib64kf6coreaddons6 in dep_tree: {'lib64kf6coreaddons6' in dep_tree}\n")
-                f.write(f"kcoreaddons in dep_tree: {'kcoreaddons' in dep_tree}\n")
-                f.write(f"lib64kf6coreaddons6 in to_remove: {'lib64kf6coreaddons6' in to_remove}\n")
-                f.write(f"kcoreaddons in to_remove: {'kcoreaddons' in to_remove}\n")
-                f.write(f"'lib64kf6coreaddons6' in unrequested: {'lib64kf6coreaddons6' in unrequested}\n\n")
+                    # Check if lib64kf6coreaddons6 is in dep_tree and to_remove
+                    f.write(f"lib64kf6coreaddons6 in dep_tree: {'lib64kf6coreaddons6' in dep_tree}\n")
+                    f.write(f"kcoreaddons in dep_tree: {'kcoreaddons' in dep_tree}\n")
+                    f.write(f"lib64kf6coreaddons6 in to_remove: {'lib64kf6coreaddons6' in to_remove}\n")
+                    f.write(f"kcoreaddons in to_remove: {'kcoreaddons' in to_remove}\n")
+                    f.write(f"'lib64kf6coreaddons6' in unrequested: {'lib64kf6coreaddons6' in unrequested}\n\n")
 
-                # Check which dep_tree packages are NOT in unrequested
-                not_in_unrequested = [p for p in dep_tree if p.lower() not in unrequested]
-                f.write(f"dep_tree packages NOT in unrequested ({len(not_in_unrequested)}):\n")
-                for p in sorted(not_in_unrequested)[:50]:
-                    f.write(f"  {p}\n")
-                if len(not_in_unrequested) > 50:
-                    f.write(f"  ... and {len(not_in_unrequested) - 50} more\n")
-                f.write("\n")
-        except:
-            pass
+                    # Check which dep_tree packages are NOT in unrequested
+                    not_in_unrequested = [p for p in dep_tree if p.lower() not in unrequested]
+                    f.write(f"dep_tree packages NOT in unrequested ({len(not_in_unrequested)}):\n")
+                    for p in sorted(not_in_unrequested)[:50]:
+                        f.write(f"  {p}\n")
+                    if len(not_in_unrequested) > 50:
+                        f.write(f"  ... and {len(not_in_unrequested) - 50} more\n")
+                    f.write("\n")
+            except:
+                pass
 
         # Orphan detection algorithm:
         # A package can be removed if ALL its reverse deps are also being removed.
@@ -2405,20 +2497,20 @@ class Resolver:
 
         to_remove = candidates
 
-        # DEBUG
-        try:
-            with open('.debug-orphans.log', 'a') as f:
-                f.write(f"Options: erase_recommends={erase_recommends}, keep_suggests={keep_suggests}\n")
-                f.write(f"Iterations: {iteration}\n")
-                f.write(f"Initial candidates: {len(to_remove) + len(removed_from_candidates)}\n")
-                f.write(f"Removed from candidates: {len(removed_from_candidates)}\n")
-                f.write(f"Final to_remove: {len(to_remove)}\n\n")
-                f.write(f"Packages that must stay (R=Requires, M=Recommends, S=Suggests):\n")
-                for pkg in sorted(removed_from_candidates.keys()):
-                    blocker, dep_type = removed_from_candidates[pkg]
-                    f.write(f"  {pkg} <-[{dep_type}]- {blocker}\n")
-        except:
-            pass
+        if DEBUG_RESOLVER:
+            try:
+                with open('.debug-orphans.log', 'a') as f:
+                    f.write(f"Options: erase_recommends={erase_recommends}, keep_suggests={keep_suggests}\n")
+                    f.write(f"Iterations: {iteration}\n")
+                    f.write(f"Initial candidates: {len(to_remove) + len(removed_from_candidates)}\n")
+                    f.write(f"Removed from candidates: {len(removed_from_candidates)}\n")
+                    f.write(f"Final to_remove: {len(to_remove)}\n\n")
+                    f.write(f"Packages that must stay (R=Requires, M=Recommends, S=Suggests):\n")
+                    for pkg in sorted(removed_from_candidates.keys()):
+                        blocker, dep_type = removed_from_candidates[pkg]
+                        f.write(f"  {pkg} <-[{dep_type}]- {blocker}\n")
+            except:
+                pass
 
         logger.debug(f"Orphan detection: iterations={iteration}, kept={len(removed_from_candidates)}, final={len(to_remove)}")
 

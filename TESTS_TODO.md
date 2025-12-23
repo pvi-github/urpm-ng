@@ -33,6 +33,33 @@
   - Tester mode --auto prend le premier choix automatiquement
   - Tester re-résolution après choix utilisateur
 
+- [ ] Option --prefer (résolution guidée par préférences)
+  **Tests intensifs requis - fonctionnalité complexe**
+
+  Cas de base :
+  - Contrainte de version : `urpm i phpmyadmin --prefer=php:8.4`
+    → doit choisir php8.4-* au lieu de php8.5-*
+  - Préférence simple : `urpm i phpmyadmin --prefer=apache`
+    → doit favoriser les paquets qui REQUIRE ou PROVIDE apache
+  - Préférence négative : `urpm i phpmyadmin --prefer=-apache-mod_php`
+    → doit exclure apache-mod_php du choix
+
+  Cas combinés :
+  - `--prefer=php:8.4,apache,php-fpm,-apache-mod_php`
+    → doit installer php8.4-fpm-apache, PAS php8.4-fpm-nginx, PAS apache-mod_php8.4
+  - `--prefer=php:8.4,nginx,php-fpm`
+    → doit installer php8.4-fpm-nginx, PAS php8.4-fpm-apache
+
+  Cas edge :
+  - Préférence sans match → doit continuer et poser question
+  - Préférences contradictoires → comportement à définir
+  - Avec --auto → doit utiliser les préférences sans demander
+
+  Vérifier que :
+  - La sélection est basée sur REQUIRES/PROVIDES, pas sur les noms de paquets
+  - Les paquets disfavorés ne sont jamais installés sauf si absolument requis
+  - L'ordre des préférences est respecté
+
 
 ## Tests automatisés (P1)
 

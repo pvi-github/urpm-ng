@@ -19,6 +19,10 @@ from .. import __version__
 from ..core.database import PackageDatabase
 
 
+# Debug flag for preferences matching - set to True to enable debug output
+DEBUG_PREFERENCES = False
+
+
 def check_dependencies() -> list:
     """Check for required Python modules.
 
@@ -2053,6 +2057,17 @@ def _add_preferences_to_choices(pool, resolved_packages: set, choices: dict) -> 
     import solv
     from collections import defaultdict
 
+    # Internal RPM/systemd triggers - not user-facing capabilities
+    # These are provided by many unrelated packages and should not be used
+    # for alternative selection
+    INTERNAL_CAPABILITIES = {
+        'should-restart',       # systemd restart trigger (glibc, dbus, systemd...)
+        'postshell',            # post-install shell requirement
+        'config',               # generic config capability
+        'bundled',              # bundled library marker
+        'debuginfo',            # debug info marker
+    }
+
     # First pass: collect all capabilities and their providers from resolved_packages
     cap_to_providers = defaultdict(set)  # {capability: {provider1, provider2, ...}}
 
@@ -2064,6 +2079,9 @@ def _add_preferences_to_choices(pool, resolved_packages: set, choices: dict) -> 
                     cap = str(dep).split()[0]
                     # Skip noise
                     if cap.startswith(('rpmlib(', '/', 'lib', 'pkgconfig(')):
+                        continue
+                    # Skip internal triggers
+                    if cap in INTERNAL_CAPABILITIES:
                         continue
                     # Skip self-provide
                     if cap == s.name:
@@ -2256,11 +2274,16 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                             for cap in caps_to_remove:
                                 del choices[cap]
 
-        # Pass resolved_packages as favored_packages so solver prefers them
+        # Pass resolved_packages AND compatible_providers as favored_packages
+        # so solver prefers both the explicitly preferred packages AND packages
+        # that depend on them (e.g., php8.4-fpm-apache depends on php8.4-fpm)
+        favored = preferences.resolved_packages | preferences._compatible_providers
         result = resolver.resolve_install(
             packages,
             choices=choices,
-            favored_packages=preferences.resolved_packages
+            favored_packages=favored,
+            explicit_disfavor=preferences.disfavored_packages,
+            preference_patterns=preferences.name_patterns
         )
 
         # Handle alternatives (multiple providers for same capability)
@@ -2460,7 +2483,9 @@ def cmd_install(args, db: PackageDatabase) -> int:
     # Find available suggests only if --with-suggests is specified
     all_to_install = [a.name for a in result.actions]
     if with_suggests:
-        suggests = resolver.find_available_suggests(all_to_install, choices=choices)
+        suggests = resolver.find_available_suggests(
+            all_to_install, choices=choices, resolved_packages=all_to_install
+        )
     else:
         suggests = []
 
@@ -6104,14 +6129,19 @@ class PreferencesMatcher:
     def __init__(self, prefer_str: str = None):
         self.version_constraints = {}  # {capability: version}
         self.name_patterns = []  # [pattern, ...]
+        self.negative_patterns = []  # [pattern, ...] - patterns to DISFAVOR
         self.resolved_packages = set()  # Packages resolved from patterns via whatprovides
+        self.disfavored_packages = set()  # Packages to explicitly disfavor
         self._compatible_providers = set()  # Packages that require something resolved_packages provide
         if prefer_str:
             for part in prefer_str.split(','):
                 part = part.strip()
                 if not part:
                     continue
-                if ':' in part:
+                # Negative preference: -pattern means DISFAVOR
+                if part.startswith('-'):
+                    self.negative_patterns.append(part[1:].lower())
+                elif ':' in part:
                     # capability:version format
                     cap, ver = part.split(':', 1)
                     self.version_constraints[cap.lower()] = ver.lower()
@@ -6186,6 +6216,22 @@ class PreferencesMatcher:
 
         self.resolved_packages = result
 
+        # Resolve negative patterns to disfavored_packages
+        for neg_pattern in self.negative_patterns:
+            # Try as capability first
+            candidates = get_candidates(neg_pattern)
+            if candidates:
+                self.disfavored_packages.update(candidates)
+            else:
+                # Try as glob pattern on package names
+                import fnmatch
+                for s in pool.solvables_iter():
+                    if s.repo and s.repo.name != '@System':
+                        name_lower = s.name.lower()
+                        # Match if pattern is substring or glob
+                        if neg_pattern in name_lower or fnmatch.fnmatch(name_lower, f'*{neg_pattern}*'):
+                            self.disfavored_packages.add(name_lower)
+
         # Now find packages that are compatible with resolved_packages
         # A package is compatible if it requires something that a resolved package provides
         self._find_compatible_providers(pool)
@@ -6195,11 +6241,20 @@ class PreferencesMatcher:
 
         Excludes packages that are alternatives to resolved_packages (provide
         the same capabilities without requiring them).
+        Also filters by version to only include packages matching the preferred versions.
         """
         import solv
+        import re
 
         if not self.resolved_packages:
             return
+
+        # Extract versions from resolved packages (e.g., php8.4-fpm -> 8.4)
+        preferred_versions = set()
+        for pkg_name in self.resolved_packages:
+            match = re.search(r'(\d+\.\d+)', pkg_name)
+            if match:
+                preferred_versions.add(match.group(1))
 
         # Collect capabilities provided by resolved packages
         provided_caps = set()
@@ -6221,6 +6276,15 @@ class PreferencesMatcher:
             if name_lower in self.resolved_packages:
                 continue
 
+            # Filter by version: if resolved packages have versions, only accept
+            # compatible providers with matching versions
+            if preferred_versions:
+                pkg_version_match = re.search(r'(\d+\.\d+)', name_lower)
+                if pkg_version_match:
+                    pkg_version = pkg_version_match.group(1)
+                    if pkg_version not in preferred_versions:
+                        continue  # Skip packages with wrong version
+
             # Get this package's requires and provides
             pkg_requires = set()
             pkg_provides = set()
@@ -6239,6 +6303,13 @@ class PreferencesMatcher:
 
             if requires_preferred and not is_alternative:
                 self._compatible_providers.add(name_lower)
+
+        if DEBUG_PREFERENCES:
+            if 'php8.4-fpm-apache' in self._compatible_providers:
+                print(f"DEBUG: php8.4-fpm-apache IS in _compatible_providers")
+            else:
+                print(f"DEBUG: php8.4-fpm-apache NOT in _compatible_providers")
+                print(f"DEBUG: provided_caps sample: {list(provided_caps)[:10]}")
 
     def match_bloc_version(self, bloc_defining_caps: dict, bloc_key: str) -> bool:
         """Check if a bloc matches version constraints or resolved packages.
