@@ -376,16 +376,22 @@ class TransactionQueue:
                     ).to_json() + "\n")
 
                 if op.op_type == OperationType.INSTALL:
+                    # Always release parent after last install package
+                    # (before rpmdb sync which can take 30-60 seconds)
+                    is_last_install = (i + 1 >= len(self.operations) or
+                                       self.operations[i + 1].op_type != OperationType.INSTALL)
                     success, count, errors = self._execute_install(
                         op,
                         pipe_state,
-                        release_parent_after=is_last_foreground
+                        release_parent_after=(is_last_foreground or is_last_install)
                     )
                 else:
+                    # For erase: release parent after if it's background OR if it's the last operation
+                    is_last_op = (i + 1 >= len(self.operations))
                     success, count, errors = self._execute_erase(
                         op,
                         pipe_state,
-                        release_parent_after=(op.background and not pipe_state['closed'])
+                        release_parent_after=((op.background or is_last_op) and not pipe_state['closed'])
                     )
 
                 if not pipe_state['closed']:
