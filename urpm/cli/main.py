@@ -429,6 +429,17 @@ def create_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Use pager for long output (less)'
     )
+    depends_parser.add_argument(
+        '--no-libs',
+        action='store_true',
+        help='Hide library packages (lib*, glibc) in tree view'
+    )
+    depends_parser.add_argument(
+        '--depth',
+        type=int,
+        default=5,
+        help='Maximum tree depth (default: 5)'
+    )
 
     # =========================================================================
     # rdepends / rd
@@ -501,6 +512,19 @@ def create_parser() -> argparse.ArgumentParser:
         parents=[display_parent]
     )
     whatsuggests_parser.add_argument(
+        'package',
+        help='Package name'
+    )
+
+    # =========================================================================
+    # why
+    # =========================================================================
+    why_parser = subparsers.add_parser(
+        'why',
+        help='Explain why a package is installed',
+        parents=[display_parent]
+    )
+    why_parser.add_argument(
         'package',
         help='Package name'
     )
@@ -6186,31 +6210,97 @@ def cmd_depends(args, db: PackageDatabase) -> int:
         for cap in sorted(requires):
             print(f"  {cap}")
     elif show_tree:
-        # --tree: show tree based on real libsolv resolution
+        # --tree: show actual dependency tree (what the package requires)
+        no_libs = getattr(args, 'no_libs', False)
+        max_depth = getattr(args, 'depth', 5)
+
+        # Build set of installed packages for coloring
+        installed_pkgs = set()
+        try:
+            import rpm
+            ts = rpm.TransactionSet()
+            for hdr in ts.dbMatch():
+                installed_pkgs.add(hdr[rpm.RPMTAG_NAME])
+        except ImportError:
+            pass
+
+        def is_lib_package(name: str) -> bool:
+            """Check if package is a library package."""
+            return (name.startswith('lib') or
+                    name in ('glibc', 'glibc-devel', 'filesystem', 'setup', 'basesystem'))
+
+        def print_requires_tree(pkg: str, visited: set, prefix: str, depth: int):
+            """Recursively print package requirements as a tree."""
+            if depth > max_depth:
+                print(f"{prefix}└── {colors.dim('... (max depth)')}")
+                return
+
+            pkg_requires = resolver.get_package_requires(pkg)
+            if not pkg_requires:
+                return
+
+            # Resolve capabilities to package names
+            deps = []
+            for cap in pkg_requires:
+                cap_base = cap.split('[')[0].split()[0] if '[' in cap else cap.split()[0]
+                if '(' in cap_base and not cap_base.startswith('lib'):
+                    cap_base = cap_base.split('(')[0]
+                providers = resolver.get_providers(cap_base, include_installed=True)
+                providers = [p for p in providers if p != pkg]
+                if providers:
+                    # Choose provider based on preference or first
+                    chosen = None
+                    for p in providers:
+                        if match_preference(p):
+                            chosen = p
+                            break
+                    if not chosen:
+                        chosen = providers[0]
+                    if chosen not in deps:
+                        # Filter libs if --no-libs
+                        if no_libs and is_lib_package(chosen):
+                            continue
+                        deps.append(chosen)
+
+            for i, dep in enumerate(sorted(deps)):
+                is_last = (i == len(deps) - 1)
+                connector = "└── " if is_last else "├── "
+                child_prefix = prefix + ("    " if is_last else "│   ")
+
+                # Color: green if installed, normal if not
+                if dep in installed_pkgs:
+                    dep_display = colors.success(dep)
+                else:
+                    dep_display = dep
+
+                if dep in visited:
+                    print(f"{prefix}{connector}{colors.dim(dep)} ⨂")
+                else:
+                    print(f"{prefix}{connector}{dep_display}")
+                    visited.add(dep)
+                    print_requires_tree(dep, visited, child_prefix, depth + 1)
+
+        def do_print_tree():
+            print(f"\n{pkg_name}")
+            print_requires_tree(pkg_name, {pkg_name}, "", 0)
+
         if use_pager:
             import io
             import subprocess
-            # Capture output
             old_stdout = sys.stdout
             sys.stdout = buffer = io.StringIO()
             try:
-                _print_dep_tree_from_resolution(
-                    resolver, pkg_name, choices_made, preferences
-                )
+                do_print_tree()
             finally:
                 sys.stdout = old_stdout
-            # Pipe to less
             output = buffer.getvalue()
             try:
                 proc = subprocess.Popen(['less', '-R'], stdin=subprocess.PIPE)
                 proc.communicate(input=output.encode())
             except (FileNotFoundError, BrokenPipeError):
-                # Fallback if less not available
                 print(output, end='')
         else:
-            _print_dep_tree_from_resolution(
-                resolver, pkg_name, choices_made, preferences
-            )
+            do_print_tree()
     elif show_all:
         # --all: flat list of all recursive dependencies
         all_deps = set()
@@ -7249,6 +7339,124 @@ def cmd_whatsuggests(args, db: PackageDatabase) -> int:
     return 0
 
 
+def cmd_why(args, db: PackageDatabase) -> int:
+    """Handle why command - explain why a package is installed."""
+    from ..core.resolver import Resolver
+    from . import colors
+
+    package = args.package
+    pkg_name = _extract_pkg_name(package)
+
+    # Check if package is installed
+    try:
+        import rpm
+        ts = rpm.TransactionSet()
+        mi = ts.dbMatch('name', pkg_name)
+        installed = False
+        for hdr in mi:
+            installed = True
+            break
+        if not installed:
+            print(f"Package '{pkg_name}' is not installed")
+            return 1
+    except ImportError:
+        print("rpm module not available")
+        return 1
+
+    # Get the list of auto-installed packages
+    resolver = Resolver(db)
+    unrequested = resolver._get_unrequested_packages()
+
+    # Check if manually installed
+    if pkg_name.lower() not in unrequested:
+        print(f"{colors.bold(pkg_name)}: {colors.success('explicitly installed')}")
+        return 0
+
+    # Package is auto-installed - find the dependency chain to an explicit package
+    # Build reverse dependency map
+    ts = rpm.TransactionSet()
+    provides_map = {}  # capability -> set of package names
+    reverse_deps = {}  # name -> set of names that require it
+
+    for hdr in ts.dbMatch():
+        name = hdr[rpm.RPMTAG_NAME]
+        if name == 'gpg-pubkey':
+            continue
+
+        # Record what this package provides
+        provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
+        for prov in provides:
+            prov_base = prov.split('(')[0]
+            if prov_base not in provides_map:
+                provides_map[prov_base] = set()
+            provides_map[prov_base].add(name)
+
+        # Record reverse deps (what this package requires)
+        requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
+        for req in requires:
+            if req.startswith('rpmlib(') or req.startswith('/'):
+                continue
+            req_base = req.split('(')[0]
+            providers = provides_map.get(req_base, set())
+            for provider in providers:
+                if provider not in reverse_deps:
+                    reverse_deps[provider] = set()
+                reverse_deps[provider].add(name)
+
+    # Also add recommends as reverse deps
+    for hdr in ts.dbMatch():
+        name = hdr[rpm.RPMTAG_NAME]
+        if name == 'gpg-pubkey':
+            continue
+        recommends = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
+        for rec in recommends:
+            rec_base = rec.split('(')[0]
+            providers = provides_map.get(rec_base, set())
+            for provider in providers:
+                if provider not in reverse_deps:
+                    reverse_deps[provider] = set()
+                reverse_deps[provider].add(name)
+
+    # BFS to find shortest path to an explicit package
+    from collections import deque
+
+    queue = deque([(pkg_name, [pkg_name])])
+    visited = {pkg_name}
+
+    while queue:
+        current, path = queue.popleft()
+
+        # Get packages that require/recommend current
+        for requirer in reverse_deps.get(current, []):
+            if requirer in visited:
+                continue
+            visited.add(requirer)
+
+            new_path = path + [requirer]
+
+            # Check if this is an explicit package
+            if requirer.lower() not in unrequested:
+                # Found it! Print the path
+                print(f"{colors.bold(pkg_name)}: installed as dependency\n")
+                print(f"Dependency chain to explicit package:\n")
+                for i, p in enumerate(new_path):
+                    indent = "  " * i
+                    if i == 0:
+                        print(f"{indent}{colors.dim(p)} (auto)")
+                    elif i == len(new_path) - 1:
+                        print(f"{indent}╰─ required by {colors.success(p)} (explicit)")
+                    else:
+                        print(f"{indent}╰─ required by {colors.dim(p)} (auto)")
+                return 0
+
+            queue.append((requirer, new_path))
+
+    # No explicit package found - it's an orphan
+    print(f"{colors.bold(pkg_name)}: {colors.warning('orphan')} (no explicit package requires it)")
+    print(f"\nThis package can be removed with: urpm autoremove --orphans")
+    return 0
+
+
 def cmd_not_implemented(args, db: PackageDatabase) -> int:
     """Placeholder for not yet implemented commands."""
     print(f"Command '{args.command}' not yet implemented")
@@ -7389,6 +7597,9 @@ def main(argv=None) -> int:
 
         elif args.command == 'whatsuggests':
             return cmd_whatsuggests(args, db)
+
+        elif args.command == 'why':
+            return cmd_why(args, db)
 
         elif args.command in ('config', 'cfg'):
             return cmd_config(args)
