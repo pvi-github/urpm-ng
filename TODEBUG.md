@@ -1,3 +1,93 @@
+# Performance de why
+
+La commande `why` utilise `_get_rdeps()` qui itère sur tous les paquets installés pour chaque niveau du BFS.
+Contrairement à `rdepends --hide-uninstalled` qui pré-construit le graphe en une passe, `why` fait des lookups répétés.
+
+A optimiser : utiliser `_build_rdeps_graph()` pour `why` aussi.
+
+# why et rdepends pas fonctionels (partiellement résolu)
+
+./bin/urpm why xwininfo
+xwininfo: installed as dependency
+
+Required by 1 explicit package(s):
+
+  libpwquality-tools (via xscreensaver-base → xscreensaver) <-- WTFF ?
+
+urpmq --whatrequires xwininfo
+joy2key
+kim4
+x11-tools
+xscreensaver-base
+xscreensaver-base
+xwininfo
+
+urpmq --whatrequires xscreensaver-base
+xscreensaver
+xscreensaver-base
+
+urpmq --whatrequires xscreensaver
+fvwm-crystal
+task-lxde
+xscreensaver
+
+urpmq --whatrequires task-lxde
+task-lxde
+
+=> LXDE et ton why il ne le trouve pas!!
+
+./bin/urpm rdepends xscreensaver
+Packages that depend on xscreensaver: 48
+
+  fvwm-crystal
+  libreoffice-langpack-af <-- ces libreoffice n'ont absolument rien à faire là 
+  libreoffice-langpack-be
+  libreoffice-langpack-bg
+  libreoffice-langpack-br
+  libreoffice-langpack-ca
+  libreoffice-langpack-cs
+  libreoffice-langpack-cy
+  libreoffice-langpack-da
+  libreoffice-langpack-de
+  libreoffice-langpack-el
+  libreoffice-langpack-en
+  libreoffice-langpack-eo
+  libreoffice-langpack-es
+  libreoffice-langpack-et
+  libreoffice-langpack-eu
+  libreoffice-langpack-fi
+  libreoffice-langpack-fr
+  libreoffice-langpack-fy
+  libreoffice-langpack-gl
+  libreoffice-langpack-hr
+  libreoffice-langpack-hu
+  libreoffice-langpack-id
+  libreoffice-langpack-it
+  libreoffice-langpack-lt
+  libreoffice-langpack-lv
+  libreoffice-langpack-nb
+  libreoffice-langpack-nl
+  libreoffice-langpack-nn
+  libreoffice-langpack-nr
+  libreoffice-langpack-nso
+  libreoffice-langpack-pl
+  libreoffice-langpack-pt
+  libreoffice-langpack-pt_BR
+  libreoffice-langpack-ro
+  libreoffice-langpack-ru
+  libreoffice-langpack-sk
+  libreoffice-langpack-sl
+  libreoffice-langpack-sr
+  libreoffice-langpack-ss
+  libreoffice-langpack-sv
+  libreoffice-langpack-tn
+  libreoffice-langpack-tr
+  libreoffice-langpack-ts
+  libreoffice-langpack-uk
+  libreoffice-langpack-xh
+  libreoffice-langpack-zu
+  task-lxde
+
 
 # Gestion des peers souci de module parfois
 
