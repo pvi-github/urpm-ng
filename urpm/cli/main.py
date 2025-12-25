@@ -7064,11 +7064,56 @@ def _print_dep_tree_legacy(db: PackageDatabase, by_provider: dict, find_provider
             _print_dep_tree_legacy(db, sub_by_provider, find_provider, visited, child_prefix, max_depth, depth + 1)
 
 
+def _is_virtual_provide(provide: str) -> bool:
+    """Check if a provide is a virtual/generic capability that shouldn't be used for rdeps.
+
+    These are capabilities provided by many packages that don't represent
+    a real dependency on a specific package (fonts, applications, configs, etc.)
+    """
+    # Provides that start with these patterns are virtual
+    virtual_prefixes = (
+        'font(',           # font(:lang=XX), font(name)
+        'application(',    # application(foo.desktop)
+        'config(',         # config(pkgname)
+        'rpmlib(',         # rpmlib features
+        'pkgconfig(',      # pkgconfig provides - usually want the package name
+        'cmake(',          # cmake modules
+        'perl(',           # perl modules - ambiguous
+        'python',          # python modules - check below
+        'mimehandler(',    # mime handlers
+        'debuginfo(',      # debuginfo
+    )
+
+    prov_lower = provide.lower()
+    for prefix in virtual_prefixes:
+        if prov_lower.startswith(prefix):
+            return True
+
+    return False
+
+
 def cmd_rdepends(args, db: PackageDatabase) -> int:
     """Handle rdepends command - show reverse dependencies."""
+    from . import colors
+    from ..core.resolver import Resolver
+
     package = args.package
     pkg_name = _extract_pkg_name(package)
     show_tree = getattr(args, 'tree', False)
+
+    # Get set of installed packages for coloring
+    installed_pkgs = set()
+    try:
+        import rpm
+        ts = rpm.TransactionSet()
+        for hdr in ts.dbMatch():
+            installed_pkgs.add(hdr[rpm.RPMTAG_NAME])
+    except ImportError:
+        pass
+
+    # Get unrequested packages (auto-installed as deps)
+    resolver = Resolver(db)
+    unrequested_pkgs = resolver._get_unrequested_packages()
 
     # Cache for reverse deps lookup
     rdeps_cache = {}
@@ -7088,7 +7133,8 @@ def cmd_rdepends(args, db: PackageDatabase) -> int:
         if pkg and pkg.get('provides'):
             for prov in pkg['provides']:
                 cap = prov.split('[')[0].strip()
-                if cap not in provides:
+                # Skip virtual provides that don't represent real deps
+                if cap not in provides and not _is_virtual_provide(cap):
                     provides.append(cap)
 
         rdeps = set()
@@ -7129,10 +7175,18 @@ def cmd_rdepends(args, db: PackageDatabase) -> int:
 
     show_all = getattr(args, 'all', False)
 
+    def format_pkg(name: str) -> str:
+        """Format package name: green if explicit, blue if auto-installed."""
+        if name in installed_pkgs:
+            if name.lower() in unrequested_pkgs:
+                return colors.info(name)  # blue: auto-installed
+            return colors.success(name)   # green: explicit
+        return name
+
     if show_tree:
         # Recursive tree with reverse arrows
-        print(f"{package}")
-        _print_rdep_tree(direct_rdeps, get_rdeps, visited={package}, prefix="", max_depth=3)
+        print(f"{format_pkg(package)}")
+        _print_rdep_tree(direct_rdeps, get_rdeps, installed_pkgs, unrequested_pkgs, visited={package}, prefix="", max_depth=3)
     elif show_all:
         # Flat list of all recursive reverse dependencies
         all_rdeps = set(direct_rdeps)
@@ -7153,18 +7207,28 @@ def cmd_rdepends(args, db: PackageDatabase) -> int:
 
         print(f"All packages that depend on {package}: {len(all_rdeps)}\n")
         for rdep in sorted(all_rdeps):
-            print(f"  {rdep}")
+            print(f"  {format_pkg(rdep)}")
     else:
         # Flat list of direct reverse dependencies
         print(f"Packages that depend on {package}: {len(direct_rdeps)}\n")
         for rdep in direct_rdeps:
-            print(f"  {rdep}")
+            print(f"  {format_pkg(rdep)}")
 
     return 0
 
 
-def _print_rdep_tree(rdeps: list, get_rdeps, visited: set, prefix: str, max_depth: int, depth: int = 0):
+def _print_rdep_tree(rdeps: list, get_rdeps, installed_pkgs: set, unrequested_pkgs: set, visited: set, prefix: str, max_depth: int, depth: int = 0):
     """Print reverse dependency tree with reverse arrows to show direction."""
+    from . import colors
+
+    def format_pkg(name: str) -> str:
+        """Format package name: green if explicit, blue if auto-installed."""
+        if name in installed_pkgs:
+            if name.lower() in unrequested_pkgs:
+                return colors.info(name)  # blue: auto-installed
+            return colors.success(name)   # green: explicit
+        return name
+
     if depth > max_depth:
         if rdeps:
             print(f"{prefix}╰◄─ ... ({len(rdeps)} packages, max depth reached)")
@@ -7177,16 +7241,16 @@ def _print_rdep_tree(rdeps: list, get_rdeps, visited: set, prefix: str, max_dept
         child_prefix = prefix + ("    " if is_last else "│   ")
 
         if pkg_name in visited:
-            print(f"{prefix}{connector}{pkg_name} (circular)")
+            print(f"{prefix}{connector}{format_pkg(pkg_name)} (circular)")
             continue
 
         sub_rdeps = get_rdeps(pkg_name)
         if sub_rdeps:
-            print(f"{prefix}{connector}{pkg_name} ({len(sub_rdeps)})")
+            print(f"{prefix}{connector}{format_pkg(pkg_name)} ({len(sub_rdeps)})")
             visited.add(pkg_name)
-            _print_rdep_tree(sub_rdeps, get_rdeps, visited, child_prefix, max_depth, depth + 1)
+            _print_rdep_tree(sub_rdeps, get_rdeps, installed_pkgs, unrequested_pkgs, visited, child_prefix, max_depth, depth + 1)
         else:
-            print(f"{prefix}{connector}{pkg_name}")
+            print(f"{prefix}{connector}{format_pkg(pkg_name)}")
 
 
 def cmd_recommends(args, db: PackageDatabase) -> int:
@@ -7373,11 +7437,14 @@ def cmd_why(args, db: PackageDatabase) -> int:
         return 0
 
     # Package is auto-installed - find the dependency chain to an explicit package
-    # Build reverse dependency map
+    # Build reverse dependency map (two passes needed)
     ts = rpm.TransactionSet()
     provides_map = {}  # capability -> set of package names
     reverse_deps = {}  # name -> set of names that require it
+    pkg_requires = {}  # name -> list of requires
+    pkg_recommends = {}  # name -> list of recommends
 
+    # First pass: build provides_map and collect requires/recommends
     for hdr in ts.dbMatch():
         name = hdr[rpm.RPMTAG_NAME]
         if name == 'gpg-pubkey':
@@ -7386,74 +7453,131 @@ def cmd_why(args, db: PackageDatabase) -> int:
         # Record what this package provides
         provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
         for prov in provides:
-            prov_base = prov.split('(')[0]
-            if prov_base not in provides_map:
-                provides_map[prov_base] = set()
-            provides_map[prov_base].add(name)
-
-        # Record reverse deps (what this package requires)
-        requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
-        for req in requires:
-            if req.startswith('rpmlib(') or req.startswith('/'):
+            # Skip virtual provides that create false dependencies
+            if _is_virtual_provide(prov):
                 continue
-            req_base = req.split('(')[0]
-            providers = provides_map.get(req_base, set())
+            # Use full provide name, not truncated
+            if prov not in provides_map:
+                provides_map[prov] = set()
+            provides_map[prov].add(name)
+            # Also add package name itself
+            if name not in provides_map:
+                provides_map[name] = set()
+            provides_map[name].add(name)
+
+        # Store requires for second pass
+        requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
+        pkg_requires[name] = [r for r in requires
+                              if not r.startswith('rpmlib(') and not r.startswith('/')
+                              and not _is_virtual_provide(r)]
+
+        # Store recommends for second pass
+        recommends = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
+        pkg_recommends[name] = [r for r in recommends if not _is_virtual_provide(r)]
+
+    # Second pass: build reverse_deps using complete provides_map
+    for name, requires in pkg_requires.items():
+        for req in requires:
+            # Try exact match first, then base name without version constraints
+            providers = provides_map.get(req, set())
+            if not providers:
+                # Strip version constraint: "foo >= 1.0" -> "foo"
+                req_base = req.split()[0] if ' ' in req else req
+                providers = provides_map.get(req_base, set())
             for provider in providers:
                 if provider not in reverse_deps:
                     reverse_deps[provider] = set()
                 reverse_deps[provider].add(name)
 
     # Also add recommends as reverse deps
-    for hdr in ts.dbMatch():
-        name = hdr[rpm.RPMTAG_NAME]
-        if name == 'gpg-pubkey':
-            continue
-        recommends = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
+    for name, recommends in pkg_recommends.items():
         for rec in recommends:
-            rec_base = rec.split('(')[0]
-            providers = provides_map.get(rec_base, set())
+            # Try exact match first, then base name without version constraints
+            providers = provides_map.get(rec, set())
+            if not providers:
+                rec_base = rec.split()[0] if ' ' in rec else rec
+                providers = provides_map.get(rec_base, set())
             for provider in providers:
                 if provider not in reverse_deps:
                     reverse_deps[provider] = set()
                 reverse_deps[provider].add(name)
 
-    # BFS to find shortest path to an explicit package
+    # For each direct reverse dep, find the first explicit package in the chain
     from collections import deque
 
-    queue = deque([(pkg_name, [pkg_name])])
-    visited = {pkg_name}
+    direct_rdeps = reverse_deps.get(pkg_name, set())
+    if not direct_rdeps:
+        print(f"{colors.bold(pkg_name)}: {colors.warning('orphan')} (nothing requires it)")
+        print(f"\nThis package can be removed with: urpm autoremove --orphans")
+        return 0
 
-    while queue:
-        current, path = queue.popleft()
+    # For each direct rdep, find path to first explicit
+    results = {}  # direct_rdep -> (explicit_pkg, path) or None if orphan branch
 
-        # Get packages that require/recommend current
-        for requirer in reverse_deps.get(current, []):
-            if requirer in visited:
-                continue
-            visited.add(requirer)
+    for direct in direct_rdeps:
+        # BFS from this direct rdep to find first explicit
+        queue = deque([(direct, [direct])])
+        visited = {pkg_name, direct}
+        found_explicit = None
 
-            new_path = path + [requirer]
+        while queue and not found_explicit:
+            current, path = queue.popleft()
 
-            # Check if this is an explicit package
-            if requirer.lower() not in unrequested:
-                # Found it! Print the path
-                print(f"{colors.bold(pkg_name)}: installed as dependency\n")
-                print(f"Dependency chain to explicit package:\n")
-                for i, p in enumerate(new_path):
-                    indent = "  " * i
-                    if i == 0:
-                        print(f"{indent}{colors.dim(p)} (auto)")
-                    elif i == len(new_path) - 1:
-                        print(f"{indent}╰─ required by {colors.success(p)} (explicit)")
-                    else:
-                        print(f"{indent}╰─ required by {colors.dim(p)} (auto)")
-                return 0
+            # Is current explicit?
+            if current.lower() not in unrequested:
+                found_explicit = (current, path)
+                break
 
-            queue.append((requirer, new_path))
+            # Continue searching through auto packages
+            for requirer in reverse_deps.get(current, []):
+                if requirer in visited:
+                    continue
+                visited.add(requirer)
+                queue.append((requirer, path + [requirer]))
 
-    # No explicit package found - it's an orphan
-    print(f"{colors.bold(pkg_name)}: {colors.warning('orphan')} (no explicit package requires it)")
-    print(f"\nThis package can be removed with: urpm autoremove --orphans")
+        results[direct] = found_explicit
+
+    # Separate into branches that lead to explicit vs orphan branches
+    explicit_branches = {k: v for k, v in results.items() if v is not None}
+    orphan_branches = [k for k, v in results.items() if v is None]
+
+    if not explicit_branches:
+        print(f"{colors.bold(pkg_name)}: {colors.warning('orphan')} (no explicit package requires it)")
+        print(f"\nThis package can be removed with: urpm autoremove --orphans")
+        return 0
+
+    # Group by explicit package
+    by_explicit = {}  # explicit -> list of (direct_rdep, path)
+    for direct, (explicit, path) in explicit_branches.items():
+        if explicit not in by_explicit:
+            by_explicit[explicit] = []
+        by_explicit[explicit].append((direct, path))
+
+    print(f"{colors.bold(pkg_name)}: installed as dependency")
+    print(f"\nRequired by {colors.success(str(len(by_explicit)))} explicit package(s):\n")
+
+    for explicit_pkg in sorted(by_explicit.keys()):
+        entries = by_explicit[explicit_pkg]
+        # Use shortest path
+        entries.sort(key=lambda x: len(x[1]))
+        direct, path = entries[0]
+
+        if len(path) == 1:
+            # Direct dependency
+            print(f"  {colors.success(explicit_pkg)}")
+        else:
+            # Indirect - show chain
+            chain = " → ".join(path[:-1])
+            print(f"  {colors.success(explicit_pkg)} (via {colors.dim(chain)})")
+
+    # Show orphan branches if any
+    if orphan_branches:
+        print(f"\n{colors.dim('Also required by (orphan branches):')}")
+        for branch in sorted(orphan_branches)[:5]:
+            print(f"  {colors.dim(branch)}")
+        if len(orphan_branches) > 5:
+            print(f"  {colors.dim(f'... and {len(orphan_branches) - 5} more')}")
+
     return 0
 
 
