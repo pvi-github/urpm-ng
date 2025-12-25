@@ -238,17 +238,30 @@ urpm list upgradable          # Alias for updates
 ```bash
 urpm depends <package>        # Show what a package requires
 urpm rdepends <package>       # Show what requires a package (reverse deps)
+urpm why <package>            # Explain why a package is installed
 
 # Options for depends
 --tree                        # Show dependency tree
 --installed                   # Only show installed dependencies
 --prefer=<prefs>              # Filter by preferences (same syntax as install)
+
+# Options for rdepends
+--tree                        # Show reverse dependency tree
+--all                         # Show all recursive reverse dependencies (flat)
+--depth=N                     # Maximum tree depth (default: 3)
+--hide-uninstalled            # Only show paths leading to installed packages
 ```
 
 Example with preferences:
 ```bash
 # Show phpmyadmin dependencies preferring PHP 8.4
 urpm depends phpmyadmin --prefer=php:8.4
+```
+
+Example with rdepends:
+```bash
+# Show reverse dependency tree for rtkit, depth 10, only installed paths
+urpm rdepends --tree --hide-uninstalled --depth=10 rtkit
 ```
 
 ### Weak dependencies
