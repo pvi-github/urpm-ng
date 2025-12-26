@@ -2453,18 +2453,20 @@ def cmd_server_list(args, db: PackageDatabase) -> int:
     for srv in servers:
         status = colors.success("enabled") if srv['enabled'] else colors.dim("disabled")
         ip_mode = srv.get('ip_mode', 'auto')
+        # Pad first, then colorize (ANSI codes break alignment)
+        ip_padded = f"{ip_mode:>6}"
         if ip_mode == 'dual':
-            ip_str = colors.success('dual')
-        elif ip_mode == 'ipv4':
-            ip_str = 'ipv4'
+            ip_str = colors.success(ip_padded)
         elif ip_mode == 'ipv6':
-            ip_str = colors.info('ipv6')
+            ip_str = colors.info(ip_padded)
+        elif ip_mode == 'auto':
+            ip_str = colors.dim(ip_padded)
         else:
-            ip_str = colors.dim('auto')
+            ip_str = ip_padded
 
         name = srv['name'][:24]
         host = srv['host'][:29]
-        print(f"{name:<25} {srv['protocol']:<8} {host:<30} {srv['priority']:>4} {ip_str:>6} {status}")
+        print(f"{name:<25} {srv['protocol']:<8} {host:<30} {srv['priority']:>4} {ip_str} {status}")
 
     print()
     return 0
