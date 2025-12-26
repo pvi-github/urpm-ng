@@ -393,10 +393,10 @@ def create_parser() -> argparse.ArgumentParser:
     )
     
     # =========================================================================
-    # depends / d
+    # depends / d / requires
     # =========================================================================
     depends_parser = subparsers.add_parser(
-        'depends', aliases=['d'],
+        'depends', aliases=['d', 'requires', 'req'],
         help='Show package dependencies',
         parents=[display_parent]
     )
@@ -442,10 +442,10 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # =========================================================================
-    # rdepends / rd
+    # rdepends / rd / whatrequires
     # =========================================================================
     rdepends_parser = subparsers.add_parser(
-        'rdepends', aliases=['rd'],
+        'rdepends', aliases=['rd', 'whatrequires', 'wr'],
         help='Show reverse dependencies',
         parents=[display_parent]
     )
@@ -7082,9 +7082,11 @@ def cmd_depends(args, db: PackageDatabase) -> int:
     alternative_caps = []
 
     for cap in requires:
-        # Extract base capability (remove version constraints)
+        # Extract base capability (remove version constraints like [>= 1.0])
         cap_base = cap.split('[')[0].split()[0] if '[' in cap else cap.split()[0]
-        if '(' in cap_base:
+        # Don't strip () for library capabilities (.so files) - they need the full name
+        # e.g., libncursesw.so.6()(64bit) must stay as-is
+        if '(' in cap_base and '.so' not in cap_base:
             cap_base = cap_base.split('(')[0]
 
         providers = resolver.get_providers(cap_base, include_installed=True)
@@ -7263,8 +7265,9 @@ def cmd_depends(args, db: PackageDatabase) -> int:
 
         # Print single-provider deps
         if single_providers:
-            print(f"Dependencies of {package}: {len(single_providers)} packages\n")
-            for prov in sorted(set(single_providers)):
+            unique_deps = sorted(set(single_providers))
+            print(f"Dependencies of {package}: {len(unique_deps)} packages\n")
+            for prov in unique_deps:
                 print(f"  {prov}")
 
         # Print alternatives
@@ -8879,10 +8882,10 @@ def main(argv=None) -> int:
         elif args.command in ('find', 'f'):
             return cmd_find(args, db)
 
-        elif args.command in ('depends', 'd'):
+        elif args.command in ('depends', 'd', 'requires', 'req'):
             return cmd_depends(args, db)
 
-        elif args.command in ('rdepends', 'rd'):
+        elif args.command in ('rdepends', 'rd', 'whatrequires', 'wr'):
             return cmd_rdepends(args, db)
 
         elif args.command == 'recommends':
