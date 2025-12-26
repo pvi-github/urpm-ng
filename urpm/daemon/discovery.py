@@ -39,10 +39,23 @@ class Peer:
     media: List[str] = field(default_factory=list)
     last_seen: datetime = field(default_factory=datetime.now)
     version: str = ""
+    # Proxy info (v11+)
+    proxy_enabled: bool = False
+    local_version: str = ""  # Peer's local Mageia version
+    local_arch: str = ""     # Peer's local architecture
+    served_media: List[dict] = field(default_factory=list)  # [{version, arch, types}]
 
     def is_alive(self, timeout: int = PEER_TIMEOUT) -> bool:
         """Check if peer is still considered alive."""
         return datetime.now() - self.last_seen < timedelta(seconds=timeout)
+
+    def serves_version(self, version: str, arch: str = None) -> bool:
+        """Check if this peer serves packages for a given Mageia version."""
+        for sm in self.served_media:
+            if sm.get('version') == version:
+                if arch is None or sm.get('arch') == arch:
+                    return True
+        return False
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -53,6 +66,10 @@ class Peer:
             'last_seen': self.last_seen.isoformat(),
             'version': self.version,
             'alive': self.is_alive(),
+            'proxy_enabled': self.proxy_enabled,
+            'local_version': self.local_version,
+            'local_arch': self.local_arch,
+            'served_media': self.served_media,
         }
 
 
@@ -153,9 +170,22 @@ class PeerDiscovery:
 
             return [peer.to_dict() for peer in self.peers.values()]
 
-    def register_peer(self, host: str, port: int, media: List[str]) -> dict:
-        """Register or update a peer (called when receiving HTTP announce)."""
+    def register_peer(self, host: str, port: int, media: List[str],
+                       proxy_enabled: bool = False, local_version: str = "",
+                       local_arch: str = "", served_media: List[dict] = None) -> dict:
+        """Register or update a peer (called when receiving HTTP announce).
+
+        Args:
+            host: Peer host
+            port: Peer port
+            media: List of media names
+            proxy_enabled: Whether peer has proxy mode enabled
+            local_version: Peer's local Mageia version
+            local_arch: Peer's architecture
+            served_media: List of {version, arch, types} dicts
+        """
         key = f"{host}:{port}"
+        served_media = served_media or []
 
         with self._peers_lock:
             if key in self.peers:
@@ -163,12 +193,23 @@ class PeerDiscovery:
                 peer = self.peers[key]
                 peer.media = media
                 peer.last_seen = datetime.now()
+                peer.proxy_enabled = proxy_enabled
+                peer.local_version = local_version
+                peer.local_arch = local_arch
+                peer.served_media = served_media
                 logger.debug(f"Updated peer: {key}")
             else:
                 # New peer
-                peer = Peer(host=host, port=port, media=media)
+                peer = Peer(
+                    host=host, port=port, media=media,
+                    proxy_enabled=proxy_enabled,
+                    local_version=local_version,
+                    local_arch=local_arch,
+                    served_media=served_media
+                )
                 self.peers[key] = peer
-                logger.info(f"New peer discovered: {key} with {len(media)} media")
+                served_info = f", serves {len(served_media)} version(s)" if served_media else ""
+                logger.info(f"New peer discovered: {key} with {len(media)} media{served_info}")
 
         return {'status': 'ok', 'registered': True}
 
@@ -309,18 +350,52 @@ class PeerDiscovery:
     def _announce_to_peer(self, host: str, port: int):
         """Send HTTP announce to a peer."""
         try:
+            import platform
             url = f"http://{host}:{port}/api/announce"
 
-            # Get our media list (use own DB connection for thread safety)
+            # Get our media list and proxy info (use own DB connection for thread safety)
             media_list = []
+            served_media = []  # [{version, arch, types}]
+            proxy_enabled = False
+            local_version = ""
+            local_arch = platform.machine()
+
             if self._db:
+                proxy_enabled = self._db.is_proxy_enabled()
+
+                # Group media by version/arch for served_media
+                version_arch_types = {}  # (version, arch) -> [types]
+
                 for m in self._db.list_media():
                     media_list.append(m['name'])
+
+                    # Get local Mageia version from first enabled media
+                    if not local_version and m.get('enabled'):
+                        local_version = m.get('mageia_version', '')
+
+                    # Only include in served_media if proxy is enabled for this media
+                    if proxy_enabled and m.get('proxy_enabled', 1) and m.get('enabled'):
+                        key = (m.get('mageia_version', ''), m.get('architecture', ''))
+                        if key not in version_arch_types:
+                            version_arch_types[key] = []
+                        version_arch_types[key].append(m.get('short_name', m['name']))
+
+                # Build served_media list
+                for (ver, arch), types in version_arch_types.items():
+                    served_media.append({
+                        'version': ver,
+                        'arch': arch,
+                        'types': types
+                    })
 
             payload = json.dumps({
                 'host': self._get_local_ip(),
                 'port': self.daemon.port,
                 'media': media_list,
+                'proxy_enabled': proxy_enabled,
+                'local_version': local_version,
+                'local_arch': local_arch,
+                'served_media': served_media,
             }).encode('utf-8')
 
             req = Request(url, data=payload, method='POST')

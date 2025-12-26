@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Iterator
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -135,6 +135,13 @@ CREATE TABLE IF NOT EXISTS media (
     update_media INTEGER DEFAULT 0,
     priority INTEGER DEFAULT 50,
 
+    -- Proxy/replication settings (v11+)
+    proxy_enabled INTEGER DEFAULT 1,      -- 1 = serve to peers, 0 = don't share
+    replication_policy TEXT DEFAULT 'on_demand',  -- 'none', 'on_demand', 'full', 'since'
+    replication_since INTEGER,            -- Timestamp for policy='since'
+    quota_mb INTEGER,                     -- Per-media quota in MB (NULL = no limit)
+    retention_days INTEGER DEFAULT 30,    -- Days to keep cached packages
+
     -- Sync state
     last_sync INTEGER,
     synthesis_md5 TEXT,
@@ -255,6 +262,30 @@ CREATE TABLE IF NOT EXISTS peer_blacklist (
     UNIQUE(peer_host, peer_port)
 );
 
+-- Cache file tracking for quota management (v11+)
+CREATE TABLE IF NOT EXISTS cache_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    media_id INTEGER,
+    file_path TEXT NOT NULL,          -- Relative path from medias/
+    file_size INTEGER NOT NULL,
+    added_time INTEGER NOT NULL,      -- Download timestamp
+    last_accessed INTEGER,            -- Last access time (for LRU)
+    is_referenced INTEGER DEFAULT 1,  -- Still in current synthesis?
+    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE,
+    UNIQUE(filename, media_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cache_files_media ON cache_files(media_id);
+CREATE INDEX IF NOT EXISTS idx_cache_files_referenced ON cache_files(is_referenced);
+CREATE INDEX IF NOT EXISTS idx_cache_files_accessed ON cache_files(last_accessed);
+
+-- Proxy configuration (v11+)
+CREATE TABLE IF NOT EXISTS proxy_config (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_pkg_name_lower ON packages(name_lower);
 CREATE INDEX IF NOT EXISTS idx_pkg_nevra ON packages(nevra);
@@ -350,6 +381,40 @@ MIGRATIONS = {
     9: (10, """
         -- Migration v9 -> v10: Add ip_mode column to server table
         ALTER TABLE server ADD COLUMN ip_mode TEXT DEFAULT 'auto';
+    """),
+    10: (11, """
+        -- Migration v10 -> v11: Add proxy/replication support
+
+        -- New columns on media table for proxy/replication
+        ALTER TABLE media ADD COLUMN proxy_enabled INTEGER DEFAULT 1;
+        ALTER TABLE media ADD COLUMN replication_policy TEXT DEFAULT 'on_demand';
+        ALTER TABLE media ADD COLUMN replication_since INTEGER;
+        ALTER TABLE media ADD COLUMN quota_mb INTEGER;
+        ALTER TABLE media ADD COLUMN retention_days INTEGER DEFAULT 30;
+
+        -- Cache file tracking for quota management
+        CREATE TABLE IF NOT EXISTS cache_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            media_id INTEGER,
+            file_path TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            added_time INTEGER NOT NULL,
+            last_accessed INTEGER,
+            is_referenced INTEGER DEFAULT 1,
+            FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE,
+            UNIQUE(filename, media_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cache_files_media ON cache_files(media_id);
+        CREATE INDEX IF NOT EXISTS idx_cache_files_referenced ON cache_files(is_referenced);
+        CREATE INDEX IF NOT EXISTS idx_cache_files_accessed ON cache_files(last_accessed);
+
+        -- Proxy configuration
+        CREATE TABLE IF NOT EXISTS proxy_config (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
     """),
 }
 
@@ -1971,3 +2036,367 @@ class PackageDatabase:
             ORDER BY blacklist_time DESC
         """)
         return [dict(row) for row in cursor]
+
+    # =========================================================================
+    # Proxy configuration
+    # =========================================================================
+
+    def get_proxy_config(self, key: str, default: str = None) -> Optional[str]:
+        """Get a proxy configuration value."""
+        cursor = self.conn.execute(
+            "SELECT value FROM proxy_config WHERE key = ?", (key,)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else default
+
+    def set_proxy_config(self, key: str, value: str):
+        """Set a proxy configuration value."""
+        self.conn.execute(
+            "INSERT OR REPLACE INTO proxy_config (key, value) VALUES (?, ?)",
+            (key, value)
+        )
+        self.conn.commit()
+
+    def get_all_proxy_config(self) -> Dict[str, str]:
+        """Get all proxy configuration values."""
+        cursor = self.conn.execute("SELECT key, value FROM proxy_config")
+        return {row[0]: row[1] for row in cursor}
+
+    def is_proxy_enabled(self) -> bool:
+        """Check if proxy mode is globally enabled."""
+        return self.get_proxy_config('enabled', '0') == '1'
+
+    def get_disabled_proxy_versions(self) -> List[str]:
+        """Get list of Mageia versions disabled for proxying."""
+        disabled = self.get_proxy_config('disabled_versions', '')
+        if not disabled:
+            return []
+        return [v.strip() for v in disabled.split(',') if v.strip()]
+
+    # =========================================================================
+    # Cache file tracking
+    # =========================================================================
+
+    def register_cache_file(self, filename: str, media_id: int, file_path: str,
+                            file_size: int) -> int:
+        """Register a cached file for quota tracking.
+
+        Args:
+            filename: RPM filename (e.g., 'foo-1.0-1.mga10.x86_64.rpm')
+            media_id: Associated media ID
+            file_path: Relative path from medias/ directory
+            file_size: File size in bytes
+
+        Returns:
+            Cache file ID
+        """
+        now = int(time.time())
+        cursor = self.conn.execute("""
+            INSERT OR REPLACE INTO cache_files
+            (filename, media_id, file_path, file_size, added_time, last_accessed, is_referenced)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+        """, (filename, media_id, file_path, file_size, now, now))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_cache_file(self, filename: str, media_id: int = None) -> Optional[Dict]:
+        """Get cache file info by filename."""
+        if media_id:
+            cursor = self.conn.execute(
+                "SELECT * FROM cache_files WHERE filename = ? AND media_id = ?",
+                (filename, media_id)
+            )
+        else:
+            cursor = self.conn.execute(
+                "SELECT * FROM cache_files WHERE filename = ?", (filename,)
+            )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def update_cache_file_access(self, filename: str, media_id: int = None):
+        """Update last_accessed timestamp for a cache file."""
+        now = int(time.time())
+        if media_id:
+            self.conn.execute(
+                "UPDATE cache_files SET last_accessed = ? WHERE filename = ? AND media_id = ?",
+                (now, filename, media_id)
+            )
+        else:
+            self.conn.execute(
+                "UPDATE cache_files SET last_accessed = ? WHERE filename = ?",
+                (now, filename)
+            )
+        self.conn.commit()
+
+    def list_cache_files(self, media_id: int = None, referenced_only: bool = False,
+                         order_by: str = 'added_time', limit: int = None) -> List[Dict]:
+        """List cached files.
+
+        Args:
+            media_id: Filter by media (None = all)
+            referenced_only: Only files still in synthesis
+            order_by: 'added_time', 'last_accessed', 'file_size'
+            limit: Max results
+
+        Returns:
+            List of cache file dicts
+        """
+        query = "SELECT * FROM cache_files WHERE 1=1"
+        params = []
+
+        if media_id:
+            query += " AND media_id = ?"
+            params.append(media_id)
+
+        if referenced_only:
+            query += " AND is_referenced = 1"
+
+        if order_by in ('added_time', 'last_accessed', 'file_size'):
+            query += f" ORDER BY {order_by}"
+        else:
+            query += " ORDER BY added_time"
+
+        if limit:
+            query += f" LIMIT {limit}"
+
+        cursor = self.conn.execute(query, params)
+        return [dict(row) for row in cursor]
+
+    def mark_cache_files_unreferenced(self, media_id: int, referenced_filenames: List[str]):
+        """Mark cache files as unreferenced if not in the provided list.
+
+        Called after sync to mark old package versions as unreferenced.
+
+        Args:
+            media_id: Media ID
+            referenced_filenames: List of filenames that ARE in current synthesis
+        """
+        if not referenced_filenames:
+            # Mark all files for this media as unreferenced
+            self.conn.execute(
+                "UPDATE cache_files SET is_referenced = 0 WHERE media_id = ?",
+                (media_id,)
+            )
+        else:
+            # First mark all as unreferenced
+            self.conn.execute(
+                "UPDATE cache_files SET is_referenced = 0 WHERE media_id = ?",
+                (media_id,)
+            )
+            # Then mark the referenced ones
+            placeholders = ','.join('?' * len(referenced_filenames))
+            self.conn.execute(f"""
+                UPDATE cache_files SET is_referenced = 1
+                WHERE media_id = ? AND filename IN ({placeholders})
+            """, [media_id] + referenced_filenames)
+        self.conn.commit()
+
+    def delete_cache_file(self, filename: str, media_id: int = None) -> bool:
+        """Delete a cache file record.
+
+        Note: This only removes the DB record, not the actual file.
+
+        Returns:
+            True if a record was deleted
+        """
+        if media_id:
+            cursor = self.conn.execute(
+                "DELETE FROM cache_files WHERE filename = ? AND media_id = ?",
+                (filename, media_id)
+            )
+        else:
+            cursor = self.conn.execute(
+                "DELETE FROM cache_files WHERE filename = ?", (filename,)
+            )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def get_cache_stats(self, media_id: int = None) -> Dict[str, Any]:
+        """Get cache statistics.
+
+        Args:
+            media_id: Filter by media (None = global stats)
+
+        Returns:
+            Dict with total_files, total_size, referenced_files, unreferenced_files, etc.
+        """
+        if media_id:
+            cursor = self.conn.execute("""
+                SELECT
+                    COUNT(*) as total_files,
+                    COALESCE(SUM(file_size), 0) as total_size,
+                    COALESCE(SUM(CASE WHEN is_referenced = 1 THEN 1 ELSE 0 END), 0) as referenced_files,
+                    COALESCE(SUM(CASE WHEN is_referenced = 0 THEN 1 ELSE 0 END), 0) as unreferenced_files,
+                    COALESCE(SUM(CASE WHEN is_referenced = 1 THEN file_size ELSE 0 END), 0) as referenced_size,
+                    COALESCE(SUM(CASE WHEN is_referenced = 0 THEN file_size ELSE 0 END), 0) as unreferenced_size,
+                    MIN(added_time) as oldest_file,
+                    MAX(added_time) as newest_file
+                FROM cache_files WHERE media_id = ?
+            """, (media_id,))
+        else:
+            cursor = self.conn.execute("""
+                SELECT
+                    COUNT(*) as total_files,
+                    COALESCE(SUM(file_size), 0) as total_size,
+                    COALESCE(SUM(CASE WHEN is_referenced = 1 THEN 1 ELSE 0 END), 0) as referenced_files,
+                    COALESCE(SUM(CASE WHEN is_referenced = 0 THEN 1 ELSE 0 END), 0) as unreferenced_files,
+                    COALESCE(SUM(CASE WHEN is_referenced = 1 THEN file_size ELSE 0 END), 0) as referenced_size,
+                    COALESCE(SUM(CASE WHEN is_referenced = 0 THEN file_size ELSE 0 END), 0) as unreferenced_size,
+                    MIN(added_time) as oldest_file,
+                    MAX(added_time) as newest_file
+                FROM cache_files
+            """)
+
+        row = cursor.fetchone()
+        return dict(row) if row else {}
+
+    def get_files_to_evict(self, media_id: int = None, max_bytes: int = None,
+                           max_age_days: int = None) -> List[Dict]:
+        """Get list of files that should be evicted based on criteria.
+
+        Priority: unreferenced files first, then oldest by last_accessed.
+
+        Args:
+            media_id: Filter by media (None = all)
+            max_bytes: Stop when we have enough bytes to free
+            max_age_days: Include files older than this
+
+        Returns:
+            List of cache file dicts to evict
+        """
+        query = """
+            SELECT * FROM cache_files
+            WHERE 1=1
+        """
+        params = []
+
+        if media_id:
+            query += " AND media_id = ?"
+            params.append(media_id)
+
+        if max_age_days:
+            cutoff = int(time.time()) - (max_age_days * 86400)
+            query += " AND added_time < ?"
+            params.append(cutoff)
+
+        # Order: unreferenced first, then oldest accessed
+        query += " ORDER BY is_referenced ASC, last_accessed ASC"
+
+        cursor = self.conn.execute(query, params)
+        files = [dict(row) for row in cursor]
+
+        if max_bytes:
+            # Only return enough files to free max_bytes
+            result = []
+            total = 0
+            for f in files:
+                result.append(f)
+                total += f['file_size']
+                if total >= max_bytes:
+                    break
+            return result
+
+        return files
+
+    # =========================================================================
+    # Media proxy/replication settings
+    # =========================================================================
+
+    def update_media_proxy_settings(self, media_id: int,
+                                     proxy_enabled: bool = None,
+                                     replication_policy: str = None,
+                                     replication_since: int = None,
+                                     quota_mb: int = None,
+                                     retention_days: int = None):
+        """Update proxy/replication settings for a media.
+
+        Args:
+            media_id: Media ID
+            proxy_enabled: Whether to serve this media to peers
+            replication_policy: 'none', 'on_demand', 'full', 'since'
+            replication_since: Timestamp for policy='since'
+            quota_mb: Per-media quota in MB (None to clear)
+            retention_days: Days to keep cached packages
+        """
+        updates = []
+        params = []
+
+        if proxy_enabled is not None:
+            updates.append("proxy_enabled = ?")
+            params.append(int(proxy_enabled))
+
+        if replication_policy is not None:
+            if replication_policy not in ('none', 'on_demand', 'full', 'since'):
+                raise ValueError(f"Invalid replication_policy: {replication_policy}")
+            updates.append("replication_policy = ?")
+            params.append(replication_policy)
+
+        if replication_since is not None:
+            updates.append("replication_since = ?")
+            params.append(replication_since)
+
+        if quota_mb is not None:
+            updates.append("quota_mb = ?")
+            params.append(quota_mb if quota_mb > 0 else None)
+
+        if retention_days is not None:
+            updates.append("retention_days = ?")
+            params.append(retention_days)
+
+        if not updates:
+            return
+
+        params.append(media_id)
+        self.conn.execute(
+            f"UPDATE media SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+        self.conn.commit()
+
+    def list_media_for_proxy(self, version: str = None, arch: str = None) -> List[Dict]:
+        """List media available for proxying to peers.
+
+        Filters by:
+        - proxy_enabled = 1
+        - Global proxy enabled
+        - Version not in disabled_versions
+        - Optionally matching version/arch
+
+        Args:
+            version: Filter by Mageia version (e.g., '10')
+            arch: Filter by architecture (e.g., 'x86_64')
+
+        Returns:
+            List of media dicts that can be served to peers
+        """
+        # Check global proxy enabled
+        if not self.is_proxy_enabled():
+            return []
+
+        disabled_versions = self.get_disabled_proxy_versions()
+
+        query = """
+            SELECT * FROM media
+            WHERE enabled = 1 AND proxy_enabled = 1
+        """
+        params = []
+
+        if version:
+            query += " AND mageia_version = ?"
+            params.append(version)
+
+        if arch:
+            query += " AND architecture = ?"
+            params.append(arch)
+
+        query += " ORDER BY priority DESC, name"
+
+        cursor = self.conn.execute(query, params)
+        media_list = [dict(row) for row in cursor]
+
+        # Filter out disabled versions
+        if disabled_versions:
+            media_list = [m for m in media_list
+                         if m['mageia_version'] not in disabled_versions]
+
+        return media_list

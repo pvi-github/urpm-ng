@@ -411,12 +411,24 @@ class UrpmdHandler(BaseHTTPRequestHandler):
         port = data.get('port')
         media_list = data.get('media', [])
 
+        # New proxy fields (v11+)
+        proxy_enabled = data.get('proxy_enabled', False)
+        local_version = data.get('local_version', '')
+        local_arch = data.get('local_arch', '')
+        served_media = data.get('served_media', [])
+
         if not host or not port:
             self.send_error_json(400, "Missing 'host' or 'port' in request")
             return
 
         # Register the peer
-        result = self.daemon.register_peer(host, port, media_list)
+        result = self.daemon.register_peer(
+            host, port, media_list,
+            proxy_enabled=proxy_enabled,
+            local_version=local_version,
+            local_arch=local_arch,
+            served_media=served_media
+        )
         self.send_json(result)
 
     def handle_have(self, data: Dict[str, Any]):

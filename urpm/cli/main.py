@@ -850,6 +850,38 @@ For legacy mode (non-Mageia URL with explicit name):
         help='No confirmation'
     )
 
+    # media set / s
+    media_set = media_subparsers.add_parser(
+        'set', aliases=['s'],
+        help='Modify media settings'
+    )
+    media_set.add_argument('name', help='Media name')
+    media_set.add_argument(
+        '--proxy',
+        choices=['yes', 'no'],
+        help='Enable/disable serving this media to peers'
+    )
+    media_set.add_argument(
+        '--replication',
+        metavar='POLICY',
+        help='Replication policy: none, on_demand, full, since:YYYY-MM-DD'
+    )
+    media_set.add_argument(
+        '--quota',
+        metavar='SIZE',
+        help='Per-media quota (e.g., 5G, 500M)'
+    )
+    media_set.add_argument(
+        '--retention',
+        metavar='DAYS', type=int,
+        help='Days to keep cached packages'
+    )
+    media_set.add_argument(
+        '--priority',
+        metavar='N', type=int,
+        help='Media priority (higher = preferred)'
+    )
+
     # =========================================================================
     # server / srv
     # =========================================================================
@@ -951,6 +983,86 @@ Examples:
     server_ipmode.add_argument(
         'mode', choices=['auto', 'ipv4', 'ipv6', 'dual'],
         help='IP mode: auto, ipv4, ipv6, or dual (dual = prefer ipv4)'
+    )
+
+    # =========================================================================
+    # proxy
+    # =========================================================================
+    proxy_parser = subparsers.add_parser(
+        'proxy',
+        help='Manage proxy/P2P settings',
+        parents=[display_parent]
+    )
+    proxy_subparsers = proxy_parser.add_subparsers(
+        dest='proxy_command',
+        metavar='<subcommand>'
+    )
+
+    # proxy status
+    proxy_subparsers.add_parser('status', help='Show proxy status and quotas')
+
+    # proxy enable
+    proxy_subparsers.add_parser('enable', help='Enable proxy mode (serve packages to peers)')
+
+    # proxy disable
+    proxy_subparsers.add_parser('disable', help='Disable proxy mode')
+
+    # proxy quota
+    proxy_quota = proxy_subparsers.add_parser('quota', help='Set global cache quota')
+    proxy_quota.add_argument(
+        'size', nargs='?',
+        help='Quota size (e.g., 10G, 500M) or empty to show current'
+    )
+
+    # proxy disable-version
+    proxy_disable_ver = proxy_subparsers.add_parser(
+        'disable-version',
+        help='Stop serving a Mageia version to peers'
+    )
+    proxy_disable_ver.add_argument(
+        'versions',
+        help='Comma-separated version numbers (e.g., 8,9)'
+    )
+
+    # proxy enable-version
+    proxy_enable_ver = proxy_subparsers.add_parser(
+        'enable-version',
+        help='Resume serving a Mageia version to peers'
+    )
+    proxy_enable_ver.add_argument(
+        'versions',
+        help='Comma-separated version numbers (e.g., 9)'
+    )
+
+    # proxy clean
+    proxy_clean = proxy_subparsers.add_parser(
+        'clean',
+        help='Enforce quotas and retention policies'
+    )
+    proxy_clean.add_argument(
+        '--dry-run', '-n', action='store_true',
+        help='Show what would be deleted without deleting'
+    )
+
+    # proxy sync
+    proxy_sync = proxy_subparsers.add_parser(
+        'sync',
+        help='Force sync according to replication policies'
+    )
+    proxy_sync.add_argument(
+        'media', nargs='?',
+        help='Specific media to sync (default: all with full/since policy)'
+    )
+
+    # proxy rate-limit
+    proxy_ratelimit = proxy_subparsers.add_parser(
+        'rate-limit',
+        help='Configure rate limiting'
+    )
+    proxy_ratelimit.add_argument(
+        'setting',
+        nargs='?',
+        help='on, off, or N/min (e.g., 60/min)'
     )
 
     # =========================================================================
@@ -2431,6 +2543,103 @@ def cmd_media_import(args, db: PackageDatabase) -> int:
     return 1 if errors else 0
 
 
+def cmd_media_set(args, db: PackageDatabase) -> int:
+    """Handle media set command - modify media settings."""
+    from . import colors
+    from datetime import datetime
+
+    media = db.get_media(args.name)
+    if not media:
+        print(colors.error(f"Media '{args.name}' not found"))
+        return 1
+
+    changes = []
+
+    # Parse and apply changes
+    proxy_enabled = None
+    if args.proxy:
+        proxy_enabled = args.proxy == 'yes'
+        changes.append(f"proxy: {'enabled' if proxy_enabled else 'disabled'}")
+
+    replication_policy = None
+    replication_since = None
+    if args.replication:
+        if args.replication.startswith('since:'):
+            replication_policy = 'since'
+            date_str = args.replication[6:]
+            try:
+                dt = datetime.strptime(date_str, '%Y-%m-%d')
+                replication_since = int(dt.timestamp())
+                changes.append(f"replication: since {date_str}")
+            except ValueError:
+                print(colors.error(f"Invalid date format: {date_str} (use YYYY-MM-DD)"))
+                return 1
+        elif args.replication in ('none', 'on_demand', 'full'):
+            replication_policy = args.replication
+            changes.append(f"replication: {replication_policy}")
+        else:
+            print(colors.error(f"Invalid replication policy: {args.replication}"))
+            print("Valid values: none, on_demand, full, since:YYYY-MM-DD")
+            return 1
+
+    quota_mb = None
+    if args.quota:
+        # Parse size like 5G, 500M
+        size_str = args.quota.upper()
+        try:
+            if size_str.endswith('G'):
+                quota_mb = int(float(size_str[:-1]) * 1024)
+            elif size_str.endswith('M'):
+                quota_mb = int(float(size_str[:-1]))
+            elif size_str.endswith('K'):
+                quota_mb = max(1, int(float(size_str[:-1]) / 1024))
+            else:
+                quota_mb = int(size_str)
+            changes.append(f"quota: {quota_mb} MB")
+        except ValueError:
+            print(colors.error(f"Invalid size format: {args.quota}"))
+            return 1
+
+    retention_days = args.retention
+    if retention_days is not None:
+        changes.append(f"retention: {retention_days} days")
+
+    priority = args.priority
+    if priority is not None:
+        changes.append(f"priority: {priority}")
+
+    if not changes:
+        print(colors.warning("No changes specified"))
+        print("Use --proxy, --replication, --quota, --retention, or --priority")
+        return 1
+
+    # Apply proxy settings
+    if any([proxy_enabled is not None, replication_policy, quota_mb is not None,
+            retention_days is not None]):
+        db.update_media_proxy_settings(
+            media['id'],
+            proxy_enabled=proxy_enabled,
+            replication_policy=replication_policy,
+            replication_since=replication_since,
+            quota_mb=quota_mb,
+            retention_days=retention_days
+        )
+
+    # Apply priority separately (it's in the base media table)
+    if priority is not None:
+        db.conn.execute(
+            "UPDATE media SET priority = ? WHERE id = ?",
+            (priority, media['id'])
+        )
+        db.conn.commit()
+
+    print(colors.success(f"Updated '{args.name}':"))
+    for change in changes:
+        print(f"  - {change}")
+
+    return 0
+
+
 # =============================================================================
 # Server commands
 # =============================================================================
@@ -2740,6 +2949,243 @@ def cmd_server_ipmode(args, db: PackageDatabase) -> int:
     old_mode = server.get('ip_mode', 'auto')
     db.set_server_ip_mode(args.name, args.mode)
     print(colors.success(f"Set IP mode for {args.name}: {args.mode} (was {old_mode})"))
+    return 0
+
+
+# =============================================================================
+# Proxy commands
+# =============================================================================
+
+def cmd_proxy_status(args, db: PackageDatabase) -> int:
+    """Handle proxy status command."""
+    from . import colors
+    from ..core.cache import CacheManager, format_size
+
+    # Global proxy status
+    enabled = db.is_proxy_enabled()
+    disabled_versions = db.get_disabled_proxy_versions()
+    global_quota = db.get_proxy_config('global_quota_mb')
+    rate_limit = db.get_proxy_config('rate_limit_enabled', '1')
+
+    print(colors.bold("\nProxy Status"))
+    print("-" * 40)
+    print(f"Proxy mode:       {colors.success('enabled') if enabled else colors.dim('disabled')}")
+    if disabled_versions:
+        print(f"Disabled versions: {', '.join(disabled_versions)}")
+    if global_quota:
+        print(f"Global quota:     {global_quota} MB")
+    print(f"Rate limiting:    {'on' if rate_limit == '1' else colors.warning('off')}")
+
+    # Cache statistics
+    cache_mgr = CacheManager(db)
+    stats = cache_mgr.get_usage()
+
+    print(colors.bold("\nCache Statistics"))
+    print("-" * 40)
+    print(f"Total files:      {stats.get('total_files', 0)}")
+    print(f"Total size:       {format_size(stats.get('total_size', 0))}")
+    print(f"Referenced:       {stats.get('referenced_files', 0)} files ({format_size(stats.get('referenced_size', 0))})")
+    print(f"Unreferenced:     {stats.get('unreferenced_files', 0)} files ({format_size(stats.get('unreferenced_size', 0))})")
+
+    if stats.get('quota_bytes'):
+        pct = stats.get('quota_used_pct', 0)
+        pct_str = f"{pct:.1f}%"
+        if pct > 90:
+            pct_str = colors.error(pct_str)
+        elif pct > 75:
+            pct_str = colors.warning(pct_str)
+        print(f"Quota used:       {pct_str}")
+
+    # Per-media summary
+    print(colors.bold("\nMedia with proxy settings"))
+    print("-" * 40)
+    media_list = db.list_media()
+    has_settings = False
+    for m in media_list:
+        if m.get('quota_mb') or m.get('replication_policy') != 'on_demand' or not m.get('proxy_enabled', 1):
+            has_settings = True
+            proxy_str = colors.success('Y') if m.get('proxy_enabled', 1) else colors.dim('N')
+            policy = m.get('replication_policy', 'on_demand')
+            quota = f"{m['quota_mb']}M" if m.get('quota_mb') else '-'
+            print(f"  {m['name'][:30]:<30} proxy={proxy_str} repl={policy:<10} quota={quota}")
+
+    if not has_settings:
+        print(colors.dim("  (all media using defaults)"))
+
+    return 0
+
+
+def cmd_proxy_enable(args, db: PackageDatabase) -> int:
+    """Handle proxy enable command."""
+    from . import colors
+
+    db.set_proxy_config('enabled', '1')
+    print(colors.success("Proxy mode enabled"))
+    print("This urpmd will now serve packages to peers on the network.")
+    return 0
+
+
+def cmd_proxy_disable(args, db: PackageDatabase) -> int:
+    """Handle proxy disable command."""
+    from . import colors
+
+    db.set_proxy_config('enabled', '0')
+    print(colors.success("Proxy mode disabled"))
+    print("This urpmd will no longer serve packages to peers.")
+    return 0
+
+
+def cmd_proxy_quota(args, db: PackageDatabase) -> int:
+    """Handle proxy quota command."""
+    from . import colors
+    from ..core.cache import format_size
+
+    if not args.size:
+        # Show current quota
+        current = db.get_proxy_config('global_quota_mb')
+        if current:
+            print(f"Global quota: {current} MB ({format_size(int(current) * 1024 * 1024)})")
+        else:
+            print("No global quota set")
+        return 0
+
+    # Parse and set quota
+    size_str = args.size.upper()
+    try:
+        if size_str.endswith('G'):
+            quota_mb = int(float(size_str[:-1]) * 1024)
+        elif size_str.endswith('M'):
+            quota_mb = int(float(size_str[:-1]))
+        elif size_str.endswith('K'):
+            quota_mb = max(1, int(float(size_str[:-1]) / 1024))
+        else:
+            quota_mb = int(size_str)
+    except ValueError:
+        print(colors.error(f"Invalid size format: {args.size}"))
+        return 1
+
+    db.set_proxy_config('global_quota_mb', str(quota_mb))
+    print(colors.success(f"Global quota set to {quota_mb} MB ({format_size(quota_mb * 1024 * 1024)})"))
+    return 0
+
+
+def cmd_proxy_disable_version(args, db: PackageDatabase) -> int:
+    """Handle proxy disable-version command."""
+    from . import colors
+
+    current = db.get_disabled_proxy_versions()
+    new_versions = [v.strip() for v in args.versions.split(',') if v.strip()]
+
+    # Merge with existing
+    all_disabled = set(current) | set(new_versions)
+    db.set_proxy_config('disabled_versions', ','.join(sorted(all_disabled)))
+
+    print(colors.success(f"Disabled proxy for Mageia version(s): {', '.join(new_versions)}"))
+    if current:
+        print(f"Previously disabled: {', '.join(current)}")
+    print(f"Now disabled: {', '.join(sorted(all_disabled))}")
+    return 0
+
+
+def cmd_proxy_enable_version(args, db: PackageDatabase) -> int:
+    """Handle proxy enable-version command."""
+    from . import colors
+
+    current = db.get_disabled_proxy_versions()
+    to_enable = [v.strip() for v in args.versions.split(',') if v.strip()]
+
+    # Remove from disabled list
+    still_disabled = [v for v in current if v not in to_enable]
+    db.set_proxy_config('disabled_versions', ','.join(sorted(still_disabled)))
+
+    enabled = [v for v in to_enable if v in current]
+    if enabled:
+        print(colors.success(f"Re-enabled proxy for Mageia version(s): {', '.join(enabled)}"))
+    else:
+        print(colors.warning(f"Version(s) {', '.join(to_enable)} were not disabled"))
+
+    if still_disabled:
+        print(f"Still disabled: {', '.join(still_disabled)}")
+    return 0
+
+
+def cmd_proxy_clean(args, db: PackageDatabase) -> int:
+    """Handle proxy clean command - enforce quotas and retention."""
+    from . import colors
+    from ..core.cache import CacheManager, format_size
+
+    cache_mgr = CacheManager(db)
+    dry_run = getattr(args, 'dry_run', False)
+
+    if dry_run:
+        print(colors.info("Dry run mode - no files will be deleted\n"))
+
+    result = cache_mgr.enforce_quotas(dry_run=dry_run)
+
+    # Report results
+    print(colors.bold("Cleanup results:"))
+    print(f"  Unreferenced files: {result['unreferenced_deleted']} ({format_size(result['unreferenced_bytes'])})")
+    print(f"  Retention policy:   {result['retention_deleted']} ({format_size(result['retention_bytes'])})")
+    print(f"  Quota enforcement:  {result['quota_deleted']} ({format_size(result['quota_bytes'])})")
+    print(f"  {colors.bold('Total:')}            {result['total_deleted']} ({format_size(result['total_bytes'])})")
+
+    if result['errors']:
+        print(colors.warning(f"\n{len(result['errors'])} errors occurred"))
+
+    if dry_run and result['total_deleted'] > 0:
+        print(colors.info("\nRun without --dry-run to actually delete files"))
+
+    return 0
+
+
+def cmd_proxy_sync(args, db: PackageDatabase) -> int:
+    """Handle proxy sync command - force sync according to replication policies."""
+    from . import colors
+
+    # TODO: Implement full/since replication sync
+    print(colors.warning("Replication sync not yet implemented"))
+    print("This will sync media with 'full' or 'since' replication policies.")
+    return 0
+
+
+def cmd_proxy_ratelimit(args, db: PackageDatabase) -> int:
+    """Handle proxy rate-limit command."""
+    from . import colors
+
+    if not args.setting:
+        # Show current setting
+        enabled = db.get_proxy_config('rate_limit_enabled', '1')
+        rate = db.get_proxy_config('rate_limit_requests_per_min', '60')
+        if enabled == '0':
+            print(f"Rate limiting: {colors.warning('OFF')} (install party mode)")
+        else:
+            print(f"Rate limiting: {colors.success('ON')} ({rate} requests/min)")
+        return 0
+
+    setting = args.setting.lower()
+    if setting == 'off':
+        db.set_proxy_config('rate_limit_enabled', '0')
+        print(colors.warning("Rate limiting disabled (install party mode)"))
+    elif setting == 'on':
+        db.set_proxy_config('rate_limit_enabled', '1')
+        rate = db.get_proxy_config('rate_limit_requests_per_min', '60')
+        print(colors.success(f"Rate limiting enabled ({rate} requests/min)"))
+    elif '/min' in setting:
+        # Parse N/min
+        try:
+            rate = int(setting.replace('/min', ''))
+            db.set_proxy_config('rate_limit_enabled', '1')
+            db.set_proxy_config('rate_limit_requests_per_min', str(rate))
+            print(colors.success(f"Rate limiting set to {rate} requests/min"))
+        except ValueError:
+            print(colors.error(f"Invalid rate format: {args.setting}"))
+            print("Use: on, off, or N/min (e.g., 60/min)")
+            return 1
+    else:
+        print(colors.error(f"Invalid setting: {args.setting}"))
+        print("Use: on, off, or N/min (e.g., 60/min)")
+        return 1
+
     return 0
 
 
@@ -8815,6 +9261,8 @@ def main(argv=None) -> int:
                 return cmd_media_update(args, db)
             elif args.media_command == 'import':
                 return cmd_media_import(args, db)
+            elif args.media_command in ('set', 's'):
+                return cmd_media_set(args, db)
             else:
                 return cmd_not_implemented(args, db)
 
@@ -8835,6 +9283,28 @@ def main(argv=None) -> int:
                 return cmd_server_test(args, db)
             elif args.server_command == 'ip-mode':
                 return cmd_server_ipmode(args, db)
+            else:
+                return cmd_not_implemented(args, db)
+
+        elif args.command == 'proxy':
+            if args.proxy_command == 'status' or args.proxy_command is None:
+                return cmd_proxy_status(args, db)
+            elif args.proxy_command == 'enable':
+                return cmd_proxy_enable(args, db)
+            elif args.proxy_command == 'disable':
+                return cmd_proxy_disable(args, db)
+            elif args.proxy_command == 'quota':
+                return cmd_proxy_quota(args, db)
+            elif args.proxy_command == 'disable-version':
+                return cmd_proxy_disable_version(args, db)
+            elif args.proxy_command == 'enable-version':
+                return cmd_proxy_enable_version(args, db)
+            elif args.proxy_command == 'clean':
+                return cmd_proxy_clean(args, db)
+            elif args.proxy_command == 'sync':
+                return cmd_proxy_sync(args, db)
+            elif args.proxy_command == 'rate-limit':
+                return cmd_proxy_ratelimit(args, db)
             else:
                 return cmd_not_implemented(args, db)
 

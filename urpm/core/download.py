@@ -571,6 +571,43 @@ class Downloader:
         except OSError:
             return False
 
+    def _register_cache_file(self, item: DownloadItem, cache_path: Path):
+        """Register a downloaded file in the cache database for quota tracking.
+
+        Args:
+            item: Download item with media info
+            cache_path: Path where the file was saved
+        """
+        if not self.db:
+            return
+
+        try:
+            # Get file size
+            file_size = cache_path.stat().st_size if cache_path.exists() else 0
+
+            # Compute relative path from medias/
+            medias_dir = self.cache_dir / "medias"
+            try:
+                rel_path = str(cache_path.relative_to(medias_dir))
+            except ValueError:
+                # File not under medias/, use full path
+                rel_path = str(cache_path)
+
+            # Get media_id (0 for legacy schema without media_id)
+            media_id = item.media_id if item.media_id else 0
+
+            if media_id:
+                self.db.register_cache_file(
+                    filename=item.filename,
+                    media_id=media_id,
+                    file_path=rel_path,
+                    file_size=file_size
+                )
+                logger.debug(f"Registered cache file: {item.filename} ({file_size} bytes)")
+        except Exception as e:
+            # Don't fail the download if cache registration fails
+            logger.warning(f"Failed to register cache file {item.filename}: {e}")
+
     def _download_from_url(self, url: str, cache_path: Path,
                             progress_callback: Callable[[int, int], None] = None,
                             timeout: int = 30,
@@ -713,6 +750,7 @@ class Downloader:
                     )
                     if success:
                         logger.info(f"Downloaded {item.filename} from {server['name']}")
+                        self._register_cache_file(item, cache_path)
                         return DownloadResult(
                             item=item,
                             success=True,
@@ -752,6 +790,7 @@ class Downloader:
                 item.url, cache_path, progress_callback, timeout, ip_mode='ipv4'
             )
             if success:
+                self._register_cache_file(item, cache_path)
                 return DownloadResult(
                     item=item,
                     success=True,
@@ -828,6 +867,9 @@ class Downloader:
 
                 # Move to final location
                 temp_path.rename(cache_path)
+
+                # Register in cache for quota tracking
+                self._register_cache_file(item, cache_path)
 
                 # Return result with provenance info (DB write happens in main thread)
                 return DownloadResult(

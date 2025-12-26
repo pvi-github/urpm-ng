@@ -96,6 +96,47 @@ class PeerClient:
         self._peers = peers
         return peers
 
+    def filter_peers_for_version(self, peers: List[Peer], version: str, arch: str = None) -> List[Peer]:
+        """Filter peers to only those serving a specific Mageia version.
+
+        Args:
+            peers: List of peers to filter
+            version: Mageia version (e.g., '10')
+            arch: Architecture (e.g., 'x86_64'), None = any
+
+        Returns:
+            Peers that serve the specified version/arch
+        """
+        result = []
+        for peer in peers:
+            # Always include peers without served_media info (legacy or same version)
+            if not peer.served_media:
+                # Legacy peer or same version - include if version matches
+                if peer.local_version == version or not peer.local_version:
+                    result.append(peer)
+                continue
+
+            # Check if peer serves this version/arch
+            if peer.serves_version(version, arch):
+                result.append(peer)
+
+        return result
+
+    def discover_peers_for_version(self, version: str, arch: str = None) -> List[Peer]:
+        """Discover peers that serve a specific Mageia version.
+
+        Convenience method that combines discover_peers() with filter_peers_for_version().
+
+        Args:
+            version: Mageia version (e.g., '10')
+            arch: Architecture (e.g., 'x86_64'), None = any
+
+        Returns:
+            Filtered list of peers
+        """
+        all_peers = self.discover_peers()
+        return self.filter_peers_for_version(all_peers, version, arch)
+
     def _query_local_urpmd(self) -> List[Peer]:
         """Query local urpmd for known peers."""
         ports_to_try = []
@@ -119,7 +160,11 @@ class PeerClient:
                             peers.append(Peer(
                                 host=p['host'],
                                 port=p['port'],
-                                media=p.get('media', [])
+                                media=p.get('media', []),
+                                proxy_enabled=p.get('proxy_enabled', False),
+                                local_version=p.get('local_version', ''),
+                                local_arch=p.get('local_arch', ''),
+                                served_media=p.get('served_media', [])
                             ))
                     return peers
 
