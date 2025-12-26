@@ -56,6 +56,11 @@ Optimisation : utilisation des méthodes natives libsolv au lieu de Python :
 Temps total divisé par ~5 (de ~1.9s à ~0.35s pour la création du pool).
 Commit : 1e5f4a7
 
+### Aliases requires/whatrequires - CORRIGÉ
+Ajoutés : `urpm requires` (alias de depends), `urpm whatrequires` (alias de rdepends)
++ Fix du parsing des capabilities .so pour l'affichage correct des dépendances.
+Commit : 6a38daa
+
 ---
 
 ## En cours / À faire
@@ -78,10 +83,6 @@ Le nettoyage basique (fichiers > 30 jours) n'est pas forcément adapté.
 
 **TODO** : implémenter les quotas par media et global.
 Si on arrive à la taille max du quota, le scheduler nettoie les fichiers en commençant par les plus vieux et surtout s'ils ont été installés.
-
-### Aliases manquants
-- `urpm requires` = `urpm depends`
-- `urpm whatrequires` = `urpm rdepends`
 
 ### Contraintes de version dans whatprovides
 Pouvoir préciser les contraintes de version (== < <= > >=) pour filtrer.
