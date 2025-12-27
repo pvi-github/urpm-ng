@@ -1,5 +1,37 @@
 # TODO_PROXY - Proxying Multi-Version et Quotas
 
+## État d'implémentation (Décembre 2024)
+
+### ✅ Implémenté
+
+**Réplication seed-based (DVD-like)**
+- `urpm/core/rpmsrate.py` - Parser rpmsrate-raw avec détection patterns locales
+- `collect_dependencies()` - Résolution dépendances avec Requires + Recommends + file deps
+- `urpm proxy sync` - Téléchargement parallèle du seed set
+- `urpm media seed-info` - Affiche le set calculé
+- `urpm media set --replication=seed` - Active la politique seed
+- Option `--latest-only` pour ne garder qu'une version par paquet
+- Déduplication multi-versions (kernel-desktop-6.12.1, 6.12.5... → seulement le dernier)
+- Expansion patterns locales (libreoffice-langpack-ar, -ca → tous les langpacks)
+- DEFAULT_SEED_SECTIONS étendu pour contenu DVD complet
+
+**Résultat actuel** : ~3.5 GB release + ~1.5 GB updates ≈ 5 GB (comparable au DVD 4.2 GB)
+
+### ⏳ Limitations connues
+
+- ~2200 paquets manquants vs DVD (principalement libs) car synthesis ne contient pas tous les file provides
+- À revoir quand urpmf sera implémenté (utilisation hdlist pour résolution complète)
+
+### 🔜 À faire
+
+- [ ] Quotas et rétention (CacheManager)
+- [ ] Proxy multi-version (mga10 sert mga9)
+- [ ] Rate limiting configurable
+- [ ] `/api/request-download` endpoint
+- [ ] Renommer `urpm proxy` → `urpm mirror` (plus cohérent avec la fonction réelle)
+
+---
+
 ## Demande initiale
 
 J'aimerais attaquer la partie proxying :

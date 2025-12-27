@@ -433,13 +433,7 @@ def sync_media(db: PackageDatabase, media_name: str,
 
             hdlist_downloaded = hdl_result.success
 
-        # Clear old packages from this media
-        if progress_callback:
-            progress_callback("clearing old data", 0, 0)
-
-        db.clear_media_packages(media_id)
-
-        # Parse and import synthesis
+        # Parse and import synthesis (UPSERT handles obsolete packages)
         if progress_callback:
             progress_callback("parsing synthesis", 0, 0)
 

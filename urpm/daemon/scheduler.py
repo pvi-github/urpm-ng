@@ -20,11 +20,15 @@ logger = logging.getLogger(__name__)
 # Default intervals (in seconds)
 DEFAULT_METADATA_CHECK_INTERVAL = 3600  # 1 hour
 DEFAULT_PREDOWNLOAD_CHECK_INTERVAL = 7200  # 2 hours
+DEFAULT_REPLICATION_CHECK_INTERVAL = 1800  # 30 minutes
+DEFAULT_FETCH_DATES_INTERVAL = 300  # 5 minutes
 # Note: cache cleanup runs after each predownload, not independently
 
 # Dev mode intervals (shorter for testing)
 DEV_METADATA_CHECK_INTERVAL = 60  # 1 minute
 DEV_PREDOWNLOAD_CHECK_INTERVAL = 120  # 2 minutes
+DEV_REPLICATION_CHECK_INTERVAL = 30  # 30 seconds
+DEV_FETCH_DATES_INTERVAL = 20  # 20 seconds
 
 
 class Scheduler:
@@ -33,6 +37,7 @@ class Scheduler:
     Handles:
     - Periodic metadata refresh (checking if updates are needed)
     - Pre-downloading packages for pending updates
+    - Replication for media with replication_policy='full'
     - Cache cleanup
 
     Has its own database connection (SQLite requires separate connections per thread).
@@ -64,12 +69,17 @@ class Scheduler:
         if dev_mode:
             self.metadata_interval = DEV_METADATA_CHECK_INTERVAL    # 60s
             self.predownload_interval = DEV_PREDOWNLOAD_CHECK_INTERVAL  # 120s
+            self.replication_interval = DEV_REPLICATION_CHECK_INTERVAL  # 30s
+            self.fetch_dates_interval = DEV_FETCH_DATES_INTERVAL  # 20s
             self.tick_interval = 10  # Check every 10s in dev mode
-            logger.info("Dev mode: using short intervals (metadata=%ds, predownload=%ds, tick=%ds)",
-                       DEV_METADATA_CHECK_INTERVAL, DEV_PREDOWNLOAD_CHECK_INTERVAL, self.tick_interval)
+            logger.info("Dev mode: using short intervals (metadata=%ds, predownload=%ds, replication=%ds, tick=%ds)",
+                       DEV_METADATA_CHECK_INTERVAL, DEV_PREDOWNLOAD_CHECK_INTERVAL,
+                       DEV_REPLICATION_CHECK_INTERVAL, self.tick_interval)
         else:
             self.metadata_interval = DEFAULT_METADATA_CHECK_INTERVAL    # 3600s (1h)
             self.predownload_interval = DEFAULT_PREDOWNLOAD_CHECK_INTERVAL  # 7200s (2h)
+            self.replication_interval = DEFAULT_REPLICATION_CHECK_INTERVAL  # 1800s (30m)
+            self.fetch_dates_interval = DEFAULT_FETCH_DATES_INTERVAL  # 300s (5m)
             self.tick_interval = 60  # Check every minute in production
 
         # JITTER (thundering herd prevention)
@@ -87,6 +97,8 @@ class Scheduler:
         # Next scheduled times (with jitter applied)
         self._next_metadata_check: Optional[float] = None
         self._next_predownload: Optional[float] = None
+        self._next_replication_check: Optional[float] = None
+        self._next_fetch_dates_check: Optional[float] = None
         self._next_cleanup: Optional[float] = None
 
         # Pre-download settings
@@ -156,6 +168,16 @@ class Scheduler:
         if self.predownload_enabled and self._should_run_task('predownload', now):
             self._run_predownload()
             self._schedule_next('predownload', now, self.predownload_interval)
+
+        # Check replication (for media with replication_policy='full')
+        if self._should_run_task('replication', now):
+            self._run_replication()
+            self._schedule_next('replication', now, self.replication_interval)
+
+        # Fetch server dates for replication priority (runs more often, lightweight)
+        if self._should_run_task('fetch_dates', now):
+            self._run_fetch_server_dates()
+            self._schedule_next('fetch_dates', now, self.fetch_dates_interval)
 
         # Note: cache cleanup runs after predownload, not independently
         # (see _run_predownload)
@@ -495,49 +517,442 @@ class Scheduler:
                 self.daemon.invalidate_rpm_index()
 
     def _run_cache_cleanup(self):
-        """Clean up old cached packages."""
+        """Clean up cached packages based on quotas and retention policies."""
         logger.info("Running scheduled cache cleanup")
 
-        if not self.base_dir.exists():
+        if not self.db:
             return
 
         try:
-            # Get all RPMs currently referenced in synthesis
-            referenced_files = set()
-            if self.db:
-                for media in self.db.list_media():
-                    # Get all package filenames from this media
-                    # TODO: Implement proper method in DB
-                    pass
+            from ..core.cache import CacheManager
 
-            # For now, just clean files older than 30 days that aren't in cache manifest
-            import os
-            from pathlib import Path
+            cache_mgr = CacheManager(self.db, self.base_dir)
+            result = cache_mgr.enforce_quotas(dry_run=False)
 
-            cutoff = time.time() - (30 * 24 * 3600)  # 30 days
-
-            cleaned = 0
-            cleaned_size = 0
-
-            for rpm_file in self.base_dir.glob('**/*.rpm'):
-                try:
-                    stat = rpm_file.stat()
-                    if stat.st_mtime < cutoff:
-                        size = stat.st_size
-                        rpm_file.unlink()
-                        cleaned += 1
-                        cleaned_size += size
-                        logger.debug(f"Removed old cached file: {rpm_file.name}")
-                except OSError as e:
-                    logger.warning(f"Could not remove {rpm_file}: {e}")
-
-            if cleaned > 0:
-                logger.info(f"Cache cleanup: removed {cleaned} files ({cleaned_size / 1024 / 1024:.1f} MB)")
+            if result['total_deleted'] > 0:
+                logger.info(
+                    f"Cache cleanup: removed {result['total_deleted']} files "
+                    f"({result['total_bytes'] / 1024 / 1024:.1f} MB) - "
+                    f"unreferenced: {result['unreferenced_deleted']}, "
+                    f"retention: {result['retention_deleted']}, "
+                    f"quota: {result['quota_deleted']}"
+                )
             else:
                 logger.debug("Cache cleanup: no files to remove")
 
+            if result['errors']:
+                for err in result['errors'][:5]:  # Log first 5 errors
+                    logger.warning(f"Cleanup error: {err}")
+
         except Exception as e:
             logger.error(f"Cache cleanup error: {e}")
+
+    def _run_replication(self):
+        """Replicate packages for media with replication_policy='seed'.
+
+        For 'seed' policy: uses rpmsrate-raw to determine which packages to replicate.
+        Only packages in the seed set (+ their dependencies) are downloaded.
+
+        Respects quotas and idle detection.
+        """
+        if not self.db:
+            return
+
+        # Find media with replication_policy='seed'
+        media_to_replicate = []
+        for media in self.db.list_media():
+            if media.get('replication_policy') == 'seed' and media.get('enabled'):
+                media_to_replicate.append(media)
+
+        if not media_to_replicate:
+            logger.debug("No media with replication_policy='seed'")
+            return
+
+        logger.info(f"Checking replication for {len(media_to_replicate)} media")
+
+        # Check if system is idle enough for background downloads
+        if not self._is_system_idle():
+            logger.debug("Skipping replication: system not idle")
+            return
+
+        # Compute seed set once (shared across all media)
+        seed_names = self._compute_seed_set(media_to_replicate)
+        if not seed_names:
+            logger.debug("No seed set computed (rpmsrate-raw not found or empty)")
+            return
+
+        logger.info(f"Seed set: {len(seed_names)} package names")
+
+        from ..core.download import Downloader, DownloadItem
+
+        for media in media_to_replicate:
+            try:
+                self._replicate_media(media, seed_names=seed_names)
+            except Exception as e:
+                logger.error(f"Replication error for {media['name']}: {e}")
+
+    def _compute_seed_set(self, media_list: list) -> set:
+        """Compute the seed set from rpmsrate-raw.
+
+        Parses rpmsrate-raw and extracts packages from the configured sections,
+        then resolves dependencies to get the complete set.
+
+        Args:
+            media_list: List of media dicts (to get replication_seeds config)
+
+        Returns:
+            Set of package names in the seed set
+        """
+        import json
+        from pathlib import Path
+        from ..core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
+
+        # Default sections (same as DVD content)
+        DEFAULT_SEED_SECTIONS = [
+            'INSTALL',
+            'CAT_PLASMA5', 'CAT_GNOME', 'CAT_XFCE', 'CAT_MATE', 'CAT_LXDE', 'CAT_LXQT',
+            'CAT_X', 'CAT_SYSTEM', 'CAT_NETWORKING_WWW', 'CAT_OFFICE',
+        ]
+
+        # Collect all sections from all media
+        all_sections = set()
+        for media in media_list:
+            seeds_json = media.get('replication_seeds')
+            if seeds_json:
+                try:
+                    sections = json.loads(seeds_json)
+                    all_sections.update(sections)
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid replication_seeds JSON for media {media['name']}")
+            else:
+                # Default: DVD-equivalent content
+                all_sections.update(DEFAULT_SEED_SECTIONS)
+
+        if not all_sections:
+            return set()
+
+        # Parse rpmsrate-raw
+        try:
+            parser = RpmsrateParser(DEFAULT_RPMSRATE_PATH)
+            parser.parse()
+        except FileNotFoundError:
+            logger.warning(f"rpmsrate-raw not found at {DEFAULT_RPMSRATE_PATH}")
+            return set()
+        except Exception as e:
+            logger.error(f"Error parsing rpmsrate-raw: {e}")
+            return set()
+
+        # Get active categories (CAT_xxx sections)
+        active_categories = [s for s in all_sections if s.startswith('CAT_')]
+
+        # Extract packages from sections
+        seed_packages = parser.get_packages(
+            sections=list(all_sections),
+            active_categories=active_categories,
+            ignore_conditions=['DRIVER', 'HW', 'HW_CAT'],
+            min_priority=4
+        )
+
+        logger.info(f"rpmsrate sections {list(all_sections)}: {len(seed_packages)} seed packages")
+
+        # Expand with dependencies using collect_dependencies
+        # This collects all required packages without checking conflicts
+        # (conflicts are fine for replication - DVD has conflicting packages)
+        result = self.db.collect_dependencies(seed_packages)
+        full_set = result['packages']
+        deps_count = len(full_set) - len(seed_packages & full_set)
+
+        logger.info(f"With dependencies: {len(full_set)} packages (+{deps_count} deps)")
+
+        if result['not_found']:
+            logger.debug(f"Seeds not found: {result['not_found']}")
+
+        return full_set
+
+    def _replicate_media(self, media: dict, seed_names: set = None):
+        """Replicate a single media (download missing packages).
+
+        Args:
+            media: Media dict with id, name, relative_path, etc.
+            seed_names: Set of package names to replicate (if None, replicate all)
+        """
+        from ..core.download import Downloader, DownloadItem
+
+        media_id = media['id']
+        media_name = media['name']
+
+        # Get all packages in this media, sorted by server date (newest first)
+        all_packages = self.db.get_packages_for_media(media_id, order_by='server_date')
+        if not all_packages:
+            logger.debug(f"Media {media_name}: no packages in synthesis")
+            return
+
+        # Filter by seed set if provided
+        if seed_names:
+            all_packages = [p for p in all_packages if p['name'] in seed_names]
+            if not all_packages:
+                logger.debug(f"Media {media_name}: no packages match seed set")
+                return
+            logger.debug(f"Media {media_name}: {len(all_packages)} packages in seed set")
+
+        # Only replicate packages with known server dates
+        # Others will be picked up once HEAD job fetches their dates
+        packages_with_dates = [p for p in all_packages if p.get('server_last_modified')]
+        packages_without_dates = len(all_packages) - len(packages_with_dates)
+
+        if packages_without_dates > 0:
+            logger.info(f"Media {media_name}: {packages_without_dates} packages waiting for server dates")
+
+        if not packages_with_dates:
+            logger.debug(f"Media {media_name}: no packages with server dates yet, waiting for HEAD job")
+            return
+
+        all_packages = packages_with_dates
+
+        # Get already cached files for this media
+        cached_files = set()
+        for cf in self.db.list_cache_files(media_id=media_id):
+            cached_files.add(cf['filename'])
+
+        # Find missing packages
+        missing = []
+        missing_size = 0
+        for pkg in all_packages:
+            filename = pkg['filename']
+            if filename not in cached_files:
+                missing.append(pkg)
+                missing_size += pkg.get('size', 0) or 0
+
+        if not missing:
+            logger.debug(f"Media {media_name}: all {len(all_packages)} packages already cached")
+            return
+
+        logger.info(f"Media {media_name}: {len(missing)}/{len(all_packages)} packages missing "
+                   f"({missing_size / 1024 / 1024:.1f} MB)")
+
+        # Check quota and limit downloads to what fits
+        quota_mb = media.get('quota_mb')
+        available_bytes = None
+        if quota_mb:
+            stats = self.db.get_cache_stats(media_id=media_id)
+            current_bytes = stats.get('total_size', 0) or 0
+            quota_bytes = quota_mb * 1024 * 1024
+            available_bytes = quota_bytes - current_bytes
+
+            if available_bytes <= 0:
+                logger.info(f"Media {media_name}: quota reached ({current_bytes / 1024 / 1024:.1f}/{quota_mb} MB)")
+                return
+
+            # Filter missing packages to fit within quota
+            if missing_size > available_bytes:
+                logger.info(f"Media {media_name}: limiting to {available_bytes / 1024 / 1024:.1f} MB "
+                           f"(quota: {quota_mb} MB, used: {current_bytes / 1024 / 1024:.1f} MB)")
+                # Sort by size (smallest first) to maximize package count
+                missing.sort(key=lambda p: p.get('size', 0) or 0)
+                limited = []
+                limited_size = 0
+                for pkg in missing:
+                    pkg_size = pkg.get('size', 0) or 0
+                    if limited_size + pkg_size <= available_bytes:
+                        limited.append(pkg)
+                        limited_size += pkg_size
+                missing = limited
+                missing_size = limited_size
+                logger.info(f"Media {media_name}: will download {len(missing)} packages ({missing_size / 1024 / 1024:.1f} MB)")
+
+        # Get servers for this media
+        servers = self.db.get_servers_for_media(media_id, enabled_only=True)
+        servers = [dict(s) for s in servers]
+
+        if not servers and not media.get('url'):
+            logger.warning(f"Media {media_name}: no servers available")
+            return
+
+        # Build download items
+        items = []
+        for pkg in missing:
+            if media.get('relative_path'):
+                items.append(DownloadItem(
+                    name=pkg['name'],
+                    version=pkg['version'],
+                    release=pkg['release'],
+                    arch=pkg['arch'],
+                    media_id=media_id,
+                    relative_path=media['relative_path'],
+                    is_official=bool(media.get('is_official', 1)),
+                    servers=servers,
+                    media_name=media_name,
+                    size=pkg.get('size', 0),
+                ))
+            elif media.get('url'):
+                items.append(DownloadItem(
+                    name=pkg['name'],
+                    version=pkg['version'],
+                    release=pkg['release'],
+                    arch=pkg['arch'],
+                    media_url=media['url'],
+                    media_name=media_name,
+                    size=pkg.get('size', 0),
+                ))
+
+        if not items:
+            return
+
+        # Download in batches to show progress
+        batch_size = 50
+        downloader = Downloader(cache_dir=self.base_dir, db=self.db)
+
+        total_downloaded = 0
+        total_cached = 0
+        total_errors = 0
+
+        for i in range(0, len(items), batch_size):
+            if not self._running:
+                logger.info("Replication interrupted by shutdown")
+                break
+
+            batch = items[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            total_batches = (len(items) + batch_size - 1) // batch_size
+
+            logger.info(f"Media {media_name}: downloading batch {batch_num}/{total_batches} "
+                       f"({len(batch)} packages)")
+
+            def progress_callback(name, pkg_num, pkg_total, bytes_done, bytes_total,
+                                  item_bytes=None, item_total=None, active_downloads=None):
+                pass  # Silent progress for background replication
+
+            results, downloaded, cached, peer_stats = downloader.download_all(batch, progress_callback)
+            errors = [r for r in results if not r.success]
+
+            total_downloaded += downloaded
+            total_cached += cached
+            total_errors += len(errors)
+
+            # Check if we should continue (system still idle?)
+            if not self._is_system_idle():
+                logger.info(f"Media {media_name}: pausing replication (system busy)")
+                break
+
+        logger.info(f"Media {media_name}: replication complete - "
+                   f"{total_downloaded} downloaded, {total_cached} cached, {total_errors} errors")
+
+        # Invalidate RPM index so peers see new packages
+        if total_downloaded > 0:
+            self.daemon.invalidate_rpm_index()
+
+    def _run_fetch_server_dates(self):
+        """Fetch Last-Modified dates from server for packages missing server_last_modified.
+
+        This runs periodically to get publication dates for replication priority.
+        Rate-limited and distributed across mirrors to avoid hammering servers.
+        """
+        if not self.db:
+            return
+
+        # Only for media with replication=full
+        media_to_process = []
+        for media in self.db.list_media():
+            if media.get('replication_policy') == 'full' and media.get('enabled'):
+                media_to_process.append(media)
+
+        if not media_to_process:
+            return
+
+        from email.utils import parsedate_to_datetime
+        from urllib.request import Request, urlopen
+        from urllib.error import URLError, HTTPError
+        from ..core.config import build_media_url
+
+        # Rate limit: max requests per run
+        max_requests_per_run = 100 if self.dev_mode else 500
+        requests_made = 0
+
+        for media in media_to_process:
+            media_id = media['id']
+            media_name = media['name']
+
+            # Get packages needing dates
+            packages = self.db.get_packages_needing_server_dates(
+                media_id, limit=max_requests_per_run - requests_made
+            )
+
+            if not packages:
+                continue
+
+            logger.info(f"Media {media_name}: fetching server dates for {len(packages)} packages")
+
+            # Get all servers for this media (for round-robin distribution)
+            servers = self.db.get_servers_for_media(media_id, enabled_only=True)
+            servers = [dict(s) for s in servers]
+
+            if not servers and not media.get('url'):
+                logger.warning(f"Media {media_name}: no server available for HEAD requests")
+                continue
+
+            # Fallback to legacy URL if no servers
+            if not servers and media.get('url'):
+                servers = [{'url': media['url'].rstrip('/')}]
+
+            updates = []
+            errors = 0
+
+            for i, pkg in enumerate(packages):
+                if not self._running:
+                    break
+
+                # Check if system is still idle (every 50 requests)
+                if requests_made > 0 and requests_made % 50 == 0:
+                    if not self._is_system_idle():
+                        logger.debug("Pausing HEAD fetches: system busy")
+                        break
+
+                filename = pkg['filename']
+
+                # Round-robin across servers
+                server = servers[i % len(servers)]
+                if 'url' in server:
+                    base_url = server['url']
+                else:
+                    base_url = build_media_url(server, media)
+
+                url = f"{base_url}/{filename}"
+
+                try:
+                    req = Request(url, method='HEAD')
+                    req.add_header('User-Agent', 'urpmd/0.1')
+
+                    response = urlopen(req, timeout=10)
+                    last_modified = response.headers.get('Last-Modified')
+
+                    if last_modified:
+                        try:
+                            dt = parsedate_to_datetime(last_modified)
+                            timestamp = int(dt.timestamp())
+                            updates.append((pkg['id'], timestamp))
+                        except (ValueError, TypeError):
+                            pass
+
+                except (URLError, HTTPError, OSError) as e:
+                    errors += 1
+                    if errors <= 3:
+                        logger.debug(f"HEAD failed for {filename}: {e}")
+
+                requests_made += 1
+
+                # Rate limit: 100ms pause every 10 requests = ~100 req/s max
+                if requests_made % 10 == 0:
+                    time.sleep(0.1)
+
+            # Batch update
+            if updates:
+                self.db.update_server_last_modified_batch(updates)
+                logger.info(f"Media {media_name}: updated {len(updates)} server dates "
+                           f"({errors} errors)")
+
+            if requests_made >= max_requests_per_run:
+                logger.debug(f"Reached max requests per run ({max_requests_per_run})")
+                break
 
     def _refresh_media(self, media_name: str):
         """Refresh metadata for a specific media.

@@ -864,7 +864,12 @@ For legacy mode (non-Mageia URL with explicit name):
     media_set.add_argument(
         '--replication',
         metavar='POLICY',
-        help='Replication policy: none, on_demand, full, since:YYYY-MM-DD'
+        help='Replication policy: none, on_demand, seed'
+    )
+    media_set.add_argument(
+        '--seeds',
+        metavar='SECTIONS',
+        help='rpmsrate sections for seed replication (comma-separated), e.g., INSTALL,CAT_PLASMA5,CAT_GNOME'
     )
     media_set.add_argument(
         '--quota',
@@ -880,6 +885,16 @@ For legacy mode (non-Mageia URL with explicit name):
         '--priority',
         metavar='N', type=int,
         help='Media priority (higher = preferred)'
+    )
+
+    # media seed-info
+    media_seed_info = media_subparsers.add_parser(
+        'seed-info',
+        help='Show seed set info for a media'
+    )
+    media_seed_info.add_argument(
+        'name',
+        help='Media name'
     )
 
     # =========================================================================
@@ -1052,6 +1067,10 @@ Examples:
     proxy_sync.add_argument(
         'media', nargs='?',
         help='Specific media to sync (default: all with full/since policy)'
+    )
+    proxy_sync.add_argument(
+        '--latest-only', action='store_true',
+        help='Only download latest version of each package (smaller, DVD-like)'
     )
 
     # proxy rate-limit
@@ -2562,25 +2581,20 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
         changes.append(f"proxy: {'enabled' if proxy_enabled else 'disabled'}")
 
     replication_policy = None
-    replication_since = None
+    replication_seeds = None
     if args.replication:
-        if args.replication.startswith('since:'):
-            replication_policy = 'since'
-            date_str = args.replication[6:]
-            try:
-                dt = datetime.strptime(date_str, '%Y-%m-%d')
-                replication_since = int(dt.timestamp())
-                changes.append(f"replication: since {date_str}")
-            except ValueError:
-                print(colors.error(f"Invalid date format: {date_str} (use YYYY-MM-DD)"))
-                return 1
-        elif args.replication in ('none', 'on_demand', 'full'):
+        if args.replication in ('none', 'on_demand', 'seed'):
             replication_policy = args.replication
             changes.append(f"replication: {replication_policy}")
         else:
             print(colors.error(f"Invalid replication policy: {args.replication}"))
-            print("Valid values: none, on_demand, full, since:YYYY-MM-DD")
+            print("Valid values: none, on_demand, seed")
             return 1
+
+    if hasattr(args, 'seeds') and args.seeds:
+        # Parse comma-separated sections
+        replication_seeds = [s.strip() for s in args.seeds.split(',')]
+        changes.append(f"seeds: {', '.join(replication_seeds)}")
 
     quota_mb = None
     if args.quota:
@@ -2610,17 +2624,17 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
 
     if not changes:
         print(colors.warning("No changes specified"))
-        print("Use --proxy, --replication, --quota, --retention, or --priority")
+        print("Use --proxy, --replication, --seeds, --quota, --retention, or --priority")
         return 1
 
     # Apply proxy settings
-    if any([proxy_enabled is not None, replication_policy, quota_mb is not None,
-            retention_days is not None]):
+    if any([proxy_enabled is not None, replication_policy, replication_seeds is not None,
+            quota_mb is not None, retention_days is not None]):
         db.update_media_proxy_settings(
             media['id'],
             proxy_enabled=proxy_enabled,
             replication_policy=replication_policy,
-            replication_since=replication_since,
+            replication_seeds=replication_seeds,
             quota_mb=quota_mb,
             retention_days=retention_days
         )
@@ -2636,6 +2650,136 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
     print(colors.success(f"Updated '{args.name}':"))
     for change in changes:
         print(f"  - {change}")
+
+    return 0
+
+
+def cmd_media_seed_info(args, db: PackageDatabase) -> int:
+    """Show seed set info for a media."""
+    from . import colors
+    import json
+    from pathlib import Path
+    from ..core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
+
+    media = db.get_media(args.name)
+    if not media:
+        print(colors.error(f"Media '{args.name}' not found"))
+        return 1
+
+    policy = media.get('replication_policy', 'on_demand')
+    if policy != 'seed':
+        print(colors.warning(f"Media '{args.name}' has replication_policy='{policy}', not 'seed'"))
+        print("Use: urpm media set <name> --replication=seed --seeds=INSTALL,CAT_PLASMA5,...")
+        return 1
+
+    # Default sections (same as DVD content)
+    DEFAULT_SEED_SECTIONS = [
+        'INSTALL',
+        # Desktop environments
+        'CAT_PLASMA5', 'CAT_GNOME', 'CAT_XFCE', 'CAT_MATE', 'CAT_LXDE', 'CAT_LXQT',
+        'CAT_X', 'CAT_GRAPHICAL_DESKTOP',
+        # Core system
+        'CAT_SYSTEM', 'CAT_ARCHIVING', 'CAT_FILE_TOOLS', 'CAT_TERMINALS',
+        'CAT_EDITORS', 'CAT_MINIMAL_DOCS', 'CAT_CONFIG',
+        # Multimedia
+        'CAT_AUDIO', 'CAT_VIDEO', 'SOUND', 'BURNER', 'SCANNER', 'PHOTO',
+        # Applications
+        'CAT_OFFICE', 'CAT_GRAPHICS', 'CAT_GAMES',
+        # Network
+        'CAT_NETWORKING_WWW', 'CAT_NETWORKING_WWW_SERVER',
+        'CAT_NETWORKING_FILE', 'CAT_NETWORKING_REMOTE_ACCESS',
+        'CAT_NETWORKING_MAIL', 'CAT_NETWORKING_IRC',
+        # Development
+        'CAT_DEVELOPMENT',
+        # Other
+        'CAT_PRINTER', 'CAT_ACCESSIBILITY', 'CAT_SPELLCHECK', 'CAT_MONITORING',
+    ]
+
+    # Parse seeds
+    seeds_json = media.get('replication_seeds')
+    if seeds_json:
+        try:
+            sections = json.loads(seeds_json)
+        except json.JSONDecodeError:
+            print(colors.error("Invalid replication_seeds JSON in database"))
+            return 1
+    else:
+        sections = DEFAULT_SEED_SECTIONS
+
+    print(f"Media: {colors.bold(args.name)}")
+    print(f"Sections: {', '.join(sections)}")
+
+    # Check rpmsrate-raw
+    if not DEFAULT_RPMSRATE_PATH.exists():
+        print(colors.warning(f"\nrpmsrate-raw not found at {DEFAULT_RPMSRATE_PATH}"))
+        print("Install the meta-task package to enable seed-based replication")
+        return 1
+
+    # Parse rpmsrate
+    try:
+        parser = RpmsrateParser(DEFAULT_RPMSRATE_PATH)
+        parser.parse()
+    except Exception as e:
+        print(colors.error(f"Error parsing rpmsrate-raw: {e}"))
+        return 1
+
+    # Get active categories
+    active_categories = [s for s in sections if s.startswith('CAT_')]
+
+    # Get seed packages
+    seed_packages = parser.get_packages(
+        sections=sections,
+        active_categories=active_categories,
+        ignore_conditions=['DRIVER', 'HW', 'HW_CAT'],
+        min_priority=4
+    )
+
+    print(f"\nPackages from rpmsrate: {colors.count(len(seed_packages))}")
+
+    # Count how many are in this media
+    all_packages = db.get_packages_for_media(media['id'])
+    media_pkg_names = {p['name'] for p in all_packages}
+    matching = seed_packages & media_pkg_names
+
+    print(f"Matching in this media: {colors.count(len(matching))}")
+
+    # Note: 'size' is installed size, not RPM download size (typically ~3x smaller)
+    seed_size = sum(p.get('size', 0) or 0 for p in all_packages if p['name'] in seed_packages)
+    print(f"Installed size (seeds only): {colors.bold(f'{seed_size / 1024 / 1024 / 1024:.1f}')} GB")
+
+    # Collect dependencies (not resolve - we want all packages for replication, conflicts OK)
+    missing_seeds = seed_packages - media_pkg_names
+    if missing_seeds:
+        print(colors.dim(f"  ({len(missing_seeds)} seeds not in media: {', '.join(sorted(missing_seeds)[:5])}...)"))
+
+    print(colors.dim("\nCollecting dependencies..."))
+    try:
+        # Use collect_dependencies which ignores conflicts (for DVD/mirror replication)
+        result = db.collect_dependencies(seed_packages)
+
+        full_set = result['packages']
+        not_found = result['not_found']
+        total_size = result['total_size']
+
+        print(f"With dependencies: {colors.count(len(full_set))} packages")
+        est_download = total_size / 3
+        print(f"Estimated download: ~{colors.bold(f'{est_download / 1024 / 1024 / 1024:.1f}')} GB (installed: {total_size / 1024 / 1024 / 1024:.1f} GB)")
+
+        # Show breakdown
+        deps_only = full_set - seed_packages
+        print(f"  - Seeds: {len(seed_packages & full_set)}, Dependencies: {len(deps_only)}")
+
+        if not_found:
+            print(colors.dim(f"  - Not found: {len(not_found)} ({', '.join(sorted(not_found)[:5])}...)"))
+
+    except Exception as e:
+        print(colors.warning(f"Dependency collection failed: {e}"))
+        import traceback
+        traceback.print_exc()
+
+    # Show some examples
+    if matching:
+        print(f"\nExample seed packages: {', '.join(sorted(matching)[:10])}...")
 
     return 0
 
@@ -3139,13 +3283,333 @@ def cmd_proxy_clean(args, db: PackageDatabase) -> int:
 
 
 def cmd_proxy_sync(args, db: PackageDatabase) -> int:
-    """Handle proxy sync command - force sync according to replication policies."""
-    from . import colors
+    """Handle proxy sync command - force sync according to replication policies.
 
-    # TODO: Implement full/since replication sync
-    print(colors.warning("Replication sync not yet implemented"))
-    print("This will sync media with 'full' or 'since' replication policies.")
-    return 0
+    Unlike the background daemon which waits for idle, this downloads immediately.
+    TODO: Rename to 'mirror sync' - this is mirroring, not proxying.
+    """
+    from . import colors
+    from ..core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
+    from ..core.download import Downloader, DownloadItem
+    from ..core.config import get_media_local_path, build_media_url
+    import json
+
+    # Default sections (same as DVD content)
+    DEFAULT_SEED_SECTIONS = [
+        'INSTALL',
+        # Desktop environments
+        'CAT_PLASMA5', 'CAT_GNOME', 'CAT_XFCE', 'CAT_MATE', 'CAT_LXDE', 'CAT_LXQT',
+        'CAT_X', 'CAT_GRAPHICAL_DESKTOP',
+        # Core system
+        'CAT_SYSTEM', 'CAT_ARCHIVING', 'CAT_FILE_TOOLS', 'CAT_TERMINALS',
+        'CAT_EDITORS', 'CAT_MINIMAL_DOCS', 'CAT_CONFIG',
+        # Multimedia
+        'CAT_AUDIO', 'CAT_VIDEO', 'SOUND', 'BURNER', 'SCANNER', 'PHOTO',
+        # Applications
+        'CAT_OFFICE', 'CAT_GRAPHICS', 'CAT_GAMES',
+        # Network
+        'CAT_NETWORKING_WWW', 'CAT_NETWORKING_WWW_SERVER',
+        'CAT_NETWORKING_FILE', 'CAT_NETWORKING_REMOTE_ACCESS',
+        'CAT_NETWORKING_MAIL', 'CAT_NETWORKING_IRC',
+        # Development
+        'CAT_DEVELOPMENT',
+        # Other
+        'CAT_PRINTER', 'CAT_ACCESSIBILITY', 'CAT_SPELLCHECK', 'CAT_MONITORING',
+    ]
+
+    # Find media with replication_policy='seed'
+    media_to_replicate = []
+    for media in db.list_media():
+        if media.get('replication_policy') == 'seed' and media.get('enabled'):
+            if args.media and media['name'] != args.media:
+                continue
+            media_to_replicate.append(media)
+
+    if not media_to_replicate:
+        if args.media:
+            print(colors.error(f"Media '{args.media}' not found or doesn't have replication_policy='seed'"))
+        else:
+            print(colors.warning("No media with replication_policy='seed'"))
+            print("Use: urpm media set <name> --replication=seed")
+        return 1
+
+    print(f"Media to sync: {len(media_to_replicate)}")
+    for m in media_to_replicate:
+        print(f"  - {m['name']}")
+
+    # Compute seed set
+    print(colors.dim("\nComputing seed set..."))
+
+    # Collect all sections from all media
+    all_sections = set()
+    for media in media_to_replicate:
+        seeds_json = media.get('replication_seeds')
+        if seeds_json:
+            try:
+                sections = json.loads(seeds_json)
+                all_sections.update(sections)
+            except json.JSONDecodeError:
+                print(colors.warning(f"Invalid replication_seeds JSON for {media['name']}"))
+        else:
+            all_sections.update(DEFAULT_SEED_SECTIONS)
+
+    # Parse rpmsrate
+    if not DEFAULT_RPMSRATE_PATH.exists():
+        print(colors.error(f"rpmsrate-raw not found at {DEFAULT_RPMSRATE_PATH}"))
+        print("Install the meta-task package to enable seed-based replication")
+        return 1
+
+    try:
+        parser = RpmsrateParser(DEFAULT_RPMSRATE_PATH)
+        parser.parse()
+    except Exception as e:
+        print(colors.error(f"Error parsing rpmsrate-raw: {e}"))
+        return 1
+
+    active_categories = [s for s in all_sections if s.startswith('CAT_')]
+    seed_packages, locale_patterns = parser.get_packages_and_patterns(
+        sections=list(all_sections),
+        active_categories=active_categories,
+        ignore_conditions=['DRIVER', 'HW', 'HW_CAT'],
+        min_priority=4
+    )
+
+    print(f"Seed packages from rpmsrate: {len(seed_packages)}")
+
+    # Expand locale patterns using database
+    if locale_patterns:
+        print(f"Locale patterns to expand: {len(locale_patterns)}")
+        expanded = 0
+        for pattern in locale_patterns:
+            # Find all packages in DB matching this prefix
+            cursor = db.conn.execute(
+                "SELECT DISTINCT name FROM packages WHERE name LIKE ?",
+                (pattern + '%',)
+            )
+            for (name,) in cursor:
+                if name not in seed_packages:
+                    seed_packages.add(name)
+                    expanded += 1
+        print(f"Expanded locale packages: +{expanded}")
+
+    # Expand with dependencies
+    result = db.collect_dependencies(seed_packages)
+    seed_names = result['packages']
+    print(f"With dependencies: {colors.count(len(seed_names))} packages")
+
+    # Helper to compare RPM versions (simplified rpmvercmp)
+    def evr_key(pkg):
+        """Return a sortable key for epoch-version-release comparison."""
+        import re
+        epoch = pkg.get('epoch', 0) or 0
+
+        def split_version(v):
+            """Split version into comparable parts (numeric vs alpha).
+            Returns tuples (type, value) where type=0 for int, 1 for str.
+            This ensures consistent ordering: numbers < strings."""
+            parts = re.findall(r'(\d+|[a-zA-Z]+)', v or '0')
+            return [(0, int(p)) if p.isdigit() else (1, p) for p in parts]
+
+        return (epoch, split_version(pkg.get('version', '0')),
+                split_version(pkg.get('release', '0')))
+
+    # Collect packages to mirror
+    # For each media, keep only the latest version of each package name
+    all_missing = []
+    by_media = {}  # media_name -> (total, cached, missing)
+
+    # First pass: collect latest version per package name per media
+    packages_per_media = {}  # media_id -> {pkg_name -> pkg}
+    for media in media_to_replicate:
+        all_packages = db.get_packages_for_media(media['id'])
+        if not all_packages:
+            continue
+
+        latest_by_name = {}
+        for pkg in all_packages:
+            if pkg['name'] in seed_names:
+                name = pkg['name']
+                if name not in latest_by_name or evr_key(pkg) > evr_key(latest_by_name[name]):
+                    latest_by_name[name] = pkg
+
+        packages_per_media[media['id']] = (media, latest_by_name)
+
+    if getattr(args, 'latest_only', False):
+        # --latest-only: deduplicate across media too, prefer Updates
+        packages_by_name = {}  # name -> (media, pkg)
+        for media_id, (media, latest_by_name) in packages_per_media.items():
+            for pkg_name, pkg in latest_by_name.items():
+                packages_by_name[pkg_name] = (media, pkg)  # Later media wins
+
+        print(f"Unique packages to mirror: {len(packages_by_name)} (--latest-only)")
+
+        for pkg_name, (media, pkg) in packages_by_name.items():
+            media_name = media['name']
+            if media_name not in by_media:
+                by_media[media_name] = [0, 0, 0]
+            by_media[media_name][0] += 1
+
+            filename = pkg.get('filename')
+            if not filename:
+                continue
+
+            cache_dir = get_media_local_path(media)
+            pkg_path = cache_dir / filename
+            if pkg_path.exists():
+                by_media[media_name][1] += 1
+            else:
+                all_missing.append((media, pkg))
+                by_media[media_name][2] += 1
+    else:
+        # Default: include latest version from each media (release + updates)
+        total_packages = 0
+        for media_id, (media, latest_by_name) in packages_per_media.items():
+            media_name = media['name']
+            by_media[media_name] = [0, 0, 0]
+
+            for pkg_name, pkg in latest_by_name.items():
+                by_media[media_name][0] += 1
+                total_packages += 1
+
+                filename = pkg.get('filename')
+                if not filename:
+                    continue
+
+                cache_dir = get_media_local_path(media)
+                pkg_path = cache_dir / filename
+                if pkg_path.exists():
+                    by_media[media_name][1] += 1
+                else:
+                    all_missing.append((media, pkg))
+                    by_media[media_name][2] += 1
+
+        print(f"Total packages to mirror: {total_packages} (release + updates, latest versions)")
+
+    # Show per-media breakdown
+    for media_name in sorted(by_media.keys()):
+        total, cached, missing = by_media[media_name]
+        print(f"  {media_name}: {total} packages ({cached} cached, {missing} to download)")
+
+    if not all_missing:
+        print(colors.success("\nAll seed packages are already cached!"))
+        return 0
+
+    # Note: 'size' in database is installed size, not RPM file size
+    # RPM files are typically ~3x smaller than installed size
+    installed_size = sum(p.get('size', 0) or 0 for _, p in all_missing)
+    estimated_download = installed_size / 3  # Rough estimate
+    print(f"\n{colors.bold('To download')}: {len(all_missing)} packages")
+    print(f"  Estimated download: ~{estimated_download / 1024 / 1024 / 1024:.1f} GB (installed: {installed_size / 1024 / 1024 / 1024:.1f} GB)")
+
+    # Build download items
+    print(colors.dim("\nPreparing downloads..."))
+
+    # Pre-compute servers per media
+    media_info = {}  # media_id -> (servers, relative_path, is_official)
+    for media in media_to_replicate:
+        servers = db.get_servers_for_media(media['id'])
+        if servers:
+            media_info[media['id']] = (servers, media['relative_path'], media.get('is_official', 1))
+
+    download_items = []
+    skipped = 0
+    for media, pkg in all_missing:
+        info = media_info.get(media['id'])
+        if not info:
+            skipped += 1
+            continue
+
+        servers, relative_path, is_official = info
+        item = DownloadItem(
+            name=pkg['name'],
+            version=pkg['version'],
+            release=pkg['release'],
+            arch=pkg['arch'],
+            media_id=media['id'],
+            relative_path=relative_path,
+            is_official=bool(is_official),
+            servers=servers,
+            size=pkg.get('size', 0) or 0
+        )
+        download_items.append(item)
+
+    if not download_items:
+        print(colors.warning("No items to download (no servers configured?)"))
+        return 1
+
+    print(f"Downloading {len(download_items)} packages...")
+
+    # Use parallel downloader (same as urpm i/u)
+    downloader = Downloader(use_peers=False, db=db)
+
+    # Multi-line progress display (exact copy from urpm i)
+    last_lines_count = [0]
+
+    def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
+                 item_bytes=None, item_total=None, active_downloads=None):
+        pct = (bytes_done * 100 // bytes_total) if bytes_total > 0 else 0
+
+        if last_lines_count[0] > 1:
+            print(f"\033[{last_lines_count[0] - 1}F", end='')
+        elif last_lines_count[0] == 1:
+            print(f"\r", end='')
+
+        if active_downloads and len(active_downloads) > 0:
+            num_lines = len(active_downloads)
+            for i, (slot, dl_name, dl_bytes, dl_total) in enumerate(active_downloads):
+                if dl_total and dl_total > 0:
+                    bar_width = 20
+                    filled = dl_bytes * bar_width // dl_total
+                    bar = '█' * filled + '░' * (bar_width - filled)
+                    dl_mb = dl_bytes / (1024 * 1024)
+                    total_mb = dl_total / (1024 * 1024)
+                    line = f"  [{pkg_num}/{pkg_total}] {pct}% #{slot+1} {dl_name} [{bar}] {dl_mb:.1f}/{total_mb:.1f}MB"
+                else:
+                    line = f"  [{pkg_num}/{pkg_total}] {pct}% #{slot+1} {dl_name}"
+
+                if i < num_lines - 1:
+                    print(f"\033[K{line}")
+                else:
+                    print(f"\033[K{line}", end='', flush=True)
+
+            if last_lines_count[0] > num_lines:
+                for _ in range(last_lines_count[0] - num_lines):
+                    print(f"\n\033[K", end='')
+                print(f"\033[{last_lines_count[0] - num_lines}F", end='', flush=True)
+
+            last_lines_count[0] = num_lines
+        else:
+            print(f"\033[K  [{pkg_num}/{pkg_total}] {pct}% - {name}...", end='', flush=True)
+            last_lines_count[0] = 1
+
+    # Suppress logging during download to avoid polluting progress display
+    import logging
+    logging.getLogger('urpm.core.download').setLevel(logging.ERROR)
+
+    dl_results, downloaded, cached, peer_stats = downloader.download_all(download_items, progress)
+
+    # Restore logging
+    logging.getLogger('urpm.core.download').setLevel(logging.WARNING)
+
+    # Clear progress lines
+    if last_lines_count[0] > 1:
+        for _ in range(last_lines_count[0] - 1):
+            print(f"\n\033[K", end='')
+        print(f"\033[{last_lines_count[0] - 1}F", end='', flush=True)
+    print()
+
+    # Summary
+    failed = [r for r in dl_results if not r.success]
+    print(f"\n{colors.bold('Done')}: {downloaded} downloaded, {cached} cached, {len(failed)} failed")
+
+    if failed:
+        print(colors.warning(f"\nFailed downloads:"))
+        for r in failed[:10]:
+            print(f"  {r.item.name}: {r.error}")
+        if len(failed) > 10:
+            print(f"  ... and {len(failed) - 10} more")
+
+    return 0 if not failed else 1
 
 
 def cmd_proxy_ratelimit(args, db: PackageDatabase) -> int:
@@ -9263,6 +9727,8 @@ def main(argv=None) -> int:
                 return cmd_media_import(args, db)
             elif args.media_command in ('set', 's'):
                 return cmd_media_set(args, db)
+            elif args.media_command == 'seed-info':
+                return cmd_media_seed_info(args, db)
             else:
                 return cmd_not_implemented(args, db)
 

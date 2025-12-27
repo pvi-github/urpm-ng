@@ -370,6 +370,54 @@ urpm cache rebuild            # Rebuild database from synthesis
 urpm cache stats              # Detailed statistics
 ```
 
+## Mirror / Replication
+
+urpm-ng can replicate a subset of packages locally, similar to a DVD installation set. This is useful for install parties or offline installations.
+
+### Seed-based replication
+
+Replication uses the `rpmsrate-raw` file from Mageia to determine which packages to mirror (same logic as DVD content).
+
+```bash
+# Enable seed-based replication on a media
+urpm media set "Core Release" --replication=seed
+urpm media set "Core Updates" --replication=seed
+
+# View the computed seed set
+urpm media seed-info "Core Release"
+# Output:
+#   Sections: INSTALL, CAT_PLASMA5, CAT_GNOME, ...
+#   Seed packages from rpmsrate: 437
+#   Locale patterns: 3
+#   Expanded locale packages: +237
+#   With dependencies: 2300 packages
+#   Estimated size: ~3.5 GB
+
+# Force sync (download missing packages)
+urpm proxy sync
+
+# Sync only latest version of each package (smaller, DVD-like)
+urpm proxy sync --latest-only
+```
+
+### How it works
+
+1. Parses `/usr/share/meta-task/rpmsrate-raw` (from meta-task package)
+2. Extracts packages from sections: INSTALL, CAT_PLASMA5, CAT_GNOME, CAT_XFCE, etc.
+3. Expands locale patterns (e.g., `libreoffice-langpack-ar` → all langpacks)
+4. Resolves dependencies (Requires + Recommends)
+5. Downloads missing packages in parallel
+
+The default seed sections cover all major desktop environments and applications, resulting in ~5 GB of packages (comparable to a Mageia DVD).
+
+### Replication policies
+
+```bash
+urpm media set <name> --replication=none       # Metadata only, no packages
+urpm media set <name> --replication=on_demand  # Cache what's downloaded (default)
+urpm media set <name> --replication=seed       # DVD-like content from rpmsrate
+```
+
 ## Configuration
 
 ### Blacklist (never install/upgrade)

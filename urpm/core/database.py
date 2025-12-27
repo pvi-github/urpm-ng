@@ -10,10 +10,10 @@ import hashlib
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Iterator
+from typing import Dict, List, Optional, Any, Iterator, Set
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 13
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS packages (
     source TEXT,  -- 'synthesis' or 'hdlist'
     pkg_hash TEXT,
     added_timestamp INTEGER,
-    
+    server_last_modified INTEGER,  -- Last-Modified from server (for replication priority)
+
     FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE,
     UNIQUE(nevra, media_id)
 );
@@ -137,8 +138,8 @@ CREATE TABLE IF NOT EXISTS media (
 
     -- Proxy/replication settings (v11+)
     proxy_enabled INTEGER DEFAULT 1,      -- 1 = serve to peers, 0 = don't share
-    replication_policy TEXT DEFAULT 'on_demand',  -- 'none', 'on_demand', 'full', 'since'
-    replication_since INTEGER,            -- Timestamp for policy='since'
+    replication_policy TEXT DEFAULT 'on_demand',  -- 'none', 'on_demand', 'seed'
+    replication_seeds TEXT,               -- JSON list of rpmsrate sections, e.g. ["INSTALL","CAT_PLASMA5"]
     quota_mb INTEGER,                     -- Per-media quota in MB (NULL = no limit)
     retention_days INTEGER DEFAULT 30,    -- Days to keep cached packages
 
@@ -415,6 +416,14 @@ MIGRATIONS = {
             key TEXT PRIMARY KEY,
             value TEXT
         );
+    """),
+    11: (12, """
+        -- Migration v11 -> v12: Add server_last_modified for replication priority
+        ALTER TABLE packages ADD COLUMN server_last_modified INTEGER;
+    """),
+    12: (13, """
+        -- Migration v12 -> v13: Add replication_seeds for seed-based replication
+        ALTER TABLE media ADD COLUMN replication_seeds TEXT;
     """),
 }
 
@@ -1243,17 +1252,16 @@ class PackageDatabase:
             progress_callback: Optional callback(count, pkg_name)
             batch_size: Number of packages per batch
         """
-        timestamp = int(time.time())
-        count = 0
+        import os
+        import logging
+        pkg_logger = logging.getLogger(__name__)
 
-        # Accumulators for batch inserts
-        pkg_rows = []
-        # We'll need to track nevra -> pkg_id mapping for deps
-        # So we insert packages first, then query their IDs
+        timestamp = int(time.time())
 
         # Collect all packages first
         all_packages = list(packages)
         total = len(all_packages)
+        imported_nevras = {pkg['nevra'] for pkg in all_packages}
 
         if progress_callback:
             progress_callback(0, "preparing...")
@@ -1262,7 +1270,62 @@ class PackageDatabase:
         self.conn.execute("BEGIN TRANSACTION")
 
         try:
-            # Bulk insert packages
+            # Step 1: Delete all dependencies for this media (they can change)
+            if media_id:
+                if progress_callback:
+                    progress_callback(0, "clearing dependencies...")
+                for table in ('requires', 'provides', 'conflicts', 'obsoletes',
+                              'recommends', 'suggests', 'supplements', 'enhances'):
+                    self.conn.execute(f"""
+                        DELETE FROM {table} WHERE pkg_id IN
+                        (SELECT id FROM packages WHERE media_id = ?)
+                    """, (media_id,))
+
+            # Step 2: Find obsolete packages (in DB but not in new synthesis)
+            obsolete_packages = []
+            if media_id:
+                cursor = self.conn.execute(
+                    "SELECT id, nevra, name, version, release, arch FROM packages WHERE media_id = ?",
+                    (media_id,)
+                )
+                for row in cursor:
+                    if row['nevra'] not in imported_nevras:
+                        obsolete_packages.append(dict(row))
+
+            # Step 3: Delete local cached files for obsolete packages
+            if obsolete_packages:
+                if progress_callback:
+                    progress_callback(0, f"removing {len(obsolete_packages)} obsolete packages...")
+
+                from .config import get_base_dir
+                base_dir = get_base_dir()
+
+                for pkg in obsolete_packages:
+                    filename = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}.rpm"
+                    # Remove from cache_files and get path
+                    cache_entry = self.get_cache_file(filename, media_id)
+                    if cache_entry:
+                        file_path = base_dir / "medias" / cache_entry['file_path']
+                        try:
+                            if file_path.exists():
+                                os.unlink(file_path)
+                                pkg_logger.debug(f"Deleted obsolete cached file: {filename}")
+                        except OSError as e:
+                            pkg_logger.warning(f"Could not delete {file_path}: {e}")
+                        self.delete_cache_file(filename, media_id)
+
+                # Delete obsolete packages from DB
+                obsolete_ids = [p['id'] for p in obsolete_packages]
+                placeholders = ','.join('?' * len(obsolete_ids))
+                self.conn.execute(
+                    f"DELETE FROM packages WHERE id IN ({placeholders})",
+                    obsolete_ids
+                )
+
+            # Step 4: UPSERT packages (preserves added_timestamp and server_last_modified)
+            if progress_callback:
+                progress_callback(0, "upserting packages...")
+
             pkg_rows = []
             for pkg in all_packages:
                 hash_data = f"{pkg['nevra']}|{pkg.get('summary', '')}"
@@ -1289,15 +1352,31 @@ class PackageDatabase:
                 ))
 
             self.conn.executemany("""
-                INSERT OR REPLACE INTO packages
+                INSERT INTO packages
                 (media_id, name, epoch, version, release, arch, name_lower, nevra,
                  summary, description, size, group_name, url, license,
                  source, pkg_hash, added_timestamp)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(nevra, media_id) DO UPDATE SET
+                    name = excluded.name,
+                    epoch = excluded.epoch,
+                    version = excluded.version,
+                    release = excluded.release,
+                    arch = excluded.arch,
+                    name_lower = excluded.name_lower,
+                    summary = excluded.summary,
+                    description = excluded.description,
+                    size = excluded.size,
+                    group_name = excluded.group_name,
+                    url = excluded.url,
+                    license = excluded.license,
+                    source = excluded.source,
+                    pkg_hash = excluded.pkg_hash
+                    -- added_timestamp and server_last_modified NOT updated
             """, pkg_rows)
 
             if progress_callback:
-                progress_callback(total, "packages inserted, indexing deps...")
+                progress_callback(total, "indexing deps...")
 
             # Build nevra -> pkg_id mapping
             cursor = self.conn.execute(
@@ -1306,7 +1385,7 @@ class PackageDatabase:
             )
             nevra_to_id = {row[1]: row[0] for row in cursor}
 
-            # Collect all dependencies
+            # Step 5: Collect and insert all dependencies
             requires_rows = []
             provides_rows = []
             conflicts_rows = []
@@ -1329,7 +1408,6 @@ class PackageDatabase:
                     conflicts_rows.append((pkg_id, cap))
                 for cap in pkg.get('obsoletes', []):
                     obsoletes_rows.append((pkg_id, cap))
-                # Weak dependencies
                 for cap in pkg.get('recommends', []):
                     recommends_rows.append((pkg_id, cap))
                 for cap in pkg.get('suggests', []):
@@ -1587,6 +1665,119 @@ class PackageDatabase:
         """, (capability, limit))
 
         return [dict(row) for row in cursor]
+
+    def get_packages_for_media(self, media_id: int, with_filename: bool = True,
+                                order_by: str = 'name') -> List[Dict]:
+        """Get all packages in a media.
+
+        Args:
+            media_id: Media ID
+            with_filename: If True, include the RPM filename
+            order_by: 'name' (default), 'server_date' (newest first), 'added' (newest first)
+
+        Returns:
+            List of package dicts with name, version, release, arch, size, filename
+        """
+        order_clause = "p.name_lower"
+        if order_by == 'server_date':
+            order_clause = "p.server_last_modified DESC NULLS LAST, p.name_lower"
+        elif order_by == 'added':
+            order_clause = "p.added_timestamp DESC, p.name_lower"
+
+        cursor = self.conn.execute(f"""
+            SELECT p.id, p.name, p.version, p.release, p.epoch, p.arch,
+                   p.nevra, p.size, p.server_last_modified, m.name as media_name
+            FROM packages p
+            LEFT JOIN media m ON p.media_id = m.id
+            WHERE p.media_id = ?
+            ORDER BY {order_clause}
+        """, (media_id,))
+
+        results = []
+        for row in cursor:
+            pkg = dict(row)
+            if with_filename:
+                # Build RPM filename: name-version-release.arch.rpm
+                pkg['filename'] = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}.rpm"
+            results.append(pkg)
+
+        return results
+
+    def get_media_packages_filenames(self, media_id: int) -> Set[str]:
+        """Get set of all RPM filenames in a media.
+
+        Efficient method for checking which packages exist.
+
+        Args:
+            media_id: Media ID
+
+        Returns:
+            Set of RPM filenames (e.g., {'foo-1.0-1.mga10.x86_64.rpm', ...})
+        """
+        cursor = self.conn.execute("""
+            SELECT name, version, release, arch
+            FROM packages
+            WHERE media_id = ?
+        """, (media_id,))
+
+        return {
+            f"{row['name']}-{row['version']}-{row['release']}.{row['arch']}.rpm"
+            for row in cursor
+        }
+
+    def get_packages_needing_server_dates(self, media_id: int, limit: int = None) -> List[Dict]:
+        """Get packages that don't have server_last_modified set.
+
+        Used by the background job to fetch HEAD for these packages.
+
+        Args:
+            media_id: Media ID
+            limit: Max number to return (None = all)
+
+        Returns:
+            List of package dicts with id, nevra, name, version, release, arch
+        """
+        query = """
+            SELECT id, nevra, name, version, release, arch
+            FROM packages
+            WHERE media_id = ? AND server_last_modified IS NULL
+            ORDER BY name_lower
+        """
+        if limit:
+            query += f" LIMIT {limit}"
+
+        cursor = self.conn.execute(query, (media_id,))
+        results = []
+        for row in cursor:
+            pkg = dict(row)
+            pkg['filename'] = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}.rpm"
+            results.append(pkg)
+        return results
+
+    def update_server_last_modified(self, package_id: int, timestamp: int):
+        """Update server_last_modified for a package.
+
+        Args:
+            package_id: Package ID
+            timestamp: Unix timestamp from server's Last-Modified header
+        """
+        self.conn.execute(
+            "UPDATE packages SET server_last_modified = ? WHERE id = ?",
+            (timestamp, package_id)
+        )
+        self.conn.commit()
+
+    def update_server_last_modified_batch(self, updates: List[tuple]):
+        """Batch update server_last_modified for multiple packages.
+
+        Args:
+            updates: List of (package_id, timestamp) tuples
+        """
+        self.conn.executemany(
+            "UPDATE packages SET server_last_modified = ? WHERE id = ?",
+            [(ts, pkg_id) for pkg_id, ts in updates]
+        )
+        self.conn.commit()
 
     # =========================================================================
     # Statistics
@@ -2305,7 +2496,7 @@ class PackageDatabase:
     def update_media_proxy_settings(self, media_id: int,
                                      proxy_enabled: bool = None,
                                      replication_policy: str = None,
-                                     replication_since: int = None,
+                                     replication_seeds: List[str] = None,
                                      quota_mb: int = None,
                                      retention_days: int = None):
         """Update proxy/replication settings for a media.
@@ -2313,11 +2504,14 @@ class PackageDatabase:
         Args:
             media_id: Media ID
             proxy_enabled: Whether to serve this media to peers
-            replication_policy: 'none', 'on_demand', 'full', 'since'
-            replication_since: Timestamp for policy='since'
+            replication_policy: 'none', 'on_demand', 'seed'
+            replication_seeds: List of rpmsrate sections for policy='seed'
+                              e.g., ['INSTALL', 'CAT_PLASMA5', 'CAT_GNOME']
             quota_mb: Per-media quota in MB (None to clear)
             retention_days: Days to keep cached packages
         """
+        import json
+
         updates = []
         params = []
 
@@ -2326,14 +2520,14 @@ class PackageDatabase:
             params.append(int(proxy_enabled))
 
         if replication_policy is not None:
-            if replication_policy not in ('none', 'on_demand', 'full', 'since'):
+            if replication_policy not in ('none', 'on_demand', 'seed'):
                 raise ValueError(f"Invalid replication_policy: {replication_policy}")
             updates.append("replication_policy = ?")
             params.append(replication_policy)
 
-        if replication_since is not None:
-            updates.append("replication_since = ?")
-            params.append(replication_since)
+        if replication_seeds is not None:
+            updates.append("replication_seeds = ?")
+            params.append(json.dumps(replication_seeds) if replication_seeds else None)
 
         if quota_mb is not None:
             updates.append("quota_mb = ?")
@@ -2400,3 +2594,135 @@ class PackageDatabase:
                          if m['mageia_version'] not in disabled_versions]
 
         return media_list
+
+    # =========================================================================
+    # Dependency collection (for replication, not installation)
+    # =========================================================================
+
+    def collect_dependencies(self, package_names: set, media_ids: List[int] = None,
+                              include_recommends: bool = True,
+                              include_file_deps: bool = True) -> Dict:
+        """Collect all dependencies recursively for a set of packages.
+
+        Unlike resolve_install(), this does NOT check conflicts - it just collects
+        all packages that would be needed. This is for replication purposes where
+        conflicting packages can coexist as RPM files.
+
+        Args:
+            package_names: Set of package names to start from
+            media_ids: Optional list of media IDs to limit search (None = all media)
+            include_recommends: If True, also follow Recommends (weak deps) - default True
+            include_file_deps: If True, also follow file dependencies (/usr/bin/...) - default True
+
+        Returns:
+            Dict with:
+                - 'packages': Set of all package names (seeds + dependencies)
+                - 'not_found': Set of package names that couldn't be resolved
+                - 'total_size': Total size in bytes
+        """
+        # Load all data into memory for fast lookup
+        media_filter = ""
+        params = []
+        if media_ids:
+            placeholders = ",".join("?" * len(media_ids))
+            media_filter = f" WHERE media_id IN ({placeholders})"
+            params = list(media_ids)
+
+        # Load packages: name_lower -> (id, name, size)
+        cursor = self.conn.execute(f"""
+            SELECT id, name, name_lower, COALESCE(size, 0) FROM packages {media_filter}
+        """, params)
+        pkg_by_name = {}  # name_lower -> (id, name, size)
+        pkg_by_id = {}    # id -> (name, size)
+        for pkg_id, name, name_lower, size in cursor:
+            # Keep highest version (first seen due to ORDER BY in original)
+            if name_lower not in pkg_by_name:
+                pkg_by_name[name_lower] = (pkg_id, name, size)
+            pkg_by_id[pkg_id] = (name, size)
+
+        # Load requires: pkg_id -> [capabilities]
+        cursor = self.conn.execute("SELECT pkg_id, capability FROM requires")
+        requires_by_pkg = {}
+        for pkg_id, cap in cursor:
+            if pkg_id not in requires_by_pkg:
+                requires_by_pkg[pkg_id] = []
+            requires_by_pkg[pkg_id].append(cap)
+
+        # Load recommends if needed: pkg_id -> [capabilities]
+        recommends_by_pkg = {}
+        if include_recommends:
+            cursor = self.conn.execute("SELECT pkg_id, capability FROM recommends")
+            for pkg_id, cap in cursor:
+                if pkg_id not in recommends_by_pkg:
+                    recommends_by_pkg[pkg_id] = []
+                recommends_by_pkg[pkg_id].append(cap)
+
+        # Load provides: capability_base -> [pkg_ids]
+        # We strip version info for matching
+        cursor = self.conn.execute("SELECT pkg_id, capability FROM provides")
+        provides_by_cap = {}
+        for pkg_id, cap in cursor:
+            cap_base = cap.split()[0]  # Remove version constraints
+            if cap_base not in provides_by_cap:
+                provides_by_cap[cap_base] = set()
+            provides_by_cap[cap_base].add(pkg_id)
+
+        # Now do the recursive collection in memory
+        result_ids = set()
+        not_found = set()
+        to_process = set(package_names)
+        processed_caps = set()
+
+        while to_process:
+            pkg_name = to_process.pop()
+
+            if pkg_name.lower() in {pkg_by_id[pid][0].lower() for pid in result_ids}:
+                continue
+
+            pkg_info = pkg_by_name.get(pkg_name.lower())
+            if not pkg_info:
+                not_found.add(pkg_name)
+                continue
+
+            pkg_id, name, size = pkg_info
+            result_ids.add(pkg_id)
+
+            # Get all dependencies for this package (requires + recommends)
+            all_deps = requires_by_pkg.get(pkg_id, [])
+            if include_recommends:
+                all_deps = all_deps + recommends_by_pkg.get(pkg_id, [])
+
+            for cap in all_deps:
+                if cap in processed_caps:
+                    continue
+                processed_caps.add(cap)
+
+                # Skip rpmlib and config dependencies (internal RPM stuff)
+                if cap.startswith(('rpmlib(', 'config(')):
+                    continue
+
+                # Skip file dependencies if not requested
+                if cap.startswith('/') and not include_file_deps:
+                    continue
+
+                cap_base = cap.split()[0]
+                provider_ids = provides_by_cap.get(cap_base, set())
+
+                # Filter to packages in our media if needed
+                if media_ids:
+                    provider_ids = {pid for pid in provider_ids if pid in pkg_by_id}
+
+                for prov_id in provider_ids:
+                    if prov_id not in result_ids:
+                        prov_name = pkg_by_id[prov_id][0]
+                        to_process.add(prov_name)
+
+        # Calculate total size
+        total_size = sum(pkg_by_id[pid][1] for pid in result_ids if pid in pkg_by_id)
+        result_names = {pkg_by_id[pid][0] for pid in result_ids if pid in pkg_by_id}
+
+        return {
+            'packages': result_names,
+            'not_found': not_found,
+            'total_size': total_size,
+        }
