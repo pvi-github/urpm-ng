@@ -92,7 +92,7 @@ class CacheManager:
                 )
         else:
             # Global quota
-            global_quota = self.db.get_proxy_config('global_quota_mb')
+            global_quota = self.db.get_mirror_config('global_quota_mb')
             if global_quota:
                 stats['quota_bytes'] = int(global_quota) * 1024 * 1024
                 stats['quota_used_pct'] = (
@@ -232,7 +232,7 @@ class CacheManager:
                         result['quota_bytes'] += f['file_size']
 
         # Phase 4: Apply global quota
-        global_quota_str = self.db.get_proxy_config('global_quota_mb')
+        global_quota_str = self.db.get_mirror_config('global_quota_mb')
         if global_quota_str:
             global_quota_bytes = int(global_quota_str) * 1024 * 1024
             current_size = self.get_total_usage()

@@ -40,7 +40,7 @@ class Peer:
     last_seen: datetime = field(default_factory=datetime.now)
     version: str = ""
     # Proxy info (v11+)
-    proxy_enabled: bool = False
+    mirror_enabled: bool = False
     local_version: str = ""  # Peer's local Mageia version
     local_arch: str = ""     # Peer's local architecture
     served_media: List[dict] = field(default_factory=list)  # [{version, arch, types}]
@@ -66,7 +66,7 @@ class Peer:
             'last_seen': self.last_seen.isoformat(),
             'version': self.version,
             'alive': self.is_alive(),
-            'proxy_enabled': self.proxy_enabled,
+            'mirror_enabled': self.mirror_enabled,
             'local_version': self.local_version,
             'local_arch': self.local_arch,
             'served_media': self.served_media,
@@ -171,7 +171,7 @@ class PeerDiscovery:
             return [peer.to_dict() for peer in self.peers.values()]
 
     def register_peer(self, host: str, port: int, media: List[str],
-                       proxy_enabled: bool = False, local_version: str = "",
+                       mirror_enabled: bool = False, local_version: str = "",
                        local_arch: str = "", served_media: List[dict] = None) -> dict:
         """Register or update a peer (called when receiving HTTP announce).
 
@@ -179,7 +179,7 @@ class PeerDiscovery:
             host: Peer host
             port: Peer port
             media: List of media names
-            proxy_enabled: Whether peer has proxy mode enabled
+            mirror_enabled: Whether peer has proxy mode enabled
             local_version: Peer's local Mageia version
             local_arch: Peer's architecture
             served_media: List of {version, arch, types} dicts
@@ -193,7 +193,7 @@ class PeerDiscovery:
                 peer = self.peers[key]
                 peer.media = media
                 peer.last_seen = datetime.now()
-                peer.proxy_enabled = proxy_enabled
+                peer.mirror_enabled = mirror_enabled
                 peer.local_version = local_version
                 peer.local_arch = local_arch
                 peer.served_media = served_media
@@ -202,7 +202,7 @@ class PeerDiscovery:
                 # New peer
                 peer = Peer(
                     host=host, port=port, media=media,
-                    proxy_enabled=proxy_enabled,
+                    mirror_enabled=mirror_enabled,
                     local_version=local_version,
                     local_arch=local_arch,
                     served_media=served_media
@@ -356,12 +356,12 @@ class PeerDiscovery:
             # Get our media list and proxy info (use own DB connection for thread safety)
             media_list = []
             served_media = []  # [{version, arch, types}]
-            proxy_enabled = False
+            mirror_enabled = False
             local_version = ""
             local_arch = platform.machine()
 
             if self._db:
-                proxy_enabled = self._db.is_proxy_enabled()
+                mirror_enabled = self._db.is_mirror_enabled()
 
                 # Group media by version/arch for served_media
                 version_arch_types = {}  # (version, arch) -> [types]
@@ -374,7 +374,7 @@ class PeerDiscovery:
                         local_version = m.get('mageia_version', '')
 
                     # Only include in served_media if proxy is enabled for this media
-                    if proxy_enabled and m.get('proxy_enabled', 1) and m.get('enabled'):
+                    if mirror_enabled and m.get('shared', 1) and m.get('enabled'):
                         key = (m.get('mageia_version', ''), m.get('architecture', ''))
                         if key not in version_arch_types:
                             version_arch_types[key] = []
@@ -392,7 +392,7 @@ class PeerDiscovery:
                 'host': self._get_local_ip(),
                 'port': self.daemon.port,
                 'media': media_list,
-                'proxy_enabled': proxy_enabled,
+                'mirror_enabled': mirror_enabled,
                 'local_version': local_version,
                 'local_arch': local_arch,
                 'served_media': served_media,

@@ -411,8 +411,9 @@ class UrpmdHandler(BaseHTTPRequestHandler):
         port = data.get('port')
         media_list = data.get('media', [])
 
-        # New proxy fields (v11+)
-        proxy_enabled = data.get('proxy_enabled', False)
+        # Mirror/sharing fields (v11+, renamed from proxy_enabled in v14)
+        # Support both names for backward compatibility
+        mirror_enabled = data.get('mirror_enabled', data.get('proxy_enabled', False))
         local_version = data.get('local_version', '')
         local_arch = data.get('local_arch', '')
         served_media = data.get('served_media', [])
@@ -424,7 +425,7 @@ class UrpmdHandler(BaseHTTPRequestHandler):
         # Register the peer
         result = self.daemon.register_peer(
             host, port, media_list,
-            proxy_enabled=proxy_enabled,
+            mirror_enabled=mirror_enabled,
             local_version=local_version,
             local_arch=local_arch,
             served_media=served_media

@@ -322,13 +322,13 @@ class UrpmDaemon:
         return []
 
     def register_peer(self, host: str, port: int, media: List[str],
-                       proxy_enabled: bool = False, local_version: str = "",
+                       mirror_enabled: bool = False, local_version: str = "",
                        local_arch: str = "", served_media: List[Dict] = None) -> Dict[str, Any]:
         """Register or update a peer."""
         if self.discovery:
             return self.discovery.register_peer(
                 host, port, media,
-                proxy_enabled=proxy_enabled,
+                mirror_enabled=mirror_enabled,
                 local_version=local_version,
                 local_arch=local_arch,
                 served_media=served_media

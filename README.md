@@ -394,10 +394,10 @@ urpm media seed-info "Core Release"
 #   Estimated size: ~3.5 GB
 
 # Force sync (download missing packages)
-urpm proxy sync
+urpm mirror sync
 
 # Sync only latest version of each package (smaller, DVD-like)
-urpm proxy sync --latest-only
+urpm mirror sync --latest-only
 ```
 
 ### How it works

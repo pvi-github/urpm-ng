@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Iterator, Set
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS media (
     priority INTEGER DEFAULT 50,
 
     -- Proxy/replication settings (v11+)
-    proxy_enabled INTEGER DEFAULT 1,      -- 1 = serve to peers, 0 = don't share
+    shared INTEGER DEFAULT 1,             -- 1 = serve to peers, 0 = don't share
     replication_policy TEXT DEFAULT 'on_demand',  -- 'none', 'on_demand', 'seed'
     replication_seeds TEXT,               -- JSON list of rpmsrate sections, e.g. ["INSTALL","CAT_PLASMA5"]
     quota_mb INTEGER,                     -- Per-media quota in MB (NULL = no limit)
@@ -282,7 +282,7 @@ CREATE INDEX IF NOT EXISTS idx_cache_files_referenced ON cache_files(is_referenc
 CREATE INDEX IF NOT EXISTS idx_cache_files_accessed ON cache_files(last_accessed);
 
 -- Proxy configuration (v11+)
-CREATE TABLE IF NOT EXISTS proxy_config (
+CREATE TABLE IF NOT EXISTS mirror_config (
     key TEXT PRIMARY KEY,
     value TEXT
 );
@@ -424,6 +424,11 @@ MIGRATIONS = {
     12: (13, """
         -- Migration v12 -> v13: Add replication_seeds for seed-based replication
         ALTER TABLE media ADD COLUMN replication_seeds TEXT;
+    """),
+    13: (14, """
+        -- Migration v13 -> v14: Rename proxy -> mirror (clearer naming)
+        ALTER TABLE media RENAME COLUMN proxy_enabled TO shared;
+        ALTER TABLE proxy_config RENAME TO mirror_config;
     """),
 }
 
@@ -2229,37 +2234,37 @@ class PackageDatabase:
         return [dict(row) for row in cursor]
 
     # =========================================================================
-    # Proxy configuration
+    # Mirror configuration
     # =========================================================================
 
-    def get_proxy_config(self, key: str, default: str = None) -> Optional[str]:
-        """Get a proxy configuration value."""
+    def get_mirror_config(self, key: str, default: str = None) -> Optional[str]:
+        """Get a mirror configuration value."""
         cursor = self.conn.execute(
-            "SELECT value FROM proxy_config WHERE key = ?", (key,)
+            "SELECT value FROM mirror_config WHERE key = ?", (key,)
         )
         row = cursor.fetchone()
         return row[0] if row else default
 
-    def set_proxy_config(self, key: str, value: str):
-        """Set a proxy configuration value."""
+    def set_mirror_config(self, key: str, value: str):
+        """Set a mirror configuration value."""
         self.conn.execute(
-            "INSERT OR REPLACE INTO proxy_config (key, value) VALUES (?, ?)",
+            "INSERT OR REPLACE INTO mirror_config (key, value) VALUES (?, ?)",
             (key, value)
         )
         self.conn.commit()
 
-    def get_all_proxy_config(self) -> Dict[str, str]:
-        """Get all proxy configuration values."""
-        cursor = self.conn.execute("SELECT key, value FROM proxy_config")
+    def get_all_mirror_config(self) -> Dict[str, str]:
+        """Get all mirror configuration values."""
+        cursor = self.conn.execute("SELECT key, value FROM mirror_config")
         return {row[0]: row[1] for row in cursor}
 
-    def is_proxy_enabled(self) -> bool:
-        """Check if proxy mode is globally enabled."""
-        return self.get_proxy_config('enabled', '0') == '1'
+    def is_mirror_enabled(self) -> bool:
+        """Check if mirror mode is globally enabled."""
+        return self.get_mirror_config('enabled', '0') == '1'
 
-    def get_disabled_proxy_versions(self) -> List[str]:
-        """Get list of Mageia versions disabled for proxying."""
-        disabled = self.get_proxy_config('disabled_versions', '')
+    def get_disabled_mirror_versions(self) -> List[str]:
+        """Get list of Mageia versions disabled for mirroring."""
+        disabled = self.get_mirror_config('disabled_versions', '')
         if not disabled:
             return []
         return [v.strip() for v in disabled.split(',') if v.strip()]
@@ -2490,20 +2495,20 @@ class PackageDatabase:
         return files
 
     # =========================================================================
-    # Media proxy/replication settings
+    # Media mirror/replication settings
     # =========================================================================
 
-    def update_media_proxy_settings(self, media_id: int,
-                                     proxy_enabled: bool = None,
-                                     replication_policy: str = None,
-                                     replication_seeds: List[str] = None,
-                                     quota_mb: int = None,
-                                     retention_days: int = None):
-        """Update proxy/replication settings for a media.
+    def update_media_mirror_settings(self, media_id: int,
+                                      shared: bool = None,
+                                      replication_policy: str = None,
+                                      replication_seeds: List[str] = None,
+                                      quota_mb: int = None,
+                                      retention_days: int = None):
+        """Update mirror/replication settings for a media.
 
         Args:
             media_id: Media ID
-            proxy_enabled: Whether to serve this media to peers
+            shared: Whether to serve this media to peers
             replication_policy: 'none', 'on_demand', 'seed'
             replication_seeds: List of rpmsrate sections for policy='seed'
                               e.g., ['INSTALL', 'CAT_PLASMA5', 'CAT_GNOME']
@@ -2515,9 +2520,9 @@ class PackageDatabase:
         updates = []
         params = []
 
-        if proxy_enabled is not None:
-            updates.append("proxy_enabled = ?")
-            params.append(int(proxy_enabled))
+        if shared is not None:
+            updates.append("shared = ?")
+            params.append(int(shared))
 
         if replication_policy is not None:
             if replication_policy not in ('none', 'on_demand', 'seed'):
@@ -2547,12 +2552,12 @@ class PackageDatabase:
         )
         self.conn.commit()
 
-    def list_media_for_proxy(self, version: str = None, arch: str = None) -> List[Dict]:
-        """List media available for proxying to peers.
+    def list_media_for_sharing(self, version: str = None, arch: str = None) -> List[Dict]:
+        """List media available for sharing with peers.
 
         Filters by:
-        - proxy_enabled = 1
-        - Global proxy enabled
+        - shared = 1
+        - Global mirror enabled
         - Version not in disabled_versions
         - Optionally matching version/arch
 
@@ -2563,15 +2568,15 @@ class PackageDatabase:
         Returns:
             List of media dicts that can be served to peers
         """
-        # Check global proxy enabled
-        if not self.is_proxy_enabled():
+        # Check global mirror enabled
+        if not self.is_mirror_enabled():
             return []
 
-        disabled_versions = self.get_disabled_proxy_versions()
+        disabled_versions = self.get_disabled_mirror_versions()
 
         query = """
             SELECT * FROM media
-            WHERE enabled = 1 AND proxy_enabled = 1
+            WHERE enabled = 1 AND shared = 1
         """
         params = []
 

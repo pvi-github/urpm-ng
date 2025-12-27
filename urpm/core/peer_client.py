@@ -31,7 +31,7 @@ class Peer:
     host: str
     port: int
     media: List[str] = field(default_factory=list)
-    proxy_enabled: bool = False
+    mirror_enabled: bool = False
     local_version: str = ''
     local_arch: str = ''
     served_media: List[dict] = field(default_factory=list)
@@ -165,7 +165,7 @@ class PeerClient:
                                 host=p['host'],
                                 port=p['port'],
                                 media=p.get('media', []),
-                                proxy_enabled=p.get('proxy_enabled', False),
+                                mirror_enabled=p.get('mirror_enabled', False),
                                 local_version=p.get('local_version', ''),
                                 local_arch=p.get('local_arch', ''),
                                 served_media=p.get('served_media', [])

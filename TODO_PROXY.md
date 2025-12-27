@@ -28,7 +28,7 @@
 - [ ] Proxy multi-version (mga10 sert mga9)
 - [ ] Rate limiting configurable
 - [ ] `/api/request-download` endpoint
-- [ ] Renommer `urpm proxy` → `urpm mirror` (plus cohérent avec la fonction réelle)
+- [x] ~~Renommer `urpm proxy` → `urpm mirror`~~ (fait - `proxy` reste comme alias)
 
 ---
 

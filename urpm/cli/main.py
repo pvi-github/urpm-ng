@@ -857,9 +857,9 @@ For legacy mode (non-Mageia URL with explicit name):
     )
     media_set.add_argument('name', help='Media name')
     media_set.add_argument(
-        '--proxy',
+        '--shared',
         choices=['yes', 'no'],
-        help='Enable/disable serving this media to peers'
+        help='Enable/disable sharing this media with peers'
     )
     media_set.add_argument(
         '--replication',
@@ -1001,84 +1001,85 @@ Examples:
     )
 
     # =========================================================================
-    # proxy
+    # mirror (local package mirroring)
     # =========================================================================
-    proxy_parser = subparsers.add_parser(
-        'proxy',
-        help='Manage proxy/P2P settings',
+    mirror_parser = subparsers.add_parser(
+        'mirror',
+        help='Manage local package mirroring',
+        aliases=['proxy'],  # backward compatibility
         parents=[display_parent]
     )
-    proxy_subparsers = proxy_parser.add_subparsers(
-        dest='proxy_command',
+    mirror_subparsers = mirror_parser.add_subparsers(
+        dest='mirror_command',
         metavar='<subcommand>'
     )
 
-    # proxy status
-    proxy_subparsers.add_parser('status', help='Show proxy status and quotas')
+    # mirror status
+    mirror_subparsers.add_parser('status', help='Show mirror status and quotas')
 
-    # proxy enable
-    proxy_subparsers.add_parser('enable', help='Enable proxy mode (serve packages to peers)')
+    # mirror enable
+    mirror_subparsers.add_parser('enable', help='Enable mirroring (serve packages to peers)')
 
-    # proxy disable
-    proxy_subparsers.add_parser('disable', help='Disable proxy mode')
+    # mirror disable
+    mirror_subparsers.add_parser('disable', help='Disable mirroring')
 
-    # proxy quota
-    proxy_quota = proxy_subparsers.add_parser('quota', help='Set global cache quota')
-    proxy_quota.add_argument(
+    # mirror quota
+    mirror_quota = mirror_subparsers.add_parser('quota', help='Set global cache quota')
+    mirror_quota.add_argument(
         'size', nargs='?',
         help='Quota size (e.g., 10G, 500M) or empty to show current'
     )
 
-    # proxy disable-version
-    proxy_disable_ver = proxy_subparsers.add_parser(
+    # mirror disable-version
+    mirror_disable_ver = mirror_subparsers.add_parser(
         'disable-version',
         help='Stop serving a Mageia version to peers'
     )
-    proxy_disable_ver.add_argument(
+    mirror_disable_ver.add_argument(
         'versions',
         help='Comma-separated version numbers (e.g., 8,9)'
     )
 
-    # proxy enable-version
-    proxy_enable_ver = proxy_subparsers.add_parser(
+    # mirror enable-version
+    mirror_enable_ver = mirror_subparsers.add_parser(
         'enable-version',
         help='Resume serving a Mageia version to peers'
     )
-    proxy_enable_ver.add_argument(
+    mirror_enable_ver.add_argument(
         'versions',
         help='Comma-separated version numbers (e.g., 9)'
     )
 
-    # proxy clean
-    proxy_clean = proxy_subparsers.add_parser(
+    # mirror clean
+    mirror_clean = mirror_subparsers.add_parser(
         'clean',
         help='Enforce quotas and retention policies'
     )
-    proxy_clean.add_argument(
+    mirror_clean.add_argument(
         '--dry-run', '-n', action='store_true',
         help='Show what would be deleted without deleting'
     )
 
-    # proxy sync
-    proxy_sync = proxy_subparsers.add_parser(
+    # mirror sync
+    mirror_sync = mirror_subparsers.add_parser(
         'sync',
         help='Force sync according to replication policies'
     )
-    proxy_sync.add_argument(
+    mirror_sync.add_argument(
         'media', nargs='?',
-        help='Specific media to sync (default: all with full/since policy)'
+        help='Specific media to sync (default: all with seed policy)'
     )
-    proxy_sync.add_argument(
+    mirror_sync.add_argument(
         '--latest-only', action='store_true',
         help='Only download latest version of each package (smaller, DVD-like)'
     )
 
-    # proxy rate-limit
-    proxy_ratelimit = proxy_subparsers.add_parser(
+    # mirror rate-limit
+    mirror_ratelimit = mirror_subparsers.add_parser(
         'rate-limit',
         help='Configure rate limiting'
     )
-    proxy_ratelimit.add_argument(
+    mirror_ratelimit.add_argument(
         'setting',
         nargs='?',
         help='on, off, or N/min (e.g., 60/min)'
@@ -2575,10 +2576,10 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
     changes = []
 
     # Parse and apply changes
-    proxy_enabled = None
-    if args.proxy:
-        proxy_enabled = args.proxy == 'yes'
-        changes.append(f"proxy: {'enabled' if proxy_enabled else 'disabled'}")
+    shared = None
+    if args.shared:
+        shared = args.shared == 'yes'
+        changes.append(f"shared: {'yes' if shared else 'no'}")
 
     replication_policy = None
     replication_seeds = None
@@ -2624,15 +2625,15 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
 
     if not changes:
         print(colors.warning("No changes specified"))
-        print("Use --proxy, --replication, --seeds, --quota, --retention, or --priority")
+        print("Use --shared, --replication, --seeds, --quota, --retention, or --priority")
         return 1
 
-    # Apply proxy settings
-    if any([proxy_enabled is not None, replication_policy, replication_seeds is not None,
+    # Apply mirror settings
+    if any([shared is not None, replication_policy, replication_seeds is not None,
             quota_mb is not None, retention_days is not None]):
-        db.update_media_proxy_settings(
+        db.update_media_mirror_settings(
             media['id'],
-            proxy_enabled=proxy_enabled,
+            shared=shared,
             replication_policy=replication_policy,
             replication_seeds=replication_seeds,
             quota_mb=quota_mb,
@@ -3097,23 +3098,23 @@ def cmd_server_ipmode(args, db: PackageDatabase) -> int:
 
 
 # =============================================================================
-# Proxy commands
+# Mirror commands
 # =============================================================================
 
-def cmd_proxy_status(args, db: PackageDatabase) -> int:
-    """Handle proxy status command."""
+def cmd_mirror_status(args, db: PackageDatabase) -> int:
+    """Handle mirror status command."""
     from . import colors
     from ..core.cache import CacheManager, format_size
 
     # Global proxy status
-    enabled = db.is_proxy_enabled()
-    disabled_versions = db.get_disabled_proxy_versions()
-    global_quota = db.get_proxy_config('global_quota_mb')
-    rate_limit = db.get_proxy_config('rate_limit_enabled', '1')
+    enabled = db.is_mirror_enabled()
+    disabled_versions = db.get_disabled_mirror_versions()
+    global_quota = db.get_mirror_config('global_quota_mb')
+    rate_limit = db.get_mirror_config('rate_limit_enabled', '1')
 
-    print(colors.bold("\nProxy Status"))
+    print(colors.bold("\nMirror Status"))
     print("-" * 40)
-    print(f"Proxy mode:       {colors.success('enabled') if enabled else colors.dim('disabled')}")
+    print(f"Mirror mode:      {colors.success('enabled') if enabled else colors.dim('disabled')}")
     if disabled_versions:
         print(f"Disabled versions: {', '.join(disabled_versions)}")
     if global_quota:
@@ -3141,17 +3142,17 @@ def cmd_proxy_status(args, db: PackageDatabase) -> int:
         print(f"Quota used:       {pct_str}")
 
     # Per-media summary
-    print(colors.bold("\nMedia with proxy settings"))
+    print(colors.bold("\nMedia with mirror settings"))
     print("-" * 40)
     media_list = db.list_media()
     has_settings = False
     for m in media_list:
-        if m.get('quota_mb') or m.get('replication_policy') != 'on_demand' or not m.get('proxy_enabled', 1):
+        if m.get('quota_mb') or m.get('replication_policy') != 'on_demand' or not m.get('shared', 1):
             has_settings = True
-            proxy_str = colors.success('Y') if m.get('proxy_enabled', 1) else colors.dim('N')
+            shared_str = colors.success('Y') if m.get('shared', 1) else colors.dim('N')
             policy = m.get('replication_policy', 'on_demand')
             quota = f"{m['quota_mb']}M" if m.get('quota_mb') else '-'
-            print(f"  {m['name'][:30]:<30} proxy={proxy_str} repl={policy:<10} quota={quota}")
+            print(f"  {m['name'][:30]:<30} shared={shared_str} repl={policy:<10} quota={quota}")
 
     if not has_settings:
         print(colors.dim("  (all media using defaults)"))
@@ -3159,34 +3160,34 @@ def cmd_proxy_status(args, db: PackageDatabase) -> int:
     return 0
 
 
-def cmd_proxy_enable(args, db: PackageDatabase) -> int:
-    """Handle proxy enable command."""
+def cmd_mirror_enable(args, db: PackageDatabase) -> int:
+    """Handle mirror enable command."""
     from . import colors
 
-    db.set_proxy_config('enabled', '1')
-    print(colors.success("Proxy mode enabled"))
+    db.set_mirror_config('enabled', '1')
+    print(colors.success("Mirror mode enabled"))
     print("This urpmd will now serve packages to peers on the network.")
     return 0
 
 
-def cmd_proxy_disable(args, db: PackageDatabase) -> int:
-    """Handle proxy disable command."""
+def cmd_mirror_disable(args, db: PackageDatabase) -> int:
+    """Handle mirror disable command."""
     from . import colors
 
-    db.set_proxy_config('enabled', '0')
-    print(colors.success("Proxy mode disabled"))
+    db.set_mirror_config('enabled', '0')
+    print(colors.success("Mirror mode disabled"))
     print("This urpmd will no longer serve packages to peers.")
     return 0
 
 
-def cmd_proxy_quota(args, db: PackageDatabase) -> int:
-    """Handle proxy quota command."""
+def cmd_mirror_quota(args, db: PackageDatabase) -> int:
+    """Handle mirror quota command."""
     from . import colors
     from ..core.cache import format_size
 
     if not args.size:
         # Show current quota
-        current = db.get_proxy_config('global_quota_mb')
+        current = db.get_mirror_config('global_quota_mb')
         if current:
             print(f"Global quota: {current} MB ({format_size(int(current) * 1024 * 1024)})")
         else:
@@ -3208,43 +3209,43 @@ def cmd_proxy_quota(args, db: PackageDatabase) -> int:
         print(colors.error(f"Invalid size format: {args.size}"))
         return 1
 
-    db.set_proxy_config('global_quota_mb', str(quota_mb))
+    db.set_mirror_config('global_quota_mb', str(quota_mb))
     print(colors.success(f"Global quota set to {quota_mb} MB ({format_size(quota_mb * 1024 * 1024)})"))
     return 0
 
 
-def cmd_proxy_disable_version(args, db: PackageDatabase) -> int:
-    """Handle proxy disable-version command."""
+def cmd_mirror_disable_version(args, db: PackageDatabase) -> int:
+    """Handle mirror disable-version command."""
     from . import colors
 
-    current = db.get_disabled_proxy_versions()
+    current = db.get_disabled_mirror_versions()
     new_versions = [v.strip() for v in args.versions.split(',') if v.strip()]
 
     # Merge with existing
     all_disabled = set(current) | set(new_versions)
-    db.set_proxy_config('disabled_versions', ','.join(sorted(all_disabled)))
+    db.set_mirror_config('disabled_versions', ','.join(sorted(all_disabled)))
 
-    print(colors.success(f"Disabled proxy for Mageia version(s): {', '.join(new_versions)}"))
+    print(colors.success(f"Disabled mirroring for Mageia version(s): {', '.join(new_versions)}"))
     if current:
         print(f"Previously disabled: {', '.join(current)}")
     print(f"Now disabled: {', '.join(sorted(all_disabled))}")
     return 0
 
 
-def cmd_proxy_enable_version(args, db: PackageDatabase) -> int:
-    """Handle proxy enable-version command."""
+def cmd_mirror_enable_version(args, db: PackageDatabase) -> int:
+    """Handle mirror enable-version command."""
     from . import colors
 
-    current = db.get_disabled_proxy_versions()
+    current = db.get_disabled_mirror_versions()
     to_enable = [v.strip() for v in args.versions.split(',') if v.strip()]
 
     # Remove from disabled list
     still_disabled = [v for v in current if v not in to_enable]
-    db.set_proxy_config('disabled_versions', ','.join(sorted(still_disabled)))
+    db.set_mirror_config('disabled_versions', ','.join(sorted(still_disabled)))
 
     enabled = [v for v in to_enable if v in current]
     if enabled:
-        print(colors.success(f"Re-enabled proxy for Mageia version(s): {', '.join(enabled)}"))
+        print(colors.success(f"Re-enabled mirroring for Mageia version(s): {', '.join(enabled)}"))
     else:
         print(colors.warning(f"Version(s) {', '.join(to_enable)} were not disabled"))
 
@@ -3253,8 +3254,8 @@ def cmd_proxy_enable_version(args, db: PackageDatabase) -> int:
     return 0
 
 
-def cmd_proxy_clean(args, db: PackageDatabase) -> int:
-    """Handle proxy clean command - enforce quotas and retention."""
+def cmd_mirror_clean(args, db: PackageDatabase) -> int:
+    """Handle mirror clean command - enforce quotas and retention."""
     from . import colors
     from ..core.cache import CacheManager, format_size
 
@@ -3282,11 +3283,10 @@ def cmd_proxy_clean(args, db: PackageDatabase) -> int:
     return 0
 
 
-def cmd_proxy_sync(args, db: PackageDatabase) -> int:
-    """Handle proxy sync command - force sync according to replication policies.
+def cmd_mirror_sync(args, db: PackageDatabase) -> int:
+    """Handle mirror sync command - force sync according to replication policies.
 
     Unlike the background daemon which waits for idle, this downloads immediately.
-    TODO: Rename to 'mirror sync' - this is mirroring, not proxying.
     """
     from . import colors
     from ..core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
@@ -3599,14 +3599,14 @@ def cmd_proxy_sync(args, db: PackageDatabase) -> int:
     return 0 if not failed else 1
 
 
-def cmd_proxy_ratelimit(args, db: PackageDatabase) -> int:
-    """Handle proxy rate-limit command."""
+def cmd_mirror_ratelimit(args, db: PackageDatabase) -> int:
+    """Handle mirror rate-limit command."""
     from . import colors
 
     if not args.setting:
         # Show current setting
-        enabled = db.get_proxy_config('rate_limit_enabled', '1')
-        rate = db.get_proxy_config('rate_limit_requests_per_min', '60')
+        enabled = db.get_mirror_config('rate_limit_enabled', '1')
+        rate = db.get_mirror_config('rate_limit_requests_per_min', '60')
         if enabled == '0':
             print(f"Rate limiting: {colors.warning('OFF')} (install party mode)")
         else:
@@ -3615,18 +3615,18 @@ def cmd_proxy_ratelimit(args, db: PackageDatabase) -> int:
 
     setting = args.setting.lower()
     if setting == 'off':
-        db.set_proxy_config('rate_limit_enabled', '0')
+        db.set_mirror_config('rate_limit_enabled', '0')
         print(colors.warning("Rate limiting disabled (install party mode)"))
     elif setting == 'on':
-        db.set_proxy_config('rate_limit_enabled', '1')
-        rate = db.get_proxy_config('rate_limit_requests_per_min', '60')
+        db.set_mirror_config('rate_limit_enabled', '1')
+        rate = db.get_mirror_config('rate_limit_requests_per_min', '60')
         print(colors.success(f"Rate limiting enabled ({rate} requests/min)"))
     elif '/min' in setting:
         # Parse N/min
         try:
             rate = int(setting.replace('/min', ''))
-            db.set_proxy_config('rate_limit_enabled', '1')
-            db.set_proxy_config('rate_limit_requests_per_min', str(rate))
+            db.set_mirror_config('rate_limit_enabled', '1')
+            db.set_mirror_config('rate_limit_requests_per_min', str(rate))
             print(colors.success(f"Rate limiting set to {rate} requests/min"))
         except ValueError:
             print(colors.error(f"Invalid rate format: {args.setting}"))
@@ -9739,25 +9739,25 @@ def main(argv=None) -> int:
             else:
                 return cmd_not_implemented(args, db)
 
-        elif args.command == 'proxy':
-            if args.proxy_command == 'status' or args.proxy_command is None:
-                return cmd_proxy_status(args, db)
-            elif args.proxy_command == 'enable':
-                return cmd_proxy_enable(args, db)
-            elif args.proxy_command == 'disable':
-                return cmd_proxy_disable(args, db)
-            elif args.proxy_command == 'quota':
-                return cmd_proxy_quota(args, db)
-            elif args.proxy_command == 'disable-version':
-                return cmd_proxy_disable_version(args, db)
-            elif args.proxy_command == 'enable-version':
-                return cmd_proxy_enable_version(args, db)
-            elif args.proxy_command == 'clean':
-                return cmd_proxy_clean(args, db)
-            elif args.proxy_command == 'sync':
-                return cmd_proxy_sync(args, db)
-            elif args.proxy_command == 'rate-limit':
-                return cmd_proxy_ratelimit(args, db)
+        elif args.command in ('mirror', 'proxy'):
+            if args.mirror_command == 'status' or args.mirror_command is None:
+                return cmd_mirror_status(args, db)
+            elif args.mirror_command == 'enable':
+                return cmd_mirror_enable(args, db)
+            elif args.mirror_command == 'disable':
+                return cmd_mirror_disable(args, db)
+            elif args.mirror_command == 'quota':
+                return cmd_mirror_quota(args, db)
+            elif args.mirror_command == 'disable-version':
+                return cmd_mirror_disable_version(args, db)
+            elif args.mirror_command == 'enable-version':
+                return cmd_mirror_enable_version(args, db)
+            elif args.mirror_command == 'clean':
+                return cmd_mirror_clean(args, db)
+            elif args.mirror_command == 'sync':
+                return cmd_mirror_sync(args, db)
+            elif args.mirror_command == 'rate-limit':
+                return cmd_mirror_ratelimit(args, db)
             else:
                 return cmd_not_implemented(args, db)
 
