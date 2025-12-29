@@ -21,6 +21,17 @@
 
 ## Phase 1 : Developper & community features
 
+### Bash autocompletion (prioritaire)
+- [ ] Script completion pour commandes/sous-commandes
+- [ ] Completion des noms de paquets (installés et disponibles)
+- [ ] Completion des noms de médias/serveurs
+- [ ] Installation via `/etc/bash_completion.d/urpm`
+
+### Installation RPM local
+- [ ] `urpm install /chemin/vers/paquet.rpm`
+- [ ] Vérification signature, alerte + confirmation si non signé
+- [ ] Résolution des dépendances depuis les médias configurés
+
 ### needs-restarting
 - [ ] Détecter reboot nécessaire (kernel, glibc, systemd)
 - [ ] Lister services à redémarrer
