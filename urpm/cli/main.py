@@ -1781,11 +1781,15 @@ def cmd_media_list(args, db: PackageDatabase) -> int:
         if servers:
             server_strs = []
             for s in servers:
-                host = s['host']
-                if s['enabled']:
-                    server_strs.append(colors.success(host))
+                if s['protocol'] == 'file':
+                    # Local filesystem - show [local] or path
+                    display = f"[local:{s['base_path'][:20]}]" if s['base_path'] else "[local]"
                 else:
-                    server_strs.append(colors.dim(host))
+                    display = s['host']
+                if s['enabled']:
+                    server_strs.append(colors.success(display))
+                else:
+                    server_strs.append(colors.dim(display))
             servers_display = " ".join(server_strs)
         else:
             servers_display = colors.warning("(no server)")
@@ -2172,7 +2176,7 @@ def cmd_media_add(args, db: PackageDatabase) -> int:
             # Fallback: try legacy mode if --name is provided
             if hasattr(args, 'name') and args.name:
                 print(colors.dim("URL not recognized as official Mageia, using legacy mode"))
-                media_id = db.add_media(
+                media_id = db.add_media_legacy(
                     name=args.name,
                     url=url,
                     enabled=not getattr(args, 'disabled', False),
@@ -2490,6 +2494,103 @@ def parse_urpmi_cfg(filepath: str) -> list:
     return media_list
 
 
+def _import_single_media(db: PackageDatabase, media: dict, colors) -> bool:
+    """Import a single media from urpmi.cfg into v8 schema.
+
+    Args:
+        db: Database instance
+        media: Dict with 'name', 'url', 'enabled', 'update' from parse_urpmi_cfg
+        colors: Colors module
+
+    Returns:
+        True if successful, False otherwise
+    """
+    url = media['url']
+    name = media['name']
+    enabled = media['enabled']
+    update = media['update']
+
+    # Parse URL to extract server and media info
+    parsed = parse_mageia_media_url(url)
+
+    if not parsed:
+        # Fallback to legacy mode for non-Mageia URLs
+        db.add_media_legacy(
+            name=name,
+            url=url,
+            enabled=enabled,
+            update=update
+        )
+        return True
+
+    # Extract parsed values
+    protocol = parsed['protocol']
+    host = parsed['host']
+    base_path = parsed['base_path']
+    relative_path = parsed['relative_path']
+    version = parsed['version']
+    arch = parsed['arch']
+    short_name = parsed['short_name']
+    is_official = parsed['is_official']
+
+    # --- Server upsert ---
+    server = db.get_server_by_location(protocol, host, base_path)
+
+    if not server:
+        # Create new server
+        server_name = _generate_server_name(protocol, host)
+        # Make server name unique if needed
+        base_server_name = server_name
+        counter = 1
+        while True:
+            try:
+                server_id = db.add_server(
+                    name=server_name,
+                    protocol=protocol,
+                    host=host,
+                    base_path=base_path,
+                    is_official=is_official,
+                    enabled=True,
+                    priority=50
+                )
+                server = {'id': server_id, 'name': server_name}
+                break
+            except Exception as e:
+                if 'UNIQUE constraint' in str(e) and 'name' in str(e):
+                    counter += 1
+                    server_name = f"{base_server_name}-{counter}"
+                else:
+                    raise
+
+    # --- Media upsert ---
+    existing_media = db.get_media_by_version_arch_shortname(version, arch, short_name)
+
+    if not existing_media:
+        # Create new media with the name from urpmi.cfg (preserves user's naming)
+        media_id = db.add_media(
+            name=name,  # Use original name from urpmi.cfg
+            short_name=short_name,
+            mageia_version=version,
+            architecture=arch,
+            relative_path=relative_path,
+            is_official=is_official,
+            allow_unsigned=False,
+            enabled=enabled,
+            update_media=update,
+            priority=50,
+            url=None
+        )
+        existing_media = {'id': media_id, 'name': name}
+    else:
+        media_id = existing_media['id']
+
+    # --- Link server to media ---
+    if not db.server_media_link_exists(server['id'], existing_media['id']):
+        db.link_server_media(server['id'], existing_media['id'])
+
+    return True
+
+
 def cmd_media_import(args, db: PackageDatabase) -> int:
     """Handle media import command - import from urpmi.cfg."""
     from . import colors
@@ -2577,12 +2678,7 @@ def cmd_media_import(args, db: PackageDatabase) -> int:
             # Remove existing first
             orig_name = existing[media['name'].lower()]
             db.remove_media(orig_name)
-            db.add_media(
-                name=media['name'],
-                url=media['url'],
-                enabled=media['enabled'],
-                update=media['update']
-            )
+            _import_single_media(db, media, colors)
             replaced += 1
             print(f"  {colors.warning('Replaced:')} {media['name']}")
         except Exception as e:
@@ -2591,12 +2687,7 @@ def cmd_media_import(args, db: PackageDatabase) -> int:
 
     for media in to_add:
         try:
-            db.add_media(
-                name=media['name'],
-                url=media['url'],
-                enabled=media['enabled'],
-                update=media['update']
-            )
+            _import_single_media(db, media, colors)
             added += 1
             print(f"  {colors.success('Added:')} {media['name']}")
         except Exception as e:

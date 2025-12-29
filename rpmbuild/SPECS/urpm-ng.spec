@@ -82,7 +82,7 @@ EOF
     # Import media from urpmi and auto-configure servers
     echo ""
     echo "=== urpm-ng: importing media configuration ==="
-    /usr/bin/urpm media import 2>/dev/null || :
+    /usr/bin/urpm media import -y 2>/dev/null || :
     echo ""
     echo "=== urpm-ng: auto-configuring mirror servers (please wait) ==="
     /usr/bin/urpm server autoconfig 2>/dev/null || :
