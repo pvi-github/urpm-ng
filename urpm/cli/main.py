@@ -2462,12 +2462,19 @@ def parse_urpmi_cfg(filepath: str) -> list:
     #   options...
     # }
     # The name can have escaped spaces (\ ) and the URL follows
-    pattern = r'([^\s{]+(?:\\ [^\s{]+)*)\s+(https?://[^\s{]+)\s*\{([^}]*)\}'
+    # URL can be: https://..., http://..., file://..., or /local/path
+    pattern = r'([^\s{]+(?:\\ [^\s{]+)*)\s+((?:https?|file)://[^\s{]+|/[^\s{]+)\s*\{([^}]*)\}'
 
     for match in re.finditer(pattern, content):
         raw_name = match.group(1)
-        url = match.group(2)
+        url_or_path = match.group(2)
         options_block = match.group(3)
+
+        # Normalize local paths to file:// URLs
+        if url_or_path.startswith('/') and not url_or_path.startswith('//'):
+            url = f'file://{url_or_path}'
+        else:
+            url = url_or_path
 
         # Unescape the name (replace '\ ' with ' ')
         name = raw_name.replace('\\ ', ' ')
