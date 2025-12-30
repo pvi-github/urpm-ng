@@ -7,7 +7,10 @@ TAR = /usr/bin/tar
 RM = /usr/bin/rm
 BM = /usr/bin/bm
 
-tarball:
+version:
+	$(SED) -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' urpm/__init__.py
+
+tarball: version
 	$(SED) -i 's/^%define version.*/%define version $(VERSION)/' rpmbuild/SPECS/$(NAME).spec
 	$(TAR) czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
 		--transform "s,^,$(NAME)-$(VERSION)/," \

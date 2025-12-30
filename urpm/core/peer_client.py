@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
 from .config import PROD_PORT, DEV_PORT, PROD_DISCOVERY_PORT, DEV_DISCOVERY_PORT, is_dev_mode
+from .. import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +194,7 @@ class PeerClient:
             message = {
                 'host': local_ip,
                 'port': 0,  # We're not a server
-                'version': '0.1.0',
+                'version': __version__,
             }
             data = DISCOVERY_MAGIC + json.dumps(message).encode('utf-8')
             sock.sendto(data, ('<broadcast>', self.discovery_port))

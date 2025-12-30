@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, parse_qs, unquote
 
+from .. import __version__
+
 logger = logging.getLogger(__name__)
 
 # Initialize mimetypes
@@ -104,7 +106,7 @@ class UrpmdHandler(BaseHTTPRequestHandler):
         """Root endpoint - service info."""
         self.send_json({
             'service': 'urpmd',
-            'version': '0.1.0',
+            'version': __version__,
             'endpoints': {
                 'api': ['/api/ping', '/api/status', '/api/media', '/api/available',
                         '/api/updates', '/api/refresh', '/api/peers', '/api/announce',
@@ -118,7 +120,7 @@ class UrpmdHandler(BaseHTTPRequestHandler):
         self.send_json({
             'status': 'ok',
             'service': 'urpmd',
-            'version': '0.1.0',
+            'version': __version__,
         })
 
     def handle_status(self):

@@ -15,6 +15,7 @@ from urllib.error import URLError, HTTPError
 if TYPE_CHECKING:
     from .daemon import UrpmDaemon
 
+from .. import __version__
 from ..core.database import PackageDatabase
 from ..core.config import PROD_DISCOVERY_PORT, DEV_DISCOVERY_PORT
 
@@ -251,7 +252,7 @@ class PeerDiscovery:
         message = {
             'host': self._get_local_ip(),
             'port': self.daemon.port,
-            'version': '0.1.0',
+            'version': __version__,
         }
 
         data = DISCOVERY_MAGIC + json.dumps(message).encode('utf-8')
