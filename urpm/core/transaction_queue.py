@@ -150,7 +150,8 @@ class TransactionQueue:
         operation_id: str = "",
         verify_signatures: bool = True,
         force: bool = False,
-        test: bool = False
+        test: bool = False,
+        erase_names: List[str] = None
     ) -> 'TransactionQueue':
         """Add an install operation to the queue.
 
@@ -160,19 +161,24 @@ class TransactionQueue:
             verify_signatures: Whether to verify GPG signatures
             force: Force install despite problems
             test: Test mode - don't actually install
+            erase_names: List of package names to erase in the SAME transaction
+                        (for obsoleted packages that must be removed atomically)
 
         Returns:
             self for method chaining
         """
-        if rpm_paths:
-            self.operations.append(QueuedOperation(
+        if rpm_paths or erase_names:
+            op = QueuedOperation(
                 op_type=OperationType.INSTALL,
-                targets=rpm_paths,
+                targets=rpm_paths or [],
                 operation_id=operation_id or f"install_{len(self.operations)}",
                 verify_signatures=verify_signatures,
                 force=force,
                 test=test,
-            ))
+            )
+            # Store erase_names as extra attribute
+            op.erase_names = erase_names or []
+            self.operations.append(op)
         return self
 
     def add_erase(
@@ -458,6 +464,7 @@ class TransactionQueue:
         import rpm
 
         rpm_paths = op.targets
+        erase_names = getattr(op, 'erase_names', [])
         errors = []
 
         ts = rpm.TransactionSet(self.root)
@@ -467,7 +474,7 @@ class TransactionQueue:
         else:
             ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
 
-        # Add packages to transaction
+        # Add packages to install
         open_fds = {}
         for path in rpm_paths:
             try:
@@ -480,6 +487,16 @@ class TransactionQueue:
             except rpm.error as e:
                 errors.append(f"{Path(path).name}: {e}")
                 return False, 0, errors
+
+        # Add packages to erase in the SAME transaction (for obsoleted packages)
+        erased_count = 0
+        for name in erase_names:
+            mi = ts.dbMatch('name', name)
+            for hdr in mi:
+                ts.addErase(hdr)
+                erased_count += 1
+                _log_background(f"Adding erase to transaction: {name}")
+                break  # Only first match
 
         # Check dependencies
         if not op.force:

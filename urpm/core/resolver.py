@@ -1539,9 +1539,9 @@ class Resolver:
                     problems=[f"Package not found: {n}" for n in not_found]
                 )
         else:
-            # Upgrade all installed packages
-            # Use SOLVER_SOLVABLE_ALL with UPDATE to update everything
-            jobs.append(self.pool.Job(solv.Job.SOLVER_UPDATE | solv.Job.SOLVER_SOLVABLE_ALL, 0))
+            # Upgrade all installed packages using DISTUPGRADE
+            # DISTUPGRADE handles broken dependencies and removes orphaned packages
+            jobs.append(self.pool.Job(solv.Job.SOLVER_DISTUPGRADE | solv.Job.SOLVER_SOLVABLE_ALL, 0))
 
         # Solve
         solver = self.pool.Solver()
@@ -1549,6 +1549,8 @@ class Resolver:
         solver.set_flag(solv.Solver.SOLVER_FLAG_ALLOW_VENDORCHANGE, 1)
         # Prefer packages compatible with already installed packages
         solver.set_flag(solv.Solver.SOLVER_FLAG_FOCUS_INSTALLED, 1)
+        # Allow removing packages with broken dependencies
+        solver.set_flag(solv.Solver.SOLVER_FLAG_ALLOW_UNINSTALL, 1)
         # Handle weak dependencies (Recommends/Suggests)
         if not self.install_recommends:
             solver.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)

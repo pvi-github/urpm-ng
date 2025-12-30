@@ -5813,13 +5813,17 @@ def cmd_update(args, db: PackageDatabase) -> int:
         force = getattr(args, 'force', False)
         test_mode = getattr(args, 'test', False)
 
-        if rpm_paths:
+        # Get names of packages to remove (obsoleted by the upgrade)
+        remove_names = [a.name for a in removes] if removes else []
+
+        if rpm_paths or remove_names:
             queue.add_install(
                 rpm_paths,
                 operation_id="upgrade",
                 verify_signatures=verify_sigs,
                 force=force,
-                test=test_mode
+                test=test_mode,
+                erase_names=remove_names  # Remove obsoleted packages in same transaction
             )
 
         orphan_names = []
