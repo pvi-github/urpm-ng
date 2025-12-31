@@ -1539,9 +1539,10 @@ class Resolver:
                     problems=[f"Package not found: {n}" for n in not_found]
                 )
         else:
-            # Upgrade all installed packages using DISTUPGRADE
-            # DISTUPGRADE handles broken dependencies and removes orphaned packages
-            jobs.append(self.pool.Job(solv.Job.SOLVER_DISTUPGRADE | solv.Job.SOLVER_SOLVABLE_ALL, 0))
+            # Upgrade all installed packages using UPDATE (not DISTUPGRADE)
+            # UPDATE is more conservative - only upgrades existing packages
+            # DISTUPGRADE was too aggressive and pulled in recommended packages
+            jobs.append(self.pool.Job(solv.Job.SOLVER_UPDATE | solv.Job.SOLVER_SOLVABLE_ALL, 0))
 
         # Solve
         solver = self.pool.Solver()

@@ -46,7 +46,9 @@
 - [ ] Guide migration urpmi → urpm
 
 ### --downloadonly / download
-- [ ] Option `--downloadonly` sur install/upgrade
+- [x] Option `--download-only` sur install
+- [ ] Option `--download-only` sur upgrade
+- [ ] Option `--destdir <path>` pour spécifier répertoire destination (compatibilité urpmi)
 - [ ] Commande `urpm download <pkg>`
 
 ### builddep

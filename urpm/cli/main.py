@@ -275,6 +275,16 @@ def create_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Reinstall already installed packages (repair)'
     )
+    install_parser.add_argument(
+        '--download-only',
+        action='store_true',
+        help='Download packages to cache but do not install them'
+    )
+    install_parser.add_argument(
+        '--nodeps',
+        action='store_true',
+        help='Skip dependency resolution (use with --download-only)'
+    )
 
     # =========================================================================
     # erase / e (like rpm -e, urpme)
@@ -659,9 +669,9 @@ def create_parser() -> argparse.ArgumentParser:
         help='Skip GPG signature verification (not recommended)'
     )
     upgrade_parser.add_argument(
-        '--without-recommends',
+        '--with-recommends',
         action='store_true',
-        help='Skip recommended packages'
+        help='Install recommended packages (not installed by default for upgrades)'
     )
     upgrade_parser.add_argument(
         '--with-suggests',
@@ -4701,6 +4711,13 @@ def cmd_install(args, db: PackageDatabase) -> int:
     _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
     _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
 
+    # Check --nodeps flag
+    nodeps = getattr(args, 'nodeps', False)
+    download_only = getattr(args, 'download_only', False)
+    if nodeps and not download_only:
+        print(colors.error("Error: --nodeps requires --download-only"))
+        return 1
+
     # Resolve virtual packages to concrete packages
     # This handles cases like php-opcache → php8.5-opcache based on what's installed
     auto_mode = getattr(args, 'auto', False)
@@ -4746,10 +4763,44 @@ def cmd_install(args, db: PackageDatabase) -> int:
     resolver = Resolver(db, install_recommends=initial_recommends)
     choices = {}
 
-    # Resolve with user choices for alternatives
-    result, aborted = _resolve_with_alternatives(
-        resolver, resolved_packages, choices, args.auto, preferences
-    )
+    if nodeps:
+        # --nodeps: build actions directly without dependency resolution
+        from ..core.resolver import PackageAction, TransactionType, Resolution
+        actions = []
+        not_found = []
+        for pkg_spec in resolved_packages:
+            pkg = db.get_package_smart(pkg_spec)
+            if not pkg:
+                not_found.append(pkg_spec)
+                continue
+            media = db.get_media_by_id(pkg['media_id'])
+            media_name = media.get('name', 'unknown') if media else 'unknown'
+            epoch = pkg.get('epoch', 0) or 0
+            evr = f"{epoch}:{pkg['version']}-{pkg['release']}" if epoch else f"{pkg['version']}-{pkg['release']}"
+            actions.append(PackageAction(
+                action=TransactionType.INSTALL,
+                name=pkg['name'],
+                evr=evr,
+                arch=pkg['arch'],
+                nevra=pkg['nevra'],
+                size=pkg.get('size', 0) or 0,
+                media_name=media_name,
+                reason=InstallReason.EXPLICIT
+            ))
+        if not_found:
+            print(colors.error(f"Packages not found ({len(not_found)}):"))
+            for p in not_found[:10]:
+                print(f"  {p}")
+            if len(not_found) > 10:
+                print(f"  ... and {len(not_found) - 10} more")
+            return 1
+        result = Resolution(success=True, actions=actions, problems=[])
+        aborted = False
+    else:
+        # Normal resolution with user choices for alternatives
+        result, aborted = _resolve_with_alternatives(
+            resolver, resolved_packages, choices, args.auto, preferences
+        )
     if aborted:
         return 1
 
@@ -5094,6 +5145,12 @@ def cmd_install(args, db: PackageDatabase) -> int:
         print(f"  {colors.success(f'{downloaded} downloaded')} ({from_peers} from peers, {from_upstream} from mirrors), {cache_str} from cache")
     else:
         print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache")
+
+    # Handle --download-only mode
+    download_only = getattr(args, 'download_only', False)
+    if download_only:
+        print(colors.success("\nPackages downloaded to cache. Use 'urpm install' to install them later."))
+        return 0
 
     # Collect RPM paths for installation
     rpm_paths = [r.path for r in dl_results if r.success and r.path]
@@ -5553,8 +5610,10 @@ def cmd_update(args, db: PackageDatabase) -> int:
         return 1
 
     # Resolve upgrades
+    # For upgrades, don't install recommends by default (unlike install)
+    # This matches urpmi --auto-update behavior
     arch = platform.machine()
-    install_recommends = not getattr(args, 'without_recommends', False)
+    install_recommends = getattr(args, 'with_recommends', False)
     resolver = Resolver(db, arch=arch, install_recommends=install_recommends)
 
     if upgrade_all:
