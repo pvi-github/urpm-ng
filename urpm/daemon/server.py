@@ -22,7 +22,7 @@ mimetypes.add_type('application/x-compressed', '.cz')
 
 # Default configuration
 DEFAULT_PORT = 9876
-DEFAULT_HOST = "127.0.0.1"  # Localhost only by default for security
+DEFAULT_HOST = "0.0.0.0"  # All interfaces for P2P (firewall controls access)
 
 
 class UrpmdHandler(BaseHTTPRequestHandler):
