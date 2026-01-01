@@ -59,6 +59,9 @@ install -m644 QUICKSTART.md %{buildroot}%{_docdir}/%{name}/
 install -m644 CHANGELOG.md %{buildroot}%{_docdir}/%{name}/
 install -m644 doc/*.md %{buildroot}%{_docdir}/%{name}/
 
+# Install bash completion
+install -Dm644 completion/urpm.bash %{buildroot}%{_sysconfdir}/bash_completion.d/urpm
+
 %post
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
 
@@ -131,5 +134,6 @@ fi
 %{_bindir}/urpm
 %{_bindir}/urpmd
 %{_unitdir}/urpmd.service
+%{_sysconfdir}/bash_completion.d/urpm
 
 %changelog

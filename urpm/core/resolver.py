@@ -1570,17 +1570,27 @@ class Resolver:
 
         return False
 
-    def resolve_upgrade(self, package_names: List[str] = None) -> Resolution:
+    def resolve_upgrade(self, package_names: List[str] = None,
+                        local_packages: set = None) -> Resolution:
         """Resolve packages to upgrade.
 
         Args:
             package_names: List of package names to upgrade (None = all)
+            local_packages: Set of package names from local RPM files
 
         Returns:
             Resolution with success status and package actions
         """
-        self._solvable_to_pkg = {}
-        self.pool = self._create_pool()
+        if local_packages is None:
+            local_packages = set()
+
+        # Preserve pool only if it has @LocalRPMs repo (for local RPM upgrade)
+        has_local_rpms = self.pool is not None and any(
+            r.name == '@LocalRPMs' for r in self.pool.repos
+        )
+        if not has_local_rpms:
+            self._solvable_to_pkg = {}
+            self.pool = self._create_pool()
 
         jobs = []
 
@@ -1589,6 +1599,22 @@ class Resolver:
             not_found = []
             not_installed = []
             for name in package_names:
+                # Local packages: find in @LocalRPMs repo and use SOLVER_INSTALL
+                if name in local_packages:
+                    local_solvable = None
+                    for repo in self.pool.repos:
+                        if repo.name == '@LocalRPMs':
+                            for s in repo.solvables:
+                                if s.name == name:
+                                    local_solvable = s
+                                    break
+                            break
+                    if local_solvable:
+                        jobs.append(self.pool.Job(solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE, local_solvable.id))
+                    else:
+                        not_found.append(name)
+                    continue
+
                 # First check if it's installed
                 inst_flags = (solv.Selection.SELECTION_NAME |
                              solv.Selection.SELECTION_CANON |

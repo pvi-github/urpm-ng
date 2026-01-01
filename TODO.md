@@ -22,10 +22,10 @@
 ## Phase 1 : Developper & community features
 
 ### Bash autocompletion (prioritaire)
-- [ ] Script completion pour commandes/sous-commandes
-- [ ] Completion des noms de paquets (installés et disponibles)
-- [ ] Completion des noms de médias/serveurs
-- [ ] Installation via `/etc/bash_completion.d/urpm`
+- [x] Script completion pour commandes/sous-commandes
+- [x] Completion des noms de paquets (installés et disponibles)
+- [x] Completion des noms de médias/serveurs
+- [x] Installation via `/etc/bash_completion.d/urpm`
 
 ### Installation RPM local
 - [x] `urpm install /chemin/vers/paquet.rpm`

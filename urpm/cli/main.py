@@ -5714,6 +5714,9 @@ def cmd_update(args, db: PackageDatabase) -> int:
     from ..core.resolver import Resolver, format_size
     from ..core.download import Downloader, DownloadItem
     from ..core.install import Installer, check_root
+    from pathlib import Path
+    from ..core.rpm import is_local_rpm, read_rpm_header
+    from ..core.download import verify_rpm_signature
 
     # Determine what to upgrade
     packages = getattr(args, 'packages', []) or []
@@ -5724,6 +5727,42 @@ def cmd_update(args, db: PackageDatabase) -> int:
         print("Specify packages to update, or use --all/-a for full system upgrade")
         print("Use --lists/-l to update media metadata only")
         return 1
+
+    # Separate local RPM files from package names
+    local_rpm_paths = []
+    local_rpm_infos = []
+    package_names = []
+    verify_sigs = not getattr(args, 'nosignature', False)
+
+    for pkg in packages:
+        if is_local_rpm(pkg):
+            path = Path(pkg)
+            if not path.exists():
+                print(colors.error(f"Error: file not found: {pkg}"))
+                return 1
+            # Read RPM header
+            info = read_rpm_header(path)
+            if not info:
+                print(colors.error(f"Error: cannot read RPM file: {pkg}"))
+                return 1
+            # Verify signature
+            if verify_sigs:
+                valid, error = verify_rpm_signature(path)
+                if not valid:
+                    print(colors.error(f"Error: signature verification failed for {pkg}"))
+                    print(colors.error(f"  {error}"))
+                    print(colors.dim("  Use --nosignature to skip verification (not recommended)"))
+                    return 1
+            local_rpm_paths.append(str(path.resolve()))
+            local_rpm_infos.append(info)
+        else:
+            package_names.append(pkg)
+
+    # If we have local RPMs, show what we're upgrading
+    if local_rpm_infos:
+        print(f"Local RPM files ({len(local_rpm_infos)}):")
+        for info in local_rpm_infos:
+            print(f"  {info['nevra']}")
 
     # Check root
     if not check_root():
@@ -5737,12 +5776,21 @@ def cmd_update(args, db: PackageDatabase) -> int:
     install_recommends = getattr(args, 'with_recommends', False)
     resolver = Resolver(db, arch=arch, install_recommends=install_recommends)
 
+    # Add local RPMs to resolver pool before resolution
+    if local_rpm_infos:
+        resolver.add_local_rpms(local_rpm_infos)
+        # Add local package names to the list
+        for info in local_rpm_infos:
+            package_names.append(info['name'])
+
     if upgrade_all:
         print("Resolving system upgrade...")
         result = resolver.resolve_upgrade()
     else:
-        print(f"Resolving upgrade for: {', '.join(packages)}")
-        result = resolver.resolve_upgrade(packages)
+        print(f"Resolving upgrade for: {', '.join(package_names)}")
+        # Build set of local package names for special handling
+        local_pkg_names = {info['name'] for info in local_rpm_infos}
+        result = resolver.resolve_upgrade(package_names, local_packages=local_pkg_names)
 
     if not result.success:
         print(colors.error("Resolution failed:"))
@@ -5807,8 +5855,19 @@ def cmd_update(args, db: PackageDatabase) -> int:
         print("\n(dry run - no changes made)")
         return 0
 
-    # Build download items (only for upgrades and installs)
-    to_download = [a for a in result.actions if a.action.value in ('upgrade', 'install')]
+    # Build download items (only for upgrades and installs, skip local RPMs)
+    to_download = [a for a in result.actions
+                   if a.action.value in ('upgrade', 'install') and a.media_name != '@LocalRPMs']
+
+    # Collect local RPM paths for actions from @LocalRPMs
+    local_action_paths = []
+    for action in result.actions:
+        if action.media_name == '@LocalRPMs':
+            # Find the path in local_rpm_infos
+            for info in local_rpm_infos:
+                if info.get('name') == action.name:
+                    local_action_paths.append(info.get('path'))
+                    break
 
     if to_download:
         print(f"\nDownloading {len(to_download)} packages...")
@@ -5950,15 +6009,18 @@ def cmd_update(args, db: PackageDatabase) -> int:
     else:
         rpm_paths = []
 
+    # Add local RPM paths
+    rpm_paths.extend(local_action_paths)
+
     # Record transaction
     if upgrade_all:
         cmd_line = "urpm upgrade"
     else:
-        cmd_line = "urpm update " + " ".join(packages)
+        cmd_line = "urpm update " + " ".join(package_names)
     transaction_id = db.begin_transaction('upgrade', cmd_line)
 
     # Record packages
-    explicit_names = set(p.lower() for p in packages) if packages else set()
+    explicit_names = set(p.lower() for p in package_names) if package_names else set()
     for action in result.actions:
         reason = 'explicit' if action.name.lower() in explicit_names or upgrade_all else 'dependency'
         db.record_package(
