@@ -18,9 +18,9 @@ The package will:
 ### 2. Import media from urpmi & autoconfigure servers
 
 ```bash
-$ su - c 'urpm media import'
+$ su -c 'urpm media import'
 
-$ su - c 'urpm server autoconfig'
+$ su -c 'urpm server autoconfig'
 ```
 
 ### 3. Start using urpm
@@ -30,7 +30,7 @@ $ su - c 'urpm server autoconfig'
 $ su -c 'urpm q firefox'
 
 # Install
-$ su - c 'urpm i firefox'
+$ su -c 'urpm i firefox'
 
 # Upgrade system
 $ su -c 'urpm u'
