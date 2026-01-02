@@ -6,8 +6,9 @@ Get started with urpm-ng in 2 minutes.
 
 ### 1. Install the package
 
+As root :
 ```bash
-sudo urpmi urpm-ng
+# urpmi urpm-ng
 ```
 
 The package will:
@@ -17,8 +18,9 @@ The package will:
 
 ### 2. Import media from urpmi
 
+As root :
 ```bash
-sudo urpm media import
+# urpm media import
 ```
 
 ### 3. Start using urpm
@@ -28,16 +30,16 @@ sudo urpm media import
 urpm search firefox
 
 # Install
-sudo urpm install firefox
+# urpm install firefox
 
 # Upgrade system
-sudo urpm upgrade
+# urpm upgrade
 
 # Remove
-sudo urpm erase firefox
+# urpm erase firefox
 
 # Clean orphans
-sudo urpm autoremove
+# urpm autoremove
 ```
 
 That's it! Machines with urpmd on the same LAN auto-discover each other and share cached packages.
@@ -50,8 +52,9 @@ For contributors or testing the latest code:
 
 ### 1. Install prerequisites
 
+As root:
 ```bash
-sudo urpmi python3-solv python3-zstandard
+# urpmi python3-solv python3-zstandard
 ```
 
 ### 2. Clone
@@ -63,18 +66,18 @@ cd urpm-ng
 
 ### 3. Configure media
 
-Import from existing urpmi config:
+Import from existing urpmi config, as root:
 ```bash
-sudo ./bin/urpm media import
-sudo ./bin/urpm media update
+# ./bin/urpm media import
+# ./bin/urpm media update
 ```
 
-Or add manually:
+Or add manually, as root:
 ```bash
 V=$(grep VERSION_ID /etc/os-release | cut -d= -f2)
 A=$(uname -m)
-sudo ./bin/urpm media add https://mirrors.kernel.org/mageia/distrib/$V/$A/media/core/release/
-sudo ./bin/urpm media add https://mirrors.kernel.org/mageia/distrib/$V/$A/media/core/updates/
+# ./bin/urpm media add https://mirrors.kernel.org/mageia/distrib/$V/$A/media/core/release/
+# ./bin/urpm media add https://mirrors.kernel.org/mageia/distrib/$V/$A/media/core/updates/
 ```
 
 ### 4. Open firewall ports
@@ -87,15 +90,16 @@ UDP 9878   # Peer discovery
 
 ### 5. Start the daemon
 
+As root:
 ```bash
-sudo ./bin/urpmd
+# ./bin/urpmd
 ```
 
 ### 6. Use urpm
 
 ```bash
-./bin/urpm search firefox
-sudo ./bin/urpm install firefox
+# ./bin/urpm search firefox
+# ./bin/urpm install firefox
 ```
 
 ---
