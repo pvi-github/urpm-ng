@@ -6,9 +6,8 @@ Get started with urpm-ng in 2 minutes.
 
 ### 1. Install the package
 
-As root :
 ```bash
-# urpmi urpm-ng
+$ su -c 'urpmi /path/to/urpm-ng-rpm-file.rpm'
 ```
 
 The package will:
@@ -16,30 +15,31 @@ The package will:
 - Configure firewall ports for P2P sharing
 - Start the urpmd daemon
 
-### 2. Import media from urpmi
+### 2. Import media from urpmi & autoconfigure servers
 
-As root :
 ```bash
-# urpm media import
+$ su - c 'urpm media import'
+
+$ su - c 'urpm server autoconfig'
 ```
 
 ### 3. Start using urpm
 
 ```bash
-# Search
-urpm search firefox
+# Search/Query
+$ su -c 'urpm q firefox'
 
 # Install
-# urpm install firefox
+$ su - c 'urpm i firefox'
 
 # Upgrade system
-# urpm upgrade
+$ su -c 'urpm u'
 
 # Remove
-# urpm erase firefox
+$ su -c 'urpm e firefox'
 
 # Clean orphans
-# urpm autoremove
+$ su -c 'urpm autoremove'
 ```
 
 That's it! Machines with urpmd on the same LAN auto-discover each other and share cached packages.
@@ -52,32 +52,38 @@ For contributors or testing the latest code:
 
 ### 1. Install prerequisites
 
-As root:
 ```bash
-# urpmi python3-solv python3-zstandard
+$ su -c 'urpmi python3-solv python3-zstandard'
 ```
 
 ### 2. Clone
 
 ```bash
 git clone https://github.com/pvi-github/urpm-ng.git
+
 cd urpm-ng
 ```
+
+Note : the following commands need to be in urpm-ng directory.
 
 ### 3. Configure media
 
 Import from existing urpmi config, as root:
 ```bash
-# ./bin/urpm media import
-# ./bin/urpm media update
+$ su -c './bin/urpm media import'
+
+$ su -c './bin/urpm media update'
 ```
 
-Or add manually, as root:
+Or add manually:
 ```bash
 V=$(grep VERSION_ID /etc/os-release | cut -d= -f2)
+
 A=$(uname -m)
-# ./bin/urpm media add https://mirrors.kernel.org/mageia/distrib/$V/$A/media/core/release/
-# ./bin/urpm media add https://mirrors.kernel.org/mageia/distrib/$V/$A/media/core/updates/
+
+$ su -c './bin/urpm media add https://mirrors.kernel.org/mageia/distrib/$V/$A/media/core/release/'
+
+$ su -c './bin/urpm media add https://mirrors.kernel.org/mageia/distrib/$V/$A/media/core/updates/'
 ```
 
 ### 4. Open firewall ports
@@ -90,16 +96,16 @@ UDP 9878   # Peer discovery
 
 ### 5. Start the daemon
 
-As root:
 ```bash
-# ./bin/urpmd
+$ su -c './bin/urpmd'
 ```
 
 ### 6. Use urpm
 
 ```bash
-# ./bin/urpm search firefox
-# ./bin/urpm install firefox
+$ su -c './bin/urpm search firefox'
+
+$ su -c './bin/urpm install firefox'
 ```
 
 ---
