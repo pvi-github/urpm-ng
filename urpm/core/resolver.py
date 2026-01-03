@@ -1814,14 +1814,31 @@ class Resolver:
                 is_watched = debug.is_watched(installed_pkg.name)
 
                 # Find the best available version of this package
+                # For UPGRADES, prefer same architecture as installed package
+                # (but solver can still INSTALL other arches as new dependencies)
                 sel = self.pool.select(installed_pkg.name, solv.Selection.SELECTION_NAME)
                 best_available = None
                 available_versions = []
+                installed_arch = installed_pkg.arch
+
                 for s in sel.solvables():
                     if s.repo != self.pool.installed:
                         available_versions.append(s)
-                        if best_available is None or s.evrcmp(best_available) > 0:
+                        if best_available is None:
                             best_available = s
+                        else:
+                            # Priority: same arch > different arch, then higher version
+                            s_same_arch = (s.arch == installed_arch)
+                            best_same_arch = (best_available.arch == installed_arch)
+
+                            if s_same_arch and not best_same_arch:
+                                # s is same arch, best isn't -> prefer s
+                                best_available = s
+                            elif s_same_arch == best_same_arch:
+                                # Both same arch status, compare version
+                                if s.evrcmp(best_available) > 0:
+                                    best_available = s
+                            # else: s is different arch, best is same arch -> keep best
 
                 # Debug output for watched packages
                 if is_watched:
