@@ -33,8 +33,8 @@ Disable colored output.
 .SH COMMANDS
 .SS Package Installation and Removal
 .TP
-.B install \fIpackage\fR ...
-Install one or more packages. Aliases: \fBi\fR.
+.B i|install \fIpackage\fR ...
+Install one or more packages.
 .RS
 .TP
 .BR \-y ", " \-\-auto
@@ -50,8 +50,8 @@ Do not install recommended packages.
 Also install suggested packages.
 .RE
 .TP
-.B erase \fIpackage\fR ...
-Remove one or more packages. Aliases: \fBe\fR, \fBremove\fR.
+.B e|erase \fIpackage\fR ...
+Remove one or more packages. Aliases: \fBremove\fR.
 .RS
 .TP
 .BR \-y ", " \-\-auto
@@ -65,15 +65,18 @@ Also remove orphaned dependencies.
 Remove orphaned packages, old kernels, or failed dependencies.
 .SS Package Updates
 .TP
-.B update \fR[\fIpackage\fR ...]
-Update specific packages or all if none specified. Aliases: \fBu\fR.
+.B up|update \fR[\fIpackage\fR ...]
+Update various things media, packages...
+.RS
+.B This will be reworked on : prefer upgrade for packages instead.\fR
+.RE
 .TP
-.B upgrade \fR[\fIpackage\fR ...]
-Upgrade packages (system upgrade if none specified). Aliases: \fBup\fR.
+.B u|upgrade \fR[\fIpackage\fR ...]
+Upgrade packages (system upgrade if none specified).
 .SS Package Information
 .TP
-.B search \fIpattern\fR
-Search for packages by name or description. Aliases: \fBs\fR, \fBquery\fR, \fBq\fR.
+.B q|query \fIpattern\fR
+Search for packages by name or description. Aliases: \fBs\fR, \fBsearch\fR.
 .TP
 .B show \fIpackage\fR
 Show detailed package information.
@@ -89,6 +92,9 @@ Find packages providing a capability.
 .TP
 .B find \fIfile\fR
 Find which package contains a file.
+.RS
+.B (Not implemented yet)
+.RE
 .TP
 .B depends \fIpackage\fR
 Show package dependencies.
@@ -227,26 +233,25 @@ Bash completion script.
 .SH EXAMPLES
 .TP
 Install a package:
-.B urpm install firefox
+.B urpm i firefox
 .TP
 Search for packages:
-.B urpm search video player
+.B urpm q video player
 .TP
 Update all packages:
-.B urpm update
+.B urpm u
 .TP
-Remove a package and orphans:
-.B urpm erase \-\-auto\-orphans gimp
+Remove a package without asking for confirmation :
+.B urpm e \-y gimp
 .TP
 Show why a package is installed:
 .B urpm why libpng
 .TP
 Update media metadata:
-.B urpm media update
+.B urpm m u
 .SH SEE ALSO
 .BR urpmd (8),
 .BR rpm (8),
-.BR dnf (8)
 .SH BUGS
 Report bugs at https://github.com/pvi-github/urpm-ng/issues
 .SH AUTHORS

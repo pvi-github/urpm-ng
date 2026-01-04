@@ -34,8 +34,8 @@ Desactive les couleurs.
 .SH COMMANDES
 .SS Installation et suppression de paquets
 .TP
-.B install \fIpaquet\fR ...
-Installe un ou plusieurs paquets. Alias : \fBi\fR.
+.B i|install \fIpaquet\fR ...
+Installe un ou plusieurs paquets.
 .RS
 .TP
 .BR \-y ", " \-\-auto
@@ -51,8 +51,8 @@ N'installe pas les paquets recommandes.
 Installe aussi les paquets suggeres.
 .RE
 .TP
-.B erase \fIpaquet\fR ...
-Supprime un ou plusieurs paquets. Alias : \fBe\fR, \fBremove\fR.
+.B e|erase \fIpaquet\fR ...
+Supprime un ou plusieurs paquets. Alias : \fBremove\fR.
 .RS
 .TP
 .BR \-y ", " \-\-auto
@@ -66,15 +66,18 @@ Supprime aussi les dependances orphelines.
 Supprime les paquets orphelins, anciens noyaux ou dependances cassees.
 .SS Mises a jour
 .TP
-.B update \fR[\fIpaquet\fR ...]
-Met a jour des paquets specifiques ou tous si aucun n'est specifie. Alias : \fBu\fR.
+.B up|update \fR[\fIpaquet\fR ...]
+Met a jour diverses choses... media, paquets...
+.RS
+.B Cette commande sera modifiée...préférez u|upgrade pour les paquets.
+.RE
 .TP
-.B upgrade \fR[\fIpaquet\fR ...]
-Met a niveau les paquets (tout le systeme si aucun n'est specifie). Alias : \fBup\fR.
+.B u|upgrade \fR[\fIpaquet\fR ...]
+Met a niveau les paquets (tout le systeme si aucun n'est specifie).
 .SS Informations sur les paquets
 .TP
-.B search \fImotif\fR
-Recherche des paquets par nom ou description. Alias : \fBs\fR, \fBquery\fR, \fBq\fR.
+.B q|query \fImotif\fR
+Recherche des paquets par nom ou description. Alias : \fBs\fR, \fBsearch\fR.
 .TP
 .B show \fIpaquet\fR
 Affiche les details d'un paquet.
@@ -90,6 +93,9 @@ Trouve les paquets fournissant une capacite.
 .TP
 .B find \fIfichier\fR
 Trouve le paquet contenant un fichier.
+.RS
+.B (Non implémenté, ça va venir).
+.RE
 .TP
 .B depends \fIpaquet\fR
 Affiche les dependances d'un paquet.
@@ -228,26 +234,25 @@ Script de completion Bash.
 .SH EXEMPLES
 .TP
 Installer un paquet :
-.B urpm install firefox
+.B urpm i firefox
 .TP
 Rechercher des paquets :
-.B urpm search lecteur video
+.B urpm q lecteur video
 .TP
 Mettre a jour tous les paquets :
-.B urpm update
+.B urpm u
 .TP
-Supprimer un paquet et les orphelins :
-.B urpm erase \-\-auto\-orphans gimp
+Supprimer un paquet sans demander confirmation :
+.B urpm e \-y gimp
 .TP
 Expliquer pourquoi un paquet est installe :
 .B urpm why libpng
 .TP
 Mettre a jour les metadonnees :
-.B urpm media update
+.B urpm m u
 .SH VOIR AUSSI
 .BR urpmd (8),
 .BR rpm (8),
-.BR dnf (8)
 .SH BOGUES
 Signaler les bogues sur https://github.com/pvi-github/urpm-ng/issues
 .SH AUTEURS
