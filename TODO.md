@@ -21,7 +21,6 @@ Aujourd'hui c'est confus : update fait les deux selon les arguments.
 - [ ] Valider mode --auto
 - [ ] Valider re-résolution après choix utilisateur
 
-
 ---
 
 ## Phase 1 : Developper & community features
@@ -48,8 +47,8 @@ Aujourd'hui c'est confus : update fait les deux selon les arguments.
 
 ### Documentation EN/FR
 - [x] Pages man (urpm.1, urpmd.8 en EN et FR)
-- [ ] Guide migration urpmi → urpm
 - [ ] Revue complète : cohérence code/docs (chemins, options, comportements)
+- [ ] Initier un guide de migration urpmi → urpm (EN, FR)
 
 ### --downloadonly / download
 - [x] Option `--download-only` sur install
@@ -60,10 +59,13 @@ Aujourd'hui c'est confus : update fait les deux selon les arguments.
 ### builddep
 - [ ] Parser BuildRequires du SRPM/.spec
 - [ ] `urpm builddep <pkg.spec>`
+- [ ] `urpm builddep <pkg.src.rpm>`
+- [ ] `urpm builddep` (dans une arborescence de travail RPM)
 
 ### Parsing hdlist.cz
-- [ ] Liste des fichiers contenus
-- [ ] Description longue, changelog, scripts
+- [ ] Vérifier si le DL des hdlists.cz est encore nécessaire. Parce que quand on fait un urpmf c'est un fichier media_info/files.xml.lzma qui est récupéré et analysé.
+- [ ] Liste des fichiers contenus <-- ça c'est dans le media_info/files.xml.lzma
+- [ ] Description longue, changelog, scripts <-- ça c'est peut être dans les hdlist.cz
 
 ### Recherche fichiers (urpmf)
 - [ ] Chercher dans paquets disponibles (pas seulement installés)
@@ -83,6 +85,27 @@ Aujourd'hui c'est confus : update fait les deux selon les arguments.
 - [ ] Phase download
 - [ ] Phase apply (reboot ou online) en une fois ou deux fois
 - [ ] Gestion conflits version majeure
+
+### --rootdir ou --bootstrap
+- [ ] il faut que urpm soit capable de faire un bootstrap et donc faire comme urpmi :
+      - [ ] urpmi.addmedia --distrib --mirrorlist 'https://mirrors.mageia.org/api/mageia.cauldron.x86_64.list' --urpmi-root /tmp/mageia-rootfs
+      - [ ] urpmi basesystem-minimal urpmi locales locales-en bash --auto --no-suggests --no-recommends --urpmi-root /tmp/mageia-rootfs --root /tmp/mageia-rootfs
+
+Il y a aussi le rpm mageia nommé rpmbootstrap qui est à regarder.
+
+Le principe est de pouvoir créer dans un répretoire donné toute l'arborescence nécessaire à la préparation d'un chroot ou d'une base d'image docker, donc :
+1. arborescence minimale
+2. initilalisation d'une base urpm (bonne archi, bonne version)
+3. installation du basesystem minimal (rpm, glibc, kerneli, bash, locales  de base, tzdata, vim, urpm, etc)
+
+Je ne sais pas si c'est bien d'aller jusqu'à générer l'image docker (entrer dans le chroot, faire l'urpm m u et urpm u, vidanger le cache urpm, effacer /etc/syconfig/network, rebuilder la rmpdb peut être ? sortir du chroot faire le dockerfile, le tar de l'arborescence fraichement créée, et le docker build...
+
+L'idée c'est que rapidement urpm puisse aussi tester des installs et builder des rpm en environnement tout neuf... donc urpm build-image|bi --option bla bla mga9 x86_64 et urpm rebuild|rb unfichier.src.rpm mga9 x86_64 ou urpm build|b mga9 x86_64 (dans une arborescence de travail RPM avec SOURCES et SPECS)
+Ça instanciera un conteneur à partir de l'image de ref, avec un répretoire "partagé" pour la persistance, ça fera le urpm builddep et ensuite le bm/rpmbuild
+Et ça pourra aussi instancier un autre conteneur vierge pour tester le urpm i du fichier et valider que ça s'installe sans souci.
+Attention que le urpm dans son conteneur devra pouvoir tirer partie des peers dispos (et peut être même qu'il faudra prévoir un download prédictif sur la machine locale de façon à disposer au moins d'un peer avec toutes les dépendances nécessaires...
+
+Et à la fin l'idée c'est que ça puisse même être effectué par urpmd, piloté via les API par un ordonnanceur pour faire du rebuild de masse parallélisé.
 
 ---
 
