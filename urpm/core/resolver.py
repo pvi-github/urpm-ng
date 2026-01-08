@@ -1481,8 +1481,75 @@ class Resolver:
 
         return None
 
+    def _count_missing_deps(self, pkg_name: str, depth: int = 3) -> int:
+        """Count how many dependencies of a package are not yet installed.
+
+        This is used to prioritize providers that require fewer new packages.
+        For example, if Qt libs are already installed, a Qt-based app will
+        have fewer missing deps than a GTK-based app.
+
+        Args:
+            pkg_name: Package name to check
+            depth: How deep to recurse (1 = direct deps only, 2+ = transitive)
+
+        Returns:
+            Estimated number of missing dependencies
+        """
+        if not self.pool or not self.pool.installed:
+            return 0
+
+        # Get installed package names
+        installed = {s.name.lower() for s in self.pool.installed.solvables}
+
+        missing = set()
+        checked = set()  # Avoid infinite loops
+
+        def count_deps_recursive(name: str, current_depth: int):
+            """Recursively count missing deps."""
+            if current_depth <= 0 or name.lower() in checked:
+                return
+            checked.add(name.lower())
+
+            sel = self.pool.select(name, solv.Selection.SELECTION_NAME)
+            if sel.isempty():
+                return
+
+            for s in sel.solvables():
+                if s.repo and s.repo.name != '@System':
+                    for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                        dep_str = str(dep).split()[0]
+                        if dep_str.startswith(('rpmlib(', '/', 'config(')):
+                            continue
+
+                        dep_obj = self.pool.Dep(dep_str)
+                        providers = self.pool.whatprovides(dep_obj)
+
+                        # Check if any provider is installed
+                        is_satisfied = False
+                        for p in providers:
+                            if p.name.lower() in installed:
+                                is_satisfied = True
+                                break
+
+                        if not is_satisfied:
+                            # Find first available provider
+                            for p in providers:
+                                if p.repo and p.repo.name != '@System':
+                                    if p.name.lower() not in missing:
+                                        missing.add(p.name.lower())
+                                        # Recurse into this dependency
+                                        count_deps_recursive(p.name, current_depth - 1)
+                                    break
+                    break  # Only process first available solvable
+
+        count_deps_recursive(pkg_name, depth)
+
+        return len(missing)
+
     def _prioritize_providers(self, providers: List[str], max_count: int) -> List[str]:
-        """Prioritize providers based on locale and common usage.
+        """Prioritize providers based on missing dependencies, locale, and common usage.
+
+        Providers requiring fewer new dependencies are shown first.
 
         Args:
             providers: List of provider package names
@@ -1491,7 +1558,6 @@ class Resolver:
         Returns:
             Sorted and limited list of providers
         """
-        import locale
         import os
 
         # Get system locale
@@ -1503,20 +1569,29 @@ class Resolver:
         # Common/popular language codes to prioritize
         common_langs = ['en', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'zh', 'ja', 'ko']
 
+        # Pre-calculate missing deps count for each provider
+        missing_deps_cache = {}
+        for name in providers:
+            missing_deps_cache[name] = self._count_missing_deps(name)
+
         def sort_key(name: str) -> tuple:
             name_lower = name.lower()
+            missing_count = missing_deps_cache.get(name, 999)
 
-            # Check if it matches system locale (highest priority)
+            # Primary sort: by number of missing dependencies (fewer = better)
+            # Secondary sort: locale matching
+            # Tertiary sort: alphabetical
+
+            locale_score = 2  # Default: no locale match
             if f'-{lang}' in name_lower or name_lower.endswith(f'_{lang}'):
-                return (0, name)
+                locale_score = 0
+            else:
+                for i, common in enumerate(common_langs):
+                    if f'-{common}' in name_lower or name_lower.endswith(f'_{common}'):
+                        locale_score = 1
+                        break
 
-            # Check if it's a common language
-            for i, common in enumerate(common_langs):
-                if f'-{common}' in name_lower or name_lower.endswith(f'_{common}'):
-                    return (1, i, name)
-
-            # Everything else alphabetically
-            return (2, 0, name)
+            return (missing_count, locale_score, name)
 
         sorted_providers = sorted(providers, key=sort_key)
         return sorted_providers[:max_count]
@@ -1537,7 +1612,7 @@ class Resolver:
 
     def find_available_suggests(self, package_names: List[str],
                                 choices: Dict[str, str] = None,
-                                resolved_packages: List[str] = None) -> List[PackageAction]:
+                                resolved_packages: List[str] = None) -> Tuple[List[PackageAction], List[Alternative]]:
         """Find packages that are suggested by the given packages.
 
         Suggests are not automatically installed by libsolv, so we need to
@@ -1551,15 +1626,18 @@ class Resolver:
                      Used to filter out suggests that will be installed anyway.
 
         Returns:
-            List of PackageAction for available suggested packages
+            Tuple of (suggests, alternatives):
+            - suggests: List of PackageAction for available suggested packages
+            - alternatives: List of Alternative for suggests with multiple providers
         """
         if not self.pool:
-            return []
+            return [], []
 
         if choices is None:
             choices = {}
 
         suggests = []
+        alternatives = []
         seen = set()
         installed_names = set()
 
@@ -1616,36 +1694,61 @@ class Resolver:
                     for d in suggests_deps:
                         print(f"  - {d}")
                 for dep in suggests_deps:
+                    dep_str = str(dep).split()[0]  # Extract capability name
+
+                    # Skip if this capability was already processed
+                    if dep_str in seen:
+                        continue
+
                     # Find packages that satisfy this suggest
                     providers = self.pool.whatprovides(dep)
                     if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
                         prov_names = [p.name for p in providers if p.repo and p.repo.name != '@System']
                         if prov_names:
                             print(f"  {dep} -> providers: {prov_names[:5]}")
+
+                    # Collect valid providers for this capability
+                    valid_providers = []
                     for provider in providers:
-                        # Skip if already installed or already in our list
+                        # Skip if already installed
                         if provider.name.lower() in installed_names:
                             if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
                                 print(f"    SKIP {provider.name}: already installed")
-                            continue
-                        if provider.name.lower() in seen:
-                            if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
-                                print(f"    SKIP {provider.name}: already seen")
                             continue
                         # Skip if it's a src package
                         if provider.arch in ('src', 'nosrc'):
                             continue
                         # Skip suggests that require rejected packages
-                        # (packages that conflict with user's choices)
                         debug_this = (pkg_name == 'phpmyadmin' and provider.name in ('php8.4-bz2', 'php8.4-zip', 'php8.5-bz2', 'php8.5-zip'))
                         if self._requires_rejected(provider, rejected_packages, debug=debug_this):
                             if pkg_name == 'phpmyadmin':
                                 print(f"    SKIP {provider.name}: requires rejected package")
                             continue
+                        valid_providers.append(provider)
 
-                        seen.add(provider.name.lower())
+                    if not valid_providers:
+                        continue
+
+                    seen.add(dep_str)
+
+                    # Deduplicate by name (keep first/best version)
+                    unique_providers = {}
+                    for p in valid_providers:
+                        if p.name not in unique_providers:
+                            unique_providers[p.name] = p
+                    valid_providers = list(unique_providers.values())
+
+                    # Check if user already made a choice for this capability
+                    if dep_str in choices:
+                        chosen_name = choices[dep_str]
+                        chosen_provider = next((p for p in valid_providers if p.name == chosen_name), None)
+                        if chosen_provider:
+                            valid_providers = [chosen_provider]
+
+                    if len(valid_providers) == 1:
+                        # Single provider - add directly to suggests
+                        provider = valid_providers[0]
                         pkg_info = self._solvable_to_pkg.get(provider.id, {})
-
                         suggests.append(PackageAction(
                             action=TransactionType.INSTALL,
                             name=provider.name,
@@ -1656,8 +1759,18 @@ class Resolver:
                             media_name=pkg_info.get('media_name', ''),
                             reason=InstallReason.SUGGESTED,
                         ))
+                    else:
+                        # Multiple providers - create an alternative for user choice
+                        # Sort by missing deps count (fewer deps = shown first)
+                        provider_names = [p.name for p in valid_providers]
+                        sorted_providers = self._prioritize_providers(provider_names, len(provider_names))
+                        alternatives.append(Alternative(
+                            capability=dep_str,
+                            required_by=f"suggested by {pkg_name}",
+                            providers=sorted_providers
+                        ))
 
-        return suggests
+        return suggests, alternatives
 
     def _requires_rejected(self, solvable, rejected_packages: set, debug=False) -> bool:
         """Check if a solvable requires any rejected package.

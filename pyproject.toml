@@ -53,3 +53,8 @@ include = ["urpm*"]
 [tool.pytest.ini_options]
 testpaths = ["urpm/tests"]
 python_files = ["test_*.py"]
+filterwarnings = [
+    # libsolv SWIG bindings bug - upstream issue, not ours
+    "ignore:builtin type Swig.*:DeprecationWarning",
+    "ignore:builtin type swigvarlink.*:DeprecationWarning",
+]

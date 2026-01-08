@@ -107,6 +107,10 @@ Attention que le urpm dans son conteneur devra pouvoir tirer partie des peers di
 
 Et à la fin l'idée c'est que ça puisse même être effectué par urpmd, piloté via les API par un ordonnanceur pour faire du rebuild de masse parallélisé.
 
+### Split ?
+
+- [ ] Prévoir de séparer en plusieurs rpms : urpm, urpmd, urpmb (b pour build), urpms (s pour scedule)
+
 ---
 
 ## Phase 3 : GUI & applet
