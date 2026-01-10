@@ -1192,6 +1192,30 @@ For legacy mode (non-Mageia URL with explicit name):
         help='Media name'
     )
 
+    # media link
+    media_link = media_subparsers.add_parser(
+        'link',
+        help='Link/unlink servers to a media',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description='''Link or unlink servers to a media source.
+
+Use +server to add a server, -server to remove it.
+Use +all/-all to add/remove all servers.
+
+Examples:
+  urpm media link "Core Release" +mirror1 +mirror2
+  urpm media link "Core Updates" -oldserver
+  urpm media link "Core Release" +newserver -oldserver
+  urpm media link "Core Release" +all
+  urpm media link "Core Release" -all +preferred_mirror
+'''
+    )
+    media_link.add_argument('name', help='Media name')
+    media_link.add_argument(
+        'changes', nargs='+', metavar='+/-server',
+        help='Server changes: +name to add, -name to remove, +all/-all for all'
+    )
+
     # media autoconfig / auto / ac
     media_autoconfig = media_subparsers.add_parser(
         'autoconfig', aliases=['auto', 'ac'],
@@ -3834,6 +3858,131 @@ def cmd_media_seed_info(args, db: PackageDatabase) -> int:
     # Show some examples
     if matching:
         print(f"\nExample seed packages: {', '.join(sorted(matching)[:10])}...")
+
+    return 0
+
+
+def cmd_media_link(args, db: PackageDatabase) -> int:
+    """Handle media link command - link/unlink servers to a media."""
+    from . import colors
+    from ..core.config import build_server_url
+    import urllib.request
+    from pathlib import Path
+
+    # Find media
+    media = db.get_media(args.name)
+    if not media:
+        print(colors.error(f"Media '{args.name}' not found"))
+        return 1
+
+    media_id = media['id']
+    relative_path = media.get('relative_path', '')
+    added = []
+    removed = []
+    skipped = []
+    errors = []
+
+    # Get all servers for +all/-all
+    all_servers = db.list_servers()
+
+    def check_server_has_media(server: dict) -> bool:
+        """Check if server has this media available."""
+        if not relative_path:
+            return True  # Can't check without relative_path
+
+        if server['protocol'] == 'file':
+            # Local filesystem check
+            md5_path = Path(server['base_path']) / relative_path / "media_info" / "MD5SUM"
+            return md5_path.exists()
+        else:
+            # Remote check via HEAD request
+            base_url = build_server_url(server)
+            url = f"{base_url}/{relative_path}/media_info/MD5SUM"
+            try:
+                req = urllib.request.Request(url, method='HEAD')
+                urllib.request.urlopen(req, timeout=5)
+                return True
+            except:
+                return False
+
+    def try_add_server(server: dict) -> bool:
+        """Try to add a server, returns True if added."""
+        if db.server_media_link_exists(server['id'], media_id):
+            return False  # Already linked
+
+        if not check_server_has_media(server):
+            skipped.append(server['name'])
+            return False
+
+        db.link_server_media(server['id'], media_id)
+        added.append(server['name'])
+        return True
+
+    for change in args.changes:
+        if change == '+all':
+            # Link all servers that have the media
+            print(f"Checking {len(all_servers)} servers...", flush=True)
+            for server in all_servers:
+                try_add_server(server)
+
+        elif change == '-all':
+            # Unlink all servers
+            for server in all_servers:
+                if db.server_media_link_exists(server['id'], media_id):
+                    db.unlink_server_media(server['id'], media_id)
+                    removed.append(server['name'])
+
+        elif change.startswith('+'):
+            server_name = change[1:]
+            server = db.get_server(server_name)
+            if not server:
+                errors.append(f"Server '{server_name}' not found")
+                continue
+            if db.server_media_link_exists(server['id'], media_id):
+                errors.append(f"Server '{server_name}' already linked")
+                continue
+            if not check_server_has_media(server):
+                skipped.append(server_name)
+                continue
+            db.link_server_media(server['id'], media_id)
+            added.append(server_name)
+
+        elif change.startswith('-'):
+            server_name = change[1:]
+            server = db.get_server(server_name)
+            if not server:
+                errors.append(f"Server '{server_name}' not found")
+                continue
+            if not db.server_media_link_exists(server['id'], media_id):
+                errors.append(f"Server '{server_name}' not linked")
+                continue
+            db.unlink_server_media(server['id'], media_id)
+            removed.append(server_name)
+
+        else:
+            errors.append(f"Invalid change '{change}' - use +server or -server")
+
+    # Report results
+    if added:
+        print(colors.success(f"Added: {', '.join(added)}"))
+    if removed:
+        print(f"Removed: {', '.join(removed)}")
+    if skipped:
+        print(colors.warning(f"Skipped (media not available): {', '.join(skipped)}"))
+    if errors:
+        for err in errors:
+            print(colors.error(err))
+        return 1
+
+    # Show current servers
+    servers = db.get_servers_for_media(media_id, enabled_only=False)
+    if servers:
+        print(f"\nServers for '{args.name}':")
+        for s in servers:
+            status = colors.success("[x]") if s['enabled'] else colors.dim("[ ]")
+            print(f"  {status} {s['name']} (priority: {s['priority']})")
+    else:
+        print(colors.dim(f"\nNo servers linked to '{args.name}'"))
 
     return 0
 
@@ -12612,6 +12761,8 @@ def main(argv=None) -> int:
                 return cmd_media_set(args, db)
             elif args.media_command == 'seed-info':
                 return cmd_media_seed_info(args, db)
+            elif args.media_command == 'link':
+                return cmd_media_link(args, db)
             elif args.media_command in ('autoconfig', 'auto', 'ac'):
                 return cmd_media_autoconfig(args, db)
             else:
