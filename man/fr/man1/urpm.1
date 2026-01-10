@@ -137,6 +137,53 @@ Met a jour les metadonnees (en parallele).
 .TP
 .B import
 Importe la configuration depuis urpmi.
+.TP
+.B link \fInom\fR \fI+serveur\fR|\fI-serveur\fR ...
+Associe ou dissocie des serveurs a un media. Utilisez +serveur pour ajouter, -serveur pour retirer.
+Utilisez +all/-all pour ajouter/retirer tous les serveurs. Ne lie que les serveurs qui ont le media disponible.
+.TP
+.B set \fInom\fR \fR[\fIoptions\fR]
+Modifie les parametres d'un media.
+.RS
+.TP
+.B \-\-shared \fIyes\fR|\fIno\fR
+Active/desactive le partage de ce media avec les pairs.
+.TP
+.B \-\-replication \fIpolicy\fR
+Politique de replication : none, on_demand, seed.
+.TP
+.B \-\-seeds \fIsections\fR
+Sections rpmsrate pour la replication seed (separees par virgules), ex: INSTALL,CAT_PLASMA5,CAT_GNOME.
+.TP
+.B \-\-quota \fItaille\fR
+Quota par media (ex: 5G, 500M).
+.TP
+.B \-\-retention \fIjours\fR
+Jours de conservation des paquets en cache.
+.TP
+.B \-\-priority \fIN\fR
+Priorite du media (plus haut = prefere).
+.RE
+.TP
+.B autoconfig \fB\-\-release\fR \fIversion\fR
+Ajoute automatiquement les medias officiels Mageia pour une release. Alias : \fBauto\fR, \fBac\fR.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIversion\fR
+Version Mageia (ex: 10, cauldron). Requis.
+.TP
+.B \-\-arch \fIarch\fR
+Architecture cible (defaut : hote).
+.TP
+.BR \-n ", " \-\-dry\-run
+Affiche ce qui serait ajoute sans modifier.
+.TP
+.B \-\-no\-nonfree
+Ignore les medias nonfree.
+.TP
+.B \-\-no\-tainted
+Ignore les medias tainted.
+.RE
 .RE
 .TP
 .B server \fR[\fIsous-commande\fR]

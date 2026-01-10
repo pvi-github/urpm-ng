@@ -307,6 +307,48 @@ urpm media enable <name>      # Enable a media
 urpm media disable <name>     # Disable a media
 urpm media update [name]      # Update media metadata
 urpm media import <file>      # Import from urpmi.cfg
+urpm media link <name> +srv -srv  # Link/unlink servers to a media
+urpm media set <name> [opts]  # Modify media settings (sharing, replication, quota...)
+urpm media autoconfig -r 10   # Auto-add official Mageia media for release 10
+```
+
+### Server-Media linking
+
+Link or unlink servers to specific media sources:
+
+```bash
+urpm media link "Core Release" +mirror1 +mirror2   # Add servers
+urpm media link "Core Updates" -oldserver          # Remove server
+urpm media link "Core Release" +all                # Add all available servers
+urpm media link "Core Release" -all +preferred     # Reset and add one
+```
+
+Note: When adding servers, urpm checks if the media is actually available on the server before linking.
+
+### Auto-configure media
+
+Automatically add official Mageia media for a release:
+
+```bash
+urpm media autoconfig --release 10              # Add all official media for Mageia 10
+urpm media autoconfig -r cauldron               # Add media for Cauldron
+urpm media autoconfig -r 10 --no-nonfree        # Skip nonfree media
+urpm media autoconfig -r 10 --no-tainted        # Skip tainted media
+urpm media autoconfig -r 10 -n                  # Dry-run: show what would be added
+```
+
+### Media settings
+
+Configure media sharing and replication:
+
+```bash
+urpm media set "Core Release" --shared=yes           # Share with P2P peers
+urpm media set "Core Release" --replication=seed     # Full replication (DVD-like)
+urpm media set "Core Release" --replication=on_demand  # Cache downloaded packages
+urpm media set "Core Release" --quota=5G             # Limit cache size
+urpm media set "Core Release" --retention=30         # Keep packages 30 days
+urpm media set "Core Release" --priority=10          # Higher priority
+urpm media set "Core Release" --seeds=INSTALL,CAT_PLASMA5  # Seed sections
 ```
 
 Examples:

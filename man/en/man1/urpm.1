@@ -136,6 +136,53 @@ Update media metadata (parallel).
 .TP
 .B import
 Import media configuration from urpmi.
+.TP
+.B link \fIname\fR \fI+server\fR|\fI-server\fR ...
+Link or unlink servers to a media. Use +server to add, -server to remove.
+Use +all/-all to add/remove all servers. Only links servers that have the media available.
+.TP
+.B set \fIname\fR \fR[\fIoptions\fR]
+Modify media settings.
+.RS
+.TP
+.B \-\-shared \fIyes\fR|\fIno\fR
+Enable/disable sharing this media with peers.
+.TP
+.B \-\-replication \fIpolicy\fR
+Replication policy: none, on_demand, seed.
+.TP
+.B \-\-seeds \fIsections\fR
+rpmsrate sections for seed replication (comma-separated), e.g., INSTALL,CAT_PLASMA5,CAT_GNOME.
+.TP
+.B \-\-quota \fIsize\fR
+Per-media quota (e.g., 5G, 500M).
+.TP
+.B \-\-retention \fIdays\fR
+Days to keep cached packages.
+.TP
+.B \-\-priority \fIN\fR
+Media priority (higher = preferred).
+.RE
+.TP
+.B autoconfig \fB\-\-release\fR \fIversion\fR
+Auto-add official Mageia media for a release. Aliases: \fBauto\fR, \fBac\fR.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIversion\fR
+Mageia release (e.g., 10, cauldron). Required.
+.TP
+.B \-\-arch \fIarch\fR
+Target architecture (default: host).
+.TP
+.BR \-n ", " \-\-dry\-run
+Show what would be added without making changes.
+.TP
+.B \-\-no\-nonfree
+Skip nonfree media.
+.TP
+.B \-\-no\-tainted
+Skip tainted media.
+.RE
 .RE
 .TP
 .B server \fR[\fIsubcommand\fR]
