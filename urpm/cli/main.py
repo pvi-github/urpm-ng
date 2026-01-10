@@ -4200,12 +4200,15 @@ def cmd_media_autoconfig(args, db: PackageDatabase) -> int:
             print(f"  Would add media: {media_name} -> {relative_path}")
         else:
             # Add the media
+            is_update = (repo == 'updates')
             db.add_media(
                 name=media_name,
+                short_name=media_name,  # Already filesystem-safe
+                mageia_version=str(release),
+                architecture=arch,
                 relative_path=relative_path,
                 is_official=True,
-                mageia_version=str(release),
-                architecture=arch
+                update_media=is_update
             )
             print(f"  Added media: {media_name}")
 
@@ -4227,7 +4230,7 @@ def cmd_media_autoconfig(args, db: PackageDatabase) -> int:
     else:
         print(colors.success(f"Added {added} media, {skipped} already existed"))
         if added > 0:
-            print(colors.dim("Run 'urpm update' to sync metadata"))
+            print(colors.dim("Run 'urpm media update' to sync metadata"))
 
     return 0
 
