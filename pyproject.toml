@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "urpm"
-version = "0.1.19"
+version = "0.1.20"
 description = "Modern package manager for Mageia Linux"
 readme = "README.md"
 license = {text = "GPL-2.0-or-later"}
