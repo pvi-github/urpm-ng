@@ -109,12 +109,17 @@ def parse_buildrequires_from_spec(spec_path: Path) -> List[str]:
                 deps_part = line.split(':', 1)[1].strip()
                 # Split by comma or whitespace for multiple deps on one line
                 # Handle version constraints like "pkg >= 1.0" - extract just pkg name
+                skip_token = False
                 for dep in re.split(r'[,\s]+', deps_part):
+                    if skip_token:
+                        skip_token = False
+                        continue
                     dep = dep.strip()
                     if not dep or dep.startswith('#'):
                         continue
                     # Skip version operators and numbers
                     if dep in ('>=', '<=', '>', '<', '=', '=='):
+                        skip_token = True
                         continue
                     if re.match(r'^[\d.]+$', dep):
                         continue
