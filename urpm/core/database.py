@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Iterator, Set
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -429,6 +429,10 @@ MIGRATIONS = {
         -- Migration v13 -> v14: Rename proxy -> mirror (clearer naming)
         ALTER TABLE media RENAME COLUMN proxy_enabled TO shared;
         ALTER TABLE proxy_config RENAME TO mirror_config;
+    """),
+    14: (15, """
+        -- Migration v14 -> v15: Reserved (no-op)
+        SELECT 1;
     """),
 }
 

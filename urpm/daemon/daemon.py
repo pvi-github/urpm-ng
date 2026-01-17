@@ -418,27 +418,63 @@ class UrpmDaemon:
         }
 
     def _build_rpm_index(self):
-        """Build index of all RPM files in medias directory."""
+        """Build index of all RPM files in medias directory and file:// servers."""
         self._rpm_index = {}
         medias_dir = self.base_dir / "medias"
 
-        if not medias_dir.exists():
-            return
+        # Index files from cache directory
+        if medias_dir.exists():
+            for rpm_path in medias_dir.rglob("*.rpm"):
+                if rpm_path.is_file():
+                    try:
+                        filename = rpm_path.name
+                        size = rpm_path.stat().st_size
+                        # Path relative to medias/ for URL construction
+                        rel_path = str(rpm_path.relative_to(medias_dir))
+                        self._rpm_index[filename] = {
+                            'size': size,
+                            'path': rel_path,
+                        }
+                    except OSError:
+                        continue
 
-        # Recursively find all .rpm files
-        for rpm_path in medias_dir.rglob("*.rpm"):
-            if rpm_path.is_file():
-                try:
-                    filename = rpm_path.name
-                    size = rpm_path.stat().st_size
-                    # Path relative to medias/ for URL construction
-                    rel_path = str(rpm_path.relative_to(medias_dir))
-                    self._rpm_index[filename] = {
-                        'size': size,
-                        'path': rel_path,
-                    }
-                except OSError:
-                    continue
+        # Index files from file:// servers (local mirrors)
+        if self.db:
+            try:
+                # Get all media with their file:// servers
+                for media in self.db.list_media():
+                    if not media.get('shared'):
+                        continue  # Skip non-shared media
+
+                    servers = self.db.get_servers_for_media(media['id'], enabled_only=True)
+                    for server in servers:
+                        if server['protocol'] != 'file':
+                            continue
+
+                        # Build local path: server.base_path + media.relative_path
+                        local_path = Path(server['base_path']) / media['relative_path']
+                        if not local_path.exists():
+                            continue
+
+                        # URL path: official/<relative_path>/<filename>
+                        url_path_prefix = f"official/{media['relative_path']}"
+
+                        # Index all RPMs in local mirror
+                        for rpm_path in local_path.glob("*.rpm"):
+                            if rpm_path.is_file():
+                                try:
+                                    filename = rpm_path.name
+                                    # Don't overwrite if already indexed from cache
+                                    if filename not in self._rpm_index:
+                                        size = rpm_path.stat().st_size
+                                        self._rpm_index[filename] = {
+                                            'size': size,
+                                            'path': f"{url_path_prefix}/{filename}",
+                                        }
+                                except OSError:
+                                    continue
+            except Exception:
+                pass  # Ignore database errors, use cache only
 
     def invalidate_rpm_index(self):
         """Invalidate the RPM index so it will be rebuilt on next check."""

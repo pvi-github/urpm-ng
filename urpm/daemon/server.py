@@ -234,6 +234,12 @@ class UrpmdHandler(BaseHTTPRequestHandler):
             self.send_error_json(400, "Invalid path")
             return
 
+        # If file doesn't exist in cache, try file:// servers
+        if not target_path.exists() and subpath and self.daemon.db:
+            alt_path = self._find_in_file_server(level2, subpath)
+            if alt_path:
+                target_path = alt_path
+
         if not target_path.exists():
             self.send_error_json(404, f"Not found: {level1}/{level2}/{subpath}" if subpath else f"{level1}/{level2}")
             return
@@ -242,6 +248,68 @@ class UrpmdHandler(BaseHTTPRequestHandler):
             self._send_directory_listing(target_path, level1, level2, subpath)
         else:
             self._send_file(target_path)
+
+    def _find_in_file_server(self, version: str, subpath: str) -> Optional[Path]:
+        """Find a file in file:// servers.
+
+        Args:
+            version: Mageia version (e.g., "10")
+            subpath: Path after version (e.g., "x86_64/media/core/release/foo.rpm")
+
+        Returns:
+            Path to file if found, None otherwise
+        """
+        # Reconstruct relative_path: version/subpath_without_filename
+        subpath_parts = subpath.split('/')
+        if len(subpath_parts) < 4:
+            return None
+
+        # Check if last part is a file
+        if '.' in subpath_parts[-1]:
+            dir_path = '/'.join(subpath_parts[:-1])
+            filename = subpath_parts[-1]
+        else:
+            return None  # Directory listing not supported from file:// servers
+
+        relative_path = f"{version}/{dir_path}"
+
+        try:
+            # Find media by relative_path
+            cursor = self.daemon.db.conn.execute(
+                "SELECT id FROM media WHERE relative_path = ? AND shared = 1",
+                (relative_path,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            media_id = row['id']
+
+            # Get file:// servers for this media
+            servers = self.daemon.db.get_servers_for_media(media_id, enabled_only=True)
+            for server in servers:
+                if server['protocol'] != 'file':
+                    continue
+
+                # Build full path
+                local_path = Path(server['base_path']) / relative_path / filename
+
+                # Security check
+                try:
+                    local_path = local_path.resolve()
+                    base_resolved = Path(server['base_path']).resolve()
+                    if not str(local_path).startswith(str(base_resolved)):
+                        continue  # Path traversal attempt
+                except (OSError, ValueError):
+                    continue
+
+                if local_path.exists() and local_path.is_file():
+                    return local_path
+
+        except Exception:
+            pass
+
+        return None
 
     def _send_directory_listing(self, dir_path: Path, level1: str, level2: str, subpath: str):
         """Send directory listing as JSON or HTML."""
