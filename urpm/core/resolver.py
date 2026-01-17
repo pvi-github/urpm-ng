@@ -1216,6 +1216,10 @@ class Resolver:
         # Prefer packages compatible with already installed packages
         # This helps select php8.5-opcache when php8.5-* is already installed
         solver.set_flag(solv.Solver.SOLVER_FLAG_FOCUS_INSTALLED, 1)
+        # Allow removing packages that are obsoleted by installed packages
+        solver.set_flag(solv.Solver.SOLVER_FLAG_ALLOW_UNINSTALL, 1)
+        # Handle obsoletes (e.g., dhcpcd obsoletes dhcp-client)
+        solver.set_flag(solv.Solver.SOLVER_FLAG_YUM_OBSOLETES, 1)
         # Handle weak dependencies (Recommends/Suggests)
         if not self.install_recommends:
             solver.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)
@@ -1241,6 +1245,7 @@ class Resolver:
 
         actions = []
         install_size = 0
+        remove_size = 0
 
         for s in trans.steps():
             pkg_info = self._solvable_to_pkg.get(s.id, {})
@@ -1278,6 +1283,8 @@ class Resolver:
             size = pkg_info.get('size', 0)
             if action in (TransactionType.INSTALL, TransactionType.UPGRADE):
                 install_size += size
+            elif action == TransactionType.REMOVE:
+                remove_size += size
 
             actions.append(PackageAction(
                 action=action,
@@ -1309,6 +1316,7 @@ class Resolver:
                 actions=actions,
                 problems=[],
                 install_size=install_size,
+                remove_size=remove_size,
                 alternatives=alternatives
             )
 
@@ -1316,7 +1324,8 @@ class Resolver:
             success=True,
             actions=actions,
             problems=[],
-            install_size=install_size
+            install_size=install_size,
+            remove_size=remove_size
         )
 
     def build_dependency_graph(self, resolution: Resolution,

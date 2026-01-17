@@ -1699,6 +1699,60 @@ class PackageDatabase:
 
         return pkg
 
+    def find_package_by_nevra(self, name: str, evr: str, arch: str) -> Optional[Dict]:
+        """Find a package by name, evr (epoch:version-release), and arch.
+
+        Args:
+            name: Package name
+            evr: Epoch:version-release (e.g., "3:4.4.3P1-4" or "4.4.3P1-4")
+            arch: Architecture (e.g., "x86_64")
+
+        Returns:
+            Package dict if found, None otherwise.
+        """
+        # Parse evr to extract epoch, version, release
+        if ':' in evr:
+            epoch_str, ver_rel = evr.split(':', 1)
+            epoch = int(epoch_str) if epoch_str else 0
+        else:
+            epoch = 0
+            ver_rel = evr
+
+        if '-' in ver_rel:
+            version, release = ver_rel.rsplit('-', 1)
+        else:
+            version = ver_rel
+            release = '1'
+
+        # Search with all components
+        cursor = self.conn.execute("""
+            SELECT * FROM packages
+            WHERE name_lower = ? AND version = ? AND release = ? AND arch = ?
+            AND (epoch = ? OR (epoch IS NULL AND ? = 0))
+            LIMIT 1
+        """, (name.lower(), version, release, arch, epoch, epoch))
+
+        row = cursor.fetchone()
+        if not row:
+            # Try without epoch constraint (some packages may not have epoch stored)
+            cursor = self.conn.execute("""
+                SELECT * FROM packages
+                WHERE name_lower = ? AND version = ? AND release = ? AND arch = ?
+                LIMIT 1
+            """, (name.lower(), version, release, arch))
+            row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        pkg = dict(row)
+        pkg['requires'] = self._get_deps(pkg['id'], 'requires')
+        pkg['provides'] = self._get_deps(pkg['id'], 'provides')
+        pkg['conflicts'] = self._get_deps(pkg['id'], 'conflicts')
+        pkg['obsoletes'] = self._get_deps(pkg['id'], 'obsoletes')
+
+        return pkg
+
     def get_package_smart(self, identifier: str) -> Optional[Dict]:
         """Get a package by name or NEVRA.
 

@@ -6628,11 +6628,15 @@ def cmd_install(args, db: PackageDatabase) -> int:
 
     final_actions = list(result.actions)
 
-    # Categorize final packages by install reason
-    explicit_pkgs = [a for a in final_actions if a.reason == InstallReason.EXPLICIT]
-    dep_pkgs = [a for a in final_actions if a.reason == InstallReason.DEPENDENCY]
-    rec_pkgs = [a for a in final_actions if a.reason == InstallReason.RECOMMENDED]
-    sug_pkgs = [a for a in final_actions if a.reason == InstallReason.SUGGESTED]
+    # Separate packages being removed (obsoleted) from packages being installed
+    remove_pkgs = [a for a in final_actions if a.action == TransactionType.REMOVE]
+    install_actions = [a for a in final_actions if a.action != TransactionType.REMOVE]
+
+    # Categorize install packages by install reason
+    explicit_pkgs = [a for a in install_actions if a.reason == InstallReason.EXPLICIT]
+    dep_pkgs = [a for a in install_actions if a.reason == InstallReason.DEPENDENCY]
+    rec_pkgs = [a for a in install_actions if a.reason == InstallReason.RECOMMENDED]
+    sug_pkgs = [a for a in install_actions if a.reason == InstallReason.SUGGESTED]
 
     # Build set of explicit package names for history recording
     explicit_names = set(a.name.lower() for a in explicit_pkgs)
@@ -6668,8 +6672,17 @@ def cmd_install(args, db: PackageDatabase) -> int:
         pkg_names = [f"{a.name}-{a.evr}" for a in sug_pkgs]
         display.print_package_list(pkg_names, indent=4)
 
+    if remove_pkgs:
+        remove_size = sum(a.size for a in remove_pkgs)
+        print(f"  {colors.error(f'Obsoleted ({len(remove_pkgs)})')} - {format_size(remove_size)}")
+        pkg_names = [f"{a.name}-{a.evr}" for a in remove_pkgs]
+        display.print_package_list(pkg_names, indent=4)
+
     # Final confirmation
-    print(f"\n{colors.bold(f'Total: {len(final_actions)} packages')} ({format_size(total_size)})")
+    if remove_pkgs:
+        print(f"\n{colors.bold(f'Total: {len(install_actions)} to install, {len(remove_pkgs)} to remove')} ({format_size(total_size)})")
+    else:
+        print(f"\n{colors.bold(f'Total: {len(install_actions)} packages')} ({format_size(total_size)})")
 
     if not args.auto:
         try:
@@ -6700,6 +6713,10 @@ def cmd_install(args, db: PackageDatabase) -> int:
     servers_cache = {}  # media_id -> list of server dicts
 
     for action in result.actions:
+        # Skip REMOVE actions - they don't need download
+        if action.action == TransactionType.REMOVE:
+            continue
+
         media_name = action.media_name
 
         # Local RPMs don't need download - get path from resolver metadata or local_rpm_infos
@@ -6955,7 +6972,10 @@ def cmd_install(args, db: PackageDatabase) -> int:
             return 130
 
         installed_count = queue_result.operations[0].count if queue_result.operations else len(rpm_paths)
-        print(colors.success(f"  {installed_count} packages installed"))
+        if remove_pkgs:
+            print(colors.success(f"  {installed_count} packages installed, {len(remove_pkgs)} removed"))
+        else:
+            print(colors.success(f"  {installed_count} packages installed"))
         db.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
@@ -10248,11 +10268,179 @@ def cmd_undo(args, db: PackageDatabase) -> int:
         # Then reinstall packages that were removed
         if to_install and not interrupted:
             print(colors.info(f"\nReinstalling {len(to_install)} package(s)..."))
+
+            # Parse NEVRAs and find packages in repositories
+            from ..core.download import Downloader, DownloadItem
+            from ..core.config import get_base_dir
+
+            download_items = []
+            not_found = []
+
+            # Cache media and servers lookups
+            media_cache = {}
+            servers_cache = {}
+
             for nevra in to_install:
-                if interrupted:
-                    break
-                print(f"  {colors.warning('Note:')} {nevra} needs to be downloaded/installed")
-                # TODO: integrate with resolver/downloader for proper reinstall
+                # Parse NEVRA: name-[epoch:]version-release.arch
+                # Example: dhcp-client-3:4.4.3P1-4.mga10.x86_64
+                if '.' in nevra:
+                    name_evr, arch = nevra.rsplit('.', 1)
+                else:
+                    name_evr = nevra
+                    arch = platform.machine()
+
+                # Split name from evr at last hyphen before version
+                # This is tricky because package names can contain hyphens
+                # We look for the pattern -[epoch:]version-release
+                import re
+                match = re.match(r'^(.+)-(\d+:)?([^-]+-[^-]+)$', name_evr)
+                if match:
+                    name = match.group(1)
+                    epoch = match.group(2).rstrip(':') if match.group(2) else None
+                    ver_rel = match.group(3)
+                    version, release = ver_rel.rsplit('-', 1)
+                    evr = f"{epoch}:{version}-{release}" if epoch else f"{version}-{release}"
+                else:
+                    # Fallback: try simpler parsing
+                    parts = name_evr.rsplit('-', 2)
+                    if len(parts) >= 3:
+                        name = parts[0]
+                        version = parts[1]
+                        release = parts[2]
+                        evr = f"{version}-{release}"
+                    else:
+                        print(f"  {colors.warning('Warning:')} cannot parse NEVRA: {nevra}")
+                        not_found.append(nevra)
+                        continue
+
+                # Find package in database
+                pkg = db.find_package_by_nevra(name, evr, arch)
+                if not pkg:
+                    # Try without epoch in evr
+                    if ':' in evr:
+                        evr_no_epoch = evr.split(':', 1)[1]
+                        pkg = db.find_package_by_nevra(name, evr_no_epoch, arch)
+
+                if not pkg:
+                    print(f"  {colors.warning('Warning:')} {nevra} not found in repositories")
+                    not_found.append(nevra)
+                    continue
+
+                # Get media info
+                media_id = pkg['media_id']
+                if media_id not in media_cache:
+                    media_cache[media_id] = db.get_media_by_id(media_id)
+                media = media_cache[media_id]
+
+                if not media:
+                    print(f"  {colors.warning('Warning:')} media not found for {nevra}")
+                    not_found.append(nevra)
+                    continue
+
+                # Get servers for this media
+                if media_id not in servers_cache:
+                    servers_cache[media_id] = [dict(s) for s in db.get_servers_for_media(media_id, enabled_only=True)]
+
+                servers = servers_cache[media_id]
+
+                # Build download item
+                # Parse version/release from evr for DownloadItem
+                dl_evr = evr
+                if ':' in dl_evr:
+                    dl_evr = dl_evr.split(':', 1)[1]  # Remove epoch for filename
+                dl_version, dl_release = dl_evr.rsplit('-', 1) if '-' in dl_evr else (dl_evr, '1')
+
+                if media.get('relative_path'):
+                    download_items.append(DownloadItem(
+                        name=name,
+                        version=dl_version,
+                        release=dl_release,
+                        arch=arch,
+                        media_id=media_id,
+                        relative_path=media['relative_path'],
+                        is_official=bool(media.get('is_official', 1)),
+                        servers=servers,
+                        media_name=media.get('name', ''),
+                        size=pkg.get('size', 0)
+                    ))
+                elif media.get('url'):
+                    download_items.append(DownloadItem(
+                        name=name,
+                        version=dl_version,
+                        release=dl_release,
+                        arch=arch,
+                        media_url=media['url'],
+                        media_name=media.get('name', ''),
+                        size=pkg.get('size', 0)
+                    ))
+                else:
+                    print(f"  {colors.warning('Warning:')} no URL or servers for {nevra}")
+                    not_found.append(nevra)
+
+            # Download packages
+            rpm_paths = []
+            if download_items:
+                urpm_root = getattr(args, 'urpm_root', None)
+                cache_dir = get_base_dir(urpm_root=urpm_root)
+                downloader = Downloader(cache_dir=cache_dir, use_peers=True, db=db)
+
+                # Simple progress for undo
+                def progress(name, pkg_num, pkg_total, bytes_done, bytes_total, **kwargs):
+                    pct = int(bytes_done * 100 / bytes_total) if bytes_total else 0
+                    print(f"\r\033[K  Downloading [{pkg_num}/{pkg_total}] {name} {pct}%", end='', flush=True)
+
+                dl_results, downloaded, cached, _ = downloader.download_all(download_items, progress)
+                print(f"\r\033[K  {downloaded} downloaded, {cached} from cache")
+
+                # Collect successful downloads
+                for result in dl_results:
+                    if result.success and result.path:
+                        rpm_paths.append(result.path)
+                    else:
+                        print(f"  {colors.error('Failed:')} {result.name}: {result.error}")
+
+            # Install downloaded packages
+            if rpm_paths and not interrupted:
+                print(colors.info(f"  Installing {len(rpm_paths)} package(s)..."))
+
+                # Check lock
+                lock = InstallLock()
+                if not lock.acquire(blocking=False):
+                    print(colors.dim("  Waiting for RPM lock..."))
+                    lock.acquire(blocking=True)
+                lock.release()
+
+                # Build transaction queue for install
+                install_queue = TransactionQueue(root=rpm_root or "/")
+                install_queue.add_install(rpm_paths, operation_id="undo_reinstall")
+
+                last_install_shown = [None]
+
+                def install_progress(op_id: str, name: str, current: int, total: int):
+                    if last_install_shown[0] != name:
+                        print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
+                        last_install_shown[0] = name
+
+                install_result = install_queue.execute(progress_callback=install_progress)
+                print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
+
+                if not install_result.success:
+                    print(colors.error("  Reinstall failed:"))
+                    if install_result.operations:
+                        for err in install_result.operations[0].errors[:5]:
+                            print(f"    {colors.error(err)}")
+                    # Don't fail the whole undo - removal was successful
+                else:
+                    # Record reinstalled packages
+                    for nevra in to_install:
+                        if nevra not in not_found:
+                            name = nevra.rsplit('.', 1)[0].rsplit('-', 2)[0] if '.' in nevra else nevra.rsplit('-', 2)[0]
+                            db.record_package(undo_trans_id, name, nevra, 'install', 'explicit')
+                    installed_count = install_result.operations[0].count if install_result.operations else len(rpm_paths)
+                    print(colors.success(f"  {installed_count} packages reinstalled"))
+
+            elif not_found and not rpm_paths:
+                print(colors.warning(f"  Could not reinstall: packages not found in repositories"))
 
         if interrupted:
             db.abort_transaction(undo_trans_id)
