@@ -283,6 +283,34 @@ urpm mark auto <package>      # Mark as auto-installed (dependency)
 urpm mark show <package>      # Show install reason
 ```
 
+## Package Holds
+
+Hold packages to prevent upgrades and replacement by obsoletes:
+
+```bash
+urpm hold <package>           # Hold a package
+urpm hold <package> -r "reason"  # Hold with a reason
+urpm hold                     # List held packages
+urpm unhold <package>         # Remove hold
+```
+
+Held packages are protected from:
+- Version upgrades during `urpm upgrade`
+- Being replaced by packages that obsolete them
+
+Example:
+```bash
+# dhcpcd obsoletes dhcp-client, but you want to keep dhcp-client
+urpm hold dhcp-client -r "Prefer dhcp-client over dhcpcd"
+
+# Now urpm upgrade will skip dhcp-client and warn:
+#   Held packages (1) skipped:
+#     dhcp-client (would be obsoleted by dhcpcd)
+
+# To allow the replacement later:
+urpm unhold dhcp-client
+```
+
 ## History and Undo
 
 ```bash

@@ -1061,6 +1061,37 @@ Examples:
     )
 
     # =========================================================================
+    # hold / unhold
+    # =========================================================================
+    hold_parser = subparsers.add_parser(
+        'hold',
+        help='Hold packages (prevent upgrades and obsoletes replacement)',
+        parents=[display_parent]
+    )
+    hold_parser.add_argument(
+        'packages', nargs='*', metavar='PACKAGE',
+        help='Package names to hold (or list holds if empty)'
+    )
+    hold_parser.add_argument(
+        '-r', '--reason',
+        help='Reason for holding the package'
+    )
+    hold_parser.add_argument(
+        '-l', '--list', action='store_true', dest='list_holds',
+        help='List held packages'
+    )
+
+    unhold_parser = subparsers.add_parser(
+        'unhold',
+        help='Remove hold from packages',
+        parents=[display_parent]
+    )
+    unhold_parser.add_argument(
+        'packages', nargs='+', metavar='PACKAGE',
+        help='Package names to unhold'
+    )
+
+    # =========================================================================
     # media / m
     # =========================================================================
     media_parser = subparsers.add_parser(
@@ -8309,6 +8340,23 @@ def cmd_update(args, db: PackageDatabase) -> int:
             print(f"  {colors.error(prob)}")
         return 1
 
+    # Show warnings for held packages
+    held_count = 0
+    if hasattr(resolver, '_held_upgrade_warnings') and resolver._held_upgrade_warnings:
+        held_count += len(resolver._held_upgrade_warnings)
+    if hasattr(resolver, '_held_obsolete_warnings') and resolver._held_obsolete_warnings:
+        held_count += len(resolver._held_obsolete_warnings)
+
+    if held_count > 0:
+        print(colors.warning(f"\nHeld packages ({held_count}) skipped:"))
+        if hasattr(resolver, '_held_upgrade_warnings') and resolver._held_upgrade_warnings:
+            for held_pkg in resolver._held_upgrade_warnings:
+                print(f"  {colors.warning(held_pkg)} (upgrade skipped)")
+        if hasattr(resolver, '_held_obsolete_warnings') and resolver._held_obsolete_warnings:
+            for held_pkg, obsoleting_pkg in resolver._held_obsolete_warnings:
+                print(f"  {colors.warning(held_pkg)} (would be obsoleted by {obsoleting_pkg})")
+        print(f"\n  Use '{colors.dim('urpm unhold <package>')}' to allow changes.")
+
     if not result.actions:
         print(colors.success("All packages are up to date."))
         return 0
@@ -8612,7 +8660,14 @@ def cmd_update(args, db: PackageDatabase) -> int:
         for op_result in queue_result.operations:
             if op_result.operation_id == "upgrade":
                 if op_result.success:
-                    print(colors.success(f"  {op_result.count} packages upgraded"))
+                    # Show both upgraded and removed counts
+                    msg_parts = []
+                    if op_result.count > 0:
+                        msg_parts.append(f"{op_result.count} packages upgraded")
+                    if remove_names:
+                        msg_parts.append(f"{len(remove_names)} removed (obsoleted)")
+                    if msg_parts:
+                        print(colors.success(f"  {', '.join(msg_parts)}"))
                 else:
                     upgrade_success = False
                     print(colors.error(f"\nUpgrade failed:"))
@@ -9535,6 +9590,69 @@ def cmd_mark(args, db: PackageDatabase) -> int:
     else:
         print("Usage: urpm mark <manual|auto|show> [packages...]")
         return 1
+
+
+def cmd_hold(args, db: PackageDatabase) -> int:
+    """Handle hold command - hold packages to prevent upgrades and obsoletes."""
+    from . import colors
+    from datetime import datetime
+
+    # List holds if no packages or --list
+    if args.list_holds or not args.packages:
+        holds = db.list_holds()
+        if not holds:
+            print("No packages are held.")
+            return 0
+
+        print(f"Held packages ({len(holds)}):\n")
+        for hold in holds:
+            ts = datetime.fromtimestamp(hold['added_timestamp'])
+            reason = f" - {hold['reason']}" if hold['reason'] else ""
+            print(f"  {colors.warning(hold['package_name'])}{reason}")
+            print(f"    (held since {ts.strftime('%Y-%m-%d %H:%M')})")
+        return 0
+
+    # Hold packages
+    added = []
+    already_held = []
+
+    for pkg in args.packages:
+        if db.add_hold(pkg, args.reason):
+            added.append(pkg)
+        else:
+            already_held.append(pkg)
+
+    if already_held:
+        print(f"Already held: {', '.join(already_held)}")
+
+    if added:
+        print(colors.success(f"Held: {', '.join(added)}"))
+        print("These packages will be protected from upgrades and obsoletes replacement.")
+
+    return 0 if added or already_held else 1
+
+
+def cmd_unhold(args, db: PackageDatabase) -> int:
+    """Handle unhold command - remove hold from packages."""
+    from . import colors
+
+    removed = []
+    not_held = []
+
+    for pkg in args.packages:
+        if db.remove_hold(pkg):
+            removed.append(pkg)
+        else:
+            not_held.append(pkg)
+
+    if not_held:
+        print(f"Not held: {', '.join(not_held)}")
+
+    if removed:
+        print(colors.success(f"Unheld: {', '.join(removed)}"))
+        print("These packages can now be upgraded and replaced by obsoletes.")
+
+    return 0 if removed else 1
 
 
 def cmd_history(args, db: PackageDatabase) -> int:
@@ -13132,6 +13250,12 @@ def main(argv=None) -> int:
 
         elif args.command == 'mark':
             return cmd_mark(args, db)
+
+        elif args.command == 'hold':
+            return cmd_hold(args, db)
+
+        elif args.command == 'unhold':
+            return cmd_unhold(args, db)
 
         elif args.command in ('provides', 'p'):
             return cmd_provides(args, db)

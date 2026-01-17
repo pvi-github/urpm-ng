@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Iterator, Set
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -236,6 +236,16 @@ CREATE TABLE IF NOT EXISTS pins (
 
 CREATE INDEX IF NOT EXISTS idx_pins_pattern ON pins(package_pattern);
 
+-- Package holds (prevent upgrades and obsoletes replacement)
+CREATE TABLE IF NOT EXISTS held_packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_name TEXT NOT NULL UNIQUE,  -- exact package name (not pattern)
+    reason TEXT,                        -- user note for why it's held
+    added_timestamp INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_held_packages_name ON held_packages(package_name);
+
 -- Peer tracking for P2P downloads (provenance)
 CREATE TABLE IF NOT EXISTS peer_downloads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -433,6 +443,16 @@ MIGRATIONS = {
     14: (15, """
         -- Migration v14 -> v15: Reserved (no-op)
         SELECT 1;
+    """),
+    15: (16, """
+        -- Migration v15 -> v16: Add held_packages table
+        CREATE TABLE IF NOT EXISTS held_packages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            package_name TEXT NOT NULL UNIQUE,
+            reason TEXT,
+            added_timestamp INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_held_packages_name ON held_packages(package_name);
     """),
 }
 
@@ -2103,6 +2123,65 @@ class PackageDatabase:
         # No pin match - return media default priority
         media = self.get_media(media_name)
         return media['priority'] if media else 50
+
+    # =========================================================================
+    # Package holds (prevent upgrades and obsoletes replacement)
+    # =========================================================================
+
+    def add_hold(self, package_name: str, reason: str = None) -> bool:
+        """Add a hold on a package.
+
+        Args:
+            package_name: Exact package name to hold
+            reason: Optional reason for the hold
+
+        Returns:
+            True if hold was added, False if already held
+        """
+        try:
+            self.conn.execute("""
+                INSERT INTO held_packages (package_name, reason, added_timestamp)
+                VALUES (?, ?, ?)
+            """, (package_name, reason, int(time.time())))
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False  # Already held
+
+    def remove_hold(self, package_name: str) -> bool:
+        """Remove a hold from a package.
+
+        Returns:
+            True if hold was removed, False if not held
+        """
+        cursor = self.conn.execute(
+            "DELETE FROM held_packages WHERE package_name = ?",
+            (package_name,)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def is_held(self, package_name: str) -> bool:
+        """Check if a package is held."""
+        cursor = self.conn.execute(
+            "SELECT 1 FROM held_packages WHERE package_name = ?",
+            (package_name,)
+        )
+        return cursor.fetchone() is not None
+
+    def list_holds(self) -> List[Dict]:
+        """List all held packages."""
+        cursor = self.conn.execute("""
+            SELECT package_name, reason, added_timestamp
+            FROM held_packages
+            ORDER BY package_name
+        """)
+        return [dict(row) for row in cursor]
+
+    def get_held_packages_set(self) -> Set[str]:
+        """Get set of all held package names (for fast lookup)."""
+        cursor = self.conn.execute("SELECT package_name FROM held_packages")
+        return {row[0] for row in cursor}
 
     # =========================================================================
     # Multi-media package resolution

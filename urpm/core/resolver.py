@@ -289,6 +289,8 @@ class Resolver:
         self.pool = None
         self._solvable_to_pkg = {}  # Map solvable id -> pkg dict
         self._installed_count = 0  # Number of installed packages loaded
+        self._held_obsolete_warnings = []  # List of (held_pkg, obsoleting_pkg) tuples
+        self._held_upgrade_warnings = []  # List of held package names skipped from upgrade
 
     def _create_pool(self) -> solv.Pool:
         """Create and populate libsolv Pool from database.
@@ -2023,9 +2025,12 @@ class Resolver:
             # Find installed packages that have updates available
             # and create SOLVER_INSTALL jobs for the newer versions
             debug.log("Full system upgrade: scanning for available updates...")
+            held_packages = self.db.get_held_packages_set()
+            held_upgrade_warnings = []
             updates_found = 0
             for installed_pkg in self.pool.installed.solvables:
                 is_watched = debug.is_watched(installed_pkg.name)
+                is_held = installed_pkg.name in held_packages
 
                 # Find the best available version of this package
                 # For UPGRADES, prefer same architecture as installed package
@@ -2077,17 +2082,82 @@ class Resolver:
                         debug.watch(installed_pkg.name, "NO UPGRADE: no available version found")
 
                 # If there's a newer version available, add an install job for it
+                # (unless the package is held)
                 if best_available and best_available.evrcmp(installed_pkg) > 0:
-                    jobs.append(self.pool.Job(
-                        solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE,
-                        best_available.id
-                    ))
-                    updates_found += 1
+                    if is_held:
+                        # Only warn if there's actually an upgrade to skip
+                        held_upgrade_warnings.append(installed_pkg.name)
+                        debug.log(f"HELD: {installed_pkg.name} upgrade skipped ({installed_pkg.evr} -> {best_available.evr})")
+                    else:
+                        jobs.append(self.pool.Job(
+                            solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE,
+                            best_available.id
+                        ))
+                        updates_found += 1
 
             debug.log(f"Found {updates_found} packages with updates available")
+            if held_upgrade_warnings:
+                debug.log(f"Skipped {len(held_upgrade_warnings)} held packages from upgrade")
 
-            if updates_found == 0:
-                debug.log("No updates found, returning empty resolution")
+            # Scan for packages that obsolete installed packages
+            # This handles cases like dhcpcd obsoleting dhcp-client
+            debug.log("Scanning for packages that obsolete installed packages...")
+            # Reuse held_packages from above
+            held_warnings = []
+            obsoletes_found = 0
+
+            already_warned = set(held_upgrade_warnings)  # Avoid duplicate warnings
+            seen_obsoletes = set()  # Track what we've already processed
+
+            for repo in self.pool.repos:
+                if repo == self.pool.installed:
+                    continue  # Skip installed repo
+                for s in repo.solvables:
+                    # Check if this package obsoletes any installed package
+                    obsoletes = s.lookup_idarray(solv.SOLVABLE_OBSOLETES)
+                    if not obsoletes:
+                        continue
+
+                    for obs_id in obsoletes:
+                        # Use whatprovides to find packages matching this obsolete
+                        # This is much faster than iterating all installed packages
+                        for provider in self.pool.whatprovides(obs_id):
+                            if provider.repo != self.pool.installed:
+                                continue  # Only care about installed packages
+
+                            # Skip if already warned in upgrade loop
+                            if provider.name in already_warned:
+                                continue
+
+                            # Skip duplicates (same obsolete pair)
+                            obs_key = (provider.name, s.name)
+                            if obs_key in seen_obsoletes:
+                                continue
+                            seen_obsoletes.add(obs_key)
+
+                            # Check if obsoleted package is held
+                            if provider.name in held_packages:
+                                held_warnings.append((provider.name, s.name))
+                                debug.log(f"HELD: {provider.name} would be obsoleted by {s.name} (skipped)")
+                            else:
+                                # Add install job for the obsoleting package
+                                jobs.append(self.pool.Job(
+                                    solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE,
+                                    s.id
+                                ))
+                                obsoletes_found += 1
+                                debug.log(f"OBSOLETES: {s.name} obsoletes installed {provider.name}")
+                            break  # Found a match, move to next obsolete
+
+            debug.log(f"Found {obsoletes_found} packages that obsolete installed packages")
+            if held_warnings:
+                debug.log(f"Skipped {len(held_warnings)} obsoletes due to held packages")
+            # Store held warnings for later display (both upgrade and obsoletes)
+            self._held_obsolete_warnings = held_warnings
+            self._held_upgrade_warnings = held_upgrade_warnings
+
+            if updates_found == 0 and obsoletes_found == 0:
+                debug.log("No updates or obsoletes found, returning empty resolution")
                 return Resolution(
                     success=True,
                     actions=[],

@@ -283,6 +283,21 @@ Manage GPG keys for package verification.
 .TP
 .B mark \fIpackage\fR manual|auto
 Mark packages as manually or automatically installed.
+.TP
+.B hold \fR[\fIpackage\fR ...] [\fB\-r\fR \fIreason\fR]
+Hold packages to prevent upgrades and obsoletes replacement.
+Without arguments, lists held packages.
+.RS
+.TP
+.BR \-r ", " \-\-reason " " \fIreason\fR
+Record a reason for the hold.
+.TP
+.BR \-l ", " \-\-list
+List held packages.
+.RE
+.TP
+.B unhold \fIpackage\fR ...
+Remove hold from packages, allowing them to be upgraded or replaced.
 .SS Initialization and Download
 .TP
 .B init \fR[\fB\-\-release\fR \fIversion\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]

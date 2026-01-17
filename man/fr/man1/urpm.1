@@ -284,6 +284,21 @@ Gere les cles GPG pour la verification des paquets.
 .TP
 .B mark \fIpaquet\fR manual|auto
 Marque les paquets comme installes manuellement ou automatiquement.
+.TP
+.B hold \fR[\fIpaquet\fR ...] [\fB\-r\fR \fIraison\fR]
+Verrouille des paquets pour empecher les mises a jour et le remplacement par obsoletes.
+Sans arguments, liste les paquets verrouilles.
+.RS
+.TP
+.BR \-r ", " \-\-reason " " \fIraison\fR
+Enregistre une raison pour le verrouillage.
+.TP
+.BR \-l ", " \-\-list
+Liste les paquets verrouilles.
+.RE
+.TP
+.B unhold \fIpaquet\fR ...
+Supprime le verrouillage des paquets, permettant leur mise a jour ou remplacement.
 .SS Initialisation et telechargement
 .TP
 .B init \fR[\fB\-\-release\fR \fIversion\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]
