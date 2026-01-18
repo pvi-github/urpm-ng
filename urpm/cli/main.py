@@ -2712,6 +2712,10 @@ def cmd_init(args, db: PackageDatabase) -> int:
         (root_path / 'tmp').chmod(0o1777)
         (root_path / 'var/tmp').chmod(0o1777)
 
+        # Skip mount operations if no_mount flag is set (used by mkimage)
+        # Container runtimes handle /dev and /proc mounting internally
+        no_mount = getattr(args, 'no_mount', False)
+
         # Check if filesystem supports device nodes (nodev mount option)
         def is_nodev_filesystem(path: Path) -> bool:
             """Check if path is on a filesystem mounted with nodev."""
@@ -2756,7 +2760,9 @@ def cmd_init(args, db: PackageDatabase) -> int:
                 pass
             return False
 
-        if not is_dev_mounted(chroot_dev):
+        if no_mount:
+            print("  Skipping mount operations (container mode)")
+        elif not is_dev_mounted(chroot_dev):
             if is_nodev_filesystem(root_path):
                 print("  Filesystem has nodev - bind mounting /dev from host...")
             else:
@@ -2796,58 +2802,59 @@ def cmd_init(args, db: PackageDatabase) -> int:
             print("  /dev already mounted")
             dev_mounted = True
 
-        # Create /dev/fd symlink (only if not using bind mount)
-        fd_link = root_path / 'dev/fd'
-        if not dev_mounted and not fd_link.exists():
-            try:
-                fd_link.symlink_to('/proc/self/fd')
-            except OSError:
-                pass
+        # Create /dev/fd symlink (only if not using bind mount and not container mode)
+        if not no_mount:
+            fd_link = root_path / 'dev/fd'
+            if not dev_mounted and not fd_link.exists():
+                try:
+                    fd_link.symlink_to('/proc/self/fd')
+                except OSError:
+                    pass
 
-        # Create /dev/stdin, stdout, stderr symlinks (only if not using bind mount)
-        if not dev_mounted:
-            for i, name in enumerate(['stdin', 'stdout', 'stderr']):
-                link_path = root_path / 'dev' / name
-                if not link_path.exists():
-                    try:
-                        link_path.symlink_to(f'/proc/self/fd/{i}')
-                    except OSError:
-                        pass
+            # Create /dev/stdin, stdout, stderr symlinks (only if not using bind mount)
+            if not dev_mounted:
+                for i, name in enumerate(['stdin', 'stdout', 'stderr']):
+                    link_path = root_path / 'dev' / name
+                    if not link_path.exists():
+                        try:
+                            link_path.symlink_to(f'/proc/self/fd/{i}')
+                        except OSError:
+                            pass
 
-        # Mount /proc (needed by many scriptlets)
-        chroot_proc = root_path / 'proc'
-        def is_proc_mounted(chroot_proc: Path) -> bool:
-            try:
-                with open('/proc/mounts', 'r') as f:
-                    chroot_proc_str = str(chroot_proc.resolve())
-                    for line in f:
-                        parts = line.split()
-                        if len(parts) >= 2 and parts[1] == chroot_proc_str:
-                            return True
-            except (OSError, IOError):
-                pass
-            return False
+            # Mount /proc (needed by many scriptlets)
+            chroot_proc = root_path / 'proc'
+            def is_proc_mounted(chroot_proc: Path) -> bool:
+                try:
+                    with open('/proc/mounts', 'r') as f:
+                        chroot_proc_str = str(chroot_proc.resolve())
+                        for line in f:
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1] == chroot_proc_str:
+                                return True
+                except (OSError, IOError):
+                    pass
+                return False
 
-        if not is_proc_mounted(chroot_proc):
-            print("  Mounting /proc...")
-            result = subprocess.run(
-                ['mount', '-t', 'proc', 'proc', str(chroot_proc)],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print(colors.dim(f"  (unmount with: umount {chroot_proc})"))
+            if not is_proc_mounted(chroot_proc):
+                print("  Mounting /proc...")
+                result = subprocess.run(
+                    ['mount', '-t', 'proc', 'proc', str(chroot_proc)],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    print(colors.dim(f"  (unmount with: umount {chroot_proc})"))
+                else:
+                    print(colors.warning(f"  Failed to mount /proc: {result.stderr.strip()}"))
             else:
-                print(colors.warning(f"  Failed to mount /proc: {result.stderr.strip()}"))
-        else:
-            print("  /proc already mounted")
+                print("  /proc already mounted")
 
-        # Create /etc/mtab symlink to /proc/mounts
-        mtab_link = root_path / 'etc/mtab'
-        if not mtab_link.exists():
-            try:
-                mtab_link.symlink_to('/proc/mounts')
-            except OSError:
-                pass
+            # Create /etc/mtab symlink to /proc/mounts
+            mtab_link = root_path / 'etc/mtab'
+            if not mtab_link.exists():
+                try:
+                    mtab_link.symlink_to('/proc/mounts')
+                except OSError:
+                    pass
 
         # Copy /etc/resolv.conf for DNS resolution
         resolv_src = Path('/etc/resolv.conf')
@@ -3384,7 +3391,14 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
     """Handle media update command."""
     from . import colors
     from ..core.sync import sync_media, sync_all_media
+    from ..core.install import check_root
     import threading
+
+    # Check root privileges (media update writes to database)
+    if not check_root():
+        print(colors.error("Error: root privileges required for media update"))
+        print("Try: sudo urpm media update")
+        return 1
 
     def progress(media_name, stage, current, total):
         # Clear line with ANSI escape code, then print
@@ -6159,6 +6173,14 @@ def cmd_install(args, db: PackageDatabase) -> int:
         print(colors.error("Error: --nodeps requires --download-only"))
         return 1
 
+    # Check root privileges early (unless allowed to skip for mkimage)
+    from ..core.install import check_root
+    allow_no_root = getattr(args, 'allow_no_root', False)
+    if not download_only and not allow_no_root and not check_root():
+        print(colors.error("Error: root privileges required for installation"))
+        print("Try: sudo urpm install <packages>")
+        return 1
+
     # Handle --builddeps option (install build dependencies from spec/SRPM)
     builddeps = getattr(args, 'builddeps', None)
     if builddeps:
@@ -6920,14 +6942,6 @@ def cmd_install(args, db: PackageDatabase) -> int:
         print("No packages to install")
         return 0
 
-    # Install packages
-    from ..core.install import check_root
-
-    if not check_root():
-        print(colors.error("\nError: root privileges required for installation"))
-        print("Try: sudo urpm install", ' '.join(args.packages))
-        return 1
-
     # Begin transaction for history
     cmd_line = "urpm install " + " ".join(args.packages)
     transaction_id = db.begin_transaction('install', cmd_line)
@@ -6965,7 +6979,9 @@ def cmd_install(args, db: PackageDatabase) -> int:
     print(colors.info(f"\nInstalling {len(rpm_paths)} packages..."))
 
     # Check if another install is in progress
-    lock = InstallLock()
+    # Use root path for lock file when installing to chroot
+    install_root = getattr(args, 'root', None) or getattr(args, 'urpm_root', None)
+    lock = InstallLock(root=install_root)
     if not lock.acquire(blocking=False):
         print(colors.warning("  RPM database is locked by another process."))
         print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
@@ -6988,7 +7004,9 @@ def cmd_install(args, db: PackageDatabase) -> int:
         # Get root for chroot installation
         from ..core.config import get_rpm_root
         rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        queue = TransactionQueue(root=rpm_root or "/")
+        # Use fakeroot for non-root chroot installs (e.g., mkimage)
+        use_fakeroot = getattr(args, 'allow_no_root', False) and rpm_root
+        queue = TransactionQueue(root=rpm_root or "/", use_fakeroot=use_fakeroot)
         queue.add_install(
             rpm_paths,
             operation_id="install",
@@ -7431,6 +7449,7 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
             mirrorlist=None,
             auto=True,
             no_sync=False,
+            no_mount=True,  # Skip mount operations - container runtime handles /dev, /proc
         )
         ret = cmd_init(init_args, chroot_db)
         if ret != 0:
@@ -7457,6 +7476,7 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
             all=False,
             test=False,
             sync=True,  # Wait for all scriptlets to complete
+            allow_no_root=True,  # Installing to user-owned chroot
         )
         ret = cmd_install(install_args, chroot_db)
         if ret != 0:
@@ -7485,6 +7505,7 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
             all=False,
             test=False,
             sync=True,  # Wait for all scriptlets to complete
+            allow_no_root=True,  # Installing to user-owned chroot
         )
         ret = cmd_install(urpm_install_args, chroot_db)
 
@@ -7543,6 +7564,7 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
                 all=False,
                 test=False,
                 sync=True,  # Wait for all scriptlets to complete
+                allow_no_root=True,  # Installing to user-owned chroot
             )
             ret = cmd_install(urpm_local_args, chroot_db)
             if ret != 0:

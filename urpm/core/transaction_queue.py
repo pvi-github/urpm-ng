@@ -141,9 +141,16 @@ class TransactionQueue:
                 print(f"{op.operation_id}: {op.count} packages")
     """
 
-    def __init__(self, root: str = "/"):
+    def __init__(self, root: str = "/", use_fakeroot: bool = False):
         self.root = root
+        self.use_fakeroot = use_fakeroot
         self.operations: List[QueuedOperation] = []
+
+    @staticmethod
+    def _fakeroot_available() -> bool:
+        """Check if fakeroot is available."""
+        import shutil
+        return shutil.which('fakeroot') is not None
 
     def add_install(
         self,
@@ -252,6 +259,10 @@ class TransactionQueue:
         # Create pipe for IPC
         read_fd, write_fd = os.pipe()
 
+        # Use fakeroot if requested and available (for non-root chroot installs)
+        if self.use_fakeroot and self._fakeroot_available() and os.geteuid() != 0:
+            return self._execute_with_fakeroot(read_fd, write_fd, progress_callback, sync)
+
         # Fork
         pid = os.fork()
 
@@ -261,6 +272,185 @@ class TransactionQueue:
         else:
             # Child process - never returns
             self._child_process(read_fd, write_fd)
+
+    def _execute_with_fakeroot(
+        self,
+        read_fd: int,
+        write_fd: int,
+        progress_callback: Callable[[str, str, int, int], None],
+        sync: bool
+    ) -> QueueResult:
+        """Execute operations in a subprocess under fakeroot."""
+        import pickle
+        import subprocess
+        import tempfile
+
+        # Serialize queue state to temp file
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pkl') as f:
+            state_file = f.name
+            pickle.dump({
+                'root': self.root,
+                'operations': self.operations,
+                'write_fd': write_fd,
+            }, f)
+
+        try:
+            # Close pipe FDs - we use subprocess stdout instead
+            os.close(write_fd)
+            os.close(read_fd)
+
+            # Python code to run under fakeroot
+            child_code = f'''
+import os
+import sys
+import pickle
+
+# Load queue state
+with open("{state_file}", "rb") as f:
+    state = pickle.load(f)
+
+# Import after loading (avoid import issues)
+from urpm.core.transaction_queue import TransactionQueue
+
+# Recreate queue
+queue = TransactionQueue(root=state["root"])
+queue.operations = state["operations"]
+
+# Run child process logic (writes to stdout which we'll redirect to pipe)
+queue._child_process_standalone()
+'''
+
+            # Run under fakeroot, redirecting stdout to our pipe
+            proc = subprocess.Popen(
+                ['fakeroot', 'python3', '-c', child_code],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                pass_fds=()  # Don't pass any FDs
+            )
+
+            # Read from subprocess stdout instead of pipe
+            read_file = proc.stdout
+
+            results: List[OperationResult] = []
+            current_op_result: Optional[OperationResult] = None
+            overall_error = ""
+
+            for line in read_file:
+                line = line.decode('utf-8').strip()
+                if not line:
+                    continue
+
+                try:
+                    msg = QueueProgressMessage.from_json(line)
+                except Exception:
+                    continue
+
+                if msg.msg_type == 'op_start':
+                    current_op_result = OperationResult(
+                        operation_id=msg.operation_id,
+                        op_type=OperationType(msg.op_type),
+                        success=True
+                    )
+                elif msg.msg_type == 'progress':
+                    if progress_callback:
+                        progress_callback(msg.operation_id, msg.name, msg.current, msg.total)
+                elif msg.msg_type == 'op_done':
+                    if current_op_result:
+                        current_op_result.count = msg.count
+                        # success is already True from op_start
+                        results.append(current_op_result)
+                        current_op_result = None
+                elif msg.msg_type == 'op_error':
+                    if current_op_result:
+                        current_op_result.success = False
+                        current_op_result.error = msg.error
+                        results.append(current_op_result)
+                        current_op_result = None
+                elif msg.msg_type == 'queue_error':
+                    overall_error = msg.error
+                elif msg.msg_type == 'parent_can_exit':
+                    pass  # Ignore in fakeroot mode
+
+            # Wait for subprocess
+            if sync:
+                print("\033[33m  Waiting for scriptlets to complete...\033[0m", flush=True)
+                proc.wait()
+
+            all_success = all(r.success for r in results) and not overall_error
+            return QueueResult(success=all_success, operations=results, overall_error=overall_error)
+
+        finally:
+            # Cleanup temp file
+            try:
+                os.unlink(state_file)
+            except OSError:
+                pass
+
+    def _child_process_standalone(self):
+        """Child process logic for fakeroot mode - writes to stdout."""
+        import sys
+        import rpm
+
+        write_file = sys.stdout
+
+        # Acquire install lock
+        lock = InstallLock(root=self.root if self.root != "/" else None)
+        try:
+            lock.acquire(blocking=True)
+        except Exception as e:
+            write_file.write(QueueProgressMessage(
+                msg_type='queue_error',
+                error=f"Failed to acquire lock: {e}"
+            ).to_json() + "\n")
+            write_file.flush()
+            sys.exit(1)
+
+        try:
+            pipe_state = {'closed': False, 'file': write_file}
+
+            for i, op in enumerate(self.operations):
+                # Signal operation start
+                write_file.write(QueueProgressMessage(
+                    msg_type='op_start',
+                    operation_id=op.operation_id,
+                    op_type=op.op_type.value
+                ).to_json() + "\n")
+                write_file.flush()
+
+                if op.op_type == OperationType.INSTALL:
+                    success, count, errors = self._execute_install(op, pipe_state, release_parent_after=False)
+                else:
+                    success, count, errors = self._execute_erase(op, pipe_state, release_parent_after=False)
+
+                if success:
+                    write_file.write(QueueProgressMessage(
+                        msg_type='op_done',
+                        operation_id=op.operation_id,
+                        count=count
+                    ).to_json() + "\n")
+                else:
+                    write_file.write(QueueProgressMessage(
+                        msg_type='op_error',
+                        operation_id=op.operation_id,
+                        error=errors[0] if errors else "Unknown error"
+                    ).to_json() + "\n")
+                    break
+
+                write_file.flush()
+
+            # Signal queue complete
+            write_file.write(QueueProgressMessage(msg_type='queue_done').to_json() + "\n")
+            write_file.flush()
+            lock.release()
+
+        except Exception as e:
+            write_file.write(QueueProgressMessage(
+                msg_type='queue_error',
+                error=str(e)
+            ).to_json() + "\n")
+            write_file.flush()
+            lock.release()
+            sys.exit(1)
 
     def _parent_process(
         self,
@@ -371,7 +561,8 @@ class TransactionQueue:
         os.setsid()
 
         # Acquire install lock ONCE for all operations
-        lock = InstallLock()
+        # Use root path for lock file when installing to chroot
+        lock = InstallLock(root=self.root if self.root != "/" else None)
         try:
             lock.acquire(blocking=True)
         except Exception as e:

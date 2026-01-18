@@ -73,9 +73,18 @@ class ProgressMessage:
 class InstallLock:
     """Manages the install lock file."""
 
-    def __init__(self):
+    def __init__(self, root: str = None):
+        """Initialize lock with optional root path.
+
+        Args:
+            root: If set, use this as root for lock file path (for chroot installs).
+        """
         self.lock_fd = None
         self.locked = False
+        if root:
+            self.lock_file = Path(root) / "var/lib/rpm/.urpm-install.lock"
+        else:
+            self.lock_file = LOCK_FILE
 
     def acquire(self, blocking: bool = True,
                 wait_callback: Callable[[int], None] = None) -> bool:
@@ -89,9 +98,9 @@ class InstallLock:
             True if lock acquired, False if non-blocking and lock held.
         """
         # Create lock file if needed
-        LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
 
-        self.lock_fd = open(LOCK_FILE, 'w')
+        self.lock_fd = open(self.lock_file, 'w')
 
         while True:
             try:
