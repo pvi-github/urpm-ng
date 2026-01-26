@@ -396,7 +396,7 @@ _system_version_cache: Optional[str] = None
 def get_system_version(root: str = None) -> Optional[str]:
     """Get the Mageia version of the system.
 
-    Reads VERSION_ID from /etc/os-release (or <root>/etc/os-release).
+    Reads VERSION_ID from /etc/version (or <root>/etc/version).
 
     Args:
         root: Optional chroot path (for --root or --urpm-root)
@@ -410,15 +410,18 @@ def get_system_version(root: str = None) -> Optional[str]:
     if root is None and _system_version_cache is not None:
         return _system_version_cache
 
-    os_release = Path(root or '/') / 'etc' / 'os-release'
+    os_release = Path(root or '/') / 'etc' / 'version'
 
     version = None
     try:
         with open(os_release) as f:
             for line in f:
-                if line.startswith('VERSION_ID='):
-                    version = line.strip().split('=')[1].strip('"')
-                    break
+                number, _ , kind = line.split(" ")
+                if kind == "official":
+                    version = number
+                else:
+                    version = kind.strip()
+                break
     except (IOError, OSError):
         pass
 

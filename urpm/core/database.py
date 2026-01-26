@@ -26,18 +26,18 @@ CREATE TABLE IF NOT EXISTS schema_info (
 CREATE TABLE IF NOT EXISTS packages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     media_id INTEGER,
-    
+
     -- NEVRA
     name TEXT NOT NULL,
     epoch INTEGER DEFAULT 0,
     version TEXT NOT NULL,
     release TEXT NOT NULL,
     arch TEXT NOT NULL,
-    
+
     -- Computed fields for fast search
     name_lower TEXT NOT NULL,
     nevra TEXT NOT NULL,
-    
+
     -- Metadata
     summary TEXT,
     description TEXT,
@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS packages (
     group_name TEXT,
     url TEXT,
     license TEXT,
-    
+    filesize INTEGER DEFAULT 0,
+
     -- Source tracking
     source TEXT,  -- 'synthesis' or 'hdlist'
     pkg_hash TEXT,
@@ -441,7 +442,11 @@ MIGRATIONS = {
         ALTER TABLE proxy_config RENAME TO mirror_config;
     """),
     14: (15, """
-        -- Migration v14 -> v15: Reserved (no-op)
+        -- Migration v14 -> v15: Adding column filesize in packages
+        ALTER TABLE packages ADD COLUMN filesize INTEGER DEFAULT 0;
+    """),
+    15: (16, """
+        -- Migration v15 -> v16: Reserved (no-op)
         SELECT 1;
     """),
     15: (16, """
@@ -998,6 +1003,10 @@ class PackageDatabase:
 
         self.conn.commit()
 
+    def _migrate_v15_to_v16_filesize(self, logger):
+        """Add filesize to packages, populate the DB with them"""
+        main.cmd_media_update(None,self)
+
     def close(self):
         """Close database connection.
 
@@ -1011,17 +1020,17 @@ class PackageDatabase:
         # Clear thread-local reference if in main thread
         if hasattr(self._local, 'conn'):
             self._local.conn = None
-    
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-    
+
     # =========================================================================
     # Media management
     # =========================================================================
-    
+
     def add_media(self, name: str, short_name: str, mageia_version: str,
                   architecture: str, relative_path: str,
                   is_official: bool = True, allow_unsigned: bool = False,
@@ -1081,12 +1090,12 @@ class PackageDatabase:
               int(time.time())))
         self.conn.commit()
         return cursor.lastrowid
-    
+
     def remove_media(self, name: str):
         """Remove a media source and all its packages."""
         self.conn.execute("DELETE FROM media WHERE name = ?", (name,))
         self.conn.commit()
-    
+
     def get_media(self, name: str) -> Optional[Dict]:
         """Get media info by name. Thread-safe."""
         conn = self._get_connection()
@@ -1101,7 +1110,7 @@ class PackageDatabase:
         conn = self._get_connection()
         cursor = conn.execute("SELECT * FROM media ORDER BY priority, name")
         return [dict(row) for row in cursor]
-    
+
     def enable_media(self, name: str, enabled: bool = True):
         """Enable or disable a media source."""
         self.conn.execute(
@@ -1455,6 +1464,7 @@ class PackageDatabase:
                     pkg['arch'],
                     pkg['name'].lower(),
                     pkg['nevra'],
+                    pkg['filesize'],
                     pkg.get('summary', ''),
                     pkg.get('description', ''),
                     pkg.get('size', 0),
@@ -1469,9 +1479,9 @@ class PackageDatabase:
             conn.executemany("""
                 INSERT INTO packages
                 (media_id, name, epoch, version, release, arch, name_lower, nevra,
-                 summary, description, size, group_name, url, license,
+                 filesize, summary, description, size, group_name, url, license,
                  source, pkg_hash, added_timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(nevra, media_id) DO UPDATE SET
                     name = excluded.name,
                     epoch = excluded.epoch,
@@ -1479,6 +1489,7 @@ class PackageDatabase:
                     release = excluded.release,
                     arch = excluded.arch,
                     name_lower = excluded.name_lower,
+                    filesize = excluded.filesize,
                     summary = excluded.summary,
                     description = excluded.description,
                     size = excluded.size,
@@ -1585,7 +1596,7 @@ class PackageDatabase:
         except Exception as e:
             conn.rollback()
             raise e
-    
+
     def clear_media_packages(self, media_id: int):
         """Remove all packages from a media.
 
@@ -1603,11 +1614,11 @@ class PackageDatabase:
         # Now delete packages
         self.conn.execute("DELETE FROM packages WHERE media_id = ?", (media_id,))
         self.conn.commit()
-    
+
     # =========================================================================
     # Package queries
     # =========================================================================
-    
+
     def search(self, pattern: str, limit: int = None, search_provides: bool = False) -> List[Dict]:
         """Search packages by name pattern, optionally also in provides.
 
@@ -1697,7 +1708,7 @@ class PackageDatabase:
                         break
 
         return results
-    
+
     def get_package(self, name: str) -> Optional[Dict]:
         """Get a package by exact name (latest version).
 
@@ -1837,7 +1848,7 @@ class PackageDatabase:
             return None
         else:
             return self.get_package(identifier)
-    
+
     def _get_deps(self, pkg_id: int, table: str) -> List[str]:
         """Get dependencies from a specific table."""
         cursor = self.conn.execute(
@@ -1845,7 +1856,7 @@ class PackageDatabase:
             (pkg_id,)
         )
         return [row[0] for row in cursor]
-    
+
     def whatprovides(self, capability: str) -> List[Dict]:
         """Find packages that provide a capability."""
         cursor = self.conn.execute("""
@@ -1855,9 +1866,9 @@ class PackageDatabase:
             WHERE pr.capability = ?
             ORDER BY p.name_lower
         """, (capability,))
-        
+
         return [dict(row) for row in cursor]
-    
+
     def whatrequires(self, capability: str, limit: int = 50) -> List[Dict]:
         """Find packages that require a capability."""
         cursor = self.conn.execute("""
@@ -1868,7 +1879,7 @@ class PackageDatabase:
             ORDER BY p.name_lower
             LIMIT ?
         """, (capability, limit))
-        
+
         return [dict(row) for row in cursor]
 
     def whatrecommends(self, capability: str, limit: int = 50) -> List[Dict]:
@@ -2017,28 +2028,28 @@ class PackageDatabase:
     def get_stats(self) -> Dict[str, Any]:
         """Get database statistics."""
         stats = {}
-        
+
         cursor = self.conn.execute("SELECT COUNT(*) FROM packages")
         stats['packages'] = cursor.fetchone()[0]
-        
+
         cursor = self.conn.execute("SELECT COUNT(*) FROM provides")
         stats['provides'] = cursor.fetchone()[0]
-        
+
         cursor = self.conn.execute("SELECT COUNT(*) FROM requires")
         stats['requires'] = cursor.fetchone()[0]
-        
+
         cursor = self.conn.execute("SELECT COUNT(*) FROM media")
         stats['media'] = cursor.fetchone()[0]
-        
+
         stats['db_size_mb'] = self.db_path.stat().st_size / 1024 / 1024
         stats['db_path'] = str(self.db_path)
-        
+
         return stats
-    
+
     # =========================================================================
     # Configuration
     # =========================================================================
-    
+
     def get_config(self, key: str, default: str = None) -> Optional[str]:
         """Get a configuration value."""
         cursor = self.conn.execute(
@@ -2046,7 +2057,7 @@ class PackageDatabase:
         )
         row = cursor.fetchone()
         return row[0] if row else default
-    
+
     def set_config(self, key: str, value: str):
         """Set a configuration value."""
         self.conn.execute(

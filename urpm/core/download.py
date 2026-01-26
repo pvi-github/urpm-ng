@@ -1223,7 +1223,7 @@ def get_download_items(db: PackageDatabase, packages: List[dict]) -> List[Downlo
                 is_official=bool(media.get('is_official', 1)),
                 servers=servers,
                 media_name=media_name,
-                size=pkg.get('size', 0)
+                size=pkg.get('filesize', 0)
             ))
         elif media.get('url'):
             items.append(DownloadItem(
@@ -1233,7 +1233,7 @@ def get_download_items(db: PackageDatabase, packages: List[dict]) -> List[Downlo
                 arch=pkg['arch'],
                 media_url=media['url'],
                 media_name=media_name,
-                size=pkg.get('size', 0)
+                size=pkg.get('filesize', 0)
             ))
 
     return items
