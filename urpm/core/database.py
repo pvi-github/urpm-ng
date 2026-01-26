@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -142,6 +142,9 @@ CREATE TABLE IF NOT EXISTS media (
     replication_seeds TEXT,               -- JSON list of rpmsrate sections, e.g. ["INSTALL","CAT_PLASMA5"]
     quota_mb INTEGER,                     -- Per-media quota in MB (NULL = no limit)
     retention_days INTEGER DEFAULT 30,    -- Days to keep cached packages
+
+    -- Files.xml sync (v18+)
+    sync_files INTEGER DEFAULT 0,         -- 1 = auto-sync files.xml for urpm find
 
     -- Sync state
     last_sync INTEGER,
@@ -512,6 +515,10 @@ MIGRATIONS = {
             compressed_size INTEGER,
             FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
         );
+    """),
+    17: (18, """
+        -- Migration v17 -> v18: Add sync_files option to media
+        ALTER TABLE media ADD COLUMN sync_files INTEGER DEFAULT 0;
     """),
 }
 
@@ -1168,6 +1175,61 @@ class PackageDatabase:
             (int(enabled), name)
         )
         self.conn.commit()
+
+    def set_media_sync_files(self, name: str, enabled: bool = True):
+        """Enable or disable files.xml sync for a media.
+
+        When enabled, urpmd will auto-sync files.xml for this media,
+        allowing `urpm find` to search in available packages.
+
+        Args:
+            name: Media name
+            enabled: True to enable sync, False to disable
+        """
+        conn = self._get_connection()
+        conn.execute(
+            "UPDATE media SET sync_files = ? WHERE name = ?",
+            (int(enabled), name)
+        )
+        conn.commit()
+
+    def set_all_media_sync_files(self, enabled: bool = True, enabled_only: bool = True) -> int:
+        """Enable or disable files.xml sync for all media.
+
+        Args:
+            enabled: True to enable sync, False to disable
+            enabled_only: If True, only affect enabled media
+
+        Returns:
+            Number of media updated
+        """
+        conn = self._get_connection()
+        if enabled_only:
+            cursor = conn.execute(
+                "UPDATE media SET sync_files = ? WHERE enabled = 1",
+                (int(enabled),)
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE media SET sync_files = ?",
+                (int(enabled),)
+            )
+        conn.commit()
+        return cursor.rowcount
+
+    def get_media_with_sync_files(self) -> List[Dict]:
+        """Get all media that have sync_files enabled."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT * FROM media WHERE sync_files = 1 ORDER BY priority, name"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def has_any_sync_files_media(self) -> bool:
+        """Check if any media has sync_files enabled."""
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT 1 FROM media WHERE sync_files = 1 LIMIT 1")
+        return cursor.fetchone() is not None
 
     def update_media_sync_info(self, media_id: int, synthesis_md5: str):
         """Update media sync timestamp and MD5. Thread-safe."""

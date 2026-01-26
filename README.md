@@ -272,8 +272,19 @@ urpm whatsuggests <package>   # Show packages that suggest a package
 ```bash
 urpm provides <package>       # List files provided by a package
 urpm whatprovides <file>      # Find which package provides a file
-urpm find <pattern>           # Search files in packages
+urpm find <pattern>           # Search files in packages (installed + available)
+urpm find -i <pattern>        # Search only in installed packages
+urpm find -a <pattern>        # Search only in available packages
 ```
+
+To search in available packages, you need to enable files.xml sync:
+
+```bash
+urpm media set --all --sync-files  # Enable files.xml sync on all media
+urpm media update --files          # Download files.xml (~500 MB, 10-15 min first time)
+```
+
+Once enabled, urpmd will automatically sync files.xml daily when the system is idle.
 
 ## Package Marking
 
@@ -377,6 +388,8 @@ urpm media set "Core Release" --quota=5G             # Limit cache size
 urpm media set "Core Release" --retention=30         # Keep packages 30 days
 urpm media set "Core Release" --priority=10          # Higher priority
 urpm media set "Core Release" --seeds=INSTALL,CAT_PLASMA5  # Seed sections
+urpm media set "Core Release" --sync-files           # Enable files.xml sync for urpm find
+urpm media set --all --sync-files                    # Enable on all media
 ```
 
 Examples:

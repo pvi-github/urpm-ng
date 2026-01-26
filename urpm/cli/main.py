@@ -1246,7 +1246,12 @@ For legacy mode (non-Mageia URL with explicit name):
         'set', aliases=['s'],
         help='Modify media settings'
     )
-    media_set.add_argument('name', help='Media name')
+    media_set.add_argument('name', nargs='?', help='Media name (or use --all)')
+    media_set.add_argument(
+        '--all', '-a',
+        action='store_true',
+        help='Apply to all enabled media'
+    )
     media_set.add_argument(
         '--shared',
         choices=['yes', 'no'],
@@ -1276,6 +1281,18 @@ For legacy mode (non-Mageia URL with explicit name):
         '--priority',
         metavar='N', type=int,
         help='Media priority (higher = preferred)'
+    )
+    # sync_files: mutually exclusive --sync-files / --no-sync-files
+    sync_files_group = media_set.add_mutually_exclusive_group()
+    sync_files_group.add_argument(
+        '--sync-files',
+        dest='sync_files', action='store_true', default=None,
+        help='Enable auto-sync of files.xml for urpm find'
+    )
+    sync_files_group.add_argument(
+        '--no-sync-files',
+        dest='sync_files', action='store_false',
+        help='Disable auto-sync of files.xml'
     )
 
     # media seed-info
@@ -2278,6 +2295,9 @@ def cmd_media_list(args, db: PackageDatabase) -> int:
         # Update flag: U or space
         update_flag = colors.info("U") if m['update_media'] else " "
 
+        # Files sync flag: F or space
+        files_flag = colors.info("F") if m.get('sync_files') else " "
+
         # Name - pad first, then apply color
         name_raw = m['name']
         name_padded = f"{name_raw:{max_name}}"
@@ -2305,7 +2325,7 @@ def cmd_media_list(args, db: PackageDatabase) -> int:
         else:
             servers_display = colors.warning("(no server)")
 
-        print(f"  {status} {update_flag} {name}  {rel_path}  {servers_display}")
+        print(f"  {status} {update_flag}{files_flag} {name}  {rel_path}  {servers_display}")
 
     return 0
 
@@ -3876,6 +3896,26 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
     from . import colors
     from datetime import datetime
 
+    # Handle --all option for sync_files
+    use_all = getattr(args, 'all', False)
+    sync_files = getattr(args, 'sync_files', None)
+
+    if use_all:
+        # --all only works with --sync-files / --no-sync-files for now
+        if sync_files is None:
+            print(colors.error("--all requires --sync-files or --no-sync-files"))
+            return 1
+
+        count = db.set_all_media_sync_files(sync_files, enabled_only=True)
+        status = "enabled" if sync_files else "disabled"
+        print(colors.success(f"sync_files {status} on {count} media"))
+        return 0
+
+    # Normal mode: require media name
+    if not args.name:
+        print(colors.error("Media name required (or use --all with --sync-files)"))
+        return 1
+
     media = db.get_media(args.name)
     if not media:
         print(colors.error(f"Media '{args.name}' not found"))
@@ -3931,9 +3971,15 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
     if priority is not None:
         changes.append(f"priority: {priority}")
 
+    # Handle sync_files option
+    sync_files = None
+    if getattr(args, 'sync_files', None) is not None:
+        sync_files = args.sync_files
+        changes.append(f"sync_files: {'yes' if sync_files else 'no'}")
+
     if not changes:
         print(colors.warning("No changes specified"))
-        print("Use --shared, --replication, --seeds, --quota, --retention, or --priority")
+        print("Use --shared, --replication, --seeds, --quota, --retention, --priority, --sync-files, or --no-sync-files")
         return 1
 
     # Apply mirror settings
@@ -3955,6 +4001,10 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
             (priority, media['id'])
         )
         db.conn.commit()
+
+    # Apply sync_files
+    if sync_files is not None:
+        db.set_media_sync_files(args.name, sync_files)
 
     print(colors.success(f"Updated '{args.name}':"))
     for change in changes:
@@ -11468,10 +11518,45 @@ def cmd_find(args, db: PackageDatabase) -> int:
         # Check if we have files.xml data
         stats = db.get_files_stats()
         if stats['total_files'] == 0:
-            if search_available:
-                # Only searching available, show hint
-                print(colors.warning("No files.xml data available."))
-                print("Run: sudo urpm media update --files")
+            # No data - check if sync_files is enabled on any media
+            has_sync_files = db.has_any_sync_files_media()
+
+            if not has_sync_files:
+                # Prompt user to enable files.xml sync
+                print(colors.info("La recherche dans les paquets disponibles nécessite le téléchargement"))
+                print(colors.info("des fichiers files.xml (~500 Mo, ~10-15 minutes la première fois)."))
+                print()
+
+                try:
+                    response = input("Activer cette fonctionnalité ? [o/N] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 1
+
+                if response in ('o', 'oui', 'y', 'yes'):
+                    # Enable sync_files on all enabled media
+                    from ..core.install import check_root
+                    if not check_root():
+                        print(colors.error("Erreur: droits root requis pour activer sync_files"))
+                        print("Essayez: sudo urpm media set --all --sync-files")
+                        return 1
+
+                    db.set_all_media_sync_files(True, enabled_only=True)
+                    enabled_count = len(db.get_media_with_sync_files())
+                    print(colors.success(f"sync_files activé sur {enabled_count} media"))
+                    print()
+                    print("Lancez maintenant: sudo urpm media update --files")
+                    print("(~10-15 minutes la première fois, puis quasi-instantané)")
+                    return 0
+                else:
+                    print(colors.dim("Fonctionnalité non activée."))
+                    print(colors.dim("Pour activer plus tard: sudo urpm media set --all --sync-files"))
+                    return 0
+
+            elif search_available:
+                # sync_files is enabled but no data yet
+                print(colors.warning("sync_files est activé mais les données ne sont pas encore téléchargées."))
+                print("Lancez: sudo urpm media update --files")
                 return 1
             # else: silently skip available search if searching both
         else:
@@ -11505,10 +11590,23 @@ def cmd_find(args, db: PackageDatabase) -> int:
     # Build combined display
     total_shown = 0
 
+    # Helper to highlight pattern in file path (green)
+    def highlight_pattern(filepath: str, pat: str) -> str:
+        """Highlight pattern matches in filepath with green color."""
+        import re
+        # Case-insensitive search
+        try:
+            # Escape special regex chars in pattern, then do case-insensitive replace
+            escaped = re.escape(pat)
+            return re.sub(f'({escaped})', lambda m: colors.success(m.group(1)), filepath, flags=re.IGNORECASE)
+        except re.error:
+            return filepath
+
     if installed_found:
         print(colors.info("Installed:"))
         for match in installed_found[:limit if limit > 0 else len(installed_found)]:
-            print(f"  {match['nevra']}: {match['file']}")
+            highlighted_file = highlight_pattern(match['file'], pattern)
+            print(f"  {match['nevra']}: {highlighted_file}")
             total_shown += 1
 
     if available_found:
@@ -11523,7 +11621,8 @@ def cmd_find(args, db: PackageDatabase) -> int:
             remaining_limit = (limit - total_shown) if limit > 0 else len(available_not_installed)
             for match in available_not_installed[:remaining_limit]:
                 media_str = f" [{match['media']}]" if match.get('media') else ""
-                print(f"  {match['nevra']}: {match['file']}{media_str}")
+                highlighted_file = highlight_pattern(match['file'], pattern)
+                print(f"  {match['nevra']}: {highlighted_file}{media_str}")
                 total_shown += 1
 
     # Summary

@@ -877,7 +877,8 @@ def sync_all_files_xml(
     progress_callback: Callable[[str, str, int, int, int, int], None] = None,
     force: bool = False,
     max_workers: int = 4,
-    filter_version: bool = True
+    filter_version: bool = True,
+    sync_files_only: bool = True
 ) -> List[Tuple[str, FilesXmlResult]]:
     """Download and import files.xml.lzma for all media in parallel.
 
@@ -895,6 +896,7 @@ def sync_all_files_xml(
         force: If True, re-download even if files.xml hasn't changed
         max_workers: Number of parallel download threads
         filter_version: If True, only sync media matching current Mageia version
+        sync_files_only: If True, only sync media with sync_files=1 (default: True)
 
     Returns:
         List of (media_name, FilesXmlResult) tuples
@@ -908,6 +910,12 @@ def sync_all_files_xml(
     all_media = [m for m in db.list_media() if m.get('enabled', True)]
     if not all_media:
         return []
+
+    # Filter by sync_files flag if requested
+    if sync_files_only:
+        all_media = [m for m in all_media if m.get('sync_files')]
+        if not all_media:
+            return []
 
     # Filter by version and architecture if requested
     version, arch = get_mageia_version_arch()

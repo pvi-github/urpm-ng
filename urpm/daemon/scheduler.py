@@ -22,6 +22,7 @@ DEFAULT_METADATA_CHECK_INTERVAL = 3600  # 1 hour
 DEFAULT_PREDOWNLOAD_CHECK_INTERVAL = 7200  # 2 hours
 DEFAULT_REPLICATION_CHECK_INTERVAL = 1800  # 30 minutes
 DEFAULT_FETCH_DATES_INTERVAL = 300  # 5 minutes
+DEFAULT_FILES_XML_CHECK_INTERVAL = 86400  # 24 hours
 # Note: cache cleanup runs after each predownload, not independently
 
 # Dev mode intervals (shorter for testing)
@@ -29,6 +30,7 @@ DEV_METADATA_CHECK_INTERVAL = 60  # 1 minute
 DEV_PREDOWNLOAD_CHECK_INTERVAL = 120  # 2 minutes
 DEV_REPLICATION_CHECK_INTERVAL = 30  # 30 seconds
 DEV_FETCH_DATES_INTERVAL = 20  # 20 seconds
+DEV_FILES_XML_CHECK_INTERVAL = 60  # 1 minute
 
 
 class Scheduler:
@@ -71,6 +73,7 @@ class Scheduler:
             self.predownload_interval = DEV_PREDOWNLOAD_CHECK_INTERVAL  # 120s
             self.replication_interval = DEV_REPLICATION_CHECK_INTERVAL  # 30s
             self.fetch_dates_interval = DEV_FETCH_DATES_INTERVAL  # 20s
+            self.files_xml_interval = DEV_FILES_XML_CHECK_INTERVAL  # 60s
             self.tick_interval = 10  # Check every 10s in dev mode
             logger.info("Dev mode: using short intervals (metadata=%ds, predownload=%ds, replication=%ds, tick=%ds)",
                        DEV_METADATA_CHECK_INTERVAL, DEV_PREDOWNLOAD_CHECK_INTERVAL,
@@ -80,6 +83,7 @@ class Scheduler:
             self.predownload_interval = DEFAULT_PREDOWNLOAD_CHECK_INTERVAL  # 7200s (2h)
             self.replication_interval = DEFAULT_REPLICATION_CHECK_INTERVAL  # 1800s (30m)
             self.fetch_dates_interval = DEFAULT_FETCH_DATES_INTERVAL  # 300s (5m)
+            self.files_xml_interval = DEFAULT_FILES_XML_CHECK_INTERVAL  # 86400s (24h)
             self.tick_interval = 60  # Check every minute in production
 
         # JITTER (thundering herd prevention)
@@ -99,6 +103,7 @@ class Scheduler:
         self._next_predownload: Optional[float] = None
         self._next_replication_check: Optional[float] = None
         self._next_fetch_dates_check: Optional[float] = None
+        self._next_files_xml_check: Optional[float] = None
         self._next_cleanup: Optional[float] = None
 
         # Pre-download settings
@@ -189,6 +194,11 @@ class Scheduler:
         if self._should_run_task('fetch_dates', now):
             self._run_fetch_server_dates()
             self._schedule_next('fetch_dates', now, self.fetch_dates_interval)
+
+        # Sync files.xml for urpm find (once per day, when idle)
+        if self._should_run_task('files_xml', now):
+            self._run_files_xml_sync()
+            self._schedule_next('files_xml', now, self.files_xml_interval)
 
         # Note: cache cleanup runs after predownload, not independently
         # (see _run_predownload)
@@ -979,6 +989,56 @@ class Scheduler:
             if requests_made >= max_requests_per_run:
                 logger.debug(f"Reached max requests per run ({max_requests_per_run})")
                 break
+
+    def _run_files_xml_sync(self):
+        """Sync files.xml for media with sync_files enabled.
+
+        This enables `urpm find` to search in available packages.
+        Only runs if:
+        - At least one media has sync_files=1
+        - System is idle (CPU and network)
+        - Last sync was > 24h ago (enforced by interval)
+        """
+        if not self.db:
+            return
+
+        # Check if any media has sync_files enabled
+        if not self.db.has_any_sync_files_media():
+            logger.debug("No media with sync_files enabled, skipping files.xml sync")
+            return
+
+        # Check if system is idle
+        if not self._is_system_idle():
+            logger.debug("Skipping files.xml sync: system not idle")
+            return
+
+        logger.info("Running scheduled files.xml sync")
+
+        try:
+            from ..core.sync import sync_all_files_xml
+
+            def progress_callback(media_name, stage, dl_current, dl_total,
+                                  import_current, import_total):
+                # Silent background sync - just log key events
+                if stage == 'done':
+                    logger.debug(f"files.xml {media_name}: sync complete ({import_current} files)")
+                elif stage == 'error':
+                    logger.warning(f"files.xml {media_name}: sync failed")
+
+            results = sync_all_files_xml(self.db, progress_callback, force=False)
+
+            # Log summary
+            synced = sum(1 for _, r in results if r.success and r.files_count > 0)
+            skipped = sum(1 for _, r in results if r.success and r.files_count == 0)
+            errors = sum(1 for _, r in results if not r.success)
+
+            if synced > 0 or errors > 0:
+                logger.info(f"files.xml sync complete: {synced} synced, {skipped} unchanged, {errors} errors")
+            else:
+                logger.debug("files.xml sync: all media up-to-date")
+
+        except Exception as e:
+            logger.error(f"files.xml sync error: {e}")
 
     def _refresh_media(self, media_name: str):
         """Refresh metadata for a specific media.
