@@ -10,10 +10,10 @@ import hashlib
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Iterator, Set
+from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -309,6 +309,39 @@ CREATE INDEX IF NOT EXISTS idx_conflicts_cap ON conflicts(capability);
 CREATE INDEX IF NOT EXISTS idx_conflicts_pkg ON conflicts(pkg_id);
 CREATE INDEX IF NOT EXISTS idx_obsoletes_cap ON obsoletes(capability);
 CREATE INDEX IF NOT EXISTS idx_obsoletes_pkg ON obsoletes(pkg_id);
+
+-- Package file lists (from files.xml.lzma)
+-- Split into dir_path + filename for efficient indexing:
+--   - Search by filename (pg_hba.conf) -> idx_pf_filename
+--   - Search by full path -> idx_pf_dir_filename composite
+--   - Prefix patterns (mod_*) -> idx_pf_filename with LIKE 'mod_%'
+CREATE TABLE IF NOT EXISTS package_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    pkg_nevra TEXT NOT NULL,
+    dir_path TEXT NOT NULL,     -- '/usr/lib64/httpd/modules' (without trailing /)
+    filename TEXT NOT NULL,     -- 'mod_ssl.so'
+    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE,
+    UNIQUE(media_id, pkg_nevra, dir_path, filename)
+);
+
+-- Index on filename for searches by name only (most common)
+CREATE INDEX IF NOT EXISTS idx_pf_filename ON package_files(filename);
+-- Composite index for full path searches
+CREATE INDEX IF NOT EXISTS idx_pf_dir_filename ON package_files(dir_path, filename);
+-- Index on media for bulk delete operations
+CREATE INDEX IF NOT EXISTS idx_pf_media ON package_files(media_id);
+
+-- Track files.xml sync state per media
+CREATE TABLE IF NOT EXISTS files_xml_state (
+    media_id INTEGER PRIMARY KEY,
+    files_md5 TEXT,              -- MD5 of files.xml.lzma for change detection
+    last_sync INTEGER,           -- Timestamp of last import
+    file_count INTEGER,          -- Number of files imported
+    pkg_count INTEGER,           -- Number of packages imported
+    compressed_size INTEGER,     -- Size of files.xml.lzma in bytes (for progress estimation)
+    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+);
 """
 
 # Migrations: dict of from_version -> (to_version, sql_script)
@@ -453,6 +486,32 @@ MIGRATIONS = {
             added_timestamp INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_held_packages_name ON held_packages(package_name);
+    """),
+    16: (17, """
+        -- Migration v16 -> v17: Add package_files table for urpmf functionality
+        -- Split into dir_path + filename for efficient indexing
+        CREATE TABLE IF NOT EXISTS package_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_id INTEGER NOT NULL,
+            pkg_nevra TEXT NOT NULL,
+            dir_path TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE,
+            UNIQUE(media_id, pkg_nevra, dir_path, filename)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pf_filename ON package_files(filename);
+        CREATE INDEX IF NOT EXISTS idx_pf_dir_filename ON package_files(dir_path, filename);
+        CREATE INDEX IF NOT EXISTS idx_pf_media ON package_files(media_id);
+
+        CREATE TABLE files_xml_state (
+            media_id INTEGER PRIMARY KEY,
+            files_md5 TEXT,
+            last_sync INTEGER,
+            file_count INTEGER,
+            pkg_count INTEGER,
+            compressed_size INTEGER,
+            FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+        );
     """),
 }
 
@@ -3036,3 +3095,600 @@ class PackageDatabase:
             'not_found': not_found,
             'total_size': total_size,
         }
+
+    # ===================================================================
+    # Package Files (urpmf functionality)
+    # ===================================================================
+
+    def import_files_xml(
+        self,
+        media_id: int,
+        files_iterator: Iterator[Tuple[str, List[str]]],
+        files_md5: str = None,
+        compressed_size: int = None,
+        progress_callback: Callable[[int, int], None] = None,
+        batch_size: int = 10000
+    ) -> Tuple[int, int]:
+        """Import package files from files.xml into the database.
+
+        Args:
+            media_id: ID of the media these files belong to
+            files_iterator: Iterator yielding (nevra, [file_paths]) tuples
+            files_md5: MD5 of the files.xml.lzma file (for change detection)
+            compressed_size: Size of files.xml.lzma in bytes (for progress estimation)
+            progress_callback: Called with (files_imported, packages_imported)
+            batch_size: Number of files to insert per transaction
+
+        Returns:
+            Tuple of (total_files, total_packages)
+        """
+        import os.path
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Getting rid of indexes for performance
+        cursor.execute("DROP INDEX IF EXISTS idx_pf_filename")
+        cursor.execute("DROP INDEX IF EXISTS idx_pf_dir_filename")
+
+        # Clear existing files for this media
+        cursor.execute("DELETE FROM package_files WHERE media_id = ?", (media_id,))
+
+        total_files = 0
+        total_packages = 0
+        batch = []
+
+        for nevra, files in files_iterator:
+            total_packages += 1
+            for filepath in files:
+                # Split into dir_path and filename
+                dir_path, filename = os.path.split(filepath)
+                if not dir_path:
+                    dir_path = '/'
+                batch.append((media_id, nevra, dir_path, filename))
+                total_files += 1
+
+                if len(batch) >= batch_size:
+                    cursor.executemany(
+                        "INSERT OR IGNORE INTO package_files (media_id, pkg_nevra, dir_path, filename) VALUES (?, ?, ?, ?)",
+                        batch
+                    )
+                    conn.commit()
+                    batch = []
+
+                    if progress_callback:
+                        progress_callback(total_files, total_packages)
+
+        # Insert remaining batch
+        if batch:
+            cursor.executemany(
+                "INSERT OR IGNORE INTO package_files (media_id, pkg_nevra, dir_path, filename) VALUES (?, ?, ?, ?)",
+                batch
+            )
+            conn.commit()
+
+        # Re-creating indexes to improve search performances
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pf_filename ON package_files(filename)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pf_dir_filename ON package_files(dir_path, filename)")
+
+        # Update sync state
+        cursor.execute("""
+            INSERT OR REPLACE INTO files_xml_state (media_id, files_md5, last_sync, file_count, pkg_count, compressed_size)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (media_id, files_md5, int(time.time()), total_files, total_packages, compressed_size))
+        conn.commit()
+
+        if progress_callback:
+            progress_callback(total_files, total_packages)
+
+        return total_files, total_packages
+
+    def search_files(
+        self,
+        pattern: str,
+        media_ids: List[int] = None,
+        case_sensitive: bool = False,
+        limit: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Search for files matching a pattern in the database.
+
+        Optimized for common use cases:
+        - Full path (/usr/lib/foo.so): exact match on dir_path + filename
+        - Filename only (pg_hba.conf): exact match on filename (uses index)
+        - Prefix pattern (mod_*): LIKE on filename (uses index)
+        - Full path pattern (/usr/lib/mod_*): exact dir_path + LIKE filename
+
+        Args:
+            pattern: Search pattern - full path, filename, or glob pattern
+            media_ids: Limit search to these media IDs (None = all)
+            case_sensitive: If True, match case exactly
+            limit: Maximum results (0 = unlimited)
+
+        Returns:
+            List of dicts with keys: file_path, pkg_nevra, media_id, media_name
+        """
+        import os.path
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        collate = "" if case_sensitive else " COLLATE NOCASE"
+        params = []
+
+        # Analyze the pattern to determine search strategy
+        has_wildcards = '*' in pattern or '?' in pattern
+
+        if pattern.startswith('/'):
+            # Full path or path pattern
+            if has_wildcards:
+                # Path with wildcards: /usr/lib/mod_*
+                # Find the last non-wildcard directory component
+                dir_path, filename_pattern = os.path.split(pattern)
+                if '*' in dir_path or '?' in dir_path:
+                    # Wildcards in directory part - need full scan (rare case)
+                    sql_pattern = pattern.replace('*', '%').replace('?', '_')
+                    where_clause = f"(pf.dir_path || '/' || pf.filename) LIKE ?{collate}"
+                    params = [sql_pattern]
+                else:
+                    # Wildcards only in filename: /usr/lib/mod_*
+                    sql_filename = filename_pattern.replace('*', '%').replace('?', '_')
+                    where_clause = f"pf.dir_path = ?{collate} AND pf.filename LIKE ?{collate}"
+                    params = [dir_path, sql_filename]
+            else:
+                # Exact full path: /usr/lib/foo.so
+                dir_path, filename = os.path.split(pattern)
+                if not dir_path:
+                    dir_path = '/'
+                where_clause = f"pf.dir_path = ?{collate} AND pf.filename = ?{collate}"
+                params = [dir_path, filename]
+        else:
+            # Filename only or filename pattern
+            if has_wildcards:
+                # Filename pattern: mod_* or *ssl*
+                sql_pattern = pattern.replace('*', '%').replace('?', '_')
+                where_clause = f"pf.filename LIKE ?{collate}"
+                params = [sql_pattern]
+            else:
+                # Exact filename: pg_hba.conf
+                where_clause = f"pf.filename = ?{collate}"
+                params = [pattern]
+
+        # Add media filter
+        if media_ids:
+            placeholders = ','.join('?' * len(media_ids))
+            where_clause += f" AND pf.media_id IN ({placeholders})"
+            params.extend(media_ids)
+
+        query = f"""
+            SELECT pf.dir_path, pf.filename, pf.pkg_nevra, pf.media_id, m.name as media_name
+            FROM package_files pf
+            JOIN media m ON pf.media_id = m.id
+            WHERE {where_clause}
+        """
+
+        if limit > 0:
+            query += f" LIMIT {limit}"
+
+        cursor.execute(query, params)
+
+        return [
+            {
+                'file_path': f"{row[0]}/{row[1]}" if row[0] != '/' else f"/{row[1]}",
+                'pkg_nevra': row[2],
+                'media_id': row[3],
+                'media_name': row[4]
+            }
+            for row in cursor.fetchall()
+        ]
+
+    def get_files_for_package(self, nevra: str, media_id: int = None) -> List[str]:
+        """Get all files belonging to a package.
+
+        Args:
+            nevra: Package NEVRA
+            media_id: Optional media ID filter
+
+        Returns:
+            List of file paths
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        if media_id:
+            cursor.execute(
+                "SELECT dir_path, filename FROM package_files WHERE pkg_nevra = ? AND media_id = ? ORDER BY dir_path, filename",
+                (nevra, media_id)
+            )
+        else:
+            cursor.execute(
+                "SELECT DISTINCT dir_path, filename FROM package_files WHERE pkg_nevra = ? ORDER BY dir_path, filename",
+                (nevra,)
+            )
+
+        return [
+            f"{row[0]}/{row[1]}" if row[0] != '/' else f"/{row[1]}"
+            for row in cursor.fetchall()
+        ]
+
+    def get_files_xml_state(self, media_id: int) -> Optional[Dict[str, Any]]:
+        """Get the files.xml sync state for a media.
+
+        Args:
+            media_id: Media ID
+
+        Returns:
+            Dict with keys: files_md5, last_sync, file_count, pkg_count, compressed_size
+            or None if no sync has been done
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT files_md5, last_sync, file_count, pkg_count, compressed_size FROM files_xml_state WHERE media_id = ?",
+            (media_id,)
+        )
+        row = cursor.fetchone()
+
+        if row:
+            return {
+                'files_md5': row[0],
+                'last_sync': row[1],
+                'file_count': row[2],
+                'pkg_count': row[3],
+                'compressed_size': row[4]
+            }
+        return None
+
+    def get_files_xml_ratio(self) -> Optional[float]:
+        """Get average ratio of file_count / compressed_size across all media.
+
+        Used to estimate total files for progress display on new imports.
+
+        Returns:
+            Ratio (files per byte) or None if no data available
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT SUM(file_count), SUM(compressed_size)
+            FROM files_xml_state
+            WHERE file_count > 0 AND compressed_size > 0
+        """)
+        row = cursor.fetchone()
+
+        if row and row[0] and row[1]:
+            return row[0] / row[1]
+        return None
+
+    def get_package_nevras_for_media(self, media_id: int) -> Set[str]:
+        """Get all distinct package NEVRAs for a media.
+
+        Used for differential sync to identify what's already in DB.
+
+        Args:
+            media_id: Media ID
+
+        Returns:
+            Set of package NEVRAs
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT DISTINCT pkg_nevra FROM package_files WHERE media_id = ?",
+            (media_id,)
+        )
+        return {row[0] for row in cursor.fetchall()}
+
+    def delete_package_files_by_nevra(self, media_id: int, nevras: Set[str]):
+        """Delete files for specific packages.
+
+        Used for differential sync to remove obsolete packages.
+
+        Args:
+            media_id: Media ID
+            nevras: Set of package NEVRAs to delete
+        """
+        if not nevras:
+            return
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Use batched deletes for efficiency
+        nevra_list = list(nevras)
+        batch_size = 500
+
+        for i in range(0, len(nevra_list), batch_size):
+            batch = nevra_list[i:i + batch_size]
+            placeholders = ','.join(['?'] * len(batch))
+            cursor.execute(
+                f"DELETE FROM package_files WHERE media_id = ? AND pkg_nevra IN ({placeholders})",
+                [media_id] + batch
+            )
+
+        conn.commit()
+
+    def insert_package_files_batch(self, media_id: int, nevra: str, files: List[str]):
+        """Insert files for a single package.
+
+        Used for differential sync to add new packages.
+
+        Args:
+            media_id: Media ID
+            nevra: Package NEVRA
+            files: List of file paths
+        """
+        if not files:
+            return
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Prepare batch data with split paths
+        batch = []
+        for file_path in files:
+            if '/' in file_path:
+                dir_path, filename = file_path.rsplit('/', 1)
+                if not dir_path:
+                    dir_path = '/'
+            else:
+                dir_path = ''
+                filename = file_path
+            batch.append((media_id, nevra, dir_path, filename))
+
+        cursor.executemany(
+            "INSERT INTO package_files (media_id, pkg_nevra, dir_path, filename) VALUES (?, ?, ?, ?)",
+            batch
+        )
+        conn.commit()
+
+    def clear_package_files(self, media_id: int = None):
+        """Clear package files from the database.
+
+        Args:
+            media_id: If specified, only clear files for this media.
+                     If None, clear all files.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        if media_id:
+            cursor.execute("DELETE FROM package_files WHERE media_id = ?", (media_id,))
+            cursor.execute("DELETE FROM files_xml_state WHERE media_id = ?", (media_id,))
+        else:
+            cursor.execute("DELETE FROM package_files")
+            cursor.execute("DELETE FROM files_xml_state")
+
+        conn.commit()
+
+    def get_files_stats(self) -> Dict[str, Any]:
+        """Get statistics about the package files database.
+
+        Returns:
+            Dict with keys: total_files, total_packages, media_stats (list)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Total counts
+        cursor.execute("SELECT COUNT(*), COUNT(DISTINCT pkg_nevra) FROM package_files")
+        total_files, total_packages = cursor.fetchone()
+
+        # Per-media stats
+        cursor.execute("""
+            SELECT m.name, fxs.file_count, fxs.pkg_count, fxs.last_sync
+            FROM files_xml_state fxs
+            JOIN media m ON fxs.media_id = m.id
+            ORDER BY m.name
+        """)
+
+        media_stats = [
+            {
+                'media_name': row[0],
+                'file_count': row[1],
+                'pkg_count': row[2],
+                'last_sync': row[3]
+            }
+            for row in cursor.fetchall()
+        ]
+
+        return {
+            'total_files': total_files or 0,
+            'total_packages': total_packages or 0,
+            'media_stats': media_stats
+        }
+
+    # =========================================================================
+    # Fast Import Methods (PRAGMAs, Staging Tables, Atomic Swap)
+    # =========================================================================
+
+    def set_fast_import_pragmas(self) -> Dict[str, Any]:
+        """Set SQLite PRAGMAs for fast bulk import.
+
+        WARNING: These settings trade durability for speed. Only use for
+        bulk imports where data can be regenerated if corrupted.
+
+        Returns:
+            Dict with original PRAGMA values for restoration
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Save original values (don't change journal_mode - WAL requires it to stay)
+        original = {}
+        for pragma in ['synchronous', 'temp_store', 'cache_size']:
+            cursor.execute(f"PRAGMA {pragma}")
+            original[pragma] = cursor.fetchone()[0]
+
+        # Set fast import PRAGMAs (keep WAL mode - don't touch journal_mode)
+        cursor.execute("PRAGMA synchronous = OFF")      # No fsync (dangerous but fast)
+        cursor.execute("PRAGMA temp_store = MEMORY")    # Temp tables in RAM
+        cursor.execute("PRAGMA cache_size = -64000")    # 64MB cache
+
+        return original
+
+    def restore_pragmas(self, original: Dict[str, Any]):
+        """Restore SQLite PRAGMAs to their original values.
+
+        Args:
+            original: Dict returned by set_fast_import_pragmas()
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        for pragma, value in original.items():
+            if pragma == 'cache_size':
+                cursor.execute(f"PRAGMA cache_size = {value}")
+            else:
+                cursor.execute(f"PRAGMA {pragma} = {value}")
+
+    def create_package_files_staging(self):
+        """Create staging table for package files import.
+
+        Creates package_files_new table WITHOUT indexes for fast bulk insert.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Drop if exists (from previous failed import)
+        cursor.execute("DROP TABLE IF EXISTS package_files_new")
+
+        # Create staging table without indexes
+        cursor.execute("""
+            CREATE TABLE package_files_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                pkg_nevra TEXT NOT NULL,
+                dir_path TEXT NOT NULL,
+                filename TEXT NOT NULL
+            )
+        """)
+        # Note: No UNIQUE constraint, no indexes - for maximum insert speed
+        # Duplicates will be ignored during insert with INSERT OR IGNORE
+
+        conn.commit()
+
+    def import_files_to_staging(
+        self,
+        media_id: int,
+        files_iterator,
+        batch_size: int = 1000,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> Tuple[int, int]:
+        """Import files to staging table with batched inserts.
+
+        Args:
+            media_id: Media ID for these files
+            files_iterator: Iterator yielding (pkg_nevra, file_list) tuples
+            batch_size: Number of files per INSERT statement
+            progress_callback: Called with (files_imported, packages_imported)
+
+        Returns:
+            Tuple of (total_files, total_packages)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        batch = []
+        total_files = 0
+        total_packages = 0
+
+        for pkg_nevra, file_list in files_iterator:
+            total_packages += 1
+
+            for file_path in file_list:
+                # Split path into dir_path and filename
+                if '/' in file_path:
+                    dir_path, filename = file_path.rsplit('/', 1)
+                    if not dir_path:
+                        dir_path = '/'
+                else:
+                    dir_path = ''
+                    filename = file_path
+
+                batch.append((media_id, pkg_nevra, dir_path, filename))
+                total_files += 1
+
+                if len(batch) >= batch_size:
+                    cursor.executemany(
+                        "INSERT INTO package_files_new (media_id, pkg_nevra, dir_path, filename) VALUES (?, ?, ?, ?)",
+                        batch
+                    )
+                    conn.commit()
+                    batch = []
+
+                    if progress_callback:
+                        progress_callback(total_files, total_packages)
+
+        # Insert remaining batch
+        if batch:
+            cursor.executemany(
+                "INSERT INTO package_files_new (media_id, pkg_nevra, dir_path, filename) VALUES (?, ?, ?, ?)",
+                batch
+            )
+            conn.commit()
+
+        if progress_callback:
+            progress_callback(total_files, total_packages)
+
+        return total_files, total_packages
+
+    def finalize_package_files_atomic(self):
+        """Replace package_files with staging table.
+
+        Performs: DROP old → RENAME staging → CREATE indexes
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Drop old table
+        cursor.execute("DROP TABLE IF EXISTS package_files")
+        conn.commit()
+
+        # Rename staging to production
+        cursor.execute("ALTER TABLE package_files_new RENAME TO package_files")
+        conn.commit()
+
+        # Create indexes (after data is loaded for efficiency)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pf_filename ON package_files(filename)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pf_dir_filename ON package_files(dir_path, filename)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pf_media ON package_files(media_id)")
+        conn.commit()
+
+    def abort_package_files_atomic(self):
+        """Abort staging import by dropping the staging table.
+
+        Call this if import fails to clean up.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("DROP TABLE IF EXISTS package_files_new")
+        conn.commit()
+
+    def update_files_xml_state_batch(self, states: List[Dict[str, Any]]):
+        """Update files_xml_state for multiple media at once.
+
+        Args:
+            states: List of dicts with keys: media_id, md5, file_count, pkg_count, compressed_size
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        for state in states:
+            cursor.execute("""
+                INSERT OR REPLACE INTO files_xml_state
+                (media_id, last_sync, files_md5, file_count, pkg_count, compressed_size)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                state['media_id'],
+                int(time.time()),
+                state.get('md5', ''),
+                state.get('file_count', 0),
+                state.get('pkg_count', 0),
+                state.get('compressed_size', 0)
+            ))
+
+        conn.commit()
