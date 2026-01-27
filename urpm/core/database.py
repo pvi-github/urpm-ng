@@ -2169,11 +2169,14 @@ class PackageDatabase:
         return row[0] if row else default
     
     def set_config(self, key: str, value: str):
-        """Set a configuration value."""
-        self.conn.execute(
-            "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
-            (key, value)
-        )
+        """Set a configuration value. If value is None, delete the key."""
+        if value is None:
+            self.conn.execute("DELETE FROM config WHERE key = ?", (key,))
+        else:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
+                (key, value)
+            )
         self.conn.commit()
 
     # =========================================================================

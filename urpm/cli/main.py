@@ -1726,6 +1726,16 @@ Examples:
     )
     kernel_keep_parser.add_argument('count', nargs='?', type=int, help='Number of kernels to keep (show current if omitted)')
 
+    # config version-mode
+    version_mode_parser = config_subparsers.add_parser(
+        'version-mode', aliases=['vm'],
+        help='Choose between system version and cauldron when both are enabled'
+    )
+    version_mode_parser.add_argument(
+        'mode', nargs='?', choices=['system', 'cauldron', 'auto'],
+        help='system=use system version, cauldron=use cauldron, auto=remove preference (show current if omitted)'
+    )
+
     # =========================================================================
     # key - GPG key management
     # =========================================================================
@@ -10022,12 +10032,53 @@ def cmd_config(args) -> int:
     """Handle config command - manage urpm configuration."""
 
     if not hasattr(args, 'config_cmd') or not args.config_cmd:
-        print("Usage: urpm config <blacklist|redlist|kernel-keep> ...")
+        print("Usage: urpm config <blacklist|redlist|kernel-keep|version-mode> ...")
         print("\nSubcommands:")
-        print("  blacklist  Manage blacklist (critical packages)")
-        print("  redlist    Manage redlist (packages requiring confirmation)")
-        print("  kernel-keep  Number of kernels to keep")
+        print("  blacklist     Manage blacklist (critical packages)")
+        print("  redlist       Manage redlist (packages requiring confirmation)")
+        print("  kernel-keep   Number of kernels to keep")
+        print("  version-mode  Choose between system version and cauldron")
         return 1
+
+    # Handle version-mode (uses database, not config file)
+    if args.config_cmd in ('version-mode', 'vm'):
+        from ..core.database import PackageDatabase
+        from ..core.config import get_db_path, get_system_version, get_accepted_versions
+
+        db = PackageDatabase(get_db_path())
+
+        if hasattr(args, 'mode') and args.mode is not None:
+            if args.mode == 'auto':
+                # Remove preference
+                db.set_config('version-mode', None)
+                print("version-mode preference removed (auto-detection)")
+            else:
+                db.set_config('version-mode', args.mode)
+                print(f"version-mode set to '{args.mode}'")
+            return 0
+        else:
+            # Show current state
+            current = db.get_config('version-mode')
+            system_version = get_system_version()
+            accepted, needs_choice, info = get_accepted_versions(db, system_version)
+
+            print(f"\nSystem version: {system_version or 'unknown'}")
+            print(f"Configured preference: {current or 'auto (none set)'}")
+
+            if info['cauldron_media']:
+                print(f"Cauldron media: {', '.join(info['cauldron_media'][:3])}" +
+                      (f" (+{len(info['cauldron_media'])-3} more)" if len(info['cauldron_media']) > 3 else ""))
+            if info['system_version_media']:
+                print(f"System version media: {', '.join(info['system_version_media'][:3])}" +
+                      (f" (+{len(info['system_version_media'])-3} more)" if len(info['system_version_media']) > 3 else ""))
+
+            if needs_choice:
+                print(f"\nConflict: Both {system_version} and cauldron media are enabled.")
+                print("Use 'urpm config version-mode <system|cauldron>' to choose.")
+            elif accepted:
+                print(f"\nActive version filter: {', '.join(sorted(accepted))}")
+            print()
+            return 0
 
     config = _read_config()
 

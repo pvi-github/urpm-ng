@@ -22,6 +22,14 @@ from .config import get_media_local_path, get_base_dir, get_system_version
 from .compression import decompress_stream
 
 
+class VersionConflictError(Exception):
+    """Raised when media configuration has ambiguous version mix (e.g., both mga10 and cauldron)."""
+
+    def __init__(self, message: str, conflict_info: dict = None):
+        super().__init__(message)
+        self.conflict_info = conflict_info or {}
+
+
 # Debug flag for resolver - set to True to enable debug output
 DEBUG_RESOLVER = False
 
@@ -382,6 +390,20 @@ class Resolver:
         system_version = get_system_version(self.root)
         debug.log(f"System version: {system_version}")
 
+        # Determine which versions to accept (handles cauldron vs numeric)
+        from .config import get_accepted_versions
+        accepted_versions, needs_choice, conflict_info = get_accepted_versions(self.db, system_version)
+
+        if needs_choice:
+            # User needs to choose between system version and cauldron
+            raise VersionConflictError(
+                f"Ambiguous media configuration: both {system_version} and cauldron media are enabled. "
+                f"Use 'urpm config set version-mode <system|cauldron>' to choose.",
+                conflict_info
+            )
+
+        debug.log(f"Accepted versions: {accepted_versions}")
+
         media_list = self.db.list_media()
         debug.log(f"Found {len(media_list)} media in database")
 
@@ -390,10 +412,10 @@ class Resolver:
                 debug.log(f"Skipping disabled media: {media['name']}")
                 continue
 
-            # Filter by Mageia version - only load media matching system version
+            # Filter by Mageia version using smart version detection
             media_version = media.get('mageia_version')
-            if system_version and media_version and media_version != system_version:
-                debug.log(f"Skipping media {media['name']}: version {media_version} != system {system_version}")
+            if accepted_versions and media_version and media_version not in accepted_versions:
+                debug.log(f"Skipping media {media['name']}: version {media_version} not in {accepted_versions}")
                 continue
 
             repo = pool.add_repo(media['name'])
