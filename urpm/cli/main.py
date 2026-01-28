@@ -726,6 +726,21 @@ Examples:
         'pattern',
         help='File pattern'
     )
+    find_parser.add_argument(
+        '--available', '-a',
+        action='store_true',
+        help='Search only in available packages (requires files.xml, see: urpm media update --files)'
+    )
+    find_parser.add_argument(
+        '--installed', '-i',
+        action='store_true',
+        help='Search only in installed packages (default: search both)'
+    )
+    find_parser.add_argument(
+        '--limit', '-l',
+        type=int, default=100,
+        help='Maximum number of results (default: 100)'
+    )
 
     # =========================================================================
     # depends / d / requires
@@ -1199,6 +1214,11 @@ For legacy mode (non-Mageia URL with explicit name):
         'name', nargs='?',
         help='Media name (empty = all)'
     )
+    media_update.add_argument(
+        '--files', '-f',
+        action='store_true',
+        help='Also download and index files.xml.lzma (enables file search in available packages)'
+    )
 
     # media import
     media_import = media_subparsers.add_parser(
@@ -1226,7 +1246,12 @@ For legacy mode (non-Mageia URL with explicit name):
         'set', aliases=['s'],
         help='Modify media settings'
     )
-    media_set.add_argument('name', help='Media name')
+    media_set.add_argument('name', nargs='?', help='Media name (or use --all)')
+    media_set.add_argument(
+        '--all', '-a',
+        action='store_true',
+        help='Apply to all enabled media'
+    )
     media_set.add_argument(
         '--shared',
         choices=['yes', 'no'],
@@ -1256,6 +1281,18 @@ For legacy mode (non-Mageia URL with explicit name):
         '--priority',
         metavar='N', type=int,
         help='Media priority (higher = preferred)'
+    )
+    # sync_files: mutually exclusive --sync-files / --no-sync-files
+    sync_files_group = media_set.add_mutually_exclusive_group()
+    sync_files_group.add_argument(
+        '--sync-files',
+        dest='sync_files', action='store_true', default=None,
+        help='Enable auto-sync of files.xml for urpm find'
+    )
+    sync_files_group.add_argument(
+        '--no-sync-files',
+        dest='sync_files', action='store_false',
+        help='Disable auto-sync of files.xml'
     )
 
     # media seed-info
@@ -1688,6 +1725,16 @@ Examples:
         help='Number of old kernels to keep (in addition to running)'
     )
     kernel_keep_parser.add_argument('count', nargs='?', type=int, help='Number of kernels to keep (show current if omitted)')
+
+    # config version-mode
+    version_mode_parser = config_subparsers.add_parser(
+        'version-mode', aliases=['vm'],
+        help='Choose between system version and cauldron when both are enabled'
+    )
+    version_mode_parser.add_argument(
+        'mode', nargs='?', choices=['system', 'cauldron', 'auto'],
+        help='system=use system version, cauldron=use cauldron, auto=remove preference (show current if omitted)'
+    )
 
     # =========================================================================
     # key - GPG key management
@@ -2258,6 +2305,9 @@ def cmd_media_list(args, db: PackageDatabase) -> int:
         # Update flag: U or space
         update_flag = colors.info("U") if m['update_media'] else " "
 
+        # Files sync flag: F or space
+        files_flag = colors.info("F") if m.get('sync_files') else " "
+
         # Name - pad first, then apply color
         name_raw = m['name']
         name_padded = f"{name_raw:{max_name}}"
@@ -2285,7 +2335,7 @@ def cmd_media_list(args, db: PackageDatabase) -> int:
         else:
             servers_display = colors.warning("(no server)")
 
-        print(f"  {status} {update_flag} {name}  {rel_path}  {servers_display}")
+        print(f"  {status} {update_flag}{files_flag} {name}  {rel_path}  {servers_display}")
 
     return 0
 
@@ -3390,7 +3440,7 @@ def cmd_media_disable(args, db: PackageDatabase) -> int:
 def cmd_media_update(args, db: PackageDatabase) -> int:
     """Handle media update command."""
     from . import colors
-    from ..core.sync import sync_media, sync_all_media
+    from ..core.sync import sync_media, sync_all_media, sync_files_xml, sync_all_files_xml
     from ..core.install import check_root
     import threading
 
@@ -3399,6 +3449,8 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
         print(colors.error("Error: root privileges required for media update"))
         print("Try: sudo urpm media update")
         return 1
+
+    sync_files = getattr(args, 'files', False)
 
     def progress(media_name, stage, current, total):
         # Clear line with ANSI escape code, then print
@@ -3426,13 +3478,37 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
 
         if result.success:
             print(colors.success(f"  {result.packages_count} packages"))
+
+            # Sync files.xml if requested
+            if sync_files:
+                print(f"  Downloading files.xml for {args.name}...")
+                files_result = sync_files_xml(db, args.name, single_progress, force=True)
+                print()  # newline after progress
+                if files_result.success:
+                    if files_result.skipped:
+                        print(colors.info(f"  files.xml: up-to-date ({files_result.file_count} files)"))
+                    else:
+                        print(colors.success(f"  files.xml: {files_result.file_count} files from {files_result.pkg_count} packages"))
+                else:
+                    print(f"  {colors.warning('Warning')}: files.xml: {files_result.error}")
+
             return 0
         else:
             print(f"  {colors.error('Error')}: {result.error}")
             return 1
     else:
         # Update all media in parallel
+        import time
         print("Updating all media (parallel)...")
+
+        # Helper to format elapsed time
+        def format_elapsed(seconds):
+            mins = int(seconds // 60)
+            secs = int(seconds % 60)
+            if mins > 0:
+                return f"{mins}m{secs}s"
+            else:
+                return f"{secs}s"
 
         # Track status for each media
         media_status = {}
@@ -3459,7 +3535,9 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
 
                 num_lines = len(media_list)
 
+        sync_start = time.time()
         results = sync_all_media(db, parallel_progress, force=True)
+        sync_elapsed = time.time() - sync_start
 
         # Clear progress lines
         if num_lines > 0:
@@ -3483,9 +3561,118 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
                 errors += 1
 
         if errors:
-            print(f"\n{colors.info('Total')}: {colors.success(str(total_packages))} packages from {len(results)} media ({colors.error(str(errors))} errors)")
+            print(f"\n{colors.info('Total')}: {colors.success(str(total_packages))} packages from {len(results)} media in {format_elapsed(sync_elapsed)} ({colors.error(str(errors))} errors)")
         else:
-            print(f"\n{colors.info('Total')}: {colors.success(str(total_packages))} packages from {len(results)} media")
+            print(f"\n{colors.info('Total')}: {colors.success(str(total_packages))} packages from {len(results)} media in {format_elapsed(sync_elapsed)}")
+
+        # Sync files.xml if requested
+        if sync_files:
+            print(f"\nSyncing files.xml...")
+
+            # Track status for each media (same pattern as synthesis sync)
+            # Filter by version/arch like sync_all_files_xml does
+            from ..core.sync import get_mageia_version_arch
+            version, arch = get_mageia_version_arch()
+
+            files_status = {}
+            files_lock = threading.Lock()
+            files_media_list = []
+            for m in db.list_media():
+                if not m['enabled'] or not m.get('sync_files'):
+                    continue
+                # Same filter as sync_all_files_xml
+                media_version = m.get('mageia_version', '')
+                media_arch = m.get('architecture', '')
+                version_ok = not media_version or not version or media_version == version
+                arch_ok = not media_arch or not arch or media_arch == arch
+                if version_ok and arch_ok:
+                    files_media_list.append(m['name'])
+            files_num_lines = 0
+
+            def files_progress(media_name, stage, dl_current, dl_total, import_current, import_total):
+                nonlocal files_num_lines
+                with files_lock:
+                    # Build status string
+                    if stage == 'checking':
+                        status = "checking..."
+                    elif stage == 'skipped':
+                        status = "up-to-date"
+                    elif stage == 'downloading':
+                        if dl_total > 0:
+                            pct = int(100 * dl_current / dl_total)
+                            status = f"downloading {pct}%"
+                        else:
+                            status = "downloading..."
+                    elif stage == 'downloaded':
+                        status = "downloaded"
+                    elif stage in ('syncing', 'analyzing', 'diff'):
+                        status = "analyzing..."
+                    elif stage == 'importing':
+                        if import_total > 0:
+                            pct = min(99, int(100 * import_current / import_total))
+                            status = f"importing {pct}%"
+                        else:
+                            status = "importing..."
+                    elif stage == 'indexing':
+                        status = "creating indexes..."
+                    elif stage == 'done':
+                        status = colors.success("done")
+                    elif stage == 'error':
+                        status = colors.error("error")
+                    else:
+                        status = stage
+
+                    files_status[media_name] = status
+
+                    # Redraw all status lines
+                    if files_num_lines > 0:
+                        print(f"\033[{files_num_lines}F", end='', flush=True)
+
+                    for name in files_media_list:
+                        st = files_status.get(name, "waiting...")
+                        print(f"\033[K  {name}: {st}")
+
+                    files_num_lines = len(files_media_list)
+
+            # Run parallel sync (force=False to respect MD5 checks)
+            files_start = time.time()
+            files_results = sync_all_files_xml(
+                db,
+                progress_callback=files_progress,
+                force=False,
+                max_workers=4,
+                filter_version=True
+            )
+            files_elapsed = time.time() - files_start
+
+            # Clear progress lines
+            if files_num_lines > 0:
+                print(f"\033[{files_num_lines}F", end='', flush=True)
+                for _ in range(files_num_lines):
+                    print("\033[K", end='')
+                    print("\033[1B", end='')
+                print(f"\033[{files_num_lines}F", end='', flush=True)
+
+            # Print final results
+            for name, result in files_results:
+                if result.success:
+                    if result.skipped:
+                        print(f"  {name}: up-to-date")
+                    else:
+                        count_str = colors.success(f"{result.file_count:,}") if result.file_count > 0 else "0"
+                        print(f"  {name}: {count_str} files")
+                else:
+                    print(f"  {colors.error(name)}: ERROR - {result.error}")
+
+            # Final summary
+            total_files = sum(r.file_count for _, r in files_results if r.success)
+            files_errors = sum(1 for _, r in files_results if not r.success)
+
+            if files_errors > 0:
+                print(f"\n{colors.info('Total files')}: {colors.success(f'{total_files:,}')} in {format_elapsed(files_elapsed)} ({colors.error(str(files_errors))} errors)")
+            else:
+                print(f"\n{colors.info('Total files')}: {colors.success(f'{total_files:,}')} in {format_elapsed(files_elapsed)}")
+
         return 1 if errors else 0
 
 
@@ -3759,6 +3946,26 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
     from . import colors
     from datetime import datetime
 
+    # Handle --all option for sync_files
+    use_all = getattr(args, 'all', False)
+    sync_files = getattr(args, 'sync_files', None)
+
+    if use_all:
+        # --all only works with --sync-files / --no-sync-files for now
+        if sync_files is None:
+            print(colors.error("--all requires --sync-files or --no-sync-files"))
+            return 1
+
+        count = db.set_all_media_sync_files(sync_files, enabled_only=True)
+        status = "enabled" if sync_files else "disabled"
+        print(colors.success(f"sync_files {status} on {count} media"))
+        return 0
+
+    # Normal mode: require media name
+    if not args.name:
+        print(colors.error("Media name required (or use --all with --sync-files)"))
+        return 1
+
     media = db.get_media(args.name)
     if not media:
         print(colors.error(f"Media '{args.name}' not found"))
@@ -3814,9 +4021,15 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
     if priority is not None:
         changes.append(f"priority: {priority}")
 
+    # Handle sync_files option
+    sync_files = None
+    if getattr(args, 'sync_files', None) is not None:
+        sync_files = args.sync_files
+        changes.append(f"sync_files: {'yes' if sync_files else 'no'}")
+
     if not changes:
         print(colors.warning("No changes specified"))
-        print("Use --shared, --replication, --seeds, --quota, --retention, or --priority")
+        print("Use --shared, --replication, --seeds, --quota, --retention, --priority, --sync-files, or --no-sync-files")
         return 1
 
     # Apply mirror settings
@@ -3838,6 +4051,10 @@ def cmd_media_set(args, db: PackageDatabase) -> int:
             (priority, media['id'])
         )
         db.conn.commit()
+
+    # Apply sync_files
+    if sync_files is not None:
+        db.set_media_sync_files(args.name, sync_files)
 
     print(colors.success(f"Updated '{args.name}':"))
     for change in changes:
@@ -9817,12 +10034,53 @@ def cmd_config(args) -> int:
     """Handle config command - manage urpm configuration."""
 
     if not hasattr(args, 'config_cmd') or not args.config_cmd:
-        print("Usage: urpm config <blacklist|redlist|kernel-keep> ...")
+        print("Usage: urpm config <blacklist|redlist|kernel-keep|version-mode> ...")
         print("\nSubcommands:")
-        print("  blacklist  Manage blacklist (critical packages)")
-        print("  redlist    Manage redlist (packages requiring confirmation)")
-        print("  kernel-keep  Number of kernels to keep")
+        print("  blacklist     Manage blacklist (critical packages)")
+        print("  redlist       Manage redlist (packages requiring confirmation)")
+        print("  kernel-keep   Number of kernels to keep")
+        print("  version-mode  Choose between system version and cauldron")
         return 1
+
+    # Handle version-mode (uses database, not config file)
+    if args.config_cmd in ('version-mode', 'vm'):
+        from ..core.database import PackageDatabase
+        from ..core.config import get_db_path, get_system_version, get_accepted_versions
+
+        db = PackageDatabase(get_db_path())
+
+        if hasattr(args, 'mode') and args.mode is not None:
+            if args.mode == 'auto':
+                # Remove preference
+                db.set_config('version-mode', None)
+                print("version-mode preference removed (auto-detection)")
+            else:
+                db.set_config('version-mode', args.mode)
+                print(f"version-mode set to '{args.mode}'")
+            return 0
+        else:
+            # Show current state
+            current = db.get_config('version-mode')
+            system_version = get_system_version()
+            accepted, needs_choice, info = get_accepted_versions(db, system_version)
+
+            print(f"\nSystem version: {system_version or 'unknown'}")
+            print(f"Configured preference: {current or 'auto (none set)'}")
+
+            if info['cauldron_media']:
+                print(f"Cauldron media: {', '.join(info['cauldron_media'][:3])}" +
+                      (f" (+{len(info['cauldron_media'])-3} more)" if len(info['cauldron_media']) > 3 else ""))
+            if info['system_version_media']:
+                print(f"System version media: {', '.join(info['system_version_media'][:3])}" +
+                      (f" (+{len(info['system_version_media'])-3} more)" if len(info['system_version_media']) > 3 else ""))
+
+            if needs_choice:
+                print(f"\nConflict: Both {system_version} and cauldron media are enabled.")
+                print("Use 'urpm config version-mode <system|cauldron>' to choose.")
+            elif accepted:
+                print(f"\nActive version filter: {', '.join(sorted(accepted))}")
+            print()
+            return 0
 
     config = _read_config()
 
@@ -11292,60 +11550,178 @@ def cmd_whatprovides(args, db: PackageDatabase) -> int:
 
 def cmd_find(args, db: PackageDatabase) -> int:
     """Handle find command - find packages containing a file (like urpmf)."""
-    pattern = args.pattern
+    from . import colors
 
-    found = []
+    pattern = args.pattern
+    search_available = getattr(args, 'available', False)
+    search_installed = getattr(args, 'installed', False)
+    limit = getattr(args, 'limit', 100)
+
+    # Default: search both if neither flag is specified
+    if not search_available and not search_installed:
+        search_both = True
+    else:
+        search_both = False
+
+    installed_found = []
+    available_found = []
 
     # Search in installed packages via rpm
-    try:
-        import rpm
-        ts = rpm.TransactionSet()
+    if search_installed or search_both:
+        try:
+            import rpm
+            ts = rpm.TransactionSet()
 
-        if pattern.startswith('/'):
-            # Exact file path
-            for hdr in ts.dbMatch('basenames', pattern):
-                name = hdr[rpm.RPMTAG_NAME]
-                version = hdr[rpm.RPMTAG_VERSION]
-                release = hdr[rpm.RPMTAG_RELEASE]
-                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                found.append({
-                    'nevra': f"{name}-{version}-{release}.{arch}",
-                    'file': pattern,
-                    'installed': True
-                })
+            if pattern.startswith('/'):
+                # Exact file path
+                for hdr in ts.dbMatch('basenames', pattern):
+                    name = hdr[rpm.RPMTAG_NAME]
+                    version = hdr[rpm.RPMTAG_VERSION]
+                    release = hdr[rpm.RPMTAG_RELEASE]
+                    arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                    installed_found.append({
+                        'nevra': f"{name}-{version}-{release}.{arch}",
+                        'file': pattern
+                    })
+            else:
+                # Pattern search - need to iterate all packages
+                import fnmatch
+                for hdr in ts.dbMatch():
+                    name = hdr[rpm.RPMTAG_NAME]
+                    if name == 'gpg-pubkey':
+                        continue
+                    files = hdr[rpm.RPMTAG_FILENAMES] or []
+                    for f in files:
+                        if fnmatch.fnmatch(f, f'*{pattern}*') or pattern in f:
+                            version = hdr[rpm.RPMTAG_VERSION]
+                            release = hdr[rpm.RPMTAG_RELEASE]
+                            arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                            installed_found.append({
+                                'nevra': f"{name}-{version}-{release}.{arch}",
+                                'file': f
+                            })
+                            break  # Only show package once
+                    if limit > 0 and len(installed_found) >= limit:
+                        break
+        except ImportError:
+            pass
+
+    # Search in available packages via database (files.xml)
+    if search_available or search_both:
+        # Check if we have files.xml data
+        stats = db.get_files_stats()
+        if stats['total_files'] == 0:
+            # No data - check if sync_files is enabled on any media
+            has_sync_files = db.has_any_sync_files_media()
+
+            if not has_sync_files:
+                # Prompt user to enable files.xml sync
+                print(colors.info("La recherche dans les paquets disponibles nécessite le téléchargement"))
+                print(colors.info("des fichiers files.xml (~500 Mo, ~10-15 minutes la première fois)."))
+                print()
+
+                try:
+                    response = input("Activer cette fonctionnalité ? [o/N] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 1
+
+                if response in ('o', 'oui', 'y', 'yes'):
+                    # Enable sync_files on all enabled media
+                    from ..core.install import check_root
+                    if not check_root():
+                        print(colors.error("Erreur: droits root requis pour activer sync_files"))
+                        print("Essayez: sudo urpm media set --all --sync-files")
+                        return 1
+
+                    db.set_all_media_sync_files(True, enabled_only=True)
+                    enabled_count = len(db.get_media_with_sync_files())
+                    print(colors.success(f"sync_files activé sur {enabled_count} media"))
+                    print()
+                    print("Lancez maintenant: sudo urpm media update --files")
+                    print("(~10-15 minutes la première fois, puis quasi-instantané)")
+                    return 0
+                else:
+                    print(colors.dim("Fonctionnalité non activée."))
+                    print(colors.dim("Pour activer plus tard: sudo urpm media set --all --sync-files"))
+                    return 0
+
+            elif search_available:
+                # sync_files is enabled but no data yet
+                print(colors.warning("sync_files est activé mais les données ne sont pas encore téléchargées."))
+                print("Lancez: sudo urpm media update --files")
+                return 1
+            # else: silently skip available search if searching both
         else:
-            # Pattern search - need to iterate all packages
-            import fnmatch
-            for hdr in ts.dbMatch():
-                name = hdr[rpm.RPMTAG_NAME]
-                if name == 'gpg-pubkey':
-                    continue
-                files = hdr[rpm.RPMTAG_FILENAMES] or []
-                for f in files:
-                    if fnmatch.fnmatch(f, f'*{pattern}*') or pattern in f:
-                        version = hdr[rpm.RPMTAG_VERSION]
-                        release = hdr[rpm.RPMTAG_RELEASE]
-                        arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                        found.append({
-                            'nevra': f"{name}-{version}-{release}.{arch}",
-                            'file': f,
-                            'installed': True
-                        })
-                        break  # Only show package once
-    except ImportError:
-        pass
+            # Search in database
+            results = db.search_files(
+                pattern,
+                limit=limit if limit > 0 else 0
+            )
 
-    if not found:
-        print(f"No installed package contains '{pattern}'")
-        print("Note: searching non-installed packages requires hdlist (not yet implemented)")
+            # Group by nevra to show file only once per package
+            seen_nevras = set()
+            for r in results:
+                nevra = r['pkg_nevra']
+                if nevra not in seen_nevras:
+                    seen_nevras.add(nevra)
+                    available_found.append({
+                        'nevra': nevra,
+                        'file': r['file_path'],
+                        'media': r['media_name']
+                    })
+
+    # Display results
+    if not installed_found and not available_found:
+        print(f"No package contains '{pattern}'")
+        if search_both or search_available:
+            stats = db.get_files_stats()
+            if stats['total_files'] == 0:
+                print(colors.info("Hint: run 'sudo urpm media update --files' to enable searching available packages"))
         return 1
 
-    print(f"Packages containing '{pattern}':")
-    for match in found[:50]:
-        print(f"  {match['nevra']}: {match['file']}")
+    # Build combined display
+    total_shown = 0
 
-    if len(found) > 50:
-        print(f"  ... and {len(found) - 50} more")
+    # Helper to highlight pattern in file path (green)
+    def highlight_pattern(filepath: str, pat: str) -> str:
+        """Highlight pattern matches in filepath with green color."""
+        import re
+        # Case-insensitive search
+        try:
+            # Escape special regex chars in pattern, then do case-insensitive replace
+            escaped = re.escape(pat)
+            return re.sub(f'({escaped})', lambda m: colors.success(m.group(1)), filepath, flags=re.IGNORECASE)
+        except re.error:
+            return filepath
+
+    if installed_found:
+        print(colors.info("Installed:"))
+        for match in installed_found[:limit if limit > 0 else len(installed_found)]:
+            highlighted_file = highlight_pattern(match['file'], pattern)
+            print(f"  {match['nevra']}: {highlighted_file}")
+            total_shown += 1
+
+    if available_found:
+        # Filter out already-installed packages (by NEVRA)
+        installed_nevras = {m['nevra'] for m in installed_found}
+        available_not_installed = [a for a in available_found if a['nevra'] not in installed_nevras]
+
+        if available_not_installed:
+            if installed_found:
+                print()
+            print(colors.info("Available (not installed):"))
+            remaining_limit = (limit - total_shown) if limit > 0 else len(available_not_installed)
+            for match in available_not_installed[:remaining_limit]:
+                media_str = f" [{match['media']}]" if match.get('media') else ""
+                highlighted_file = highlight_pattern(match['file'], pattern)
+                print(f"  {match['nevra']}: {highlighted_file}{media_str}")
+                total_shown += 1
+
+    # Summary
+    total_found = len(installed_found) + len(available_found)
+    if limit > 0 and total_found > limit:
+        print(f"\n{colors.info('Showing')} {total_shown} of {total_found} results (use --limit to see more)")
 
     return 0
 

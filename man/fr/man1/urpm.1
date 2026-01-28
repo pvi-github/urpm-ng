@@ -105,10 +105,23 @@ Affiche les capacites fournies par un paquet.
 .B whatprovides \fIcapacite\fR
 Trouve les paquets fournissant une capacite.
 .TP
-.B find \fIfichier\fR
-Trouve le paquet contenant un fichier.
+.B find \fImotif\fR
+Trouve le paquet contenant un fichier correspondant au motif.
 .RS
-.B (Non implémenté, ça va venir).
+.TP
+.BR \-i ", " \-\-installed
+Recherche uniquement dans les paquets installes.
+.TP
+.BR \-a ", " \-\-available
+Recherche uniquement dans les paquets disponibles (necessite la sync files.xml).
+.TP
+.BR \-l ", " \-\-limit " " \fIN\fR
+Limite les resultats a N correspondances.
+.PP
+Par defaut, recherche dans les paquets installes et disponibles.
+La recherche dans les paquets disponibles necessite d'activer la sync files.xml via
+\fBurpm media set \-\-all \-\-sync-files\fR puis
+\fBurpm media update \-\-files\fR.
 .RE
 .TP
 .B depends \fIpaquet\fR
@@ -142,6 +155,12 @@ Desactive un media.
 .TP
 .B update \fR[\fInom\fR]
 Met a jour les metadonnees (en parallele).
+.RS
+.TP
+.B \-\-files
+Synchronise aussi les files.xml pour les medias avec sync_files active. Requis pour
+que \fBurpm find\fR recherche dans les paquets disponibles.
+.RE
 .TP
 .B import
 Importe la configuration depuis urpmi.
@@ -171,6 +190,16 @@ Jours de conservation des paquets en cache.
 .TP
 .B \-\-priority \fIN\fR
 Priorite du media (plus haut = prefere).
+.TP
+.B \-\-sync\-files
+Active la synchronisation automatique de files.xml pour ce media. Requis pour que
+\fBurpm find\fR recherche dans les paquets disponibles.
+.TP
+.B \-\-no\-sync\-files
+Desactive la synchronisation automatique de files.xml.
+.TP
+.BR \-a ", " \-\-all
+Applique le reglage a tous les medias actives (utiliser avec \fB\-\-sync\-files\fR ou \fB\-\-no\-sync\-files\fR).
 .RE
 .TP
 .B autoconfig \fB\-\-release\fR \fIversion\fR

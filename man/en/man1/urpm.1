@@ -104,10 +104,23 @@ Show what capabilities a package provides.
 .B whatprovides \fIcapability\fR
 Find packages providing a capability.
 .TP
-.B find \fIfile\fR
-Find which package contains a file.
+.B find \fIpattern\fR
+Find which package contains a file matching the pattern.
 .RS
-.B (Not implemented yet)
+.TP
+.BR \-i ", " \-\-installed
+Search only in installed packages.
+.TP
+.BR \-a ", " \-\-available
+Search only in available packages (requires files.xml sync).
+.TP
+.BR \-l ", " \-\-limit " " \fIN\fR
+Limit results to N matches.
+.PP
+By default, searches both installed and available packages.
+Available package search requires enabling files.xml sync via
+\fBurpm media set \-\-all \-\-sync-files\fR followed by
+\fBurpm media update \-\-files\fR.
 .RE
 .TP
 .B depends \fIpackage\fR
@@ -141,6 +154,12 @@ Disable a media.
 .TP
 .B update \fR[\fIname\fR]
 Update media metadata (parallel).
+.RS
+.TP
+.B \-\-files
+Also sync files.xml for media with sync_files enabled. Required for
+\fBurpm find\fR to search available packages.
+.RE
 .TP
 .B import
 Import media configuration from urpmi.
@@ -170,6 +189,16 @@ Days to keep cached packages.
 .TP
 .B \-\-priority \fIN\fR
 Media priority (higher = preferred).
+.TP
+.B \-\-sync\-files
+Enable automatic files.xml sync for this media. Required for \fBurpm find\fR
+to search available packages.
+.TP
+.B \-\-no\-sync\-files
+Disable automatic files.xml sync.
+.TP
+.BR \-a ", " \-\-all
+Apply setting to all enabled media (use with \fB\-\-sync\-files\fR or \fB\-\-no\-sync\-files\fR).
 .RE
 .TP
 .B autoconfig \fB\-\-release\fR \fIversion\fR

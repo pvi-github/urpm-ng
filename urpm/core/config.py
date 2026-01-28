@@ -430,3 +430,78 @@ def get_system_version(root: str = None) -> Optional[str]:
         _system_version_cache = version
 
     return version
+
+
+def get_accepted_versions(db, system_version: str = None) -> tuple:
+    """Determine which media versions to accept based on configured media.
+
+    Implements smart version filtering:
+    1. Only cauldron media enabled → accept only 'cauldron'
+    2. Only numeric media enabled → accept only system version
+    3. Mix of system version + cauldron → returns None (needs user choice)
+
+    Args:
+        db: PackageDatabase instance
+        system_version: System version (from get_system_version), or None to auto-detect
+
+    Returns:
+        Tuple of (accepted_versions: set or None, needs_user_choice: bool, conflict_info: dict)
+        - accepted_versions: set of version strings to accept, or None if ambiguous
+        - needs_user_choice: True if user must choose between versions
+        - conflict_info: dict with 'system_version', 'cauldron_media', 'numeric_media' for UI
+    """
+    if system_version is None:
+        system_version = get_system_version()
+
+    # Get all enabled media with their versions
+    media_list = db.list_media()
+
+    cauldron_media = []
+    system_version_media = []
+    other_numeric_media = []
+
+    for m in media_list:
+        if not m.get('enabled'):
+            continue
+        media_version = m.get('mageia_version', '')
+        if not media_version:
+            continue  # No version info, will be accepted anyway
+
+        if media_version == 'cauldron':
+            cauldron_media.append(m['name'])
+        elif media_version == system_version:
+            system_version_media.append(m['name'])
+        else:
+            # Other numeric version (e.g., mga9 on mga10 system)
+            other_numeric_media.append((m['name'], media_version))
+
+    conflict_info = {
+        'system_version': system_version,
+        'cauldron_media': cauldron_media,
+        'system_version_media': system_version_media,
+        'other_numeric_media': other_numeric_media,
+    }
+
+    # First: check if user has set an explicit preference
+    version_mode = db.get_config('version-mode')
+    if version_mode == 'cauldron':
+        return {'cauldron'}, False, conflict_info
+    elif version_mode == 'system':
+        return {system_version}, False, conflict_info
+
+    # No explicit preference - auto-detect based on enabled media
+
+    # Case 1: Only cauldron media
+    if cauldron_media and not system_version_media:
+        return {'cauldron'}, False, conflict_info
+
+    # Case 2: Only numeric media (system version)
+    if system_version_media and not cauldron_media:
+        return {system_version}, False, conflict_info
+
+    # Case 3: Mix of system version + cauldron - needs user choice
+    if system_version_media and cauldron_media:
+        return None, True, conflict_info
+
+    # No versioned media at all → accept system version by default
+    return {system_version} if system_version else set(), False, conflict_info
