@@ -754,6 +754,8 @@ class PackageDatabase:
                     self._migrate_media_directories(logger)
                 elif version == 9 and to_version == 10:
                     self._migrate_v9_to_v10_test_servers(logger)
+                elif version == 18 and to_version == 19:
+                    print("A new column 'filesize' has been added in database. To populate it, launch the command:\n   'urpm media update'"))
                 version = to_version
             except sqlite3.Error as e:
                 logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
@@ -1068,10 +1070,6 @@ class PackageDatabase:
                 logger.warning(f"  {srv['name']} ({host}): test failed ({e}), keeping 'auto'")
 
         self.conn.commit()
-
-    def _migrate_v15_to_v16_filesize(self, logger):
-        """Add filesize to packages, populate the DB with them"""
-        main.cmd_media_update(None,self)
 
     def close(self):
         """Close database connection.

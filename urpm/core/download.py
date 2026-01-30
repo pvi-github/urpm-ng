@@ -1211,6 +1211,8 @@ def get_download_items(db: PackageDatabase, packages: List[dict]) -> List[Downlo
             release = '1'
 
         # Use new schema if available, fallback to legacy URL
+        # Fallback to uncompressed size if filesize is zero
+        size = pkg.get('filesize', 0) if pkg.get('filesize', 0) != 0 else pkg.size
         if media.get('relative_path'):
             servers = servers_cache.get(media['id'], [])
             items.append(DownloadItem(
@@ -1223,7 +1225,7 @@ def get_download_items(db: PackageDatabase, packages: List[dict]) -> List[Downlo
                 is_official=bool(media.get('is_official', 1)),
                 servers=servers,
                 media_name=media_name,
-                size=pkg.get('filesize', 0)
+                size=size
             ))
         elif media.get('url'):
             items.append(DownloadItem(
@@ -1233,7 +1235,7 @@ def get_download_items(db: PackageDatabase, packages: List[dict]) -> List[Downlo
                 arch=pkg['arch'],
                 media_url=media['url'],
                 media_name=media_name,
-                size=pkg.get('filesize', 0)
+                size=size
             ))
 
     return items
