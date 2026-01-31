@@ -5,6 +5,7 @@ whether Docker or Podman is being used.
 """
 
 import logging
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -352,18 +353,45 @@ class Container:
             logger.error(f"Import failed: {result.stderr}")
         return result.returncode == 0
 
-    def import_from_dir(self, directory: str, tag: str) -> bool:
+    def import_from_dir(self, directory: str, tag: str, tmpdir: str = None, use_unshare: bool = False) -> bool:
         """Create image from directory (tar + import).
 
         Args:
             directory: Directory to import
             tag: Tag for the new image
+            tmpdir: Temporary directory for podman (avoids /tmp space issues)
+            use_unshare: Run under 'podman unshare' for UID/GID mapping
 
         Returns:
             True if successful
         """
         logger.info(f"Creating image {tag} from {directory}")
 
+        # Set TMPDIR for podman to avoid /tmp quota issues
+        # Use parent of source directory if not specified
+        env = os.environ.copy()
+        if tmpdir:
+            env['TMPDIR'] = tmpdir
+        else:
+            env['TMPDIR'] = str(Path(directory).parent)
+
+        if use_unshare and self.runtime.name == 'podman':
+            # Run tar + import under podman unshare for proper UID/GID mapping
+            # This is needed when the chroot was built under podman unshare
+            cmd = f'tar -C {directory} -c . | {self.cmd} import - {tag}'
+            result = subprocess.run(
+                ['podman', 'unshare', 'sh', '-c', cmd],
+                capture_output=True,
+                text=True,
+                env=env
+            )
+            if result.returncode != 0:
+                logger.error(f"Import failed: {result.stderr}")
+                print(result.stderr)
+                return False
+            return True
+
+        # Standard import without unshare
         # tar -C dir -c . | docker/podman import - tag
         # Let tar stderr go to terminal so user sees warnings
         tar_proc = subprocess.Popen(
@@ -375,7 +403,8 @@ class Container:
             stdin=tar_proc.stdout,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            env=env
         )
 
         # Allow tar_proc to receive SIGPIPE if import_proc exits early

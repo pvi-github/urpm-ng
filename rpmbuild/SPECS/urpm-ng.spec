@@ -27,8 +27,6 @@ Requires:       python3-rpm
 Requires:       python3-zstandard
 Requires:       gnupg2
 
-Suggests:       fakeroot
-
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd

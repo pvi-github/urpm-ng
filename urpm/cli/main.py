@@ -24,6 +24,9 @@ from ..core.database import PackageDatabase
 
 # Debug flag for preferences matching - set to True to enable debug output
 DEBUG_PREFERENCES = False
+DEBUG_MKIMAGE = False
+DEBUG_BUILD = True
+DEBUG_INSTALL = False
 
 
 def check_dependencies() -> list:
@@ -2765,18 +2768,9 @@ def cmd_init(args, db: PackageDatabase) -> int:
         for d in essential_dirs:
             (root_path / d).mkdir(parents=True, exist_ok=True)
 
-        # Create UsrMerge symlinks (required for --noscripts mode where
-        # filesystem package scriptlets don't run)
-        usrmerge_links = [
-            ('bin', 'usr/bin'),
-            ('sbin', 'usr/sbin'),
-            ('lib', 'usr/lib'),
-            ('lib64', 'usr/lib64'),
-        ]
-        for link_name, target in usrmerge_links:
-            link_path = root_path / link_name
-            if not link_path.exists():
-                link_path.symlink_to(target)
+        # Note: UsrMerge symlinks (/bin -> usr/bin, etc.) are created by
+        # the filesystem package. Don't create them here or it will conflict.
+        # We only create the target directories (usr/bin, etc.) above.
 
         # Set proper permissions for /tmp and /var/tmp
         (root_path / 'tmp').chmod(0o1777)
@@ -7208,6 +7202,12 @@ def cmd_install(args, db: PackageDatabase) -> int:
     rpm_paths = [r.path for r in dl_results if r.success and r.path]
     rpm_paths.extend(local_action_paths)  # Add local RPM files
 
+    # DEBUG: show what packages are in rpm_paths
+    if DEBUG_INSTALL:
+        print(colors.dim(f"  DEBUG rpm_paths ({len(rpm_paths)}):"))
+        for rp in rpm_paths:
+            print(colors.dim(f"    {Path(rp).name}"))
+
     if not rpm_paths:
         print("No packages to install")
         return 0
@@ -7679,10 +7679,12 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
 
     # Base packages for build image
     packages = [
+        'filesystem',         # Must be first - creates base directory structure
         'basesystem-minimal',
         'coreutils',          # Essential: ls, cp, mv, cat, etc.
         'grep',               # Essential: used by bash profile scripts
         'sed',                # Essential: used by bash profile scripts
+        'findutils',          # Essential: find, xargs
         'vim-minimal',
         'locales',
         'locales-en',
@@ -7690,6 +7692,7 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
         'rpm',
         'curl',
         'wget',
+        'ca-certificates',    # SSL certificates for pip/https
         'cronie',
         'urpmi',
     ]
@@ -7756,14 +7759,99 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
         # 2. Install packages
         # Use noscripts when not root (user namespace) - scriptlets often fail
         use_noscripts = os.geteuid() != 0
+
+        # Install filesystem FIRST in separate transaction
+        # This ensures /bin -> usr/bin symlinks are created before other packages
         if use_noscripts:
-            print("\n[2/5] Installing packages (--noscripts for user namespace)...")
+            print("\n[2/5] Installing filesystem (--noscripts)...")
         else:
-            print("\n[2/5] Installing packages...")
+            print("\n[2/5] Installing filesystem...")
+        fs_args = argparse.Namespace(
+            urpm_root=tmpdir,
+            root=tmpdir,
+            packages=['filesystem'],
+            auto=True,
+            without_recommends=True,
+            with_suggests=False,
+            download_only=False,
+            nodeps=False,
+            nosignature=False,
+            noscripts=use_noscripts,
+            force=False,
+            reinstall=False,
+            debug=None,
+            watched=None,
+            prefer=None,
+            all=False,
+            test=False,
+            sync=True,
+            allow_no_root=True,
+        )
+        ret = cmd_install(fs_args, chroot_db)
+        if ret != 0:
+            print(colors.error("Failed to install filesystem"))
+            return ret
+
+        # DEBUG: Verify filesystem is actually installed
+        import subprocess
+        rpm_db_dir = Path(tmpdir) / 'var/lib/rpm'
+        if DEBUG_MKIMAGE:
+            print(colors.dim(f"  DEBUG: RPM db dir: {rpm_db_dir}"))
+        if rpm_db_dir.exists():
+            db_files = list(rpm_db_dir.iterdir())
+            if DEBUG_MKIMAGE:
+                print(colors.dim(f"  DEBUG: RPM db files: {[f.name for f in db_files]}"))
+            # Check if rpmdb.sqlite exists and has content
+            rpmdb_sqlite = rpm_db_dir / 'rpmdb.sqlite'
+            if rpmdb_sqlite.exists():
+                if DEBUG_MKIMAGE:
+                    print(colors.dim(f"  DEBUG: rpmdb.sqlite size: {rpmdb_sqlite.stat().st_size} bytes"))
+        else:
+            if DEBUG_MKIMAGE:
+                print(colors.error(f"  DEBUG: RPM db dir does not exist!"))
+
+        check = subprocess.run(
+            ['rpm', '--root', tmpdir, '-q', 'filesystem'],
+            capture_output=True, text=True
+        )
+        if check.returncode != 0:
+            if DEBUG_MKIMAGE:
+                print(colors.error(f"  DEBUG: filesystem NOT installed! rpm -q says: {check.stderr}"))
+            # Also try rpm -qa to see what IS installed
+            qa_result = subprocess.run(
+                ['rpm', '--root', tmpdir, '-qa'],
+                capture_output=True, text=True
+            )
+            pkg_count = len(qa_result.stdout.strip().split('\n')) if qa_result.stdout.strip() else 0
+            if DEBUG_MKIMAGE:
+                print(colors.dim(f"  DEBUG: rpm -qa shows {pkg_count} packages"))
+            if pkg_count > 0 and pkg_count < 10:
+                print(colors.dim(f"  DEBUG: packages: {qa_result.stdout.strip()}"))
+        else:
+            print(colors.success(f"  DEBUG: filesystem installed: {check.stdout.strip()}"))
+
+        # Check symlinks
+        bin_path = Path(tmpdir) / 'bin'
+        if bin_path.is_symlink():
+            if DEBUG_MKIMAGE:
+                print(colors.success(f"  DEBUG: /bin is symlink -> {bin_path.resolve()}"))
+        elif bin_path.exists():
+            if DEBUG_MKIMAGE:
+                print(colors.error(f"  DEBUG: /bin exists but is NOT a symlink!"))
+        else:
+            if DEBUG_MKIMAGE:
+                print(colors.error(f"  DEBUG: /bin does not exist!"))
+
+        # Now install remaining packages (filesystem already provides /bin -> usr/bin etc)
+        remaining_packages = [p for p in packages if p != 'filesystem']
+        if use_noscripts:
+            print("\n[2.5/6] Installing packages (--noscripts for user namespace)...")
+        else:
+            print("\n[2.5/6] Installing packages...")
         install_args = argparse.Namespace(
             urpm_root=tmpdir,
             root=tmpdir,
-            packages=packages,
+            packages=remaining_packages,
             auto=True,
             without_recommends=True,
             with_suggests=False,
@@ -7786,8 +7874,8 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
             print(colors.error("Failed to install packages"))
             return ret
 
-        # 2.5. Install urpm (this project)
-        print("\n[2.5/5] Installing urpm...")
+        # 3. Install urpm (this project)
+        print("\n[3/6] Installing urpm...")
 
         # First try from repos (for when it's officially available)
         urpm_install_args = argparse.Namespace(
@@ -7879,19 +7967,19 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
         else:
             print(colors.success("  urpm installed from repositories"))
 
-        # 3. Cleanup chroot to reduce image size
-        print("\n[3/5] Cleaning up chroot...")
+        # 4. Cleanup chroot to reduce image size
+        print("\n[4/6] Cleaning up chroot...")
         # Close chroot database to flush all data before image creation
         chroot_db.close()
         _cleanup_chroot_for_image(tmpdir)
 
-        # 4. Unmount filesystems
-        print("\n[4/5] Unmounting filesystems...")
+        # 5. Unmount filesystems
+        print("\n[5/6] Unmounting filesystems...")
         cleanup_args = argparse.Namespace(urpm_root=tmpdir)
         cmd_cleanup(cleanup_args, db)
 
-        # 5. Create container image
-        print(f"\n[5/5] Creating container image {tag}...")
+        # 6. Create container image
+        print(f"\n[6/6] Creating container image {tag}...")
         # Estimate chroot size for user feedback
         try:
             import os
@@ -7906,7 +7994,8 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
         except Exception:
             pass
         print(f"  Archiving and importing (this may take a moment)...", end='', flush=True)
-        if not container.import_from_dir(tmpdir, tag):
+        # Use podman unshare for import when not root (same UID/GID mapping as install)
+        if not container.import_from_dir(tmpdir, tag, use_unshare=use_noscripts):
             print()  # newline after "..."
             print(colors.error("Failed to create container image"))
             return 1
@@ -7975,6 +8064,12 @@ def _cleanup_chroot_for_image(root: str):
                 pass
 
     print(f"  Removed {removed} cache/log entries")
+
+    # Ensure /var/tmp exists (required by RPM scriptlets)
+    var_tmp = os.path.join(root, 'var', 'tmp')
+    if not os.path.exists(var_tmp):
+        os.makedirs(var_tmp, mode=0o1777, exist_ok=True)
+        print(f"  Created /var/tmp")
 
     # Create /etc/machine-id if missing (required by systemd, dbus, etc.)
     machine_id_path = os.path.join(root, 'etc', 'machine-id')
@@ -8177,6 +8272,9 @@ def _build_single_package(
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/BUILD'])
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/RPMS'])
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/SRPMS'])
+
+        # DEBUG SSL IN BUILD... TODO: do that in mkimage
+        container.exec(cid, ['/bin/update-ca-trust', 'extract'])
 
         # 3. Copy source into container
         print(f"  Copying source...")
