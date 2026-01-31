@@ -12,7 +12,7 @@ Provides a modern CLI with short aliases:
 """
 
 import argparse
-import shutil 
+import shutil
 import subprocess
 import sys
 import time
@@ -158,7 +158,7 @@ def print_quickstart_guide():
 
 class AliasedSubParsersAction(argparse._SubParsersAction):
     """Custom action to support command aliases in argparse."""
-    
+
     class _AliasedPseudoAction(argparse.Action):
         def __init__(self, name, aliases, help):
             dest = name
@@ -170,11 +170,11 @@ class AliasedSubParsersAction(argparse._SubParsersAction):
     def add_parser(self, name, **kwargs):
         aliases = kwargs.pop('aliases', [])
         parser = super().add_parser(name, **kwargs)
-        
+
         # Register aliases
         for alias in aliases:
             self._name_parser_map[alias] = parser
-        
+
         return parser
 
 
@@ -671,7 +671,7 @@ Examples:
         action='store_true',
         help='Show changelog'
     )
-    
+
     # =========================================================================
     # list / l
     # =========================================================================
@@ -687,7 +687,7 @@ Examples:
         default='installed',
         help='Filter type (default: installed)'
     )
-    
+
     # =========================================================================
     # provides / p
     # =========================================================================
@@ -713,7 +713,7 @@ Examples:
         'capability',
         help='Capability or file path to search'
     )
-    
+
     # =========================================================================
     # find / f (search in files, compat with urpmf)
     # =========================================================================
@@ -1118,7 +1118,7 @@ Examples:
         dest='media_command',
         metavar='<subcommand>'
     )
-    
+
     # media list / l / ls
     media_list = media_subparsers.add_parser(
         'list', aliases=['l', 'ls'],
@@ -1190,21 +1190,21 @@ For legacy mode (non-Mageia URL with explicit name):
         help='Remove media source'
     )
     media_remove.add_argument('name', help='Media name')
-    
+
     # media enable / e
     media_enable = media_subparsers.add_parser(
         'enable', aliases=['e'],
         help='Enable media source'
     )
     media_enable.add_argument('name', help='Media name')
-    
+
     # media disable / d
     media_disable = media_subparsers.add_parser(
         'disable', aliases=['d'],
         help='Disable media source'
     )
     media_disable.add_argument('name', help='Media name')
-    
+
     # media update / u
     media_update = media_subparsers.add_parser(
         'update', aliases=['u'],
@@ -1587,7 +1587,7 @@ Examples:
         dest='cache_command',
         metavar='<subcommand>'
     )
-    
+
     cache_subparsers.add_parser('info', help='Cache information')
 
     cache_clean_parser = cache_subparsers.add_parser('clean', help='Clean orphan RPMs from cache')
@@ -5486,9 +5486,10 @@ def cmd_mirror_sync(args, db: PackageDatabase) -> int:
             relative_path=relative_path,
             is_official=bool(is_official),
             servers=servers,
-            size=pkg.get('size', 0) or 0
+            size=pkg.get('filesize', 0) or 0
         )
         download_items.append(item)
+        print(f"Insert 1 {pkg['name']} {pkg.get('filesize',0)}")
 
     if not download_items:
         print(colors.warning("No items to download (no servers configured?)"))
@@ -6569,7 +6570,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
                 evr=evr,
                 arch=pkg['arch'],
                 nevra=pkg['nevra'],
-                size=pkg.get('size', 0) or 0,
+                size=pkg.get('filesize', 0) or 0,
                 media_name=media_name,
                 reason=InstallReason.EXPLICIT
             ))
@@ -6616,7 +6617,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
                     evr=evr,
                     arch=info['arch'],
                     nevra=info['nevra'],
-                    size=info.get('size', 0) or 0,
+                    size=info.get('filesize', 0) or 0,
                     media_name='@LocalRPMs',
                     reason=InstallReason.EXPLICIT
                 )
@@ -6672,7 +6673,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
                                     evr=s.evr,
                                     arch=s.arch,
                                     nevra=f"{s.name}-{s.evr}.{s.arch}",
-                                    size=resolver._solvable_to_pkg.get(s.id, {}).get('size', 0),
+                                    size=s.size,
                                     media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
                                     reason=InstallReason.SUGGESTED,
                                 )
@@ -6704,7 +6705,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
                                             evr=s.evr,
                                             arch=s.arch,
                                             nevra=f"{s.name}-{s.evr}.{s.arch}",
-                                            size=resolver._solvable_to_pkg.get(s.id, {}).get('size', 0),
+                                            size=s.size,
                                             media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
                                             reason=InstallReason.SUGGESTED,
                                         )
@@ -6727,7 +6728,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
                                             evr=s.evr,
                                             arch=s.arch,
                                             nevra=f"{s.name}-{s.evr}.{s.arch}",
-                                            size=resolver._solvable_to_pkg.get(s.id, {}).get('size', 0),
+                                            size=s.size,
                                             media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
                                             reason=InstallReason.SUGGESTED,
                                         )
@@ -6762,7 +6763,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
                                 evr=s.evr,
                                 arch=s.arch,
                                 nevra=f"{s.name}-{s.evr}.{s.arch}",
-                                size=resolver._solvable_to_pkg.get(s.id, {}).get('size', 0),
+                                size=s.size,
                                 media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
                                 reason=InstallReason.SUGGESTED,
                             )
@@ -7417,10 +7418,11 @@ def cmd_download(args, db: PackageDatabase) -> int:
                 evr=evr,
                 arch=pkg['arch'],
                 nevra=pkg['nevra'],
-                size=pkg.get('size', 0) or 0,
+                size=pkg.get('filesize', 0) or 0,
                 media_name=media_name,
                 reason=InstallReason.EXPLICIT
             ))
+            print(f"Insert {pkg['name']} {pkg.get('filesize',0)}")
 
         if not_found:
             print(colors.error(f"Packages not found ({len(not_found)}):"))
@@ -7512,7 +7514,7 @@ def cmd_download(args, db: PackageDatabase) -> int:
                 is_official=bool(media.get('is_official', 1)),
                 servers=servers,
                 media_name=media_name,
-                size=action.size
+                size=action.size,
             ))
         elif media.get('url'):
             download_items.append(DownloadItem(
@@ -7522,7 +7524,7 @@ def cmd_download(args, db: PackageDatabase) -> int:
                 arch=action.arch,
                 media_url=media['url'],
                 media_name=media_name,
-                size=action.size
+                size=action.size,
             ))
         else:
             print(f"  Warning: no URL or servers for media '{media_name}'")
@@ -8711,7 +8713,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
                     is_official=bool(media.get('is_official', 1)),
                     servers=servers,
                     media_name=media_name,
-                    size=action.size
+                    size=action.filesize
                 ))
             elif media.get('url'):
                 download_items.append(DownloadItem(
@@ -8721,7 +8723,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
                     arch=action.arch,
                     media_url=media['url'],
                     media_name=media_name,
-                    size=action.size
+                    size=action.filesize
                 ))
 
         # Download
@@ -10793,7 +10795,7 @@ def cmd_undo(args, db: PackageDatabase) -> int:
                         arch=arch,
                         media_url=media['url'],
                         media_name=media.get('name', ''),
-                        size=pkg.get('size', 0)
+                        size=pkg.get('filesize', 0)
                     ))
                 else:
                     print(f"  {colors.warning('Warning:')} no URL or servers for {nevra}")
@@ -13540,10 +13542,10 @@ def main(argv=None) -> int:
 
         elif args.command in ('search', 's', 'query', 'q'):
             return cmd_search(args, db)
-        
+
         elif args.command in ('show', 'sh', 'info'):
             return cmd_show(args, db)
-        
+
         elif args.command in ('media', 'm'):
             if args.media_command in ('list', 'l', 'ls', None):
                 return cmd_media_list(args, db)
@@ -13696,11 +13698,11 @@ def main(argv=None) -> int:
 
         else:
             return cmd_not_implemented(args, db)
-    
+
     except KeyboardInterrupt:
         print("\nInterrupted")
         return 130
-    
+
     except Exception as e:
         if args.verbose:
             import traceback
@@ -13708,7 +13710,7 @@ def main(argv=None) -> int:
         else:
             print(f"Error: {e}")
         return 1
-    
+
     finally:
         db.close()
 

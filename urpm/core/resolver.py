@@ -241,6 +241,7 @@ class PackageAction:
     arch: str
     nevra: str
     size: int = 0
+    filesize: int = 0
     media_name: str = ""
     reason: InstallReason = InstallReason.DEPENDENCY
     from_evr: str = ""  # Previous version for upgrades
@@ -450,6 +451,7 @@ class Resolver:
                             'nevra': f"{s.name}-{s.evr}.{s.arch}",
                             'summary': s.lookup_str(solv.SOLVABLE_SUMMARY) or "",
                             'size': s.lookup_num(solv.SOLVABLE_INSTALLSIZE) or 0,
+                            'filesize': s.lookup_num(solv.SOLVABLE_DOWNLOADSIZE) or 0,
                             'media_name': repo.name,
                         }
                     debug.log(f"Loaded {repo.nsolvables} packages from synthesis")
@@ -473,14 +475,14 @@ class Resolver:
         """
         # Load all packages first
         cursor = self.db.conn.execute("""
-            SELECT id, name, epoch, version, release, arch, nevra, summary, size
+            SELECT id, name, epoch, version, release, arch, nevra, summary, size, filesize
             FROM packages WHERE media_id = ?
         """, (media_id,))
 
         pkg_id_to_solvable = {}
 
         for row in cursor:
-            pkg_id, name, epoch, version, release, arch, nevra, summary, size = row
+            pkg_id, name, epoch, version, release, arch, nevra, summary, size, filesize = row
 
             # Skip src packages
             if arch in ('src', 'nosrc'):
@@ -508,6 +510,7 @@ class Resolver:
                 'nevra': nevra,
                 'summary': summary or "",
                 'size': size or 0,
+                'filesize': filesize or 0,
                 'media_name': repo.name,
             }
 
@@ -730,6 +733,7 @@ class Resolver:
                 'arch': arch,
                 'nevra': f"{name}-{s.evr}.{arch}",
                 'size': size,
+                'filesize': size,
                 'media_name': '@System',
             }
             count += 1
@@ -836,6 +840,7 @@ class Resolver:
                 'arch': info['arch'],
                 'nevra': info['nevra'],
                 'size': info.get('size', 0),
+                'filesize': info.get('filesize', 0),
                 'media_name': '@LocalRPMs',
                 'local_path': info['path'],  # Critical: path to the RPM file
             }
@@ -1313,7 +1318,7 @@ class Resolver:
                 elif decision_reason == solv.Solver.SOLVER_REASON_RESOLVE_JOB:
                     reason = InstallReason.EXPLICIT
 
-            size = pkg_info.get('size', 0)
+            size = pkg_info.get('filesize', 0)
             if action in (TransactionType.INSTALL, TransactionType.UPGRADE):
                 install_size += size
             elif action == TransactionType.REMOVE:
@@ -1879,6 +1884,7 @@ class Resolver:
                             arch=provider.arch,
                             nevra=f"{provider.name}-{provider.evr}.{provider.arch}",
                             size=pkg_info.get('size', 0),
+                            filesize=pkg_info.get('filesize', 0),
                             media_name=pkg_info.get('media_name', ''),
                             reason=InstallReason.SUGGESTED,
                         ))
@@ -2276,6 +2282,7 @@ class Resolver:
                 arch=s.arch,
                 nevra=f"{s.name}-{s.evr}.{s.arch}",
                 size=size,
+                filesize=pkg_info.get('filesize', 0),
                 media_name=pkg_info.get('media_name', ''),
             ))
 
@@ -2366,6 +2373,7 @@ class Resolver:
                     arch=s.arch,
                     nevra=f"{s.name}-{s.evr}.{s.arch}",
                     size=size,
+                    filesize=pkg_info.get('filesize', 0)
                 ))
 
         return Resolution(

@@ -51,10 +51,10 @@ def parse_nevra(nevra: str) -> Tuple[str, str, str, str]:
 
 def parse_dependency(dep: str) -> Tuple[str, str, str]:
     """Parse a dependency string with optional version constraint.
-    
+
     Args:
         dep: String like "libfoo>=1.0" or "bar[>= 2.0]" or just "baz"
-        
+
     Returns:
         Tuple of (name, operator, version)
     """
@@ -62,12 +62,12 @@ def parse_dependency(dep: str) -> Tuple[str, str, str]:
     match = re.match(r'^(.+?)\[([<>=!]+)\s*(.+?)\]$', dep)
     if match:
         return match.group(1), match.group(2), match.group(3)
-    
+
     # Handle name>=version format (no brackets)
     match = re.match(r'^(.+?)([<>=!]+)(.+)$', dep)
     if match:
         return match.group(1), match.group(2), match.group(3)
-    
+
     # No version constraint
     return dep, '', ''
 
@@ -154,6 +154,11 @@ def parse_synthesis(filename: Path) -> Iterator[Dict[str, Any]]:
             except ValueError:
                 size = 0
 
+            try:
+                filesize = int(current_tags.get('filesize', "0"))
+            except ValueError:
+                filesize = 0
+
             pkg = {
                 'name': name,
                 'version': version,
@@ -172,6 +177,7 @@ def parse_synthesis(filename: Path) -> Iterator[Dict[str, Any]]:
                 'recommends': current_tags.get('recommends', []),
                 'supplements': current_tags.get('supplements', []),
                 'enhances': current_tags.get('enhances', []),
+                'filesize': filesize,
             }
 
             yield pkg
@@ -197,14 +203,16 @@ def parse_synthesis(filename: Path) -> Iterator[Dict[str, Any]]:
                 current_tags['supplements'] = list(parts[2:]) if len(parts) > 2 else []
             elif tag == 'enhances':
                 current_tags['enhances'] = list(parts[2:]) if len(parts) > 2 else []
+            elif tag == 'filesize':
+                current_tags['filesize'] = parts[2] if len(parts) > 2 else "0"
 
 
 def parse_synthesis_to_list(filename: Path) -> List[Dict[str, Any]]:
     """Parse a synthesis file and return list of packages.
-    
+
     Args:
         filename: Path to synthesis.hdlist.cz file
-        
+
     Returns:
         List of package dictionaries
     """

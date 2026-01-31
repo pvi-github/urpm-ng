@@ -73,6 +73,7 @@ class TestPackages:
                 'summary': 'Web browser',
                 'provides': ['firefox', 'webrunner'],
                 'requires': ['libgtk3', 'libnspr4'],
+                'filesize': 200000000,
             },
             {
                 'name': 'thunderbird',
@@ -84,6 +85,7 @@ class TestPackages:
                 'summary': 'Email client',
                 'provides': ['thunderbird'],
                 'requires': ['libgtk3'],
+                'filesize': 220000000,
             },
         ]
 
@@ -106,6 +108,7 @@ class TestPackages:
                 'summary': 'Text editor',
                 'provides': ['vim', 'editor'],
                 'requires': ['ncurses'],
+                'filesize': 220000000,
             },
         ]
         db.import_packages(iter(packages))
@@ -128,6 +131,7 @@ class TestPackages:
                 'nevra': 'glibc-2.38-1.mga9.x86_64',
                 'provides': ['libc.so.6', 'glibc'],
                 'requires': [],
+                'filesize': 220000000,
             },
         ]
         db.import_packages(iter(packages))
@@ -169,6 +173,7 @@ class TestStats:
                 'nevra': 'test-1.0-1.noarch',
                 'provides': ['test'],
                 'requires': ['dep1', 'dep2'],
+                'filesize': 220000000,
             },
         ]
         db.import_packages(iter(packages), media_id=1)
