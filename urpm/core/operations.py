@@ -402,6 +402,66 @@ class PackageOperations:
             resolver.mark_as_explicit(explicit_packages)
 
     # =========================================================================
+    # Queries (read-only operations for D-Bus/PackageKit)
+    # =========================================================================
+
+    def search_packages(
+        self,
+        pattern: str,
+        search_provides: bool = True,
+        limit: int = None
+    ) -> List[Dict]:
+        """Search packages by name pattern.
+
+        Args:
+            pattern: Search pattern (substring match)
+            search_provides: Also search in provides capabilities
+            limit: Maximum results
+
+        Returns:
+            List of package dicts with name, version, release, arch, summary, etc.
+        """
+        return self.db.search(pattern, limit=limit, search_provides=search_provides)
+
+    def get_package_info(self, identifier: str) -> Optional[Dict]:
+        """Get detailed package information.
+
+        Args:
+            identifier: Package name or NEVRA
+
+        Returns:
+            Package dict or None
+        """
+        return self.db.get_package_smart(identifier)
+
+    def get_updates(self, arch: str = None) -> Tuple[bool, list, list]:
+        """Get list of available updates.
+
+        Args:
+            arch: System architecture (default: auto-detect)
+
+        Returns:
+            (success, upgrades, problems)
+            - success: True if resolution succeeded
+            - upgrades: List of PackageAction for available upgrades
+            - problems: List of problem strings if resolution failed
+        """
+        import platform
+        from .resolver import Resolver
+
+        if arch is None:
+            arch = platform.machine()
+
+        resolver = Resolver(self.db, arch=arch)
+        result = resolver.resolve_upgrade()
+
+        if not result.success:
+            return False, [], result.problems
+
+        upgrades = [a for a in result.actions if a.action.value == 'upgrade']
+        return True, upgrades, []
+
+    # =========================================================================
     # Cache management
     # =========================================================================
 

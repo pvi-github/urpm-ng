@@ -2114,6 +2114,7 @@ def cmd_search(args, db: PackageDatabase) -> int:
     """Handle search command."""
     import re
     from . import colors
+    from ..core.operations import PackageOperations
 
     # Handle --unavailable: list installed packages not in any media
     if getattr(args, 'unavailable', False):
@@ -2125,7 +2126,8 @@ def cmd_search(args, db: PackageDatabase) -> int:
         print(colors.dim("  Use --unavailable to list packages not in any media"))
         return 1
 
-    results = db.search(args.pattern, search_provides=True)
+    ops = PackageOperations(db)
+    results = ops.search_packages(args.pattern, search_provides=True)
 
     if not results:
         print(colors.warning(f"No packages found for '{args.pattern}'"))
@@ -2224,8 +2226,10 @@ def cmd_search(args, db: PackageDatabase) -> int:
 def cmd_show(args, db: PackageDatabase) -> int:
     """Handle show/info command."""
     from . import colors
+    from ..core.operations import PackageOperations
 
-    pkg = db.get_package_smart(args.package)
+    ops = PackageOperations(db)
+    pkg = ops.get_package_info(args.package)
 
     if not pkg:
         print(colors.error(f"Package '{args.package}' not found"))
@@ -9014,21 +9018,17 @@ def cmd_list(args, db: PackageDatabase) -> int:
 
     elif filter_type in ('updates', 'upgradable'):
         # List packages with available updates
-        from ..core.resolver import Resolver
+        from ..core.operations import PackageOperations
 
-        arch = platform.machine()
-        resolver = Resolver(db, arch=arch)
-
+        ops = PackageOperations(db)
         print("Checking for updates...")
-        result = resolver.resolve_upgrade()
+        success, upgrades, problems = ops.get_updates()
 
-        if not result.success:
+        if not success:
             print("Error checking updates:")
-            for p in result.problems:
+            for p in problems:
                 print(f"  {p}")
             return 1
-
-        upgrades = [a for a in result.actions if a.action.value == 'upgrade']
 
         if not upgrades:
             print("All packages are up to date.")
