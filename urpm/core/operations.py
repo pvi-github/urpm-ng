@@ -148,7 +148,7 @@ class PackageOperations:
                     is_official=bool(media.get('is_official', 1)),
                     servers=servers,
                     media_name=media_name,
-                    size=action.size
+                    size=action.filesize or action.size
                 ))
             elif media.get('url'):
                 download_items.append(DownloadItem(
@@ -158,7 +158,7 @@ class PackageOperations:
                     arch=action.arch,
                     media_url=media['url'],
                     media_name=media_name,
-                    size=action.size
+                    size=action.filesize or action.size
                 ))
             else:
                 logger.warning(f"No URL or servers for media '{media_name}'")
@@ -273,8 +273,67 @@ class PackageOperations:
         queue.add_erase(
             package_names,
             operation_id="erase",
-            noscripts=options.noscripts
+            force=options.force,
+            test=options.test,
         )
+
+        return queue.execute(
+            progress_callback=progress_callback,
+            sync=options.sync
+        )
+
+    def execute_upgrade(
+        self,
+        rpm_paths: List[str],
+        erase_names: List[str] = None,
+        orphan_names: List[str] = None,
+        options: InstallOptions = None,
+        progress_callback: Callable[[str, str, int, int], None] = None
+    ) -> Any:
+        """Execute upgrade via TransactionQueue.
+
+        Combines install (with optional erase of obsoleted packages)
+        and orphan cleanup in a single queue.
+
+        Args:
+            rpm_paths: RPM file paths to install/upgrade
+            erase_names: Package names to remove (obsoleted)
+            orphan_names: Orphaned deps to remove in background
+            options: Install options
+            progress_callback: Called with (op_id, name, current, total)
+
+        Returns:
+            TransactionQueue result, or None if nothing to do
+        """
+        if options is None:
+            options = InstallOptions()
+
+        queue = TransactionQueue(
+            root=options.root,
+            use_userns=options.use_userns
+        )
+
+        if rpm_paths or erase_names:
+            queue.add_install(
+                rpm_paths,
+                operation_id="upgrade",
+                verify_signatures=options.verify_signatures,
+                force=options.force,
+                test=options.test,
+                erase_names=erase_names or [],
+            )
+
+        if orphan_names:
+            queue.add_erase(
+                orphan_names,
+                operation_id="orphan_cleanup",
+                force=options.force,
+                test=options.test,
+                background=True,
+            )
+
+        if queue.is_empty():
+            return None
 
         return queue.execute(
             progress_callback=progress_callback,

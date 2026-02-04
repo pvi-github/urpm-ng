@@ -8290,11 +8290,11 @@ def cmd_erase(args, db: PackageDatabase) -> int:
 
     from ..core.resolver import Resolver, format_size, set_solver_debug
     from ..core.install import check_root
+    from ..core.operations import PackageOperations, InstallOptions
     from ..core.background_install import (
         check_background_error, clear_background_error,
         InstallLock
     )
-    from ..core.transaction_queue import TransactionQueue
     from . import colors
 
     # Check for previous background errors
@@ -8445,9 +8445,18 @@ def cmd_erase(args, db: PackageDatabase) -> int:
         print("\n(dry run - no changes made)")
         return 0
 
+    # Set correct reasons on actions for transaction history
+    from ..core.resolver import InstallReason
+    for action in all_actions:
+        if action.name.lower() in explicit_names:
+            action.reason = InstallReason.EXPLICIT
+        else:
+            action.reason = InstallReason.DEPENDENCY
+
     # Record transaction
+    ops = PackageOperations(db)
     cmd_line = ' '.join(['urpm', 'erase'] + args.packages)
-    transaction_id = db.begin_transaction('erase', cmd_line)
+    transaction_id = ops.begin_transaction('erase', cmd_line, all_actions)
 
     # Setup Ctrl+C handler
     interrupted = [False]
@@ -8456,7 +8465,7 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     def sigint_handler(signum, frame):
         if interrupted[0]:
             print("\n\nForce abort!")
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
@@ -8481,29 +8490,13 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     last_erase_shown = [None]
 
     try:
-        # Record packages being erased (with correct reason)
-        for action in all_actions:
-            reason = 'explicit' if action.name.lower() in explicit_names else 'dependency'
-            db.record_package(
-                transaction_id,
-                action.nevra,
-                action.name,
-                'remove',
-                reason
-            )
-
-        force = getattr(args, 'force', False)
-        test_mode = getattr(args, 'test', False)
-
-        # Build transaction queue
         from ..core.config import get_rpm_root
         rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        queue = TransactionQueue(root=rpm_root or "/")
-        queue.add_erase(
-            packages_to_erase,
-            operation_id="erase",
-            force=force,
-            test=test_mode
+        erase_opts = InstallOptions(
+            force=getattr(args, 'force', False),
+            test=getattr(args, 'test', False),
+            root=rpm_root or "/",
+            sync=getattr(args, 'sync', False),
         )
 
         # Progress callback
@@ -8512,9 +8505,9 @@ def cmd_erase(args, db: PackageDatabase) -> int:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_erase_shown[0] = name
 
-        # Execute the queue
-        sync_mode = getattr(args, 'sync', False)
-        queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
+        queue_result = ops.execute_erase(
+            packages_to_erase, options=erase_opts, progress_callback=queue_progress
+        )
 
         # Print done
         print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
@@ -8526,19 +8519,19 @@ def cmd_erase(args, db: PackageDatabase) -> int:
                     print(f"  {colors.error(err)}")
             elif queue_result.overall_error:
                 print(f"  {colors.error(queue_result.overall_error)}")
-            if not force:
+            if not erase_opts.force:
                 print(colors.dim("  Use --force to ignore dependency problems"))
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
             print(colors.warning(f"\n  Erase interrupted"))
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 130
 
         erased_count = queue_result.operations[0].count if queue_result.operations else len(packages_to_erase)
         print(colors.success(f"  {erased_count} packages erased"))
-        db.complete_transaction(transaction_id)
+        ops.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
         erased_packages = [action.name for action in all_actions]
@@ -8555,7 +8548,7 @@ def cmd_erase(args, db: PackageDatabase) -> int:
         return 0
 
     except Exception as e:
-        db.abort_transaction(transaction_id)
+        ops.abort_transaction(transaction_id)
         raise
     finally:
         signal.signal(signal.SIGINT, original_handler)
@@ -8571,7 +8564,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
         check_background_error, clear_background_error,
         InstallLock
     )
-    from ..core.transaction_queue import TransactionQueue
+    from ..core.operations import PackageOperations, InstallOptions
 
     # Check for previous background install errors
     prev_error = check_background_error()
@@ -8593,8 +8586,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
         return cmd_media_update(args, db)
 
     from ..core.resolver import Resolver, format_size, set_solver_debug
-    from ..core.download import Downloader, DownloadItem
-    from ..core.install import Installer, check_root
+    from ..core.install import check_root
     from pathlib import Path
     from ..core.rpm import is_local_rpm, read_rpm_header
     from ..core.download import verify_rpm_signature
@@ -8763,80 +8755,21 @@ def cmd_update(args, db: PackageDatabase) -> int:
         print("\n(dry run - no changes made)")
         return 0
 
-    # Build download items (only for upgrades and installs, skip local RPMs)
-    to_download = [a for a in result.actions
-                   if a.action.value in ('upgrade', 'install') and a.media_name != '@LocalRPMs']
+    # Build download items and download
+    ops = PackageOperations(db)
+    download_items, local_action_paths = ops.build_download_items(
+        result.actions, resolver, local_rpm_infos
+    )
 
-    # Collect local RPM paths for actions from @LocalRPMs
-    local_action_paths = []
-    for action in result.actions:
-        if action.media_name == '@LocalRPMs':
-            # Find the path in local_rpm_infos
-            for info in local_rpm_infos:
-                if info.get('name') == action.name:
-                    local_action_paths.append(info.get('path'))
-                    break
+    dl_results = []
+    downloaded = 0
 
-    if to_download:
-        print(f"\nDownloading {len(to_download)} packages...")
-        download_items = []
-        media_cache = {}
-        servers_cache = {}  # media_id -> list of server dicts
-
-        for action in to_download:
-            media_name = action.media_name
-            if media_name not in media_cache:
-                media = db.get_media(media_name)
-                media_cache[media_name] = media
-                # Pre-load servers for this media
-                if media and media.get('id'):
-                    servers_cache[media['id']] = db.get_servers_for_media(
-                        media['id'], enabled_only=True
-                    )
-
-            media = media_cache[media_name]
-            if not media:
-                continue
-
-            # Parse EVR
-            evr = action.evr
-            if ':' in evr:
-                evr = evr.split(':', 1)[1]
-            version, release = evr.rsplit('-', 1) if '-' in evr else (evr, '1')
-
-            # Use new schema if available, fallback to legacy URL
-            if media.get('relative_path'):
-                servers = servers_cache.get(media['id'], [])
-                servers = [dict(s) for s in servers]
-                download_items.append(DownloadItem(
-                    name=action.name,
-                    version=version,
-                    release=release,
-                    arch=action.arch,
-                    media_id=media['id'],
-                    relative_path=media['relative_path'],
-                    is_official=bool(media.get('is_official', 1)),
-                    servers=servers,
-                    media_name=media_name,
-                    size=action.filesize
-                ))
-            elif media.get('url'):
-                download_items.append(DownloadItem(
-                    name=action.name,
-                    version=version,
-                    release=release,
-                    arch=action.arch,
-                    media_url=media['url'],
-                    media_name=media_name,
-                    size=action.filesize
-                ))
-
-        # Download
-        use_peers = not getattr(args, 'no_peers', False)
-        only_peers = getattr(args, 'only_peers', False)
-        from ..core.config import get_base_dir
-        cache_dir = get_base_dir(urpm_root=getattr(args, 'urpm_root', None))
-        downloader = Downloader(cache_dir=cache_dir, use_peers=use_peers, only_peers=only_peers, db=db)
+    if download_items:
+        print(f"\nDownloading {len(download_items)} packages...")
+        dl_opts = InstallOptions(
+            use_peers=not getattr(args, 'no_peers', False),
+            only_peers=getattr(args, 'only_peers', False),
+        )
 
         # Multi-line progress display using DownloadProgressDisplay
         from . import display
@@ -8844,20 +8777,21 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
         def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
                      item_bytes=None, item_total=None, slots_status=None):
-            # Calculate global speed from all active downloads
             global_speed = 0.0
             if slots_status:
                 for slot, prog in slots_status:
                     if prog is not None:
                         global_speed += prog.get_speed()
-
             progress_display.update(
                 pkg_num, pkg_total, bytes_done, bytes_total,
                 slots_status or [], global_speed
             )
 
         download_start = time.time()
-        dl_results, downloaded, cached, peer_stats = downloader.download_all(download_items, progress)
+        dl_results, downloaded, cached, peer_stats = ops.download_packages(
+            download_items, options=dl_opts, progress_callback=progress,
+            urpm_root=getattr(args, 'urpm_root', None)
+        )
         download_elapsed = time.time() - download_start
         progress_display.finish()
 
@@ -8879,35 +8813,35 @@ def cmd_update(args, db: PackageDatabase) -> int:
         else:
             print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache in {time_str}")
 
-        # Notify urpmd to invalidate cache index (so new downloads are visible to peers)
         if downloaded > 0:
-            _notify_urpmd_cache_invalidate()
+            PackageOperations.notify_urpmd_cache_invalidate()
 
-        rpm_paths = [r.path for r in dl_results if r.success and r.path]
-    else:
-        rpm_paths = []
-
-    # Add local RPM paths
+    rpm_paths = [r.path for r in dl_results if r.success and r.path]
     rpm_paths.extend(local_action_paths)
+
+    # Set correct reasons on actions for transaction history
+    from ..core.resolver import InstallReason
+    explicit_names = set(p.lower() for p in package_names) if package_names else set()
+    for action in result.actions:
+        if action.name.lower() in explicit_names or upgrade_all:
+            action.reason = InstallReason.EXPLICIT
+        else:
+            action.reason = InstallReason.DEPENDENCY
+
+    # Include orphans in transaction recording (with 'orphan' reason)
+    all_record_actions = list(result.actions)
+    orphan_names = [a.name for a in orphans] if orphans else []
+    if orphans:
+        for o in orphans:
+            o.reason = 'orphan'
+        all_record_actions.extend(orphans)
 
     # Record transaction
     if upgrade_all:
         cmd_line = "urpm upgrade"
     else:
         cmd_line = "urpm update " + " ".join(package_names)
-    transaction_id = db.begin_transaction('upgrade', cmd_line)
-
-    # Record packages
-    explicit_names = set(p.lower() for p in package_names) if package_names else set()
-    for action in result.actions:
-        reason = 'explicit' if action.name.lower() in explicit_names or upgrade_all else 'dependency'
-        db.record_package(
-            transaction_id,
-            action.nevra,
-            action.name,
-            action.action.value,
-            reason
-        )
+    transaction_id = ops.begin_transaction('upgrade', cmd_line, all_record_actions)
 
     # Setup interrupt handler
     interrupted = [False]
@@ -8916,7 +8850,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
     def sigint_handler(signum, frame):
         if interrupted[0]:
             print("\n\nForce abort!")
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
@@ -8926,41 +8860,20 @@ def cmd_update(args, db: PackageDatabase) -> int:
     signal.signal(signal.SIGINT, sigint_handler)
 
     try:
-        # Build transaction queue with all operations
         from ..core.config import get_rpm_root
         rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        queue = TransactionQueue(root=rpm_root or "/")
+        upgrade_opts = InstallOptions(
+            verify_signatures=not getattr(args, 'nosignature', False),
+            force=getattr(args, 'force', False),
+            test=getattr(args, 'test', False),
+            root=rpm_root or "/",
+            sync=getattr(args, 'sync', False),
+        )
 
-        verify_sigs = not getattr(args, 'nosignature', False)
-        force = getattr(args, 'force', False)
-        test_mode = getattr(args, 'test', False)
-
-        # Get names of packages to remove (obsoleted by the upgrade)
         remove_names = [a.name for a in removes] if removes else []
 
-        if rpm_paths or remove_names:
-            queue.add_install(
-                rpm_paths,
-                operation_id="upgrade",
-                verify_signatures=verify_sigs,
-                force=force,
-                test=test_mode,
-                erase_names=remove_names  # Remove obsoleted packages in same transaction
-            )
-
-        orphan_names = []
-        if orphans:
-            orphan_names = [a.name for a in orphans]
-            queue.add_erase(
-                orphan_names,
-                operation_id="orphan_cleanup",
-                force=force,
-                test=test_mode,
-                background=True  # Don't wait - runs after rpmdb sync
-            )
-
-        if queue.is_empty():
-            db.complete_transaction(transaction_id)
+        if not rpm_paths and not remove_names and not orphan_names:
+            ops.complete_transaction(transaction_id)
             return 0
 
         # Check if another install is in progress
@@ -8977,27 +8890,28 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
         def queue_progress(op_id: str, name: str, current: int, total: int):
             if current_phase[0] != op_id:
-                # New phase starting
                 current_phase[0] = op_id
                 if op_id == "upgrade":
                     print(f"\nUpgrading {total} packages...")
-                # Note: orphan_cleanup runs in background, no progress display
                 last_shown[0] = None
-
             if last_shown[0] != name:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_shown[0] = name
 
-        # Execute the queue - all operations run sequentially in one process
-        sync_mode = getattr(args, 'sync', False)
-        queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
+        queue_result = ops.execute_upgrade(
+            rpm_paths,
+            erase_names=remove_names,
+            orphan_names=orphan_names or None,
+            options=upgrade_opts,
+            progress_callback=queue_progress,
+        )
 
         # Clear the line after last progress
         print(f"\r\033[K", end='')
 
         if interrupted[0]:
             print(colors.warning(f"\n  Operation interrupted"))
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 130
 
         # Process results for each operation
@@ -9006,7 +8920,6 @@ def cmd_update(args, db: PackageDatabase) -> int:
         for op_result in queue_result.operations:
             if op_result.operation_id == "upgrade":
                 if op_result.success:
-                    # Show both upgraded and removed counts
                     msg_parts = []
                     if op_result.count > 0:
                         msg_parts.append(f"{op_result.count} packages upgraded")
@@ -9023,32 +8936,19 @@ def cmd_update(args, db: PackageDatabase) -> int:
         # Orphan cleanup runs in background - just display status
         if orphan_names:
             print(colors.dim(f"  {len(orphan_names)} orphaned packages being removed in background..."))
-            # Record orphan removals now (will complete in background)
-            for a in orphans:
-                db.record_package(
-                    transaction_id,
-                    a.nevra,
-                    a.name,
-                    'remove',
-                    'orphan'
-                )
-            # Unmark from installed-through-deps.list
             resolver.unmark_packages(orphan_names)
 
         if not upgrade_success:
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 1
 
-        db.complete_transaction(transaction_id)
+        ops.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
-        # New installs during upgrade are dependencies
         new_deps = [a.name for a in result.actions if a.action.value == 'install']
         if new_deps:
             resolver.mark_as_dependency(new_deps)
-            # Debug: write what we marked as deps
             _write_debug_file(DEBUG_LAST_INSTALLED_DEPS, new_deps)
-        # Removed packages (obsoleted) should be unmarked
         removed = [a.name for a in result.actions if a.action.value == 'remove']
         if removed:
             resolver.unmark_packages(removed)
@@ -9063,7 +8963,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
         return 0
 
     except Exception as e:
-        db.abort_transaction(transaction_id)
+        ops.abort_transaction(transaction_id)
         raise
     finally:
         signal.signal(signal.SIGINT, original_handler)
