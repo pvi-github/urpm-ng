@@ -41,6 +41,7 @@ dev = [
 [project.scripts]
 urpm = "urpm.cli.main:main"
 urpmd = "urpm.daemon.daemon:main"
+urpm-dbus-service = "urpm.dbus.service:main"
 
 [project.urls]
 Homepage = "https://mageia.org"
