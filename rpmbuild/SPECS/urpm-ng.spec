@@ -195,6 +195,7 @@ fi
 if [ $1 -ge 2 ]; then
     # Upgrade: restart only if was running
     /usr/bin/systemctl try-restart urpmd.service >/dev/null 2>&1 || :
+    /usr/bin/systemctl try-restart urpm-dbus.service >/dev/null 2>&1 || :
 fi
 
 %preun
