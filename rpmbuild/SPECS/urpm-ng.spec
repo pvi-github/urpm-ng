@@ -118,6 +118,9 @@ install -Dm644 data/org.mageia.Urpm.v1.conf %{buildroot}%{_sysconfdir}/dbus-1/sy
 # Install PolicyKit policy
 install -Dm644 data/org.mageia.urpm.policy %{buildroot}%{_datadir}/polkit-1/actions/org.mageia.urpm.policy
 
+# Install AppStream configuration
+install -Dm644 data/appstream-mageia.conf %{buildroot}%{_datadir}/appstream/appstream.conf.d/mageia.conf
+
 # Install D-Bus service executable
 install -Dm755 /dev/null %{buildroot}%{_libexecdir}/urpm-dbus-service
 cat > %{buildroot}%{_libexecdir}/urpm-dbus-service << 'EOFSCRIPT'
@@ -250,5 +253,6 @@ fi
 
 %files -n pk-backend-urpm
 %{_libdir}/packagekit-backend/libpk_backend_urpm.so
+%{_datadir}/appstream/appstream.conf.d/mageia.conf
 
 %changelog
