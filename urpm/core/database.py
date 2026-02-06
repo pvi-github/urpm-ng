@@ -3985,6 +3985,11 @@ class PackageDatabase:
         # Checkpoint WAL before rebuild to start with clean state
         cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
+        # Close cursor and commit to clear any active statements
+        # This is required before _recreate_fts_table() can commit
+        cursor.close()
+        conn.commit()
+
         # Drop and recreate FTS table for clean rebuild
         # This creates the table if it doesn't exist, or recreates it for clean state
         self._recreate_fts_table()
