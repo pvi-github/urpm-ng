@@ -2336,6 +2336,15 @@ class Resolver:
                 jobs += sel.jobs(solv.Job.SOLVER_ERASE)
 
         if not_found:
+            # If ALL packages are not installed, return success with "nothing to do"
+            # (handles PackageKit calling remove twice, second time package is gone)
+            if len(not_found) == len(package_names):
+                return Resolution(
+                    success=True,
+                    actions=[],
+                    problems=[]
+                )
+            # If only some packages not found, that's an error
             return Resolution(
                 success=False,
                 actions=[],
@@ -2375,6 +2384,14 @@ class Resolver:
                     size=size,
                     filesize=pkg_info.get('filesize', 0)
                 ))
+
+        # Find orphaned dependencies if requested
+        if clean_deps and actions:
+            initial_removes = {a.name for a in actions}
+            orphan_actions = self._find_orphans_iterative(initial_removes)
+            if orphan_actions:
+                actions.extend(orphan_actions)
+                remove_size += sum(a.size or 0 for a in orphan_actions)
 
         return Resolution(
             success=True,

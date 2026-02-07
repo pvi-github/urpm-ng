@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+
+  <vendor>Mageia</vendor>
+  <vendor_url>https://www.mageia.org</vendor_url>
+  <icon_name>system-software-install</icon_name>
+
+  <action id="org.mageia.urpm.query">
+    <description>Search packages</description>
+    <description xml:lang="fr">Rechercher des paquets</description>
+    <message>Authentication is not required to search packages.</message>
+    <message xml:lang="fr">Aucune authentification requise pour rechercher des paquets.</message>
+    <defaults>
+      <allow_any>yes</allow_any>
+      <allow_inactive>yes</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.mageia.urpm.refresh">
+    <description>Refresh package metadata</description>
+    <description xml:lang="fr">Rafraîchir les métadonnées des paquets</description>
+    <message>Authentication is required to refresh package metadata.</message>
+    <message xml:lang="fr">Authentification requise pour rafraîchir les métadonnées des paquets.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.mageia.urpm.install">
+    <description>Install packages</description>
+    <description xml:lang="fr">Installer des paquets</description>
+    <message>Authentication is required to install packages.</message>
+    <message xml:lang="fr">Authentification requise pour installer des paquets.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.mageia.urpm.remove">
+    <description>Remove packages</description>
+    <description xml:lang="fr">Supprimer des paquets</description>
+    <message>Authentication is required to remove packages.</message>
+    <message xml:lang="fr">Authentification requise pour supprimer des paquets.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.mageia.urpm.upgrade">
+    <description>Upgrade system packages</description>
+    <description xml:lang="fr">Mettre à jour les paquets système</description>
+    <message>Authentication is required to upgrade system packages.</message>
+    <message xml:lang="fr">Authentification requise pour mettre à jour les paquets système.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.mageia.urpm.media-manage">
+    <description>Manage package sources</description>
+    <description xml:lang="fr">Gérer les sources de paquets</description>
+    <message>Authentication is required to manage package sources.</message>
+    <message xml:lang="fr">Authentification requise pour gérer les sources de paquets.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+</policyconfig>

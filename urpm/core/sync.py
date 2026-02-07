@@ -918,14 +918,23 @@ def sync_all_files_xml(
             return []
 
     # Filter by version and architecture if requested
-    version, arch = get_mageia_version_arch()
-    if filter_version and (version or arch):
+    if filter_version:
+        from .config import get_accepted_versions
+        import platform
+
+        # Get accepted versions (respects version-mode config)
+        accepted_versions, _, _ = get_accepted_versions(db)
+        arch = platform.machine()
+
         filtered_media = []
         for m in all_media:
             media_version = m.get('mageia_version', '')
             media_arch = m.get('architecture', '')
-            # Check version match (accept if media version is empty or matches)
-            version_ok = not media_version or not version or media_version == version
+            # Check version match using accepted_versions set
+            if accepted_versions:
+                version_ok = not media_version or media_version in accepted_versions
+            else:
+                version_ok = True  # No filtering if accepted_versions is None
             # Check arch match (accept if media arch is empty or matches)
             arch_ok = not media_arch or not arch or media_arch == arch
             if version_ok and arch_ok:

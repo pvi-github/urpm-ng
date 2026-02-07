@@ -687,6 +687,76 @@ The daemon automatically performs:
 
 When multiple machines on the same LAN run urpmd, they automatically discover each other and can share cached RPM packages, reducing bandwidth usage.
 
+---
+
+# GUI Integration (Discover / GNOME Software)
+
+urpm-ng provides a PackageKit backend allowing graphical software centers to manage packages.
+
+## Installation
+
+```bash
+urpm install pk-backend-urpm
+```
+
+This installs:
+- `libpk_backend_urpm.so` - PackageKit backend
+- D-Bus service `org.mageia.Urpm.v1` - Privileged operations
+- PolicyKit policies - Authorization prompts
+- AppStream configuration - Software catalog metadata
+
+## Supported Applications
+
+- **KDE Discover** - Full support (search, install, remove, updates)
+- **GNOME Software** - Full support (search, install, remove, updates)
+
+## How It Works
+
+```
+┌─────────────────┐
+│  Discover /     │
+│  GNOME Software │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│   PackageKit    │
+│ (libpk_backend_ │
+│    urpm.so)     │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  D-Bus Service  │
+│  + PolicyKit    │
+│ (org.mageia.    │
+│   Urpm.v1)      │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  urpm-ng core   │
+│  (Python)       │
+└─────────────────┘
+```
+
+## Troubleshooting
+
+```bash
+# Check if D-Bus service is running
+systemctl status urpm-dbus.service
+
+# Check PackageKit backend
+pkcon backend-details
+
+# Restart services after update
+systemctl restart packagekit.service
+systemctl restart urpm-dbus.service
+
+# Check D-Bus interface
+gdbus introspect --system --dest org.mageia.Urpm.v1 \
+  --object-path /org/mageia/Urpm/v1
+```
+
+---
+
 # Development & contributing
 
 ## Prerequisites

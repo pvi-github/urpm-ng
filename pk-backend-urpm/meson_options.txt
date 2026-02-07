@@ -1,0 +1,5 @@
+option('pk_backend_dir',
+  type : 'string',
+  value : '',
+  description : 'PackageKit backend directory (default: libdir/packagekit-backend)'
+)

@@ -1614,6 +1614,7 @@ Examples:
 
     cache_subparsers.add_parser('rebuild', help='Rebuild database from synthesis files')
     cache_subparsers.add_parser('stats', help='Detailed cache statistics')
+    cache_subparsers.add_parser('rebuild-fts', help='Rebuild FTS index for fast file search')
 
     # =========================================================================
     # history / h
@@ -1836,6 +1837,44 @@ Examples:
         '--show-all', '-a',
         action='store_true',
         help='Show all files (do not truncate list)'
+    )
+
+    # =========================================================================
+    # appstream
+    # =========================================================================
+    appstream_parser = subparsers.add_parser(
+        'appstream',
+        help='Manage AppStream metadata for software centers (Discover, GNOME Software)'
+    )
+    appstream_subparsers = appstream_parser.add_subparsers(
+        dest='appstream_command',
+        metavar='<subcommand>'
+    )
+
+    # appstream generate
+    appstream_generate = appstream_subparsers.add_parser(
+        'generate', aliases=['gen'],
+        help='Generate AppStream catalog from package database'
+    )
+    appstream_generate.add_argument(
+        '--output', '-o',
+        help='Output file (default: /var/cache/swcatalog/xml/mageia-{version}.xml.gz)'
+    )
+    appstream_generate.add_argument(
+        '--no-compress',
+        action='store_true',
+        help='Do not gzip the output file'
+    )
+
+    # appstream init-distro
+    appstream_init = appstream_subparsers.add_parser(
+        'init-distro',
+        help='Create OS metainfo file for AppStream (required for Discover/GNOME Software)'
+    )
+    appstream_init.add_argument(
+        '--force', '-f',
+        action='store_true',
+        help='Overwrite existing metainfo file'
     )
 
     return parser
@@ -3621,8 +3660,11 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
 
             # Track status for each media (same pattern as synthesis sync)
             # Filter by version/arch like sync_all_files_xml does
-            from ..core.sync import get_mageia_version_arch
-            version, arch = get_mageia_version_arch()
+            from ..core.config import get_accepted_versions
+            import platform
+
+            accepted_versions, _, _ = get_accepted_versions(db)
+            arch = platform.machine()
 
             files_status = {}
             files_lock = threading.Lock()
@@ -3633,7 +3675,10 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
                 # Same filter as sync_all_files_xml
                 media_version = m.get('mageia_version', '')
                 media_arch = m.get('architecture', '')
-                version_ok = not media_version or not version or media_version == version
+                if accepted_versions:
+                    version_ok = not media_version or media_version in accepted_versions
+                else:
+                    version_ok = True
                 arch_ok = not media_arch or not arch or media_arch == arch
                 if version_ok and arch_ok:
                     files_media_list.append(m['name'])
@@ -5886,6 +5931,75 @@ def cmd_cache_stats(args, db: PackageDatabase) -> int:
     print(f"  Package records: {history_pkgs}")
 
     print()
+    return 0
+
+
+def cmd_cache_rebuild_fts(args, db: PackageDatabase) -> int:
+    """Handle cache rebuild-fts command - rebuild FTS index for file search."""
+    import time
+    import urllib.request
+    import json
+
+    # Check current FTS state
+    stats = db.get_fts_stats()
+
+    print(f"\nFTS Index Status:")
+    print(f"  Available: {'yes' if stats['available'] else 'no'}")
+    print(f"  Current:   {'yes' if stats['current'] else 'no'}")
+    print(f"  Files in package_files: {stats['pf_count']:,}")
+    print(f"  Files in FTS index:     {stats['fts_count']:,}")
+
+    if stats['last_rebuild']:
+        from datetime import datetime
+        rebuild_time = datetime.fromtimestamp(stats['last_rebuild'])
+        print(f"  Last rebuild: {rebuild_time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    print(f"\nRebuilding FTS index...", flush=True)
+
+    # Try to use urpmd API if running (avoids database lock issues)
+    from ..core.config import DEV_PORT, PROD_PORT, is_dev_mode
+    port = DEV_PORT if is_dev_mode() else PROD_PORT
+
+    try:
+        req = urllib.request.Request(
+            f'http://localhost:{port}/api/rebuild-fts',
+            data=b'{}',
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            result = json.loads(resp.read().decode())
+
+        if result.get('success'):
+            print(f"\nDone: {result.get('indexed', 0):,} files indexed in {result.get('elapsed', 0)}s")
+            print("  (rebuilt via urpmd)")
+            return 0
+        elif result.get('error'):
+            print(f"Error from urpmd: {result['error']}")
+            return 1
+    except urllib.error.URLError:
+        # urpmd not running, do it directly
+        pass
+    except Exception as e:
+        # urpmd error, try direct rebuild
+        print(f"  urpmd unavailable ({e}), rebuilding directly...")
+
+    # Direct rebuild (urpmd not running)
+    start_time = time.time()
+    last_progress = [0]
+
+    def progress_callback(current: int, total: int):
+        pct = int(current * 100 / total) if total > 0 else 0
+        # Show progress every 10%
+        if pct >= last_progress[0] + 10 or current == total:
+            print(f"  {pct}% ({current:,} / {total:,} files)", flush=True)
+            last_progress[0] = (pct // 10) * 10
+
+    indexed = db.rebuild_fts_index(progress_callback=progress_callback)
+
+    elapsed = time.time() - start_time
+    print(f"\nDone: {indexed:,} files indexed in {elapsed:.1f}s")
+
     return 0
 
 
@@ -10532,6 +10646,258 @@ def cmd_peer(args, db: PackageDatabase) -> int:
         return 1
 
 
+def cmd_appstream(args, db: PackageDatabase) -> int:
+    """Handle appstream command - generate AppStream catalog."""
+    import gzip
+    import xml.etree.ElementTree as ET
+    from pathlib import Path
+    from ..core.config import get_system_version
+    from . import colors
+
+    if args.appstream_command in ('generate', 'gen', None):
+        # Get system version for catalog naming
+        version = get_system_version() or 'unknown'
+
+        # Determine output path (handle missing args when called without subcommand)
+        output_arg = getattr(args, 'output', None)
+        no_compress = getattr(args, 'no_compress', False)
+        if output_arg:
+            output_path = Path(output_arg)
+        else:
+            catalog_dir = Path('/var/cache/swcatalog/xml')
+            catalog_dir.mkdir(parents=True, exist_ok=True)
+            if no_compress:
+                output_path = catalog_dir / f'mageia-{version}.xml'
+            else:
+                output_path = catalog_dir / f'mageia-{version}.xml.gz'
+
+        print(f"Generating AppStream catalog for Mageia {version}...")
+        print(f"Output: {output_path}")
+
+        # RPM groups that indicate desktop applications
+        DESKTOP_GROUPS = {
+            # Games
+            'games', 'games/arcade', 'games/boards', 'games/cards', 'games/puzzles',
+            'games/sports', 'games/strategy', 'games/adventure', 'games/rpg',
+            # Graphical desktop applications
+            'graphical desktop/gnome', 'graphical desktop/kde', 'graphical desktop/xfce',
+            'graphical desktop/other',
+            # Office & productivity
+            'office', 'office/suite', 'office/wordprocessor', 'office/spreadsheet',
+            'office/presentation', 'office/database', 'office/finance',
+            # Graphics
+            'graphics', 'graphics/viewer', 'graphics/editor', 'graphics/3d',
+            'graphics/photography', 'graphics/scanning',
+            # Multimedia
+            'video', 'video/players', 'video/editors',
+            'sound', 'sound/players', 'sound/editors', 'sound/mixers',
+            # Networking / Internet
+            'networking/www', 'networking/mail', 'networking/chat',
+            'networking/instant messaging', 'networking/news', 'networking/ftp',
+            'networking/file transfer', 'networking/remote access',
+            # Education & Science
+            'education', 'sciences', 'sciences/astronomy', 'sciences/chemistry',
+            'sciences/mathematics', 'sciences/physics',
+            # Development (IDEs only)
+            'development/ide',
+            # Accessibility
+            'accessibility',
+            # Archiving
+            'archiving/compression',
+            # Editors
+            'editors',
+            # Emulators
+            'emulators',
+            # File tools
+            'file tools',
+            # Terminals
+            'terminals',
+        }
+
+        # Map RPM groups to freedesktop categories
+        GROUP_TO_CATEGORY = {
+            'games': 'Game', 'games/arcade': 'Game', 'games/boards': 'Game',
+            'games/cards': 'Game', 'games/puzzles': 'Game', 'games/sports': 'Game',
+            'games/strategy': 'Game', 'games/adventure': 'Game', 'games/rpg': 'Game',
+            'office': 'Office', 'office/suite': 'Office', 'office/wordprocessor': 'Office',
+            'office/spreadsheet': 'Office', 'office/presentation': 'Office',
+            'office/database': 'Office', 'office/finance': 'Office',
+            'graphics': 'Graphics', 'graphics/viewer': 'Graphics', 'graphics/editor': 'Graphics',
+            'graphics/3d': 'Graphics', 'graphics/photography': 'Graphics', 'graphics/scanning': 'Graphics',
+            'video': 'AudioVideo', 'video/players': 'AudioVideo', 'video/editors': 'AudioVideo',
+            'sound': 'AudioVideo', 'sound/players': 'AudioVideo', 'sound/editors': 'AudioVideo',
+            'sound/mixers': 'AudioVideo',
+            'networking/www': 'Network', 'networking/mail': 'Network', 'networking/chat': 'Network',
+            'networking/instant messaging': 'Network', 'networking/news': 'Network',
+            'networking/ftp': 'Network', 'networking/file transfer': 'Network',
+            'networking/remote access': 'Network',
+            'education': 'Education', 'sciences': 'Science', 'sciences/astronomy': 'Science',
+            'sciences/chemistry': 'Science', 'sciences/mathematics': 'Science',
+            'sciences/physics': 'Science',
+            'development/ide': 'Development',
+            'accessibility': 'Accessibility',
+            'archiving/compression': 'Utility',
+            'editors': 'TextEditor',
+            'emulators': 'Game',
+            'file tools': 'Utility',
+            'terminals': 'TerminalEmulator',
+            'graphical desktop/gnome': 'GNOME', 'graphical desktop/kde': 'KDE',
+            'graphical desktop/xfce': 'XFCE', 'graphical desktop/other': 'Utility',
+        }
+
+        # Create root element
+        root = ET.Element('components')
+        root.set('version', '0.14')
+        root.set('origin', f'mageia-{version}')
+
+        conn = db._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT DISTINCT
+                p.name, p.version, p.release, p.arch,
+                p.summary, p.description, p.url, p.license,
+                p.size, p.group_name
+            FROM packages p
+            JOIN media m ON p.media_id = m.id
+            WHERE m.enabled = 1
+            ORDER BY p.name
+        ''')
+
+        pkg_count = 0
+        skipped = 0
+        for row in cursor.fetchall():
+            name, ver, release, arch, summary, description, url, license_, size, group_name = row
+
+            # Skip non-application packages
+            if name.endswith(('-debug', '-debuginfo', '-devel', '-static', '-doc', '-docs')):
+                skipped += 1
+                continue
+            if name.startswith(('lib', 'perl-', 'python-', 'python3-', 'ruby-', 'golang-', 'rust-')):
+                skipped += 1
+                continue
+            if name.endswith(('-libs', '-common', '-data', '-lang', '-l10n', '-i18n')):
+                skipped += 1
+                continue
+
+            # Filter by group - only desktop applications
+            group_lower = (group_name or '').lower()
+            if not any(group_lower.startswith(g) or group_lower == g for g in DESKTOP_GROUPS):
+                skipped += 1
+                continue
+
+            # Create component as desktop-application
+            component = ET.SubElement(root, 'component')
+            component.set('type', 'desktop-application')
+
+            # Desktop ID (AppStream spec requires .desktop suffix)
+            desktop_id = f'{name}.desktop'
+            ET.SubElement(component, 'id').text = desktop_id
+            ET.SubElement(component, 'pkgname').text = name
+            ET.SubElement(component, 'name').text = name
+            ET.SubElement(component, 'summary').text = summary or f'{name} application'
+
+            # Launchable (desktop file reference)
+            launchable = ET.SubElement(component, 'launchable')
+            launchable.set('type', 'desktop-id')
+            launchable.text = desktop_id
+
+            if description:
+                desc_elem = ET.SubElement(component, 'description')
+                p_elem = ET.SubElement(desc_elem, 'p')
+                p_elem.text = description[:500]
+
+            if url:
+                url_elem = ET.SubElement(component, 'url')
+                url_elem.set('type', 'homepage')
+                url_elem.text = url
+
+            if license_:
+                ET.SubElement(component, 'project_license').text = license_
+
+            # Category from group mapping
+            categories = ET.SubElement(component, 'categories')
+            category = GROUP_TO_CATEGORY.get(group_lower, 'Utility')
+            ET.SubElement(categories, 'category').text = category
+
+            # Icon - try package name, fallback to stock
+            icon = ET.SubElement(component, 'icon')
+            icon.set('type', 'stock')
+            icon.text = name  # Many apps have icon named after package
+
+            pkg_count += 1
+
+        print(f"Generated {pkg_count} desktop application components")
+        print(f"Skipped {skipped} non-application packages")
+
+        # Write output
+        tree = ET.ElementTree(root)
+
+        # Add XML declaration
+        xml_str = ET.tostring(root, encoding='unicode')
+        xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_str
+
+        if no_compress or not str(output_path).endswith('.gz'):
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(xml_str)
+        else:
+            with gzip.open(output_path, 'wt', encoding='utf-8') as f:
+                f.write(xml_str)
+
+        print(colors.ok(f"AppStream catalog generated: {output_path}"))
+        print("\nTo refresh the AppStream cache, run:")
+        print("  sudo appstreamcli refresh-cache --force")
+
+        return 0
+
+    elif args.appstream_command == 'init-distro':
+        # Create OS metainfo file for AppStream
+        metainfo_dir = Path('/usr/share/metainfo')
+        metainfo_file = metainfo_dir / 'org.mageia.mageia.metainfo.xml'
+
+        if metainfo_file.exists() and not getattr(args, 'force', False):
+            print(f"OS metainfo file already exists: {metainfo_file}")
+            print("Use --force to overwrite")
+            return 1
+
+        # Get system version
+        version = get_system_version() or 'unknown'
+
+        metainfo_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<component type="operating-system">
+  <id>org.mageia.mageia</id>
+  <name>Mageia</name>
+  <summary>Mageia Linux Distribution</summary>
+  <description>
+    <p>Mageia is a GNU/Linux-based, Free Software operating system.
+    It is a community project, supported by a nonprofit organization
+    of elected contributors.</p>
+  </description>
+  <url type="homepage">https://www.mageia.org</url>
+  <metadata_license>CC0-1.0</metadata_license>
+  <releases>
+    <release version="{version}" />
+  </releases>
+</component>
+'''
+        try:
+            metainfo_dir.mkdir(parents=True, exist_ok=True)
+            with open(metainfo_file, 'w', encoding='utf-8') as f:
+                f.write(metainfo_content)
+            print(colors.ok(f"OS metainfo file created: {metainfo_file}"))
+            return 0
+        except PermissionError:
+            print(colors.error(f"Permission denied. Run with sudo."))
+            return 1
+        except Exception as e:
+            print(colors.error(f"Failed to create metainfo: {e}"))
+            return 1
+
+    else:
+        print(f"Unknown appstream command: {args.appstream_command}")
+        return 1
+
+
 def cmd_undo(args, db: PackageDatabase) -> int:
     """Handle undo command - undo last or specific transaction."""
     import signal
@@ -13682,12 +14048,14 @@ def main(argv=None) -> int:
                 return cmd_not_implemented(args, db)
 
         elif args.command in ('cache', 'c'):
-            if args.cache_command == 'info':
+            if args.cache_command == 'info' or args.cache_command is None:
                 return cmd_cache_info(args, db)
             elif args.cache_command == 'clean':
                 return cmd_cache_clean(args, db)
             elif args.cache_command == 'rebuild':
                 return cmd_cache_rebuild(args, db)
+            elif args.cache_command == 'rebuild-fts':
+                return cmd_cache_rebuild_fts(args, db)
             elif args.cache_command == 'stats':
                 return cmd_cache_stats(args, db)
             else:
@@ -13760,6 +14128,9 @@ def main(argv=None) -> int:
 
         elif args.command == 'peer':
             return cmd_peer(args, db)
+
+        elif args.command == 'appstream':
+            return cmd_appstream(args, db)
 
         else:
             return cmd_not_implemented(args, db)

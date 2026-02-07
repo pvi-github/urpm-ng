@@ -1,0 +1,17 @@
+[Unit]
+Description=urpm Package Management D-Bus Service
+Documentation=man:urpm(1)
+After=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.mageia.Urpm.v1
+ExecStart=/usr/libexec/urpm-dbus-service
+
+# Hardening (limited - package manager needs write access to /usr, /etc, /var)
+PrivateTmp=no
+ProtectHome=yes
+NoNewPrivileges=no
+
+[Install]
+WantedBy=multi-user.target

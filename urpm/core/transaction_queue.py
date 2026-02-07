@@ -889,19 +889,18 @@ queue._child_process_standalone()
                 _log_background(f"Install complete: {total} packages")
 
         # Set problem filters
-        prob_filter = 0
+        # Always skip disk space check - RPM's check can be unreliable
+        # (reports false positives with plenty of space available)
+        # Always allow replacing same package - handles PackageKit double-calls
+        # where second call arrives before first transaction completes
+        prob_filter = rpm.RPMPROB_FILTER_DISKSPACE | rpm.RPMPROB_FILTER_REPLACEPKG
         if op.force:
             prob_filter |= (
-                rpm.RPMPROB_FILTER_REPLACEPKG |
                 rpm.RPMPROB_FILTER_OLDPACKAGE |
                 rpm.RPMPROB_FILTER_REPLACENEWFILES |
                 rpm.RPMPROB_FILTER_REPLACEOLDFILES
             )
-        elif op.reinstall:
-            # Reinstall only needs REPLACEPKG to allow same version
-            prob_filter |= rpm.RPMPROB_FILTER_REPLACEPKG
-        if prob_filter:
-            ts.setProbFilter(prob_filter)
+        ts.setProbFilter(prob_filter)
 
         # Set transaction flags (noscripts for chroot/container builds)
         if op.noscripts:
