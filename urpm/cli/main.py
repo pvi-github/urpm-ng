@@ -24,6 +24,9 @@ from ..core.database import PackageDatabase
 
 # Debug flag for preferences matching - set to True to enable debug output
 DEBUG_PREFERENCES = False
+DEBUG_MKIMAGE = False
+DEBUG_BUILD = True
+DEBUG_INSTALL = False
 
 
 def check_dependencies() -> list:
@@ -377,6 +380,11 @@ Examples:
         help='Skip GPG signature verification (not recommended)'
     )
     install_parser.add_argument(
+        '--noscripts',
+        action='store_true',
+        help='Skip pre/post install scripts (for chroot/container builds)'
+    )
+    install_parser.add_argument(
         '--no-peers',
         action='store_true',
         help='Disable P2P download from LAN peers'
@@ -521,7 +529,7 @@ Examples:
     )
     mkimage_parser.add_argument(
         '--workdir', '-w',
-        help='Working directory for chroot (default: /tmp)'
+        help='Working directory for chroot (default: ~/.cache/urpm/mkimage)'
     )
 
     # =========================================================================
@@ -2106,6 +2114,7 @@ def cmd_search(args, db: PackageDatabase) -> int:
     """Handle search command."""
     import re
     from . import colors
+    from ..core.operations import PackageOperations
 
     # Handle --unavailable: list installed packages not in any media
     if getattr(args, 'unavailable', False):
@@ -2117,7 +2126,8 @@ def cmd_search(args, db: PackageDatabase) -> int:
         print(colors.dim("  Use --unavailable to list packages not in any media"))
         return 1
 
-    results = db.search(args.pattern, search_provides=True)
+    ops = PackageOperations(db)
+    results = ops.search_packages(args.pattern, search_provides=True)
 
     if not results:
         print(colors.warning(f"No packages found for '{args.pattern}'"))
@@ -2216,8 +2226,10 @@ def cmd_search(args, db: PackageDatabase) -> int:
 def cmd_show(args, db: PackageDatabase) -> int:
     """Handle show/info command."""
     from . import colors
+    from ..core.operations import PackageOperations
 
-    pkg = db.get_package_smart(args.package)
+    ops = PackageOperations(db)
+    pkg = ops.get_package_info(args.package)
 
     if not pkg:
         print(colors.error(f"Package '{args.package}' not found"))
@@ -2753,10 +2765,16 @@ def cmd_init(args, db: PackageDatabase) -> int:
             'dev', 'dev/pts', 'dev/shm',
             'proc', 'sys',
             'etc', 'var/tmp', 'var/lib/rpm',
-            'run', 'tmp'
+            'run', 'tmp',
+            # UsrMerge target directories
+            'usr/bin', 'usr/sbin', 'usr/lib', 'usr/lib64'
         ]
         for d in essential_dirs:
             (root_path / d).mkdir(parents=True, exist_ok=True)
+
+        # Note: UsrMerge symlinks (/bin -> usr/bin, etc.) are created by
+        # the filesystem package. Don't create them here or it will conflict.
+        # We only create the target directories (usr/bin, etc.) above.
 
         # Set proper permissions for /tmp and /var/tmp
         (root_path / 'tmp').chmod(0o1777)
@@ -2913,6 +2931,38 @@ def cmd_init(args, db: PackageDatabase) -> int:
             try:
                 import shutil
                 shutil.copy2(str(resolv_src), str(resolv_dst))
+            except (OSError, IOError):
+                pass
+
+        # Create minimal /etc/passwd and /etc/group for RPM
+        # These are needed before the first package installation
+        passwd_file = root_path / 'etc/passwd'
+        if not passwd_file.exists():
+            try:
+                passwd_file.write_text("root:x:0:0:root:/root:/bin/bash\n")
+            except (OSError, IOError):
+                pass
+
+        group_file = root_path / 'etc/group'
+        if not group_file.exists():
+            try:
+                # Minimal groups needed by common packages
+                group_file.write_text(
+                    "root:x:0:\n"
+                    "bin:x:1:\n"
+                    "daemon:x:2:\n"
+                    "sys:x:3:\n"
+                    "tty:x:5:\n"
+                    "disk:x:6:\n"
+                    "wheel:x:10:\n"
+                    "mail:x:12:\n"
+                    "man:x:15:\n"
+                    "utmp:x:22:\n"
+                    "audio:x:63:\n"
+                    "video:x:39:\n"
+                    "users:x:100:\n"
+                    "nobody:x:65534:\n"
+                )
             except (OSError, IOError):
                 pass
 
@@ -6356,12 +6406,11 @@ def cmd_install(args, db: PackageDatabase) -> int:
     import signal
     import solv
     from ..core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction, TransactionType
-    from ..core.download import Downloader, DownloadItem
+    from ..core.operations import PackageOperations, InstallOptions
     from ..core.background_install import (
         check_background_error, clear_background_error,
         InstallLock
     )
-    from ..core.transaction_queue import TransactionQueue
     from . import colors
 
     # Set up solver debug if requested
@@ -7002,90 +7051,10 @@ def cmd_install(args, db: PackageDatabase) -> int:
         return 0
 
     # Build download items (skip local RPMs - we already have them)
-    download_items = []
-    local_action_paths = []  # Paths for local RPMs from resolver
-    media_cache = {}
-    servers_cache = {}  # media_id -> list of server dicts
-
-    for action in result.actions:
-        # Skip REMOVE actions - they don't need download
-        if action.action == TransactionType.REMOVE:
-            continue
-
-        media_name = action.media_name
-
-        # Local RPMs don't need download - get path from resolver metadata or local_rpm_infos
-        if media_name == '@LocalRPMs':
-            pkg_info = resolver._solvable_to_pkg.get(action.nevra)
-            if not pkg_info:
-                # Find by name+evr+arch match in resolver
-                for sid, info in resolver._solvable_to_pkg.items():
-                    if (info.get('name') == action.name and
-                        info.get('evr') == action.evr and
-                        info.get('arch') == action.arch and
-                        info.get('media_name') == '@LocalRPMs'):
-                        pkg_info = info
-                        break
-            if not pkg_info:
-                # Fallback: find in local_rpm_infos (for --reinstall actions)
-                for info in local_rpm_infos:
-                    if info.get('name') == action.name:
-                        pkg_info = info
-                        break
-            if pkg_info and pkg_info.get('local_path', pkg_info.get('path')):
-                local_action_paths.append(pkg_info.get('local_path') or pkg_info.get('path'))
-            continue
-
-        if media_name not in media_cache:
-            media = db.get_media(media_name)
-            media_cache[media_name] = media
-            # Pre-load servers for this media (avoid SQLite threading issues)
-            if media and media.get('id'):
-                servers_cache[media['id']] = db.get_servers_for_media(
-                    media['id'], enabled_only=True
-                )
-
-        media = media_cache[media_name]
-        if not media:
-            print(f"  Warning: media '{media_name}' not found")
-            continue
-
-        # Parse EVR - remove epoch for filename
-        evr = action.evr
-        if ':' in evr:
-            evr = evr.split(':', 1)[1]
-        version, release = evr.rsplit('-', 1) if '-' in evr else (evr, '1')
-
-        # Use new schema if available, fallback to legacy URL
-        if media.get('relative_path'):
-            servers = servers_cache.get(media['id'], [])
-            # Convert sqlite3.Row to dict for thread safety
-            servers = [dict(s) for s in servers]
-            download_items.append(DownloadItem(
-                name=action.name,
-                version=version,
-                release=release,
-                arch=action.arch,
-                media_id=media['id'],
-                relative_path=media['relative_path'],
-                is_official=bool(media.get('is_official', 1)),
-                servers=servers,
-                media_name=media_name,
-                size=action.size
-            ))
-        elif media.get('url'):
-            # Legacy schema
-            download_items.append(DownloadItem(
-                name=action.name,
-                version=version,
-                release=release,
-                arch=action.arch,
-                media_url=media['url'],
-                media_name=media_name,
-                size=action.size
-            ))
-        else:
-            print(f"  Warning: no URL or servers for media '{media_name}'")
+    ops = PackageOperations(db)
+    download_items, local_action_paths = ops.build_download_items(
+        result.actions, resolver, local_rpm_infos
+    )
 
     # Download remote packages (if any)
     dl_results = []
@@ -7095,11 +7064,10 @@ def cmd_install(args, db: PackageDatabase) -> int:
 
     if download_items:
         print(colors.info("\nDownloading packages..."))
-        use_peers = not getattr(args, 'no_peers', False)
-        only_peers = getattr(args, 'only_peers', False)
-        from ..core.config import get_base_dir
-        cache_dir = get_base_dir(urpm_root=getattr(args, 'urpm_root', None))
-        downloader = Downloader(cache_dir=cache_dir, use_peers=use_peers, only_peers=only_peers, db=db)
+        dl_opts = InstallOptions(
+            use_peers=not getattr(args, 'no_peers', False),
+            only_peers=getattr(args, 'only_peers', False),
+        )
 
         # Multi-line progress display using DownloadProgressDisplay
         from . import display
@@ -7120,7 +7088,10 @@ def cmd_install(args, db: PackageDatabase) -> int:
             )
 
         download_start = time.time()
-        dl_results, downloaded, cached, peer_stats = downloader.download_all(download_items, progress)
+        dl_results, downloaded, cached, peer_stats = ops.download_packages(
+            download_items, options=dl_opts, progress_callback=progress,
+            urpm_root=getattr(args, 'urpm_root', None)
+        )
         download_elapsed = time.time() - download_start
         progress_display.finish()
 
@@ -7144,7 +7115,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
 
         # Notify urpmd to invalidate cache index (so new downloads are visible to peers)
         if downloaded > 0:
-            _notify_urpmd_cache_invalidate()
+            PackageOperations.notify_urpmd_cache_invalidate()
 
     # Handle --download-only mode
     download_only = getattr(args, 'download_only', False)
@@ -7156,25 +7127,19 @@ def cmd_install(args, db: PackageDatabase) -> int:
     rpm_paths = [r.path for r in dl_results if r.success and r.path]
     rpm_paths.extend(local_action_paths)  # Add local RPM files
 
+    # DEBUG: show what packages are in rpm_paths
+    if DEBUG_INSTALL:
+        print(colors.dim(f"  DEBUG rpm_paths ({len(rpm_paths)}):"))
+        for rp in rpm_paths:
+            print(colors.dim(f"    {Path(rp).name}"))
+
     if not rpm_paths:
         print("No packages to install")
         return 0
 
     # Begin transaction for history
     cmd_line = "urpm install " + " ".join(args.packages)
-    transaction_id = db.begin_transaction('install', cmd_line)
-
-    # Record all packages in transaction
-    for action in result.actions:
-        # Use the install reason from the action
-        reason = action.reason.value  # 'explicit', 'dependency', 'recommended', 'suggested'
-        db.record_package(
-            transaction_id,
-            action.nevra,
-            action.name,
-            action.action.value,
-            reason
-        )
+    transaction_id = ops.begin_transaction('install', cmd_line, result.actions)
 
     # Setup Ctrl+C handler
     interrupted = [False]
@@ -7184,7 +7149,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
         if interrupted[0]:
             # Second Ctrl+C - force abort
             print("\n\nForce abort!")
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
@@ -7213,25 +7178,17 @@ def cmd_install(args, db: PackageDatabase) -> int:
     last_shown = [None]
 
     try:
-        verify_sigs = not getattr(args, 'nosignature', False)
-        force = getattr(args, 'force', False)
-        test_mode = getattr(args, 'test', False)
-        reinstall_mode = getattr(args, 'reinstall', False)
-
-        # Build transaction queue
-        # Get root for chroot installation
         from ..core.config import get_rpm_root
         rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        # Use fakeroot for non-root chroot installs (e.g., mkimage)
-        use_fakeroot = getattr(args, 'allow_no_root', False) and rpm_root
-        queue = TransactionQueue(root=rpm_root or "/", use_fakeroot=use_fakeroot)
-        queue.add_install(
-            rpm_paths,
-            operation_id="install",
-            verify_signatures=verify_sigs,
-            force=force,
-            test=test_mode,
-            reinstall=reinstall_mode
+        install_opts = InstallOptions(
+            verify_signatures=not getattr(args, 'nosignature', False),
+            force=getattr(args, 'force', False),
+            test=getattr(args, 'test', False),
+            reinstall=getattr(args, 'reinstall', False),
+            noscripts=getattr(args, 'noscripts', False),
+            root=rpm_root or "/",
+            use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
+            sync=getattr(args, 'sync', False),
         )
 
         # Progress callback
@@ -7240,9 +7197,9 @@ def cmd_install(args, db: PackageDatabase) -> int:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_shown[0] = name
 
-        # Execute the queue
-        sync_mode = getattr(args, 'sync', False)
-        queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
+        queue_result = ops.execute_install(
+            rpm_paths, options=install_opts, progress_callback=queue_progress
+        )
 
         # Print done
         print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
@@ -7254,12 +7211,12 @@ def cmd_install(args, db: PackageDatabase) -> int:
                     print(f"  {colors.error(err)}")
             elif queue_result.overall_error:
                 print(f"  {colors.error(queue_result.overall_error)}")
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
             print(colors.warning(f"\n  Installation interrupted"))
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 130
 
         installed_count = queue_result.operations[0].count if queue_result.operations else len(rpm_paths)
@@ -7267,20 +7224,14 @@ def cmd_install(args, db: PackageDatabase) -> int:
             print(colors.success(f"  {installed_count} packages installed, {len(remove_pkgs)} removed"))
         else:
             print(colors.success(f"  {installed_count} packages installed"))
-        db.complete_transaction(transaction_id)
+        ops.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
-        # Non-explicit packages (deps, recommends, suggests) go in the deps list
+        ops.mark_dependencies(resolver, result.actions)
         dep_packages = [a.name for a in result.actions
                         if a.reason != InstallReason.EXPLICIT]
-        explicit_packages = [a.name for a in result.actions
-                            if a.reason == InstallReason.EXPLICIT]
         if dep_packages:
-            resolver.mark_as_dependency(dep_packages)
-            # Debug: write what we marked as deps
             _write_debug_file(DEBUG_LAST_INSTALLED_DEPS, dep_packages)
-        if explicit_packages:
-            resolver.mark_as_explicit(explicit_packages)
 
         # Debug: copy the installed-through-deps.list for inspection
         _copy_installed_deps_list()
@@ -7288,7 +7239,7 @@ def cmd_install(args, db: PackageDatabase) -> int:
         return 0
 
     except Exception as e:
-        db.abort_transaction(transaction_id)
+        ops.abort_transaction(transaction_id)
         raise
     finally:
         signal.signal(signal.SIGINT, original_handler)
@@ -7590,6 +7541,7 @@ def cmd_download(args, db: PackageDatabase) -> int:
 def cmd_mkimage(args, db: PackageDatabase) -> int:
     """Create a minimal Docker/Podman image for RPM builds."""
     import argparse
+    import os
     import platform
     import shutil
     import tempfile
@@ -7624,7 +7576,12 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
 
     # Base packages for build image
     packages = [
+        'filesystem',         # Must be first - creates base directory structure
         'basesystem-minimal',
+        'coreutils',          # Essential: ls, cp, mv, cat, etc.
+        'grep',               # Essential: used by bash profile scripts
+        'sed',                # Essential: used by bash profile scripts
+        'findutils',          # Essential: find, xargs
         'vim-minimal',
         'locales',
         'locales-en',
@@ -7632,6 +7589,7 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
         'rpm',
         'curl',
         'wget',
+        'ca-certificates',    # SSL certificates for pip/https
         'cronie',
         'urpmi',
     ]
@@ -7646,8 +7604,28 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
     print(f"  Architecture: {arch}")
     print(f"  Packages: {len(packages)}")
 
-    # Create temporary directory for chroot
+    # Determine working directory (default: ~/.cache/urpm/mkimage)
     workdir = getattr(args, 'workdir', None)
+    if not workdir:
+        # Use XDG cache directory as default (better than /tmp for large builds)
+        xdg_cache = os.environ.get('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
+        workdir = os.path.join(xdg_cache, 'urpm', 'mkimage')
+        os.makedirs(workdir, exist_ok=True)
+
+    # Check available disk space (require at least 2 GB)
+    MIN_SPACE_GB = 2
+    try:
+        stat = os.statvfs(workdir)
+        free_gb = (stat.f_bavail * stat.f_frsize) / (1024 ** 3)
+        if free_gb < MIN_SPACE_GB:
+            print(colors.error(f"Insufficient disk space in {workdir}"))
+            print(colors.error(f"  Available: {free_gb:.1f} GB, required: {MIN_SPACE_GB} GB"))
+            print(colors.dim(f"  Use --workdir to specify a different location"))
+            return 1
+    except OSError as e:
+        print(colors.warning(f"Could not check disk space: {e}"))
+
+    # Create temporary directory for chroot
     tmpdir = tempfile.mkdtemp(prefix='urpm-mkimage-', dir=workdir)
     print(f"\nBuilding chroot in {tmpdir}...")
 
@@ -7676,17 +7654,108 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
             return ret
 
         # 2. Install packages
-        print("\n[2/5] Installing packages...")
-        install_args = argparse.Namespace(
+        # Use noscripts when not root (user namespace) - scriptlets often fail
+        use_noscripts = os.geteuid() != 0
+
+        # Install filesystem FIRST in separate transaction
+        # This ensures /bin -> usr/bin symlinks are created before other packages
+        if use_noscripts:
+            print("\n[2/5] Installing filesystem (--noscripts)...")
+        else:
+            print("\n[2/5] Installing filesystem...")
+        fs_args = argparse.Namespace(
             urpm_root=tmpdir,
             root=tmpdir,
-            packages=packages,
+            packages=['filesystem'],
             auto=True,
             without_recommends=True,
             with_suggests=False,
             download_only=False,
             nodeps=False,
             nosignature=False,
+            noscripts=use_noscripts,
+            force=False,
+            reinstall=False,
+            debug=None,
+            watched=None,
+            prefer=None,
+            all=False,
+            test=False,
+            sync=True,
+            allow_no_root=True,
+        )
+        ret = cmd_install(fs_args, chroot_db)
+        if ret != 0:
+            print(colors.error("Failed to install filesystem"))
+            return ret
+
+        # DEBUG: Verify filesystem is actually installed
+        import subprocess
+        rpm_db_dir = Path(tmpdir) / 'var/lib/rpm'
+        if DEBUG_MKIMAGE:
+            print(colors.dim(f"  DEBUG: RPM db dir: {rpm_db_dir}"))
+        if rpm_db_dir.exists():
+            db_files = list(rpm_db_dir.iterdir())
+            if DEBUG_MKIMAGE:
+                print(colors.dim(f"  DEBUG: RPM db files: {[f.name for f in db_files]}"))
+            # Check if rpmdb.sqlite exists and has content
+            rpmdb_sqlite = rpm_db_dir / 'rpmdb.sqlite'
+            if rpmdb_sqlite.exists():
+                if DEBUG_MKIMAGE:
+                    print(colors.dim(f"  DEBUG: rpmdb.sqlite size: {rpmdb_sqlite.stat().st_size} bytes"))
+        else:
+            if DEBUG_MKIMAGE:
+                print(colors.error(f"  DEBUG: RPM db dir does not exist!"))
+
+        check = subprocess.run(
+            ['rpm', '--root', tmpdir, '-q', 'filesystem'],
+            capture_output=True, text=True
+        )
+        if check.returncode != 0:
+            if DEBUG_MKIMAGE:
+                print(colors.error(f"  DEBUG: filesystem NOT installed! rpm -q says: {check.stderr}"))
+            # Also try rpm -qa to see what IS installed
+            qa_result = subprocess.run(
+                ['rpm', '--root', tmpdir, '-qa'],
+                capture_output=True, text=True
+            )
+            pkg_count = len(qa_result.stdout.strip().split('\n')) if qa_result.stdout.strip() else 0
+            if DEBUG_MKIMAGE:
+                print(colors.dim(f"  DEBUG: rpm -qa shows {pkg_count} packages"))
+            if pkg_count > 0 and pkg_count < 10:
+                print(colors.dim(f"  DEBUG: packages: {qa_result.stdout.strip()}"))
+        else:
+            print(colors.success(f"  DEBUG: filesystem installed: {check.stdout.strip()}"))
+
+        # Check symlinks
+        bin_path = Path(tmpdir) / 'bin'
+        if bin_path.is_symlink():
+            if DEBUG_MKIMAGE:
+                print(colors.success(f"  DEBUG: /bin is symlink -> {bin_path.resolve()}"))
+        elif bin_path.exists():
+            if DEBUG_MKIMAGE:
+                print(colors.error(f"  DEBUG: /bin exists but is NOT a symlink!"))
+        else:
+            if DEBUG_MKIMAGE:
+                print(colors.error(f"  DEBUG: /bin does not exist!"))
+
+        # Now install remaining packages (filesystem already provides /bin -> usr/bin etc)
+        remaining_packages = [p for p in packages if p != 'filesystem']
+        if use_noscripts:
+            print("\n[2.5/6] Installing packages (--noscripts for user namespace)...")
+        else:
+            print("\n[2.5/6] Installing packages...")
+        install_args = argparse.Namespace(
+            urpm_root=tmpdir,
+            root=tmpdir,
+            packages=remaining_packages,
+            auto=True,
+            without_recommends=True,
+            with_suggests=False,
+            download_only=False,
+            nodeps=False,
+            nosignature=False,
+            noscripts=use_noscripts,
             force=False,
             reinstall=False,
             debug=None,
@@ -7702,8 +7771,8 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
             print(colors.error("Failed to install packages"))
             return ret
 
-        # 2.5. Install urpm (this project)
-        print("\n[2.5/5] Installing urpm...")
+        # 3. Install urpm (this project)
+        print("\n[3/6] Installing urpm...")
 
         # First try from repos (for when it's officially available)
         urpm_install_args = argparse.Namespace(
@@ -7716,6 +7785,7 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
             download_only=False,
             nodeps=False,
             nosignature=False,
+            noscripts=use_noscripts,
             force=False,
             reinstall=False,
             debug=None,
@@ -7775,6 +7845,7 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
                 download_only=False,
                 nodeps=False,
                 nosignature=True,  # Local build, no signature
+                noscripts=use_noscripts,
                 force=False,
                 reinstall=False,
                 debug=None,
@@ -7793,22 +7864,39 @@ def cmd_mkimage(args, db: PackageDatabase) -> int:
         else:
             print(colors.success("  urpm installed from repositories"))
 
-        # 3. Cleanup chroot to reduce image size
-        print("\n[3/5] Cleaning up chroot...")
+        # 4. Cleanup chroot to reduce image size
+        print("\n[4/6] Cleaning up chroot...")
         # Close chroot database to flush all data before image creation
         chroot_db.close()
         _cleanup_chroot_for_image(tmpdir)
 
-        # 4. Unmount filesystems
-        print("\n[4/5] Unmounting filesystems...")
+        # 5. Unmount filesystems
+        print("\n[5/6] Unmounting filesystems...")
         cleanup_args = argparse.Namespace(urpm_root=tmpdir)
         cmd_cleanup(cleanup_args, db)
 
-        # 5. Create container image
-        print(f"\n[5/5] Creating container image {tag}...")
-        if not container.import_from_dir(tmpdir, tag):
+        # 6. Create container image
+        print(f"\n[6/6] Creating container image {tag}...")
+        # Estimate chroot size for user feedback
+        try:
+            import os
+            total_size = sum(
+                os.path.getsize(os.path.join(dirpath, filename))
+                for dirpath, dirnames, filenames in os.walk(tmpdir)
+                for filename in filenames
+                if os.path.isfile(os.path.join(dirpath, filename))
+            )
+            size_mb = total_size / (1024 * 1024)
+            print(f"  Chroot size: {size_mb:.1f} MB")
+        except Exception:
+            pass
+        print(f"  Archiving and importing (this may take a moment)...", end='', flush=True)
+        # Use podman unshare for import when not root (same UID/GID mapping as install)
+        if not container.import_from_dir(tmpdir, tag, use_unshare=use_noscripts):
+            print()  # newline after "..."
             print(colors.error("Failed to create container image"))
             return 1
+        print(" done")
 
         # Get image size
         images = container.images(filter_name=tag)
@@ -7873,6 +7961,24 @@ def _cleanup_chroot_for_image(root: str):
                 pass
 
     print(f"  Removed {removed} cache/log entries")
+
+    # Ensure /var/tmp exists (required by RPM scriptlets)
+    var_tmp = os.path.join(root, 'var', 'tmp')
+    if not os.path.exists(var_tmp):
+        os.makedirs(var_tmp, mode=0o1777, exist_ok=True)
+        print(f"  Created /var/tmp")
+
+    # Create /etc/machine-id if missing (required by systemd, dbus, etc.)
+    machine_id_path = os.path.join(root, 'etc', 'machine-id')
+    if not os.path.exists(machine_id_path):
+        try:
+            import uuid
+            machine_id = uuid.uuid4().hex  # 32 hex chars, no dashes
+            with open(machine_id_path, 'w') as f:
+                f.write(machine_id + '\n')
+            print(f"  Created /etc/machine-id")
+        except (IOError, OSError):
+            pass
 
 
 def cmd_build(args, db: PackageDatabase) -> int:
@@ -8064,6 +8170,9 @@ def _build_single_package(
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/RPMS'])
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/SRPMS'])
 
+        # DEBUG SSL IN BUILD... TODO: do that in mkimage
+        container.exec(cid, ['/bin/update-ca-trust', 'extract'])
+
         # 3. Copy source into container
         print(f"  Copying source...")
 
@@ -8185,11 +8294,11 @@ def cmd_erase(args, db: PackageDatabase) -> int:
 
     from ..core.resolver import Resolver, format_size, set_solver_debug
     from ..core.install import check_root
+    from ..core.operations import PackageOperations, InstallOptions
     from ..core.background_install import (
         check_background_error, clear_background_error,
         InstallLock
     )
-    from ..core.transaction_queue import TransactionQueue
     from . import colors
 
     # Check for previous background errors
@@ -8340,9 +8449,18 @@ def cmd_erase(args, db: PackageDatabase) -> int:
         print("\n(dry run - no changes made)")
         return 0
 
+    # Set correct reasons on actions for transaction history
+    from ..core.resolver import InstallReason
+    for action in all_actions:
+        if action.name.lower() in explicit_names:
+            action.reason = InstallReason.EXPLICIT
+        else:
+            action.reason = InstallReason.DEPENDENCY
+
     # Record transaction
+    ops = PackageOperations(db)
     cmd_line = ' '.join(['urpm', 'erase'] + args.packages)
-    transaction_id = db.begin_transaction('erase', cmd_line)
+    transaction_id = ops.begin_transaction('erase', cmd_line, all_actions)
 
     # Setup Ctrl+C handler
     interrupted = [False]
@@ -8351,7 +8469,7 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     def sigint_handler(signum, frame):
         if interrupted[0]:
             print("\n\nForce abort!")
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
@@ -8376,29 +8494,13 @@ def cmd_erase(args, db: PackageDatabase) -> int:
     last_erase_shown = [None]
 
     try:
-        # Record packages being erased (with correct reason)
-        for action in all_actions:
-            reason = 'explicit' if action.name.lower() in explicit_names else 'dependency'
-            db.record_package(
-                transaction_id,
-                action.nevra,
-                action.name,
-                'remove',
-                reason
-            )
-
-        force = getattr(args, 'force', False)
-        test_mode = getattr(args, 'test', False)
-
-        # Build transaction queue
         from ..core.config import get_rpm_root
         rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        queue = TransactionQueue(root=rpm_root or "/")
-        queue.add_erase(
-            packages_to_erase,
-            operation_id="erase",
-            force=force,
-            test=test_mode
+        erase_opts = InstallOptions(
+            force=getattr(args, 'force', False),
+            test=getattr(args, 'test', False),
+            root=rpm_root or "/",
+            sync=getattr(args, 'sync', False),
         )
 
         # Progress callback
@@ -8407,9 +8509,9 @@ def cmd_erase(args, db: PackageDatabase) -> int:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_erase_shown[0] = name
 
-        # Execute the queue
-        sync_mode = getattr(args, 'sync', False)
-        queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
+        queue_result = ops.execute_erase(
+            packages_to_erase, options=erase_opts, progress_callback=queue_progress
+        )
 
         # Print done
         print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
@@ -8421,19 +8523,19 @@ def cmd_erase(args, db: PackageDatabase) -> int:
                     print(f"  {colors.error(err)}")
             elif queue_result.overall_error:
                 print(f"  {colors.error(queue_result.overall_error)}")
-            if not force:
+            if not erase_opts.force:
                 print(colors.dim("  Use --force to ignore dependency problems"))
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
             print(colors.warning(f"\n  Erase interrupted"))
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 130
 
         erased_count = queue_result.operations[0].count if queue_result.operations else len(packages_to_erase)
         print(colors.success(f"  {erased_count} packages erased"))
-        db.complete_transaction(transaction_id)
+        ops.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
         erased_packages = [action.name for action in all_actions]
@@ -8450,7 +8552,7 @@ def cmd_erase(args, db: PackageDatabase) -> int:
         return 0
 
     except Exception as e:
-        db.abort_transaction(transaction_id)
+        ops.abort_transaction(transaction_id)
         raise
     finally:
         signal.signal(signal.SIGINT, original_handler)
@@ -8466,7 +8568,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
         check_background_error, clear_background_error,
         InstallLock
     )
-    from ..core.transaction_queue import TransactionQueue
+    from ..core.operations import PackageOperations, InstallOptions
 
     # Check for previous background install errors
     prev_error = check_background_error()
@@ -8488,8 +8590,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
         return cmd_media_update(args, db)
 
     from ..core.resolver import Resolver, format_size, set_solver_debug
-    from ..core.download import Downloader, DownloadItem
-    from ..core.install import Installer, check_root
+    from ..core.install import check_root
     from pathlib import Path
     from ..core.rpm import is_local_rpm, read_rpm_header
     from ..core.download import verify_rpm_signature
@@ -8658,80 +8759,22 @@ def cmd_update(args, db: PackageDatabase) -> int:
         print("\n(dry run - no changes made)")
         return 0
 
-    # Build download items (only for upgrades and installs, skip local RPMs)
-    to_download = [a for a in result.actions
-                   if a.action.value in ('upgrade', 'install') and a.media_name != '@LocalRPMs']
+    # Build download items and download
+    ops = PackageOperations(db)
+    download_items, local_action_paths = ops.build_download_items(
+        result.actions, resolver, local_rpm_infos
+    )
 
-    # Collect local RPM paths for actions from @LocalRPMs
-    local_action_paths = []
-    for action in result.actions:
-        if action.media_name == '@LocalRPMs':
-            # Find the path in local_rpm_infos
-            for info in local_rpm_infos:
-                if info.get('name') == action.name:
-                    local_action_paths.append(info.get('path'))
-                    break
+    dl_results = []
+    downloaded = 0
 
-    if to_download:
-        print(f"\nDownloading {len(to_download)} packages...")
-        download_items = []
-        media_cache = {}
-        servers_cache = {}  # media_id -> list of server dicts
 
-        for action in to_download:
-            media_name = action.media_name
-            if media_name not in media_cache:
-                media = db.get_media(media_name)
-                media_cache[media_name] = media
-                # Pre-load servers for this media
-                if media and media.get('id'):
-                    servers_cache[media['id']] = db.get_servers_for_media(
-                        media['id'], enabled_only=True
-                    )
-
-            media = media_cache[media_name]
-            if not media:
-                continue
-
-            # Parse EVR
-            evr = action.evr
-            if ':' in evr:
-                evr = evr.split(':', 1)[1]
-            version, release = evr.rsplit('-', 1) if '-' in evr else (evr, '1')
-
-            # Use new schema if available, fallback to legacy URL
-            if media.get('relative_path'):
-                servers = servers_cache.get(media['id'], [])
-                servers = [dict(s) for s in servers]
-                download_items.append(DownloadItem(
-                    name=action.name,
-                    version=version,
-                    release=release,
-                    arch=action.arch,
-                    media_id=media['id'],
-                    relative_path=media['relative_path'],
-                    is_official=bool(media.get('is_official', 1)),
-                    servers=servers,
-                    media_name=media_name,
-                    size=action.filesize
-                ))
-            elif media.get('url'):
-                download_items.append(DownloadItem(
-                    name=action.name,
-                    version=version,
-                    release=release,
-                    arch=action.arch,
-                    media_url=media['url'],
-                    media_name=media_name,
-                    size=action.filesize
-                ))
-
-        # Download
-        use_peers = not getattr(args, 'no_peers', False)
-        only_peers = getattr(args, 'only_peers', False)
-        from ..core.config import get_base_dir
-        cache_dir = get_base_dir(urpm_root=getattr(args, 'urpm_root', None))
-        downloader = Downloader(cache_dir=cache_dir, use_peers=use_peers, only_peers=only_peers, db=db)
+    if download_items:
+        print(f"\nDownloading {len(download_items)} packages...")
+        dl_opts = InstallOptions(
+            use_peers=not getattr(args, 'no_peers', False),
+            only_peers=getattr(args, 'only_peers', False),
+        )
 
         # Multi-line progress display using DownloadProgressDisplay
         from . import display
@@ -8739,20 +8782,21 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
         def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
                      item_bytes=None, item_total=None, slots_status=None):
-            # Calculate global speed from all active downloads
             global_speed = 0.0
             if slots_status:
                 for slot, prog in slots_status:
                     if prog is not None:
                         global_speed += prog.get_speed()
-
             progress_display.update(
                 pkg_num, pkg_total, bytes_done, bytes_total,
                 slots_status or [], global_speed
             )
 
         download_start = time.time()
-        dl_results, downloaded, cached, peer_stats = downloader.download_all(download_items, progress)
+        dl_results, downloaded, cached, peer_stats = ops.download_packages(
+            download_items, options=dl_opts, progress_callback=progress,
+            urpm_root=getattr(args, 'urpm_root', None)
+        )
         download_elapsed = time.time() - download_start
         progress_display.finish()
 
@@ -8774,35 +8818,35 @@ def cmd_update(args, db: PackageDatabase) -> int:
         else:
             print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache in {time_str}")
 
-        # Notify urpmd to invalidate cache index (so new downloads are visible to peers)
         if downloaded > 0:
-            _notify_urpmd_cache_invalidate()
+            PackageOperations.notify_urpmd_cache_invalidate()
 
-        rpm_paths = [r.path for r in dl_results if r.success and r.path]
-    else:
-        rpm_paths = []
-
-    # Add local RPM paths
+    rpm_paths = [r.path for r in dl_results if r.success and r.path]
     rpm_paths.extend(local_action_paths)
+
+    # Set correct reasons on actions for transaction history
+    from ..core.resolver import InstallReason
+    explicit_names = set(p.lower() for p in package_names) if package_names else set()
+    for action in result.actions:
+        if action.name.lower() in explicit_names or upgrade_all:
+            action.reason = InstallReason.EXPLICIT
+        else:
+            action.reason = InstallReason.DEPENDENCY
+
+    # Include orphans in transaction recording (with 'orphan' reason)
+    all_record_actions = list(result.actions)
+    orphan_names = [a.name for a in orphans] if orphans else []
+    if orphans:
+        for o in orphans:
+            o.reason = 'orphan'
+        all_record_actions.extend(orphans)
 
     # Record transaction
     if upgrade_all:
         cmd_line = "urpm upgrade"
     else:
         cmd_line = "urpm update " + " ".join(package_names)
-    transaction_id = db.begin_transaction('upgrade', cmd_line)
-
-    # Record packages
-    explicit_names = set(p.lower() for p in package_names) if package_names else set()
-    for action in result.actions:
-        reason = 'explicit' if action.name.lower() in explicit_names or upgrade_all else 'dependency'
-        db.record_package(
-            transaction_id,
-            action.nevra,
-            action.name,
-            action.action.value,
-            reason
-        )
+    transaction_id = ops.begin_transaction('upgrade', cmd_line, all_record_actions)
 
     # Setup interrupt handler
     interrupted = [False]
@@ -8811,7 +8855,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
     def sigint_handler(signum, frame):
         if interrupted[0]:
             print("\n\nForce abort!")
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
@@ -8821,41 +8865,20 @@ def cmd_update(args, db: PackageDatabase) -> int:
     signal.signal(signal.SIGINT, sigint_handler)
 
     try:
-        # Build transaction queue with all operations
         from ..core.config import get_rpm_root
         rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        queue = TransactionQueue(root=rpm_root or "/")
+        upgrade_opts = InstallOptions(
+            verify_signatures=not getattr(args, 'nosignature', False),
+            force=getattr(args, 'force', False),
+            test=getattr(args, 'test', False),
+            root=rpm_root or "/",
+            sync=getattr(args, 'sync', False),
+        )
 
-        verify_sigs = not getattr(args, 'nosignature', False)
-        force = getattr(args, 'force', False)
-        test_mode = getattr(args, 'test', False)
-
-        # Get names of packages to remove (obsoleted by the upgrade)
         remove_names = [a.name for a in removes] if removes else []
 
-        if rpm_paths or remove_names:
-            queue.add_install(
-                rpm_paths,
-                operation_id="upgrade",
-                verify_signatures=verify_sigs,
-                force=force,
-                test=test_mode,
-                erase_names=remove_names  # Remove obsoleted packages in same transaction
-            )
-
-        orphan_names = []
-        if orphans:
-            orphan_names = [a.name for a in orphans]
-            queue.add_erase(
-                orphan_names,
-                operation_id="orphan_cleanup",
-                force=force,
-                test=test_mode,
-                background=True  # Don't wait - runs after rpmdb sync
-            )
-
-        if queue.is_empty():
-            db.complete_transaction(transaction_id)
+        if not rpm_paths and not remove_names and not orphan_names:
+            ops.complete_transaction(transaction_id)
             return 0
 
         # Check if another install is in progress
@@ -8872,27 +8895,28 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
         def queue_progress(op_id: str, name: str, current: int, total: int):
             if current_phase[0] != op_id:
-                # New phase starting
                 current_phase[0] = op_id
                 if op_id == "upgrade":
                     print(f"\nUpgrading {total} packages...")
-                # Note: orphan_cleanup runs in background, no progress display
                 last_shown[0] = None
-
             if last_shown[0] != name:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_shown[0] = name
 
-        # Execute the queue - all operations run sequentially in one process
-        sync_mode = getattr(args, 'sync', False)
-        queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
+        queue_result = ops.execute_upgrade(
+            rpm_paths,
+            erase_names=remove_names,
+            orphan_names=orphan_names or None,
+            options=upgrade_opts,
+            progress_callback=queue_progress,
+        )
 
         # Clear the line after last progress
         print(f"\r\033[K", end='')
 
         if interrupted[0]:
             print(colors.warning(f"\n  Operation interrupted"))
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 130
 
         # Process results for each operation
@@ -8901,7 +8925,6 @@ def cmd_update(args, db: PackageDatabase) -> int:
         for op_result in queue_result.operations:
             if op_result.operation_id == "upgrade":
                 if op_result.success:
-                    # Show both upgraded and removed counts
                     msg_parts = []
                     if op_result.count > 0:
                         msg_parts.append(f"{op_result.count} packages upgraded")
@@ -8918,32 +8941,19 @@ def cmd_update(args, db: PackageDatabase) -> int:
         # Orphan cleanup runs in background - just display status
         if orphan_names:
             print(colors.dim(f"  {len(orphan_names)} orphaned packages being removed in background..."))
-            # Record orphan removals now (will complete in background)
-            for a in orphans:
-                db.record_package(
-                    transaction_id,
-                    a.nevra,
-                    a.name,
-                    'remove',
-                    'orphan'
-                )
-            # Unmark from installed-through-deps.list
             resolver.unmark_packages(orphan_names)
 
         if not upgrade_success:
-            db.abort_transaction(transaction_id)
+            ops.abort_transaction(transaction_id)
             return 1
 
-        db.complete_transaction(transaction_id)
+        ops.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
-        # New installs during upgrade are dependencies
         new_deps = [a.name for a in result.actions if a.action.value == 'install']
         if new_deps:
             resolver.mark_as_dependency(new_deps)
-            # Debug: write what we marked as deps
             _write_debug_file(DEBUG_LAST_INSTALLED_DEPS, new_deps)
-        # Removed packages (obsoleted) should be unmarked
         removed = [a.name for a in result.actions if a.action.value == 'remove']
         if removed:
             resolver.unmark_packages(removed)
@@ -8958,7 +8968,7 @@ def cmd_update(args, db: PackageDatabase) -> int:
         return 0
 
     except Exception as e:
-        db.abort_transaction(transaction_id)
+        ops.abort_transaction(transaction_id)
         raise
     finally:
         signal.signal(signal.SIGINT, original_handler)
@@ -9009,21 +9019,17 @@ def cmd_list(args, db: PackageDatabase) -> int:
 
     elif filter_type in ('updates', 'upgradable'):
         # List packages with available updates
-        from ..core.resolver import Resolver
+        from ..core.operations import PackageOperations
 
-        arch = platform.machine()
-        resolver = Resolver(db, arch=arch)
-
+        ops = PackageOperations(db)
         print("Checking for updates...")
-        result = resolver.resolve_upgrade()
+        success, upgrades, problems = ops.get_updates()
 
-        if not result.success:
+        if not success:
             print("Error checking updates:")
-            for p in result.problems:
+            for p in problems:
                 print(f"  {p}")
             return 1
-
-        upgrades = [a for a in result.actions if a.action.value == 'upgrade']
 
         if not upgrades:
             print("All packages are up to date.")
@@ -11551,11 +11557,15 @@ def cmd_whatprovides(args, db: PackageDatabase) -> int:
 def cmd_find(args, db: PackageDatabase) -> int:
     """Handle find command - find packages containing a file (like urpmf)."""
     from . import colors
+    from collections import OrderedDict
 
     pattern = args.pattern
     search_available = getattr(args, 'available', False)
     search_installed = getattr(args, 'installed', False)
-    limit = getattr(args, 'limit', 100)
+    show_all = getattr(args, 'show_all', False)
+
+    # Limit files per package (--show-all shows all)
+    FILES_PER_PKG = 5 if not show_all else 0  # 0 = unlimited
 
     # Default: search both if neither flag is specified
     if not search_available and not search_installed:
@@ -11586,23 +11596,36 @@ def cmd_find(args, db: PackageDatabase) -> int:
             else:
                 # Pattern search - need to iterate all packages
                 import fnmatch
+                # Convert SQL wildcards to fnmatch wildcards
+                fnmatch_pattern = pattern.replace('%', '*').replace('_', '?')
+                has_wildcards = '*' in fnmatch_pattern or '?' in fnmatch_pattern
+
+                if fnmatch_pattern.startswith('/'):
+                    # Absolute path - use as-is
+                    pass
+                elif has_wildcards:
+                    # User specified wildcards - use as-is
+                    pass
+                else:
+                    # No wildcards, no leading / - search for exact filename
+                    # nvim → */nvim (file named nvim)
+                    fnmatch_pattern = '*/' + fnmatch_pattern
+
                 for hdr in ts.dbMatch():
                     name = hdr[rpm.RPMTAG_NAME]
                     if name == 'gpg-pubkey':
                         continue
                     files = hdr[rpm.RPMTAG_FILENAMES] or []
+                    version = hdr[rpm.RPMTAG_VERSION]
+                    release = hdr[rpm.RPMTAG_RELEASE]
+                    arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                    nevra = f"{name}-{version}-{release}.{arch}"
                     for f in files:
-                        if fnmatch.fnmatch(f, f'*{pattern}*') or pattern in f:
-                            version = hdr[rpm.RPMTAG_VERSION]
-                            release = hdr[rpm.RPMTAG_RELEASE]
-                            arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                        if fnmatch.fnmatch(f, fnmatch_pattern):
                             installed_found.append({
-                                'nevra': f"{name}-{version}-{release}.{arch}",
+                                'nevra': nevra,
                                 'file': f
                             })
-                            break  # Only show package once
-                    if limit > 0 and len(installed_found) >= limit:
-                        break
         except ImportError:
             pass
 
@@ -11653,23 +11676,26 @@ def cmd_find(args, db: PackageDatabase) -> int:
                 return 1
             # else: silently skip available search if searching both
         else:
-            # Search in database
+            # Check if FTS index needs rebuild (migration case)
+            if db.is_fts_available() and not db.is_fts_index_current():
+                print(colors.warning("L'index de recherche rapide (FTS) doit être reconstruit."))
+                print(colors.dim("Lancez: sudo urpm media update --files"))
+                print(colors.dim("(La recherche sera plus lente en attendant)"))
+                print()
+
+            # Search in database (uses FTS if available, falls back to B-tree)
             results = db.search_files(
                 pattern,
-                limit=limit if limit > 0 else 0
+                limit=0  # Fetch all, display limits handled by FILES_PER_PKG
             )
 
-            # Group by nevra to show file only once per package
-            seen_nevras = set()
+            # Collect all matching files
             for r in results:
-                nevra = r['pkg_nevra']
-                if nevra not in seen_nevras:
-                    seen_nevras.add(nevra)
-                    available_found.append({
-                        'nevra': nevra,
-                        'file': r['file_path'],
-                        'media': r['media_name']
-                    })
+                available_found.append({
+                    'nevra': r['pkg_nevra'],
+                    'file': r['file_path'],
+                    'media': r['media_name']
+                })
 
     # Display results
     if not installed_found and not available_found:
@@ -11680,27 +11706,70 @@ def cmd_find(args, db: PackageDatabase) -> int:
                 print(colors.info("Hint: run 'sudo urpm media update --files' to enable searching available packages"))
         return 1
 
-    # Build combined display
-    total_shown = 0
-
     # Helper to highlight pattern in file path (green)
     def highlight_pattern(filepath: str, pat: str) -> str:
         """Highlight pattern matches in filepath with green color."""
         import re
-        # Case-insensitive search
         try:
-            # Escape special regex chars in pattern, then do case-insensitive replace
-            escaped = re.escape(pat)
-            return re.sub(f'({escaped})', lambda m: colors.success(m.group(1)), filepath, flags=re.IGNORECASE)
+            # Strip leading/trailing wildcards (they match everything, no point highlighting)
+            regex_pat = pat.strip('%*')
+            if not regex_pat:
+                return filepath  # Pattern is only wildcards, nothing to highlight
+
+            # Escape regex special chars
+            regex_pat = re.sub(r'([.^$+{}\\|\[\]()])', r'\\\1', regex_pat)
+            # Convert remaining internal wildcards to regex
+            regex_pat = regex_pat.replace('%', '.*').replace('*', '.*')
+            regex_pat = regex_pat.replace('?', '.').replace('_', '.')
+            return re.sub(f'({regex_pat})', lambda m: colors.success(m.group(1)), filepath, flags=re.IGNORECASE)
         except re.error:
             return filepath
 
+    # Helper to group results by package
+    def group_by_package(results: list) -> OrderedDict:
+        """Group results by nevra, preserving order of first occurrence."""
+        grouped = OrderedDict()
+        for r in results:
+            nevra = r['nevra']
+            if nevra not in grouped:
+                grouped[nevra] = {'media': r.get('media'), 'files': []}
+            grouped[nevra]['files'].append(r['file'])
+        return grouped
+
+    # Helper to display a group of packages
+    def display_grouped(grouped: OrderedDict, max_files: int, show_media: bool = False) -> tuple:
+        """Display grouped packages, return (shown_files, hidden_files)."""
+        total_shown = 0
+        total_hidden = 0
+        for nevra, data in grouped.items():
+            files = data['files']
+            media_str = f" {colors.dim('[' + data['media'] + ']')}" if show_media and data.get('media') else ""
+            pkg_display = colors.cyan(nevra)
+            print(f"  {pkg_display}:{media_str}")
+
+            # Show files with optional limit
+            files_to_show = files if max_files == 0 else files[:max_files]
+            for f in files_to_show:
+                print(f"    {highlight_pattern(f, pattern)}")
+                total_shown += 1
+
+            # Show "... N more" if truncated
+            hidden = len(files) - len(files_to_show)
+            if hidden > 0:
+                print(colors.dim(f"    ... ({hidden} more)"))
+                total_hidden += hidden
+
+        return total_shown, total_hidden
+
+    total_shown = 0
+    total_hidden = 0
+
     if installed_found:
         print(colors.info("Installed:"))
-        for match in installed_found[:limit if limit > 0 else len(installed_found)]:
-            highlighted_file = highlight_pattern(match['file'], pattern)
-            print(f"  {match['nevra']}: {highlighted_file}")
-            total_shown += 1
+        grouped = group_by_package(installed_found)
+        shown, hidden = display_grouped(grouped, FILES_PER_PKG, show_media=False)
+        total_shown += shown
+        total_hidden += hidden
 
     if available_found:
         # Filter out already-installed packages (by NEVRA)
@@ -11711,17 +11780,14 @@ def cmd_find(args, db: PackageDatabase) -> int:
             if installed_found:
                 print()
             print(colors.info("Available (not installed):"))
-            remaining_limit = (limit - total_shown) if limit > 0 else len(available_not_installed)
-            for match in available_not_installed[:remaining_limit]:
-                media_str = f" [{match['media']}]" if match.get('media') else ""
-                highlighted_file = highlight_pattern(match['file'], pattern)
-                print(f"  {match['nevra']}: {highlighted_file}{media_str}")
-                total_shown += 1
+            grouped = group_by_package(available_not_installed)
+            shown, hidden = display_grouped(grouped, FILES_PER_PKG, show_media=True)
+            total_shown += shown
+            total_hidden += hidden
 
-    # Summary
-    total_found = len(installed_found) + len(available_found)
-    if limit > 0 and total_found > limit:
-        print(f"\n{colors.info('Showing')} {total_shown} of {total_found} results (use --limit to see more)")
+    # Summary if some files were hidden
+    if total_hidden > 0:
+        print(f"\n{colors.dim(f'{total_hidden} files hidden (use --show-all to see all)')}")
 
     return 0
 

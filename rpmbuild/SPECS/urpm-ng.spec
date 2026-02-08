@@ -1,5 +1,5 @@
 %define name urpm-ng
-%define version 0.1.23
+%define version 0.1.26
 %define release 1
 
 Name:           %{name}
@@ -27,8 +27,6 @@ Requires:       python3-rpm
 Requires:       python3-zstandard
 Requires:       gnupg2
 
-Suggests:       fakeroot
-
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
@@ -43,6 +41,20 @@ urpm-ng is a complete rewrite of the classic urpmi toolset, providing:
 
 %prep
 %setup -q
+
+# Check if setuptools < 77.0.0 (old way in mga9)
+# We use packaging.version for clean comparison (fallback to grep if packaging not available)
+if ! python3 -c "import setuptools; from packaging.version import parse; exit(0 if parse(setuptools.__version__) >= parse('77.0.0') else 1)" 2>/dev/null; then
+    echo "Adapting pyproject.toml for old setuptools (< 77)"
+    
+    # Remove license-files line (not well supported or useless in old setuptools)
+    sed -i '/^[[:space:]]*license-files[[:space:]]*=/d' pyproject.toml
+    
+    # Convert license = "..." to license = { text = "..." }
+    # This version preserves original indentation and only matches lines with at least one space/tab
+    # (to avoid matching random license lines outside [project] – though rare)
+    sed -i -E 's/^([[:space:]]*)license = "([^"]*)"/\1license = { text = "\2" }/' pyproject.toml
+fi
 
 %build
 %pyproject_wheel

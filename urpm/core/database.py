@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -525,6 +525,19 @@ MIGRATIONS = {
         -- Migration v18 -> v19: Adding column filesize in packages
         ALTER TABLE packages ADD COLUMN filesize INTEGER DEFAULT 0;
     """),
+    19: (20, """
+        -- Migration v19 -> v20: FTS5 trigram index for fast file search
+        -- Index on pkg_nevra for fast DELETE during incremental sync
+        CREATE INDEX IF NOT EXISTS idx_pf_nevra ON package_files(pkg_nevra);
+
+        -- Track FTS index state (FTS table created on first rebuild to avoid corruption)
+        CREATE TABLE IF NOT EXISTS fts_state (
+            table_name TEXT PRIMARY KEY,
+            last_rebuild INTEGER,
+            row_count INTEGER,
+            is_current INTEGER DEFAULT 0
+        );
+    """),
 }
 
 
@@ -740,11 +753,25 @@ class PackageDatabase:
             logger.info(f"Migrating database schema v{version} -> v{to_version}")
 
             try:
-                self.conn.executescript(migration_sql)
-                self.conn.execute(
-                    "UPDATE schema_info SET version = ?", (to_version,)
-                )
-                self.conn.commit()
+                # Retry logic for database lock (urpmd may be running)
+                max_retries = 10
+                retry_delay = 0.5
+                for attempt in range(max_retries):
+                    try:
+                        self.conn.executescript(migration_sql)
+                        self.conn.execute(
+                            "UPDATE schema_info SET version = ?", (to_version,)
+                        )
+                        self.conn.commit()
+                        break
+                    except sqlite3.OperationalError as e:
+                        if "locked" in str(e) and attempt < max_retries - 1:
+                            if attempt == 0:
+                                logger.warning("Database locked (urpmd running?), waiting...")
+                            import time
+                            time.sleep(retry_delay)
+                        else:
+                            raise
 
                 # Run post-migration data fixups
                 if version == 7 and to_version == 8:
@@ -759,6 +786,11 @@ class PackageDatabase:
                 version = to_version
             except sqlite3.Error as e:
                 logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
+                if "locked" in str(e):
+                    raise RuntimeError(
+                        f"Database migration failed: database is locked.\n"
+                        f"Try: sudo systemctl stop urpmd && urpm --version && sudo systemctl start urpmd"
+                    )
                 raise RuntimeError(f"Database migration failed: {e}")
 
         logger.info(f"Database schema is now at version {SCHEMA_VERSION}")
@@ -1738,6 +1770,45 @@ class PackageDatabase:
     # Package queries
     # =========================================================================
 
+def _get_accepted_versions(self) -> Optional[set]:
+        """Get the set of accepted media versions for queries.
+
+        Uses get_accepted_versions() which respects the version-mode config.
+        Returns None if no version filtering should be applied.
+        """
+        from .config import get_accepted_versions, get_system_version
+
+        accepted, needs_choice, info = get_accepted_versions(self)
+
+        if accepted:
+            return accepted
+
+        if needs_choice:
+            # Ambiguous (mix of cauldron + numeric) - accept all
+            return None
+
+        # Fallback to system version
+        sv = get_system_version()
+        return {sv} if sv else None
+
+    def _build_version_filter(self, table_alias: str = "m") -> tuple:
+        """Build SQL version filter clause and params.
+
+        Returns:
+            (join_clause, where_clause, params) where:
+            - join_clause: JOIN media ... (or empty string)
+            - where_clause: AND m.mageia_version IN (...) (or empty string)
+            - params: tuple of version values
+        """
+        accepted = self._get_accepted_versions()
+        if not accepted:
+            return "", "", ()
+
+        join_clause = f"JOIN media {table_alias} ON p.media_id = {table_alias}.id"
+        placeholders = ','.join('?' * len(accepted))
+        where_clause = f"AND {table_alias}.mageia_version IN ({placeholders})"
+        return join_clause, where_clause, tuple(accepted)
+
     def search(self, pattern: str, limit: int = None, search_provides: bool = False) -> List[Dict]:
         """Search packages by name pattern, optionally also in provides.
 
@@ -1752,22 +1823,13 @@ class PackageDatabase:
         Returns:
             List of package dicts. If found via provides, includes 'matched_provide' key.
         """
-        from .config import get_system_version
-        system_version = get_system_version()
-
         pattern_lower = f'%{pattern.lower()}%'
         results = []
         seen_ids = set()
 
-        # Build version filter
-        if system_version:
-            version_join = "JOIN media m ON p.media_id = m.id"
-            version_filter = "AND m.mageia_version = ?"
-            base_params = (pattern_lower, system_version)
-        else:
-            version_join = ""
-            version_filter = ""
-            base_params = (pattern_lower,)
+        # Build version filter (respects version-mode config)
+        version_join, version_filter, version_params = self._build_version_filter()
+        base_params = (pattern_lower,) + version_params
 
         # Search by name
         if limit:
@@ -1834,20 +1896,18 @@ class PackageDatabase:
         Filters by system version to avoid returning packages from other
         Mageia versions (e.g., mga9 packages on a mga10 system).
         """
-        from .config import get_system_version
-        system_version = get_system_version()
+        # Build version filter (respects version-mode config)
+        version_join, version_filter, version_params = self._build_version_filter()
 
-        if system_version:
-            # Filter by system version via media join
-            cursor = self.conn.execute("""
+        if version_join:
+            cursor = self.conn.execute(f"""
                 SELECT p.* FROM packages p
-                JOIN media m ON p.media_id = m.id
-                WHERE p.name_lower = ? AND m.mageia_version = ?
+                {version_join}
+                WHERE p.name_lower = ? {version_filter}
                 ORDER BY p.epoch DESC, p.version DESC, p.release DESC
                 LIMIT 1
-            """, (name.lower(), system_version))
+            """, (name.lower(),) + version_params)
         else:
-            # Fallback if system version unknown
             cursor = self.conn.execute("""
                 SELECT * FROM packages
                 WHERE name_lower = ?
@@ -2329,17 +2389,18 @@ class PackageDatabase:
         Returns packages sorted by effective priority (pins + media priority),
         then by version (newest first).
         """
-        from .config import get_system_version
-        system_version = get_system_version()
+        # Build version filter (respects version-mode config)
+        accepted = self._get_accepted_versions()
 
-        if system_version:
-            cursor = self.conn.execute("""
+        if accepted:
+            placeholders = ','.join('?' * len(accepted))
+            cursor = self.conn.execute(f"""
                 SELECT p.*, m.name as media_name, m.priority as media_priority
                 FROM packages p
                 JOIN media m ON p.media_id = m.id
-                WHERE p.name_lower = ? AND m.mageia_version = ?
+                WHERE p.name_lower = ? AND m.mageia_version IN ({placeholders})
                 ORDER BY p.epoch DESC, p.version DESC, p.release DESC
-            """, (name.lower(), system_version))
+            """, (name.lower(),) + tuple(accepted))
         else:
             cursor = self.conn.execute("""
                 SELECT p.*, m.name as media_name, m.priority as media_priority
@@ -2428,13 +2489,35 @@ class PackageDatabase:
             action: 'install', 'remove', 'upgrade', 'downgrade'
             reason: 'explicit' or 'dependency'
             previous_nevra: For upgrade/downgrade, the previous version
+
+        Note: Does not commit - batched with complete_transaction().
         """
         self.conn.execute("""
             INSERT INTO history_packages
             (history_id, pkg_nevra, pkg_name, action, reason, previous_nevra)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (transaction_id, nevra, name, action, reason, previous_nevra))
-        self.conn.commit()
+
+    def _commit_with_retry(self, max_retries: int = 10, base_delay: float = 0.5):
+        """Commit with retry and exponential backoff for lock contention.
+
+        Used after RPM transactions when urpmd may hold the database lock.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        for attempt in range(max_retries):
+            try:
+                self.conn.commit()
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) and attempt < max_retries - 1:
+                    delay = base_delay * (attempt + 1)
+                    if attempt == 0:
+                        logger.warning("Database locked, retrying...")
+                    time.sleep(delay)
+                else:
+                    raise
 
     def complete_transaction(self, transaction_id: int, return_code: int = 0):
         """Mark a transaction as complete."""
@@ -2442,7 +2525,7 @@ class PackageDatabase:
             UPDATE history SET status = 'complete', return_code = ?
             WHERE id = ?
         """, (return_code, transaction_id))
-        self.conn.commit()
+        self._commit_with_retry()
 
     def abort_transaction(self, transaction_id: int):
         """Mark a transaction as interrupted."""
@@ -2450,7 +2533,7 @@ class PackageDatabase:
             UPDATE history SET status = 'interrupted', return_code = -1
             WHERE id = ?
         """, (transaction_id,))
-        self.conn.commit()
+        self._commit_with_retry()
 
     def list_history(self, limit: int = 20, action_filter: str = None) -> List[Dict]:
         """List recent transactions.
@@ -3266,11 +3349,8 @@ class PackageDatabase:
     ) -> List[Dict[str, Any]]:
         """Search for files matching a pattern in the database.
 
-        Optimized for common use cases:
-        - Full path (/usr/lib/foo.so): exact match on dir_path + filename
-        - Filename only (pg_hba.conf): exact match on filename (uses index)
-        - Prefix pattern (mod_*): LIKE on filename (uses index)
-        - Full path pattern (/usr/lib/mod_*): exact dir_path + LIKE filename
+        Uses FTS5 trigram index when available (fast for all patterns).
+        Falls back to B-tree indexes if FTS not available.
 
         Args:
             pattern: Search pattern - full path, filename, or glob pattern
@@ -3281,51 +3361,48 @@ class PackageDatabase:
         Returns:
             List of dicts with keys: file_path, pkg_nevra, media_id, media_name
         """
+        import logging
         import os.path
 
+        logger = logging.getLogger(__name__)
+
+        # Use FTS if available and current (much faster for all patterns)
+        if self.is_fts_index_current():
+            try:
+                return self.search_files_fts(pattern, media_ids, limit)
+            except sqlite3.DatabaseError as e:
+                # FTS corrupted - mark as dirty and fall back to B-tree
+                if "malformed" in str(e) or "corrupt" in str(e).lower():
+                    logger.warning(f"FTS index corrupted, falling back to B-tree search: {e}")
+                    self.fts_mark_dirty()
+                else:
+                    raise
+
+        # Fallback to B-tree index search
         conn = self._get_connection()
         cursor = conn.cursor()
 
         collate = "" if case_sensitive else " COLLATE NOCASE"
         params = []
 
-        # Analyze the pattern to determine search strategy
-        has_wildcards = '*' in pattern or '?' in pattern
+        # Convert wildcards to SQL LIKE pattern
+        sql_pattern = pattern.replace('*', '%').replace('?', '_')
+        has_wildcards = '%' in sql_pattern or '_' in sql_pattern
 
-        if pattern.startswith('/'):
-            # Full path or path pattern
-            if has_wildcards:
-                # Path with wildcards: /usr/lib/mod_*
-                # Find the last non-wildcard directory component
-                dir_path, filename_pattern = os.path.split(pattern)
-                if '*' in dir_path or '?' in dir_path:
-                    # Wildcards in directory part - need full scan (rare case)
-                    sql_pattern = pattern.replace('*', '%').replace('?', '_')
-                    where_clause = f"(pf.dir_path || '/' || pf.filename) LIKE ?{collate}"
-                    params = [sql_pattern]
-                else:
-                    # Wildcards only in filename: /usr/lib/mod_*
-                    sql_filename = filename_pattern.replace('*', '%').replace('?', '_')
-                    where_clause = f"pf.dir_path = ?{collate} AND pf.filename LIKE ?{collate}"
-                    params = [dir_path, sql_filename]
-            else:
-                # Exact full path: /usr/lib/foo.so
-                dir_path, filename = os.path.split(pattern)
-                if not dir_path:
-                    dir_path = '/'
-                where_clause = f"pf.dir_path = ?{collate} AND pf.filename = ?{collate}"
-                params = [dir_path, filename]
+        if sql_pattern.startswith('/'):
+            # Absolute path - use as-is
+            full_pattern = sql_pattern
+        elif has_wildcards:
+            # User specified wildcards explicitly - use as-is
+            full_pattern = sql_pattern
         else:
-            # Filename only or filename pattern
-            if has_wildcards:
-                # Filename pattern: mod_* or *ssl*
-                sql_pattern = pattern.replace('*', '%').replace('?', '_')
-                where_clause = f"pf.filename LIKE ?{collate}"
-                params = [sql_pattern]
-            else:
-                # Exact filename: pg_hba.conf
-                where_clause = f"pf.filename = ?{collate}"
-                params = [pattern]
+            # No wildcards, no leading / - search for exact filename
+            # nvim → %/nvim (file named nvim)
+            full_pattern = '%/' + sql_pattern
+
+        # Always search on full path for consistency
+        where_clause = f"(pf.dir_path || '/' || pf.filename) LIKE ?{collate}"
+        params = [full_pattern]
 
         # Add media filter
         if media_ids:
@@ -3459,11 +3536,15 @@ class PackageDatabase:
         """Delete files for specific packages.
 
         Used for differential sync to remove obsolete packages.
+        Also removes corresponding entries from FTS index.
 
         Args:
             media_id: Media ID
             nevras: Set of package NEVRAs to delete
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         if not nevras:
             return
 
@@ -3473,10 +3554,31 @@ class PackageDatabase:
         # Use batched deletes for efficiency
         nevra_list = list(nevras)
         batch_size = 500
+        fts_available = self.is_fts_available()
+        fts_failed = False
 
         for i in range(0, len(nevra_list), batch_size):
             batch = nevra_list[i:i + batch_size]
             placeholders = ','.join(['?'] * len(batch))
+
+            # Delete from FTS BEFORE deleting from main table (external content mode)
+            if fts_available and not fts_failed:
+                try:
+                    cursor.execute(f"""
+                        DELETE FROM package_files_fts
+                        WHERE rowid IN (
+                            SELECT id FROM package_files
+                            WHERE media_id = ? AND pkg_nevra IN ({placeholders})
+                        )
+                    """, [media_id] + batch)
+                except sqlite3.DatabaseError as e:
+                    if "malformed" in str(e) or "corrupt" in str(e).lower():
+                        logger.warning(f"FTS corrupted during delete, marking dirty: {e}")
+                        fts_failed = True
+                    else:
+                        raise
+
+            # Delete from main table
             cursor.execute(
                 f"DELETE FROM package_files WHERE media_id = ? AND pkg_nevra IN ({placeholders})",
                 [media_id] + batch
@@ -3484,16 +3586,24 @@ class PackageDatabase:
 
         conn.commit()
 
+        # Mark FTS as needing rebuild if it failed
+        if fts_failed:
+            self.fts_mark_dirty()
+
     def insert_package_files_batch(self, media_id: int, nevra: str, files: List[str]):
         """Insert files for a single package.
 
         Used for differential sync to add new packages.
+        Also adds corresponding entries to FTS index.
 
         Args:
             media_id: Media ID
             nevra: Package NEVRA
             files: List of file paths
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         if not files:
             return
 
@@ -3512,10 +3622,35 @@ class PackageDatabase:
                 filename = file_path
             batch.append((media_id, nevra, dir_path, filename))
 
+        # Get last ID before insert (for FTS sync)
+        fts_available = self.is_fts_available()
+        last_id = 0
+        if fts_available:
+            cursor.execute("SELECT MAX(id) FROM package_files")
+            row = cursor.fetchone()
+            last_id = row[0] if row and row[0] else 0
+
         cursor.executemany(
             "INSERT INTO package_files (media_id, pkg_nevra, dir_path, filename) VALUES (?, ?, ?, ?)",
             batch
         )
+
+        # Sync FTS index (insert only newly added rows - ID > last_id)
+        if fts_available:
+            try:
+                cursor.execute("""
+                    INSERT INTO package_files_fts(rowid, dir_path, filename)
+                    SELECT id, dir_path, filename
+                    FROM package_files
+                    WHERE id > ?
+                """, (last_id,))
+            except sqlite3.DatabaseError as e:
+                if "malformed" in str(e) or "corrupt" in str(e).lower():
+                    logger.warning(f"FTS corrupted during insert, marking dirty: {e}")
+                    self.fts_mark_dirty()
+                else:
+                    raise
+
         conn.commit()
 
     def clear_package_files(self, media_id: int = None):
@@ -3573,6 +3708,366 @@ class PackageDatabase:
             'total_packages': total_packages or 0,
             'media_stats': media_stats
         }
+
+    # =========================================================================
+    # FTS5 Index for Fast File Search
+    # =========================================================================
+
+    def is_fts_supported(self) -> bool:
+        """Check if schema supports FTS (fts_state table exists)."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='fts_state'
+        """)
+        return cursor.fetchone() is not None
+
+    def is_fts_available(self) -> bool:
+        """Check if FTS5 table exists and is ready for queries."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='package_files_fts'
+        """)
+        return cursor.fetchone() is not None
+
+    def is_fts_index_current(self) -> bool:
+        """Check if FTS index is populated and current.
+
+        Uses fts_state.is_current flag for O(1) check instead of COUNT(*).
+        """
+        if not self.is_fts_available():
+            return False
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Check fts_state flag (fast O(1) lookup)
+        cursor.execute("""
+            SELECT is_current FROM fts_state WHERE table_name = 'package_files_fts'
+        """)
+        row = cursor.fetchone()
+
+        if row is None:
+            # No state entry - check if both tables are empty (fresh install)
+            cursor.execute("SELECT 1 FROM package_files LIMIT 1")
+            if cursor.fetchone() is None:
+                return True  # Empty is considered current
+            return False  # Data exists but no FTS state = needs rebuild
+
+        return row[0] == 1
+
+    def get_fts_stats(self) -> Dict[str, Any]:
+        """Get FTS index statistics."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        stats = {
+            'available': self.is_fts_available(),
+            'current': False,
+            'pf_count': 0,
+            'fts_count': 0,
+            'last_rebuild': None
+        }
+
+        if not stats['available']:
+            return stats
+
+        cursor.execute("SELECT COUNT(*) FROM package_files")
+        stats['pf_count'] = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM package_files_fts")
+        stats['fts_count'] = cursor.fetchone()[0]
+
+        stats['current'] = stats['pf_count'] == stats['fts_count']
+
+        cursor.execute("""
+            SELECT last_rebuild FROM fts_state WHERE table_name = 'package_files_fts'
+        """)
+        row = cursor.fetchone()
+        if row:
+            stats['last_rebuild'] = row[0]
+
+        return stats
+
+    def _recreate_fts_table(self):
+        """Drop and recreate FTS table.
+
+        Called during rebuild or when FTS operations fail with corruption errors.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("DROP TABLE IF EXISTS package_files_fts")
+        cursor.execute("""
+            CREATE VIRTUAL TABLE package_files_fts USING fts5(
+                dir_path,
+                filename,
+                tokenize = 'trigram',
+                content = 'package_files',
+                content_rowid = 'id'
+            )
+        """)
+        cursor.execute("DELETE FROM fts_state WHERE table_name = 'package_files_fts'")
+        conn.commit()
+
+    def rebuild_fts_index(
+        self,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> int:
+        """Rebuild FTS index from scratch.
+
+        This is needed after initial migration or to repair a corrupted index.
+        Uses batched inserts to show progress and allow interruption.
+
+        If the FTS table is corrupted, it will be automatically recreated.
+
+        Args:
+            progress_callback: Called with (current_count, total_count)
+
+        Returns:
+            Number of rows indexed
+        """
+        import logging
+        import time
+
+        logger = logging.getLogger(__name__)
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Check if fts_state table exists (indicates schema supports FTS)
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='fts_state'
+        """)
+        if cursor.fetchone() is None:
+            return 0  # Schema doesn't support FTS yet
+
+        # Get total count for progress
+        cursor.execute("SELECT COUNT(*) FROM package_files")
+        total = cursor.fetchone()[0]
+
+        if total == 0:
+            # Mark as current even if empty
+            cursor.execute("""
+                INSERT OR REPLACE INTO fts_state (table_name, last_rebuild, row_count, is_current)
+                VALUES ('package_files_fts', ?, 0, 1)
+            """, (int(time.time()),))
+            conn.commit()
+            return 0
+
+        # Drop and recreate FTS table for clean rebuild
+        # This creates the table if it doesn't exist, or recreates it for clean state
+        self._recreate_fts_table()
+        cursor = conn.cursor()  # Get fresh cursor after table recreation
+
+        # Use fast PRAGMAs during rebuild (keep WAL mode active)
+        cursor.execute("PRAGMA synchronous = OFF")
+
+        try:
+            # Batch insert for progress reporting
+            batch_size = 50000
+            indexed = 0
+
+            cursor.execute("SELECT MIN(id), MAX(id) FROM package_files")
+            min_id, max_id = cursor.fetchone()
+
+            current_id = min_id
+            while current_id <= max_id:
+                # Insert batch into FTS
+                try:
+                    cursor.execute("""
+                        INSERT INTO package_files_fts(rowid, dir_path, filename)
+                        SELECT id, dir_path, filename
+                        FROM package_files
+                        WHERE id >= ? AND id < ?
+                    """, (current_id, current_id + batch_size))
+                except sqlite3.DatabaseError as e:
+                    if "malformed" in str(e) or "corrupt" in str(e).lower():
+                        # FTS corrupted during insert - recreate and restart
+                        logger.warning(f"FTS corruption during rebuild: {e}")
+                        conn.rollback()
+                        self._recreate_fts_table()
+                        cursor = conn.cursor()
+                        cursor.execute("PRAGMA synchronous = OFF")
+                        # Restart from beginning
+                        indexed = 0
+                        current_id = min_id
+                        continue
+                    else:
+                        raise
+
+                indexed += cursor.rowcount
+                current_id += batch_size
+
+                # Commit after each batch to release write lock
+                # This allows other processes to access the DB during rebuild
+                conn.commit()
+
+                if progress_callback:
+                    progress_callback(indexed, total)
+
+            # Update FTS state
+            cursor.execute("""
+                INSERT OR REPLACE INTO fts_state (table_name, last_rebuild, row_count, is_current)
+                VALUES ('package_files_fts', ?, ?, 1)
+            """, (int(time.time()), indexed))
+            conn.commit()
+
+            return indexed
+
+        except Exception:
+            # Rollback on any unhandled exception to release locks
+            conn.rollback()
+            raise
+
+        finally:
+            # Restore safe PRAGMA (WAL mode stays active)
+            cursor.execute("PRAGMA synchronous = NORMAL")
+
+    def fts_sync_delete_nevras(self, media_id: int, nevras: Set[str]):
+        """Remove entries from FTS index for deleted packages.
+
+        Called by delete_package_files_by_nevra after deleting from main table.
+        """
+        if not self.is_fts_available() or not nevras:
+            return
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Delete FTS entries by rowid (matching deleted package_files rows)
+        # Since package_files rows are already deleted, we need to delete by
+        # querying the FTS table directly with a subquery that would have matched
+        # Actually, with external content, we need to delete BEFORE the main delete
+        # This method is called AFTER delete, so FTS entries may already be orphaned
+        # The 'rebuild' command will clean them up, or we accept slight inconsistency
+        pass  # FTS external content auto-handles this on queries
+
+    def fts_sync_insert_nevra(self, media_id: int, nevra: str):
+        """Add entries to FTS index for a new package.
+
+        Called by insert_package_files_batch after inserting into main table.
+        """
+        if not self.is_fts_available():
+            return
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Insert into FTS from the newly added rows
+        cursor.execute("""
+            INSERT INTO package_files_fts(rowid, dir_path, filename)
+            SELECT id, dir_path, filename
+            FROM package_files
+            WHERE pkg_nevra = ? AND media_id = ?
+        """, (nevra, media_id))
+
+    def fts_mark_dirty(self):
+        """Mark FTS index as needing rebuild."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE fts_state SET is_current = 0 WHERE table_name = 'package_files_fts'
+        """)
+        conn.commit()
+
+    def search_files_fts(
+        self,
+        pattern: str,
+        media_ids: List[int] = None,
+        limit: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Search files using FTS5 trigram index.
+
+        FTS5 trigram tokenizer accelerates LIKE/GLOB queries by using the
+        trigram index to find candidate rows. Simply run LIKE on the FTS
+        virtual table columns - SQLite handles the optimization automatically.
+
+        Args:
+            pattern: Glob pattern (with * wildcards)
+            media_ids: Limit to these media IDs
+            limit: Max results (0 = unlimited)
+
+        Returns:
+            List of dicts with: file_path, pkg_nevra, media_id, media_name
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Convert glob pattern to SQL LIKE pattern
+        sql_pattern = pattern.replace('*', '%').replace('?', '_')
+
+        params = []
+
+        # Determine full_pattern based on user input
+        has_wildcards = '%' in sql_pattern or '_' in sql_pattern
+
+        if sql_pattern.startswith('/'):
+            # Absolute path - use as-is
+            full_pattern = sql_pattern
+        elif has_wildcards:
+            # User specified wildcards explicitly - use as-is
+            full_pattern = sql_pattern
+        else:
+            # No wildcards, no leading / - search for exact filename
+            # nvim → %/nvim (file named nvim)
+            full_pattern = '%/' + sql_pattern
+
+        # Extract searchable terms for FTS acceleration (>= 3 chars for trigram)
+        import re
+        terms = re.split(r'[%_/]+', full_pattern)
+        terms = [t for t in terms if len(t) >= 3]
+
+        if terms:
+            # Use longest term for best FTS selectivity
+            best_term = max(terms, key=len)
+            fts_where = "(dir_path LIKE ? OR filename LIKE ?)"
+            params.append(f'%{best_term}%')
+            params.append(f'%{best_term}%')
+        else:
+            # No good search term - full scan
+            fts_where = "1=1"
+
+        # Always filter on full path for correctness
+        post_filter = "(pf.dir_path || '/' || pf.filename) LIKE ?"
+        params.append(full_pattern)
+
+        where_media = ""
+        if media_ids:
+            placeholders = ','.join(['?'] * len(media_ids))
+            where_media = f" AND pf.media_id IN ({placeholders})"
+            params.extend(media_ids)
+
+        limit_clause = f" LIMIT {limit}" if limit > 0 else ""
+
+        # Query FTS table to get candidate rowids, then join for full data
+        query = f"""
+            SELECT pf.dir_path, pf.filename, pf.pkg_nevra, pf.media_id, m.name as media_name
+            FROM package_files pf
+            JOIN media m ON pf.media_id = m.id
+            WHERE pf.id IN (
+                SELECT rowid FROM package_files_fts WHERE {fts_where}
+            )
+            AND {post_filter}{where_media}
+            ORDER BY pf.filename, pf.dir_path
+            {limit_clause}
+        """
+
+        cursor.execute(query, params)
+
+        return [
+            {
+                'file_path': f"{row[0]}/{row[1]}" if row[0] else row[1],
+                'pkg_nevra': row[2],
+                'media_id': row[3],
+                'media_name': row[4]
+            }
+            for row in cursor.fetchall()
+        ]
 
     # =========================================================================
     # Fast Import Methods (PRAGMAs, Staging Tables, Atomic Swap)

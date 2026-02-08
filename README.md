@@ -761,6 +761,12 @@ This part will also  talk about creating branches, submitting merge requests, do
 
 ---
 
+# Known Issues / TODO
+
+- **`urpm find` performance** - Search in files.xml is slower than urpmf (2.5s vs 0.6s). Needs optimization.
+
+---
+
 # License
 
 GPL-3.0 - See LICENSE file for details.
@@ -768,4 +774,5 @@ GPL-3.0 - See LICENSE file for details.
 # Authors
 
 - Maât (Pascal Vilarem)
+- Papoteur (Mageia Contributor)
 - Claude (AI assistant)

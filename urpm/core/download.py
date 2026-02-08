@@ -26,6 +26,42 @@ from .peer_client import (
 
 logger = logging.getLogger(__name__)
 
+# RPM magic bytes: 0xED 0xAB 0xEE 0xDB
+RPM_MAGIC = b'\xed\xab\xee\xdb'
+
+
+def is_valid_rpm(file_path: Path) -> Tuple[bool, str]:
+    """Quick check if a file is a valid RPM by checking magic bytes.
+
+    Args:
+        file_path: Path to the file to check
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        - is_valid: True if file starts with RPM magic bytes
+        - error_message: Description of problem if invalid, None if valid
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            magic = f.read(4)
+            if len(magic) < 4:
+                return False, "File too small (< 4 bytes)"
+            if magic != RPM_MAGIC:
+                # Try to detect what it actually is
+                f.seek(0)
+                start = f.read(100)
+                if b'<!DOCTYPE' in start or b'<html' in start.lower() or b'<HTML' in start:
+                    return False, "File is HTML (captive portal?)"
+                elif start.startswith(b'<?xml'):
+                    return False, "File is XML"
+                elif start.startswith(b'PK'):
+                    return False, "File is ZIP archive"
+                else:
+                    return False, f"Invalid RPM magic (got {magic.hex()})"
+            return True, None
+    except (OSError, IOError) as e:
+        return False, f"Cannot read file: {e}"
+
 
 def verify_rpm_signature(rpm_path: Path) -> tuple:
     """Verify GPG signature of an RPM file.
@@ -658,7 +694,7 @@ class Downloader:
         try:
             with open(path, 'rb') as f:
                 magic = f.read(4)
-            return magic == b'\xed\xab\xee\xdb'
+            return magic == RPM_MAGIC
         except OSError:
             return False
 
@@ -846,6 +882,18 @@ class Downloader:
                         url, cache_path, progress_callback, timeout, ip_mode=ip_mode
                     )
                     if success:
+                        # Verify the downloaded file is actually an RPM
+                        is_rpm, rpm_error = is_valid_rpm(cache_path)
+                        if not is_rpm:
+                            # Delete corrupt file and treat as failure
+                            logger.warning(f"Downloaded file is not a valid RPM: {rpm_error}")
+                            try:
+                                cache_path.unlink()
+                            except OSError:
+                                pass
+                            all_errors.append(f"{server['name']}: {rpm_error}")
+                            break  # Try next server
+
                         logger.info(f"Downloaded {item.filename} from {server['name']}")
                         self._register_cache_file(item, cache_path)
                         return DownloadResult(
@@ -898,6 +946,17 @@ class Downloader:
                 item.url, cache_path, progress_callback, timeout, ip_mode='ipv4'
             )
             if success:
+                # Verify the downloaded file is actually an RPM
+                is_rpm, rpm_error = is_valid_rpm(cache_path)
+                if not is_rpm:
+                    logger.warning(f"Downloaded file is not a valid RPM: {rpm_error}")
+                    try:
+                        cache_path.unlink()
+                    except OSError:
+                        pass
+                    last_error = rpm_error
+                    break  # Don't retry, server is probably broken
+
                 self._register_cache_file(item, cache_path)
                 return DownloadResult(
                     item=item,
@@ -975,6 +1034,20 @@ class Downloader:
 
                 # Move to final location
                 temp_path.rename(cache_path)
+
+                # Verify the downloaded file is actually an RPM
+                is_rpm, rpm_error = is_valid_rpm(cache_path)
+                if not is_rpm:
+                    logger.warning(f"Peer {peer.host} served invalid RPM: {rpm_error}")
+                    try:
+                        cache_path.unlink()
+                    except OSError:
+                        pass
+                    return DownloadResult(
+                        item=item,
+                        success=False,
+                        error=f"Peer served invalid file: {rpm_error}"
+                    )
 
                 # Register in cache for quota tracking
                 self._register_cache_file(item, cache_path)

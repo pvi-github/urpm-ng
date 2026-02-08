@@ -1251,6 +1251,21 @@ def sync_all_files_xml(
                 if states_to_update:
                     db.update_files_xml_state_batch(states_to_update)
 
+                # Rebuild FTS index after full import (atomic swap cleared it)
+                if db.is_fts_available():
+                    if progress_callback:
+                        # Use first media for progress reporting
+                        progress_callback("FTS index", 'indexing', 0, 0, 0, 0)
+
+                    def fts_progress(current, total):
+                        if progress_callback:
+                            progress_callback("FTS index", 'indexing', 0, 0, current, total)
+
+                    db.rebuild_fts_index(progress_callback=fts_progress)
+
+                    if progress_callback:
+                        progress_callback("FTS index", 'done', 0, 0, 0, 0)
+
             except Exception as e:
                 # Atomic swap failed - abort
                 db.abort_package_files_atomic()
@@ -1261,6 +1276,22 @@ def sync_all_files_xml(
         else:
             # All imports failed - cleanup staging
             db.abort_package_files_atomic()
+
+    # =========================================================================
+    # Check if FTS needs rebuild (migration case: data exists but FTS empty)
+    # =========================================================================
+    if use_incremental and db.is_fts_available() and not db.is_fts_index_current():
+        if progress_callback:
+            progress_callback("FTS index", 'indexing', 0, 0, 0, 0)
+
+        def fts_progress(current, total):
+            if progress_callback:
+                progress_callback("FTS index", 'indexing', 0, 0, current, total)
+
+        db.rebuild_fts_index(progress_callback=fts_progress)
+
+        if progress_callback:
+            progress_callback("FTS index", 'done', 0, 0, 0, 0)
 
     # =========================================================================
     # Build results

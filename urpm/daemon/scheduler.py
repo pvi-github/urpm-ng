@@ -152,6 +152,17 @@ class Scheduler:
         except Exception as e:
             logger.warning(f"Startup cache reconcile failed: {e}", exc_info=True)
 
+        # Check if FTS index needs rebuild (after migration/upgrade)
+        try:
+            if self.db.is_fts_supported() and not self.db.is_fts_index_current():
+                fts_stats = self.db.get_fts_stats()
+                main_count = fts_stats.get('main_table_count', 0)
+                fts_count = fts_stats.get('fts_row_count', 0)
+                logger.info(f"FTS index needs rebuild ({fts_count} indexed, {main_count} in table)")
+                self._rebuild_fts_index()
+        except Exception as e:
+            logger.warning(f"FTS index check failed: {e}", exc_info=True)
+
         try:
             while self._running:
                 try:
@@ -1197,3 +1208,36 @@ class Scheduler:
                     total_tx += int(stats[8])
 
         return total_rx, total_tx
+
+    def _rebuild_fts_index(self):
+        """Rebuild FTS index for fast file search.
+
+        Called on startup if the FTS index is out of sync (e.g., after
+        database migration from a version without FTS).
+        """
+        if not self.db:
+            return
+
+        logger.info("Rebuilding FTS index for fast file search...")
+
+        try:
+            start_time = time.time()
+            last_log_time = [start_time]
+
+            def progress_callback(current, total):
+                now = time.time()
+                # Log progress every 30 seconds
+                if now - last_log_time[0] >= 30:
+                    pct = current * 100 // total if total > 0 else 0
+                    elapsed = now - start_time
+                    logger.info(f"FTS rebuild: {pct}% ({current:,}/{total:,} files, {elapsed:.0f}s)")
+                    last_log_time[0] = now
+
+            self.db.rebuild_fts_index(progress_callback=progress_callback)
+
+            elapsed = time.time() - start_time
+            stats = self.db.get_fts_stats()
+            logger.info(f"FTS rebuild complete: {stats.get('fts_row_count', 0):,} files indexed in {elapsed:.1f}s")
+
+        except Exception as e:
+            logger.error(f"FTS rebuild failed: {e}", exc_info=True)

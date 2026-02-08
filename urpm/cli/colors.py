@@ -103,6 +103,11 @@ def bold(text: str) -> str:
     return _wrap(text, 'bold')
 
 
+def cyan(text: str) -> str:
+    """Format text as cyan."""
+    return _wrap(text, 'cyan')
+
+
 # Convenience functions for common patterns
 def pkg_install(name: str) -> str:
     """Format package name for installation (green)."""

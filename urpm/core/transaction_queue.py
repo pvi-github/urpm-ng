@@ -39,6 +39,9 @@ from .background_install import (
     _set_background_error,
 )
 
+DEBUG_EXECINSTALL = False
+DEBUG_USERNS = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +64,7 @@ class QueuedOperation:
     test: bool = False
     background: bool = False  # If True, parent doesn't wait for this operation
     reinstall: bool = False  # If True, allow reinstalling same version
+    noscripts: bool = False  # If True, skip pre/post install scripts
 
 
 @dataclass
@@ -141,16 +145,29 @@ class TransactionQueue:
                 print(f"{op.operation_id}: {op.count} packages")
     """
 
-    def __init__(self, root: str = "/", use_fakeroot: bool = False):
+    def __init__(self, root: str = "/", use_userns: bool = False):
         self.root = root
-        self.use_fakeroot = use_fakeroot
+        self.use_userns = use_userns
         self.operations: List[QueuedOperation] = []
 
     @staticmethod
-    def _fakeroot_available() -> bool:
-        """Check if fakeroot is available."""
+    def _userns_available() -> bool:
+        """Check if podman unshare is available for proper UID/GID mapping."""
+        import subprocess
         import shutil
-        return shutil.which('fakeroot') is not None
+        # We need podman unshare for proper subuid/subgid mapping
+        # Simple 'unshare --user --map-root-user' doesn't work because
+        # chown operations fail for UIDs outside the single-user mapping
+        if not shutil.which('podman'):
+            return False
+        try:
+            result = subprocess.run(
+                ['podman', 'unshare', 'true'],
+                capture_output=True, timeout=10
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, OSError):
+            return False
 
     def add_install(
         self,
@@ -160,7 +177,8 @@ class TransactionQueue:
         force: bool = False,
         test: bool = False,
         erase_names: List[str] = None,
-        reinstall: bool = False
+        reinstall: bool = False,
+        noscripts: bool = False
     ) -> 'TransactionQueue':
         """Add an install operation to the queue.
 
@@ -173,6 +191,7 @@ class TransactionQueue:
             erase_names: List of package names to erase in the SAME transaction
                         (for obsoleted packages that must be removed atomically)
             reinstall: Allow reinstalling same version without --force
+            noscripts: Skip pre/post install scripts
 
         Returns:
             self for method chaining
@@ -186,6 +205,7 @@ class TransactionQueue:
                 force=force,
                 test=test,
                 reinstall=reinstall,
+                noscripts=noscripts,
             )
             # Store erase_names as extra attribute
             op.erase_names = erase_names or []
@@ -259,9 +279,17 @@ class TransactionQueue:
         # Create pipe for IPC
         read_fd, write_fd = os.pipe()
 
-        # Use fakeroot if requested and available (for non-root chroot installs)
-        if self.use_fakeroot and self._fakeroot_available() and os.geteuid() != 0:
-            return self._execute_with_fakeroot(read_fd, write_fd, progress_callback, sync)
+        # For non-root chroot installs, use user namespaces
+        if self.use_userns and os.geteuid() != 0:
+            if self._userns_available():
+                return self._execute_with_userns(read_fd, write_fd, progress_callback, sync)
+            else:
+                os.close(read_fd)
+                os.close(write_fd)
+                return QueueResult(
+                    success=False,
+                    overall_error="podman unshare not available. Install 'podman' or run as root."
+                )
 
         # Fork
         pid = os.fork()
@@ -273,14 +301,14 @@ class TransactionQueue:
             # Child process - never returns
             self._child_process(read_fd, write_fd)
 
-    def _execute_with_fakeroot(
+    def _execute_with_userns(
         self,
         read_fd: int,
         write_fd: int,
         progress_callback: Callable[[str, str, int, int], None],
         sync: bool
     ) -> QueueResult:
-        """Execute operations in a subprocess under fakeroot."""
+        """Execute operations in a user namespace (for non-root chroot installs)."""
         import pickle
         import subprocess
         import tempfile
@@ -299,7 +327,7 @@ class TransactionQueue:
             os.close(write_fd)
             os.close(read_fd)
 
-            # Python code to run under fakeroot
+            # Python code to run in the user namespace
             child_code = f'''
 import os
 import sys
@@ -316,19 +344,21 @@ from urpm.core.transaction_queue import TransactionQueue
 queue = TransactionQueue(root=state["root"])
 queue.operations = state["operations"]
 
-# Run child process logic (writes to stdout which we'll redirect to pipe)
+# Run child process logic (writes to stdout)
 queue._child_process_standalone()
 '''
 
-            # Run under fakeroot, redirecting stdout to our pipe
+            # Run under podman unshare for proper UID/GID mapping
+            # podman unshare uses /etc/subuid and /etc/subgid to map
+            # a range of UIDs/GIDs, allowing chown operations to work
             proc = subprocess.Popen(
-                ['fakeroot', 'python3', '-c', child_code],
+                ['podman', 'unshare', 'python3', '-c', child_code],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                pass_fds=()  # Don't pass any FDs
+                pass_fds=()
             )
 
-            # Read from subprocess stdout instead of pipe
+            # Read from subprocess stdout
             read_file = proc.stdout
 
             results: List[OperationResult] = []
@@ -353,28 +383,48 @@ queue._child_process_standalone()
                     )
                 elif msg.msg_type == 'progress':
                     if progress_callback:
-                        progress_callback(msg.operation_id, msg.name, msg.current, msg.total)
+                        progress_callback(
+                            msg.operation_id or '',
+                            msg.name or '',
+                            msg.current or 0,
+                            msg.total or 0
+                        )
                 elif msg.msg_type == 'op_done':
                     if current_op_result:
-                        current_op_result.count = msg.count
-                        # success is already True from op_start
+                        current_op_result.count = msg.count or 0
                         results.append(current_op_result)
                         current_op_result = None
                 elif msg.msg_type == 'op_error':
                     if current_op_result:
                         current_op_result.success = False
-                        current_op_result.error = msg.error
+                        current_op_result.errors = [msg.error] if msg.error else []
                         results.append(current_op_result)
                         current_op_result = None
                 elif msg.msg_type == 'queue_error':
                     overall_error = msg.error
                 elif msg.msg_type == 'parent_can_exit':
-                    pass  # Ignore in fakeroot mode
+                    pass  # Ignore in userns mode
 
             # Wait for subprocess
             if sync:
                 print("\033[33m  Waiting for scriptlets to complete...\033[0m", flush=True)
                 proc.wait()
+
+            # Check return code and stderr
+            stderr_output = proc.stderr.read().decode('utf-8').strip() if proc.stderr else ""
+
+            # Show stderr for debugging even on success (temporary)
+            if stderr_output:
+                import sys
+                print(f"\033[33m  [userns stderr]:\n{stderr_output}\033[0m", file=sys.stderr, flush=True)
+
+            # Only treat stderr as error if return code is non-zero
+            # RPM prints warnings to stderr even on success (e.g., "group X does not exist")
+            if proc.returncode != 0:
+                if stderr_output:
+                    overall_error = stderr_output
+                else:
+                    overall_error = f"unshare process exited with code {proc.returncode}"
 
             all_success = all(r.success for r in results) and not overall_error
             return QueueResult(success=all_success, operations=results, overall_error=overall_error)
@@ -387,11 +437,20 @@ queue._child_process_standalone()
                 pass
 
     def _child_process_standalone(self):
-        """Child process logic for fakeroot mode - writes to stdout."""
+        """Child process logic for userns mode - writes to stdout."""
         import sys
         import rpm
 
         write_file = sys.stdout
+
+        # Debug: show what we're about to do
+        if DEBUG_USERNS:
+            print(f"[userns child] root={self.root}, ops={len(self.operations)}", file=sys.stderr)
+            for op in self.operations:
+                print(f"[userns child]   op: {op.op_type.value} targets={len(op.targets)}", file=sys.stderr)
+                if op.targets:
+                    print(f"[userns child]     first: {op.targets[0]}", file=sys.stderr)
+            sys.stderr.flush()
 
         # Acquire install lock
         lock = InstallLock(root=self.root if self.root != "/" else None)
@@ -418,7 +477,13 @@ queue._child_process_standalone()
                 write_file.flush()
 
                 if op.op_type == OperationType.INSTALL:
+                    if DEBUG_USERNS:
+                        print(f"[userns child] executing install...", file=sys.stderr)
+                        sys.stderr.flush()
                     success, count, errors = self._execute_install(op, pipe_state, release_parent_after=False)
+                    if DEBUG_USERNS:
+                        print(f"[userns child] install result: success={success} count={count} errors={errors}", file=sys.stderr)
+                        sys.stderr.flush()
                 else:
                     success, count, errors = self._execute_erase(op, pipe_state, release_parent_after=False)
 
@@ -677,10 +742,15 @@ queue._child_process_standalone()
             release_parent_after: If True, send parent_can_exit after last package
         """
         import rpm
+        import sys
 
         rpm_paths = op.targets
         erase_names = getattr(op, 'erase_names', [])
         errors = []
+
+        if DEBUG_EXECINSTALL:
+            print(f"[_execute_install] root={self.root} paths={len(rpm_paths)} noscripts={op.noscripts}", file=sys.stderr)
+            sys.stderr.flush()
 
         ts = rpm.TransactionSet(self.root or '/')
 
@@ -691,17 +761,27 @@ queue._child_process_standalone()
 
         # Add packages to install
         open_fds = {}
+        added_count = 0
         for path in rpm_paths:
             try:
                 fd = os.open(str(path), os.O_RDONLY)
                 try:
                     hdr = ts.hdrFromFdno(fd)
                     ts.addInstall(hdr, str(path), 'u')
+                    added_count += 1
+                    if DEBUG_EXECINSTALL:
+                        print(f"[_execute_install] added: {Path(path).name}", file=sys.stderr)
                 finally:
                     os.close(fd)
             except rpm.error as e:
+                print(f"[_execute_install] ERROR adding {path}: {e}", file=sys.stderr)
+                sys.stderr.flush()
                 errors.append(f"{Path(path).name}: {e}")
                 return False, 0, errors
+
+        if DEBUG_EXECINSTALL:
+            print(f"[_execute_install] added {added_count} packages to transaction", file=sys.stderr)
+            sys.stderr.flush()
 
         # Add packages to erase in the SAME transaction (for obsoleted packages)
         erased_count = 0
@@ -715,13 +795,24 @@ queue._child_process_standalone()
 
         # Check dependencies
         if not op.force:
+            if DEBUG_EXECINSTALL:
+                print(f"[_execute_install] checking dependencies...", file=sys.stderr)
+                sys.stderr.flush()
             unresolved = ts.check()
             if unresolved:
+                print(f"[_execute_install] unresolved deps: {unresolved}", file=sys.stderr)
+                sys.stderr.flush()
                 errors = [f"Dependency: {prob}" for prob in unresolved]
                 return False, 0, errors
+            if DEBUG_EXECINSTALL:
+                print(f"[_execute_install] dependencies OK", file=sys.stderr)
+                sys.stderr.flush()
 
         # Order transaction
         ts.order()
+        if DEBUG_EXECINSTALL:
+            print(f"[_execute_install] transaction ordered", file=sys.stderr)
+            sys.stderr.flush()
 
         if op.test:
             return True, len(rpm_paths), []
@@ -812,9 +903,20 @@ queue._child_process_standalone()
         if prob_filter:
             ts.setProbFilter(prob_filter)
 
+        # Set transaction flags (noscripts for chroot/container builds)
+        if op.noscripts:
+            ts.setFlags(rpm.RPMTRANS_FLAG_NOSCRIPTS)
+            _log_background("Skipping pre/post scripts (--noscripts)")
+
         # Run transaction
+        if DEBUG_EXECINSTALL:
+            print(f"[_execute_install] calling ts.run() with {total} packages", file=sys.stderr)
+            sys.stderr.flush()
         _log_background(f"Starting install: {total} packages")
         problems = ts.run(callback, '')
+        if DEBUG_EXECINSTALL:
+            print(f"[_execute_install] ts.run() returned: problems={problems}", file=sys.stderr)
+            sys.stderr.flush()
 
         # Clean up any remaining FDs
         for fd in open_fds.values():
@@ -824,6 +926,8 @@ queue._child_process_standalone()
                 pass
 
         if problems:
+            print(f"[_execute_install] PROBLEMS: {problems}", file=sys.stderr)
+            sys.stderr.flush()
             _log_background(f"Transaction failed: {problems}")
             errors = [str(p) for p in problems]
 

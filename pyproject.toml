@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "urpm"
-version = "0.1.23"
+version = "0.1.26"
 description = "Modern package manager for Mageia Linux"
 readme = "README.md"
-license = {text = "GPL-2.0-or-later"}
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [
     {name = "Mageia Community"}
 ]
@@ -16,7 +17,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
