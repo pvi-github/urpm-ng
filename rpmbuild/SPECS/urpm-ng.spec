@@ -22,6 +22,7 @@ BuildRequires:  python3-setuptools
 BuildRequires:  python3-solv
 BuildRequires:  python3-rpm
 BuildRequires:  python3-zstandard
+BuildRequires:  meson
 
 Requires:       python3
 Requires:       python3-solv
