@@ -1,5 +1,5 @@
 %define name urpm-ng
-%define version 0.1.27
+%define version 0.2.1
 %define release 1
 
 Name:           %{name}
@@ -121,6 +121,9 @@ install -Dm644 data/org.mageia.urpm.policy %{buildroot}%{_datadir}/polkit-1/acti
 
 # Install AppStream configuration
 install -Dm644 data/appstream-mageia.conf %{buildroot}%{_datadir}/appstream/appstream.conf.d/mageia.conf
+
+# Install OS metainfo for Discover/GNOME Software
+install -Dm644 data/mageia.metainfo.xml %{buildroot}%{_datadir}/metainfo/mageia.metainfo.xml
 
 # Install D-Bus service executable
 install -Dm755 /dev/null %{buildroot}%{_libexecdir}/urpm-dbus-service
@@ -275,5 +278,6 @@ fi
 %files -n pk-backend-urpm
 %{_libdir}/packagekit-backend/libpk_backend_urpm.so
 %{_datadir}/appstream/appstream.conf.d/mageia.conf
+%{_datadir}/metainfo/mageia.metainfo.xml
 
 %changelog
