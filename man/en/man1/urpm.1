@@ -57,6 +57,12 @@ Install build dependencies from spec file or SRPM. Auto-detects if no file speci
 .TP
 .B \-\-sync
 Wait for all scriptlets and triggers to complete before returning.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Allow additional architectures beyond system arch and noarch. Can be repeated.
+By default, only packages matching the system architecture (e.g., x86_64) and
+noarch are considered. Use this option to install 32-bit packages on 64-bit
+systems (e.g., \fB\-\-allow\-arch i686\fR for wine or steam).
 .RE
 .TP
 .B e|erase \fIpackage\fR ...
@@ -86,6 +92,9 @@ Upgrade packages (system upgrade if none specified).
 .TP
 .B \-\-only\-peers
 Only download from LAN peers, no upstream mirrors.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Allow additional architectures (e.g., \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Package Information
 .TP
@@ -352,6 +361,9 @@ Download build dependencies from spec file.
 .TP
 .B \-\-only\-peers
 Only download from LAN peers, no upstream mirrors.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Allow additional architectures (e.g., \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Container Build System
 .TP

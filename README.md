@@ -129,6 +129,7 @@ urpm i <package>              # Short alias
 --force                       # Force despite dependency problems
 --nosignature                 # Skip GPG verification (not recommended)
 --prefer=<prefs>              # Guide alternative choices (see below)
+--allow-arch <arch>           # Allow additional architectures (e.g., i686 for wine/steam)
 ```
 
 #### Preference-guided installation
@@ -149,6 +150,20 @@ Preference syntax:
 - `-pattern` - Disfavor packages matching this (e.g., `-apache-mod_php`)
 
 Preferences work by checking package REQUIRES and PROVIDES, not package names.
+
+#### Architecture filtering
+
+By default, urpm only considers packages matching your system architecture and `noarch`. This prevents accidental installation of i686 packages on x86_64 systems when 32-bit media are enabled.
+
+To install 32-bit packages (wine, steam, multilib):
+
+```bash
+urpm install wine --allow-arch i686
+urpm install steam --allow-arch i686
+
+# Multiple architectures
+urpm install mypackage --allow-arch i686 --allow-arch armv7hl
+```
 
 ### Remove packages
 
@@ -175,6 +190,7 @@ urpm upgrade <package>        # Upgrade specific packages
 --auto                        # Non-interactive mode
 --without-recommends          # Skip recommended packages
 --with-suggests               # Also install suggested packages
+--allow-arch <arch>           # Allow additional architectures (e.g., i686)
 ```
 
 ### Auto-remove orphans

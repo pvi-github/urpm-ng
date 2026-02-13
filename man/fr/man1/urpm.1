@@ -58,6 +58,12 @@ Installe les dependances de build depuis un fichier spec ou SRPM. Auto-detection
 .TP
 .B \-\-sync
 Attend la fin de tous les scriptlets et triggers avant de retourner.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Autorise des architectures supplementaires au-dela de l'architecture systeme et noarch.
+Peut etre repete. Par defaut, seuls les paquets correspondant a l'architecture systeme
+(ex: x86_64) et noarch sont consideres. Utilisez cette option pour installer des paquets
+32 bits sur un systeme 64 bits (ex: \fB\-\-allow\-arch i686\fR pour wine ou steam).
 .RE
 .TP
 .B e|erase \fIpaquet\fR ...
@@ -87,6 +93,9 @@ Met a niveau les paquets (tout le systeme si aucun n'est specifie).
 .TP
 .B \-\-only\-peers
 Telecharge uniquement depuis les pairs LAN, pas de miroirs upstream.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Autorise des architectures supplementaires (ex: \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Informations sur les paquets
 .TP
@@ -353,6 +362,9 @@ Telecharge les dependances de build depuis un fichier spec.
 .TP
 .B \-\-only\-peers
 Telecharge uniquement depuis les pairs LAN, pas de miroirs upstream.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Autorise des architectures supplementaires (ex: \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Systeme de build en conteneurs
 .TP
