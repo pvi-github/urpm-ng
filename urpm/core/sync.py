@@ -70,7 +70,8 @@ class SyncResult:
 
 def download_file(url: str, dest: Path,
                   progress_callback: Callable[[int, int], None] = None,
-                  timeout: int = 30) -> DownloadResult:
+                  timeout: int = 30,
+                  ip_mode: str = 'auto') -> DownloadResult:
     """Download a file from URL to destination.
 
     Args:
@@ -78,11 +79,25 @@ def download_file(url: str, dest: Path,
         dest: Destination path
         progress_callback: Optional callback(downloaded_bytes, total_bytes)
         timeout: Connection timeout in seconds
+        ip_mode: IP version preference ('auto', 'ipv4', 'ipv6', 'dual')
 
     Returns:
         DownloadResult with success status and metadata
     """
+    import socket
+    from .config import get_socket_family_for_ip_mode
+
+    # Force IPv4/IPv6 by patching getaddrinfo temporarily
+    family = get_socket_family_for_ip_mode(ip_mode)
+    original_getaddrinfo = socket.getaddrinfo
+
+    def patched_getaddrinfo(host, port, fam=0, *args, **kwargs):
+        # Force the socket family for hostname resolution
+        return original_getaddrinfo(host, port, family, *args, **kwargs)
+
     try:
+        socket.getaddrinfo = patched_getaddrinfo
+
         req = urllib.request.Request(url)
         req.add_header('User-Agent', 'urpm/0.1')
 
@@ -118,6 +133,8 @@ def download_file(url: str, dest: Path,
         return DownloadResult(success=False, error=f"URL error: {e.reason}")
     except Exception as e:
         return DownloadResult(success=False, error=str(e))
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
 
 
 def get_media_base_url(media_url: str) -> str:
@@ -222,8 +239,9 @@ def download_from_server(url: str, dest: Path, server: dict,
         except Exception as e:
             return DownloadResult(success=False, error=str(e))
     else:
-        # HTTP(S) download
-        return download_file(url, dest, progress_callback, timeout)
+        # HTTP(S) download - use server's IP mode preference
+        ip_mode = server.get('ip_mode', 'auto') if server else 'auto'
+        return download_file(url, dest, progress_callback, timeout, ip_mode=ip_mode)
 
 
 def get_effective_media_url(db, media: dict) -> Tuple[Optional[dict], Optional[str]]:
