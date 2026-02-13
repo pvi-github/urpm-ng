@@ -78,17 +78,25 @@ Also remove orphaned dependencies.
 .TP
 .B autoremove
 Remove orphaned packages, old kernels, or failed dependencies.
-.SS Package Updates
+.SS Metadata and Package Updates
 .TP
-.B up|update \fR[\fIpackage\fR ...]
-Update various things media, packages...
+.B update \fR[\fImedia\fR]
+Update media metadata only (apt-style). Does not upgrade packages.
 .RS
-.B This will be reworked on : prefer upgrade for packages instead.\fR
+.TP
+.B \-\-files
+Also sync files.xml for media with sync_files enabled.
 .RE
 .TP
 .B u|upgrade \fR[\fIpackage\fR ...]
 Upgrade packages (system upgrade if none specified).
 .RS
+.TP
+.BR \-y ", " \-\-auto
+No confirmation prompt.
+.TP
+.B \-\-with\-recommends
+Install recommended packages.
 .TP
 .B \-\-only\-peers
 Only download from LAN peers, no upstream mirrors.

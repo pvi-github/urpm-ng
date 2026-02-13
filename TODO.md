@@ -8,12 +8,6 @@
 
 ## En cours
 
-### Clarification update/upgrade (style apt)
-Revoir la sémantique :
-- `urpm update` = mise à jour métadonnées uniquement
-- `urpm upgrade` = mise à jour des paquets
-- `urpm distupgrade` (futur) = mise à jour majeure du système
-
 ### Alternatives (OR deps)
 - [ ] Tests intensifs install avec alternatives
 - [ ] Valider mode --auto

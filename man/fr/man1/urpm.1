@@ -79,17 +79,25 @@ Supprime aussi les dependances orphelines.
 .TP
 .B autoremove
 Supprime les paquets orphelins, anciens noyaux ou dependances cassees.
-.SS Mises a jour
+.SS Metadonnees et mises a jour
 .TP
-.B up|update \fR[\fIpaquet\fR ...]
-Met a jour diverses choses... media, paquets...
+.B update \fR[\fImedia\fR]
+Met a jour les metadonnees des medias uniquement (style apt). Ne met pas a jour les paquets.
 .RS
-.B Cette commande sera modifiée...préférez u|upgrade pour les paquets.
+.TP
+.B \-\-files
+Synchronise aussi files.xml pour les medias avec sync_files active.
 .RE
 .TP
 .B u|upgrade \fR[\fIpaquet\fR ...]
 Met a niveau les paquets (tout le systeme si aucun n'est specifie).
 .RS
+.TP
+.BR \-y ", " \-\-auto
+Pas de confirmation.
+.TP
+.B \-\-with\-recommends
+Installe les paquets recommandes.
 .TP
 .B \-\-only\-peers
 Telecharge uniquement depuis les pairs LAN, pas de miroirs upstream.

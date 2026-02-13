@@ -913,56 +913,21 @@ Examples:
     )
 
     # =========================================================================
-    # update / u
+    # update - metadata only (apt-style)
     # =========================================================================
     update_parser = subparsers.add_parser(
-        'update', aliases=['up'],
-        help='Update packages or metadata',
+        'update',
+        help='Update media metadata (apt-style: use "upgrade" for packages)',
         parents=[display_parent, debug_parent]
     )
     update_parser.add_argument(
-        'packages', nargs='*',
-        help='Packages to update (empty = all)'
+        'name', nargs='?',
+        help='Media name to update (default: all)'
     )
     update_parser.add_argument(
-        '--lists', '-l',
+        '--files',
         action='store_true',
-        help='Update media metadata only'
-    )
-    update_parser.add_argument(
-        '--all', '-a',
-        action='store_true',
-        help='Update all packages'
-    )
-    update_parser.add_argument(
-        '--security',
-        action='store_true',
-        help='Security updates only'
-    )
-    update_parser.add_argument(
-        '--auto', '-y',
-        action='store_true',
-        help='No confirmation'
-    )
-    update_parser.add_argument(
-        '--noerase-orphans',
-        action='store_true',
-        help='Keep orphaned dependencies (do not remove them)'
-    )
-    update_parser.add_argument(
-        '--test',
-        action='store_true',
-        help='Dry run - show what would be done'
-    )
-    update_parser.add_argument(
-        '--nosignature',
-        action='store_true',
-        help='Skip GPG signature verification (not recommended)'
-    )
-    update_parser.add_argument(
-        '--no-peers',
-        action='store_true',
-        help='Disable P2P download from LAN peers'
+        help='Also sync files.xml for media with sync_files enabled'
     )
 
     # =========================================================================
@@ -8739,8 +8704,8 @@ def cmd_erase(args, db: PackageDatabase) -> int:
         signal.signal(signal.SIGINT, original_handler)
 
 
-def cmd_update(args, db: PackageDatabase) -> int:
-    """Handle update/upgrade command."""
+def cmd_upgrade(args, db: PackageDatabase) -> int:
+    """Handle upgrade command - upgrade packages."""
     import platform
     import signal
 
@@ -8764,12 +8729,6 @@ def cmd_update(args, db: PackageDatabase) -> int:
     _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
     _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
-    # If --lists, just update media metadata
-    if getattr(args, 'lists', False):
-        # Reuse media update logic
-        args.name = None  # Update all
-        return cmd_media_update(args, db)
-
     from ..core.resolver import Resolver, format_size, set_solver_debug
     from ..core.install import check_root
     from pathlib import Path
@@ -8786,13 +8745,8 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
     # Determine what to upgrade
     packages = getattr(args, 'packages', []) or []
-    # --all flag OR (upgrade/u command with no packages) = full system upgrade
-    upgrade_all = getattr(args, 'all', False) or (args.command in ('upgrade', 'u') and not packages)
-
-    if not packages and not upgrade_all:
-        print("Specify packages to update, or use --all/-a for full system upgrade")
-        print("Use --lists/-l to update media metadata only")
-        return 1
+    # No packages = full system upgrade (apt-style: urpm upgrade = upgrade all)
+    upgrade_all = not packages
 
     # Separate local RPM files from package names
     local_rpm_paths = []
@@ -13972,8 +13926,12 @@ def main(argv=None) -> int:
         elif args.command in ('erase', 'e'):
             return cmd_erase(args, db)
 
-        elif args.command in ('update', 'up', 'upgrade', 'u'):
-            return cmd_update(args, db)
+        elif args.command == 'update':
+            # apt-style: update = metadata only
+            return cmd_media_update(args, db)
+
+        elif args.command in ('upgrade', 'u'):
+            return cmd_upgrade(args, db)
 
         elif args.command in ('list', 'l'):
             return cmd_list(args, db)

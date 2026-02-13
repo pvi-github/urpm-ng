@@ -179,16 +179,24 @@ urpm remove <package>         # Alternative alias
 --force                       # Force despite dependency problems
 ```
 
-### Upgrade system
+### Update metadata (apt-style)
+
+```bash
+urpm update                   # Update all media metadata
+urpm update "Core Release"    # Update specific media
+urpm update --files           # Also sync files.xml
+```
+
+### Upgrade packages
 
 ```bash
 urpm upgrade                  # Upgrade all packages
-urpm up                       # Short alias
+urpm u                        # Short alias
 urpm upgrade <package>        # Upgrade specific packages
 
 # Options
 --auto                        # Non-interactive mode
---without-recommends          # Skip recommended packages
+--with-recommends             # Install recommended packages
 --with-suggests               # Also install suggested packages
 --allow-arch <arch>           # Allow additional architectures (e.g., i686)
 ```
