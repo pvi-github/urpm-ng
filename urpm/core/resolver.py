@@ -275,7 +275,8 @@ class Resolver:
 
     def __init__(self, db: PackageDatabase, arch: str = "x86_64", root: str = None,
                  urpm_root: str = None, install_recommends: bool = True,
-                 ignore_installed: bool = False):
+                 ignore_installed: bool = False,
+                 allowed_arches: list = None):
         """Initialize resolver.
 
         Args:
@@ -285,6 +286,9 @@ class Resolver:
             urpm_root: Root for both urpm config and RPM (--urpm-root)
             install_recommends: Install recommended packages (default: True)
             ignore_installed: If True, resolve as if nothing is installed (for download-only)
+            allowed_arches: List of allowed package architectures.
+                           Default: [arch, 'noarch'] (system arch + noarch)
+                           Use --allow-arch to add more (e.g., i686 for wine/steam)
         """
         self.db = db
         self.arch = arch
@@ -293,6 +297,8 @@ class Resolver:
         self.urpm_root = urpm_root
         self.install_recommends = install_recommends
         self.ignore_installed = ignore_installed
+        # Default allowed architectures: system arch + noarch
+        self.allowed_arches = allowed_arches if allowed_arches is not None else [arch, 'noarch']
         self.pool = None
         self._solvable_to_pkg = {}  # Map solvable id -> pkg dict
         self._installed_count = 0  # Number of installed packages loaded
@@ -417,6 +423,12 @@ class Resolver:
             media_version = media.get('mageia_version')
             if accepted_versions and media_version and media_version not in accepted_versions:
                 debug.log(f"Skipping media {media['name']}: version {media_version} not in {accepted_versions}")
+                continue
+
+            # Filter by architecture - only load media matching allowed architectures
+            media_arch = media.get('architecture')
+            if media_arch and media_arch not in self.allowed_arches:
+                debug.log(f"Skipping media {media['name']}: architecture {media_arch} not in {self.allowed_arches}")
                 continue
 
             repo = pool.add_repo(media['name'])

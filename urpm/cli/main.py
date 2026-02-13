@@ -422,6 +422,13 @@ Examples:
         help='Install build dependencies from spec file or SRPM'
     )
     install_parser.add_argument(
+        '--allow-arch',
+        type=str,
+        action='append',
+        metavar='ARCH',
+        help='Allow additional architectures (e.g., --allow-arch i686 for wine/steam). Can be repeated.'
+    )
+    install_parser.add_argument(
         '--sync',
         action='store_true',
         help='Wait for all scriptlets and triggers to complete before returning'
@@ -480,6 +487,13 @@ Examples:
         '--nodeps',
         action='store_true',
         help='Download only specified packages, no dependencies'
+    )
+    download_parser.add_argument(
+        '--allow-arch',
+        type=str,
+        action='append',
+        metavar='ARCH',
+        help='Allow additional architectures (e.g., --allow-arch i686 for wine/steam)'
     )
 
     # =========================================================================
@@ -1007,6 +1021,13 @@ Examples:
         '--force',
         action='store_true',
         help='Force upgrade despite dependency problems or conflicts'
+    )
+    upgrade_parser.add_argument(
+        '--allow-arch',
+        type=str,
+        action='append',
+        metavar='ARCH',
+        help='Allow additional architectures (e.g., --allow-arch i686 for wine/steam)'
     )
 
     # =========================================================================
@@ -6465,7 +6486,7 @@ def _create_resolver(db: 'PackageDatabase', args, **kwargs) -> 'Resolver':
 
     Args:
         db: Package database
-        args: Parsed arguments (may contain root, urpm_root)
+        args: Parsed arguments (may contain root, urpm_root, allow_arch)
         **kwargs: Additional arguments to pass to Resolver
 
     Returns:
@@ -6481,6 +6502,19 @@ def _create_resolver(db: 'PackageDatabase', args, **kwargs) -> 'Resolver':
     # Default arch if not provided
     if 'arch' not in kwargs:
         kwargs['arch'] = platform.machine()
+
+    # Handle --allow-arch: build allowed_arches list
+    # Default: [system_arch, 'noarch']
+    # With --allow-arch: add specified architectures
+    if 'allowed_arches' not in kwargs:
+        allow_arch = getattr(args, 'allow_arch', None)
+        if allow_arch:
+            # User specified additional architectures
+            arch = kwargs.get('arch', platform.machine())
+            allowed_arches = [arch, 'noarch'] + list(allow_arch)
+            # Remove duplicates while preserving order
+            seen = set()
+            kwargs['allowed_arches'] = [x for x in allowed_arches if not (x in seen or seen.add(x))]
 
     return Resolver(db, root=root, urpm_root=urpm_root, **kwargs)
 
