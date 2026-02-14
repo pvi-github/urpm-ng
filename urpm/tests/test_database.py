@@ -25,14 +25,33 @@ class TestMedia:
     def test_add_media(self, db):
         media_id = db.add_media(
             name="Core Release",
+            short_name="release",
+            mageia_version="10",
+            architecture="noarch",
+            relative_path = ".",
             url="http://mirrors.mageia.org/distrib/9/x86_64/media/core/release",
             enabled=True
         )
         assert media_id > 0
 
     def test_list_media(self, db):
-        db.add_media(name="Core Release", url="http://example.com/core")
-        db.add_media(name="Core Updates", url="http://example.com/updates", update=True)
+        db.add_media(
+            name="Core Release",
+            short_name="release",
+            mageia_version="10",
+            architecture="noarch",
+            relative_path = ".",
+            url="http://example.com/core"
+            )
+        db.add_media(
+            name="Core Updates",
+            short_name="test",
+            mageia_version="10",
+            architecture="noarch",
+            relative_path = ".",
+            url="http://example.com/updates",
+            update_media=True
+            )
 
         media_list = db.list_media()
         assert len(media_list) == 2
@@ -40,14 +59,28 @@ class TestMedia:
         assert media_list[1]['update_media'] == 1
 
     def test_remove_media(self, db):
-        db.add_media(name="Test", url="http://test.com")
+        db.add_media(
+            name="Test",
+            short_name="test",
+            mageia_version="10",
+            architecture="noarch",
+            relative_path = ".",
+            url="http://test.com"
+            )
         assert len(db.list_media()) == 1
 
         db.remove_media("Test")
         assert len(db.list_media()) == 0
 
     def test_enable_disable_media(self, db):
-        db.add_media(name="Test", url="http://test.com")
+        db.add_media(
+            name="Test",
+            short_name="test",
+            mageia_version="10",
+            architecture="noarch",
+            relative_path = ".",
+            url="http://test.com"
+            )
 
         db.enable_media("Test", enabled=False)
         media = db.get_media("Test")
@@ -162,7 +195,15 @@ class TestStats:
         assert stats['media'] == 0
 
     def test_stats_with_data(self, db):
-        db.add_media(name="Test", url="http://test.com")
+
+        db.add_media(
+            name="Test",
+            short_name="test",
+            mageia_version="10",
+            architecture="noarch",
+            relative_path = ".",
+            url="http://test.com",
+            )
         packages = [
             {
                 'name': 'test',
