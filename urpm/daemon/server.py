@@ -101,6 +101,8 @@ class UrpmdHandler(BaseHTTPRequestHandler):
             self.handle_have(data)
         elif path == '/api/invalidate-cache':
             self.handle_invalidate_cache()
+        elif path == '/api/rebuild-fts':
+            self.handle_rebuild_fts()
         else:
             self.send_error_json(404, f"Unknown endpoint: {path}")
 
@@ -112,7 +114,7 @@ class UrpmdHandler(BaseHTTPRequestHandler):
             'endpoints': {
                 'api': ['/api/ping', '/api/status', '/api/media', '/api/available',
                         '/api/updates', '/api/refresh', '/api/peers', '/api/announce',
-                        '/api/have'],
+                        '/api/have', '/api/rebuild-fts'],
                 'files': ['/media/'],
             }
         })
@@ -471,6 +473,15 @@ class UrpmdHandler(BaseHTTPRequestHandler):
 
         self.daemon.invalidate_rpm_index()
         self.send_json({'status': 'ok', 'message': 'Cache index invalidated'})
+
+    def handle_rebuild_fts(self):
+        """Rebuild FTS index for fast file search."""
+        if not self.daemon:
+            self.send_error_json(500, "Daemon not initialized")
+            return
+
+        result = self.daemon.rebuild_fts()
+        self.send_json(result)
 
     def handle_peers(self):
         """List known peers."""

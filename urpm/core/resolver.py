@@ -275,7 +275,8 @@ class Resolver:
 
     def __init__(self, db: PackageDatabase, arch: str = "x86_64", root: str = None,
                  urpm_root: str = None, install_recommends: bool = True,
-                 ignore_installed: bool = False):
+                 ignore_installed: bool = False,
+                 allowed_arches: list = None):
         """Initialize resolver.
 
         Args:
@@ -285,6 +286,9 @@ class Resolver:
             urpm_root: Root for both urpm config and RPM (--urpm-root)
             install_recommends: Install recommended packages (default: True)
             ignore_installed: If True, resolve as if nothing is installed (for download-only)
+            allowed_arches: List of allowed package architectures.
+                           Default: [arch, 'noarch'] (system arch + noarch)
+                           Use --allow-arch to add more (e.g., i686 for wine/steam)
         """
         self.db = db
         self.arch = arch
@@ -293,6 +297,8 @@ class Resolver:
         self.urpm_root = urpm_root
         self.install_recommends = install_recommends
         self.ignore_installed = ignore_installed
+        # Default allowed architectures: system arch + noarch
+        self.allowed_arches = allowed_arches if allowed_arches is not None else [arch, 'noarch']
         self.pool = None
         self._solvable_to_pkg = {}  # Map solvable id -> pkg dict
         self._installed_count = 0  # Number of installed packages loaded
@@ -417,6 +423,12 @@ class Resolver:
             media_version = media.get('mageia_version')
             if accepted_versions and media_version and media_version not in accepted_versions:
                 debug.log(f"Skipping media {media['name']}: version {media_version} not in {accepted_versions}")
+                continue
+
+            # Filter by architecture - only load media matching allowed architectures
+            media_arch = media.get('architecture')
+            if media_arch and media_arch not in self.allowed_arches:
+                debug.log(f"Skipping media {media['name']}: architecture {media_arch} not in {self.allowed_arches}")
                 continue
 
             repo = pool.add_repo(media['name'])
@@ -1184,20 +1196,36 @@ class Resolver:
                     favored.add(pkg_name)
 
         for name in package_names:
+            # Parse version constraint if present (formats: "name >= ver" or "name[>= ver]")
+            base_name = name
+            version_constraint = None
+
+            # Handle "name op version" format (space-separated)
+            space_match = re.match(r'^(.+?)\s+(>=|<=|>|<|==|=)\s+(.+)$', name)
+            if space_match:
+                base_name = space_match.group(1)
+                version_constraint = (space_match.group(2), space_match.group(3))
+            else:
+                # Handle "name[op version]" format (bracket)
+                bracket_match = re.match(r'^([^\[]+)\[([<>=!]+)\s*(.+)\]$', name)
+                if bracket_match:
+                    base_name = bracket_match.group(1)
+                    version_constraint = (bracket_match.group(2), bracket_match.group(3))
+
             # Use multiple selection flags for flexibility
             flags = (solv.Selection.SELECTION_NAME |
                     solv.Selection.SELECTION_CANON |
                     solv.Selection.SELECTION_DOTARCH |
                     solv.Selection.SELECTION_REL)
-            sel = self.pool.select(name, flags)
+            sel = self.pool.select(base_name, flags)
 
             if sel.isempty():
                 # Try glob match
-                sel = self.pool.select(name, solv.Selection.SELECTION_GLOB |
+                sel = self.pool.select(base_name, solv.Selection.SELECTION_GLOB |
                                        solv.Selection.SELECTION_CANON)
             if sel.isempty():
                 # Try provides match
-                sel = self.pool.select(name, solv.Selection.SELECTION_PROVIDES)
+                sel = self.pool.select(base_name, solv.Selection.SELECTION_PROVIDES)
 
                 if not sel.isempty() and name not in choices:
                     # Check if multiple different packages provide this capability
@@ -1223,15 +1251,15 @@ class Resolver:
                             )]
                         )
 
-            if sel.isempty() and name not in local_packages:
+            if sel.isempty() and base_name not in local_packages:
                 not_found.append(name)
-            elif name in local_packages:
+            elif base_name in local_packages:
                 # For local packages, find directly in @LocalRPMs repo (pool.select doesn't work)
                 local_solvable = None
                 for repo in self.pool.repos:
                     if repo.name == '@LocalRPMs':
                         for s in repo.solvables:
-                            if s.name == name:
+                            if s.name == base_name:
                                 local_solvable = s
                                 break
                         break
@@ -2336,6 +2364,15 @@ class Resolver:
                 jobs += sel.jobs(solv.Job.SOLVER_ERASE)
 
         if not_found:
+            # If ALL packages are not installed, return success with "nothing to do"
+            # (handles PackageKit calling remove twice, second time package is gone)
+            if len(not_found) == len(package_names):
+                return Resolution(
+                    success=True,
+                    actions=[],
+                    problems=[]
+                )
+            # If only some packages not found, that's an error
             return Resolution(
                 success=False,
                 actions=[],
@@ -2375,6 +2412,14 @@ class Resolver:
                     size=size,
                     filesize=pkg_info.get('filesize', 0)
                 ))
+
+        # Find orphaned dependencies if requested
+        if clean_deps and actions:
+            initial_removes = {a.name for a in actions}
+            orphan_actions = self._find_orphans_iterative(initial_removes)
+            if orphan_actions:
+                actions.extend(orphan_actions)
+                remove_size += sum(a.size or 0 for a in orphan_actions)
 
         return Resolution(
             success=True,

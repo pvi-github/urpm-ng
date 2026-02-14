@@ -422,6 +422,13 @@ Examples:
         help='Install build dependencies from spec file or SRPM'
     )
     install_parser.add_argument(
+        '--allow-arch',
+        type=str,
+        action='append',
+        metavar='ARCH',
+        help='Allow additional architectures (e.g., --allow-arch i686 for wine/steam). Can be repeated.'
+    )
+    install_parser.add_argument(
         '--sync',
         action='store_true',
         help='Wait for all scriptlets and triggers to complete before returning'
@@ -480,6 +487,13 @@ Examples:
         '--nodeps',
         action='store_true',
         help='Download only specified packages, no dependencies'
+    )
+    download_parser.add_argument(
+        '--allow-arch',
+        type=str,
+        action='append',
+        metavar='ARCH',
+        help='Allow additional architectures (e.g., --allow-arch i686 for wine/steam)'
     )
 
     # =========================================================================
@@ -899,56 +913,21 @@ Examples:
     )
 
     # =========================================================================
-    # update / u
+    # update - metadata only (apt-style)
     # =========================================================================
     update_parser = subparsers.add_parser(
-        'update', aliases=['up'],
-        help='Update packages or metadata',
+        'update',
+        help='Update media metadata (apt-style: use "upgrade" for packages)',
         parents=[display_parent, debug_parent]
     )
     update_parser.add_argument(
-        'packages', nargs='*',
-        help='Packages to update (empty = all)'
+        'name', nargs='?',
+        help='Media name to update (default: all)'
     )
     update_parser.add_argument(
-        '--lists', '-l',
+        '--files',
         action='store_true',
-        help='Update media metadata only'
-    )
-    update_parser.add_argument(
-        '--all', '-a',
-        action='store_true',
-        help='Update all packages'
-    )
-    update_parser.add_argument(
-        '--security',
-        action='store_true',
-        help='Security updates only'
-    )
-    update_parser.add_argument(
-        '--auto', '-y',
-        action='store_true',
-        help='No confirmation'
-    )
-    update_parser.add_argument(
-        '--noerase-orphans',
-        action='store_true',
-        help='Keep orphaned dependencies (do not remove them)'
-    )
-    update_parser.add_argument(
-        '--test',
-        action='store_true',
-        help='Dry run - show what would be done'
-    )
-    update_parser.add_argument(
-        '--nosignature',
-        action='store_true',
-        help='Skip GPG signature verification (not recommended)'
-    )
-    update_parser.add_argument(
-        '--no-peers',
-        action='store_true',
-        help='Disable P2P download from LAN peers'
+        help='Also sync files.xml for media with sync_files enabled'
     )
 
     # =========================================================================
@@ -1007,6 +986,13 @@ Examples:
         '--force',
         action='store_true',
         help='Force upgrade despite dependency problems or conflicts'
+    )
+    upgrade_parser.add_argument(
+        '--allow-arch',
+        type=str,
+        action='append',
+        metavar='ARCH',
+        help='Allow additional architectures (e.g., --allow-arch i686 for wine/steam)'
     )
 
     # =========================================================================
@@ -1226,6 +1212,11 @@ For legacy mode (non-Mageia URL with explicit name):
         '--files', '-f',
         action='store_true',
         help='Also download and index files.xml.lzma (enables file search in available packages)'
+    )
+    media_update.add_argument(
+        '--no-appstream',
+        action='store_true',
+        help='Skip AppStream metadata sync'
     )
 
     # media import
@@ -1614,6 +1605,7 @@ Examples:
 
     cache_subparsers.add_parser('rebuild', help='Rebuild database from synthesis files')
     cache_subparsers.add_parser('stats', help='Detailed cache statistics')
+    cache_subparsers.add_parser('rebuild-fts', help='Rebuild FTS index for fast file search')
 
     # =========================================================================
     # history / h
@@ -1838,6 +1830,65 @@ Examples:
         help='Show all files (do not truncate list)'
     )
 
+    # =========================================================================
+    # appstream
+    # =========================================================================
+    appstream_parser = subparsers.add_parser(
+        'appstream',
+        help='Manage AppStream metadata for software centers (Discover, GNOME Software)'
+    )
+    appstream_subparsers = appstream_parser.add_subparsers(
+        dest='appstream_command',
+        metavar='<subcommand>'
+    )
+
+    # appstream generate
+    appstream_generate = appstream_subparsers.add_parser(
+        'generate', aliases=['gen'],
+        help='Generate AppStream catalog from package database'
+    )
+    appstream_generate.add_argument(
+        '--output', '-o',
+        help='Output file (default: /var/cache/swcatalog/xml/mageia-{version}.xml.gz)'
+    )
+    appstream_generate.add_argument(
+        '--no-compress',
+        action='store_true',
+        help='Do not gzip the output file'
+    )
+    appstream_generate.add_argument(
+        '--media', '-m',
+        help='Generate for specific media only'
+    )
+
+    # appstream status
+    appstream_status = appstream_subparsers.add_parser(
+        'status',
+        help='Show AppStream status for all media'
+    )
+
+    # appstream merge
+    appstream_merge = appstream_subparsers.add_parser(
+        'merge',
+        help='Merge per-media AppStream files into unified catalog'
+    )
+    appstream_merge.add_argument(
+        '--refresh', '-r',
+        action='store_true',
+        help='Also refresh system AppStream cache'
+    )
+
+    # appstream init-distro
+    appstream_init = appstream_subparsers.add_parser(
+        'init-distro',
+        help='Create OS metainfo file for AppStream (required for Discover/GNOME Software)'
+    )
+    appstream_init.add_argument(
+        '--force', '-f',
+        action='store_true',
+        help='Overwrite existing metainfo file'
+    )
+
     return parser
 
 
@@ -1855,6 +1906,10 @@ def _extract_pkg_name(package: str) -> str:
         The package name
     """
     import re
+    # Don't try to extract NEVRA from virtual packages (pkgconfig, etc.)
+    # These have parentheses and the version inside is part of the name
+    if '(' in package:
+        return package
     # If it looks like a NEVRA (has version pattern), extract name
     # Pattern: name-version-release.arch where version starts with digit
     match = re.match(r'^(.+?)-\d+[.:]', package)
@@ -3501,6 +3556,7 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
         return 1
 
     sync_files = getattr(args, 'files', False)
+    skip_appstream = getattr(args, 'no_appstream', False)
 
     def progress(media_name, stage, current, total):
         # Clear line with ANSI escape code, then print
@@ -3523,7 +3579,8 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
             progress(args.name, stage, current, total)
 
         urpm_root = getattr(args, 'urpm_root', None)
-        result = sync_media(db, args.name, single_progress, force=True, urpm_root=urpm_root)
+        result = sync_media(db, args.name, single_progress, force=True,
+                           urpm_root=urpm_root, skip_appstream=skip_appstream)
         print()  # newline after progress
 
         if result.success:
@@ -3586,7 +3643,8 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
                 num_lines = len(media_list)
 
         sync_start = time.time()
-        results = sync_all_media(db, parallel_progress, force=True)
+        results = sync_all_media(db, parallel_progress, force=True,
+                                 skip_appstream=skip_appstream)
         sync_elapsed = time.time() - sync_start
 
         # Clear progress lines
@@ -3621,8 +3679,11 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
 
             # Track status for each media (same pattern as synthesis sync)
             # Filter by version/arch like sync_all_files_xml does
-            from ..core.sync import get_mageia_version_arch
-            version, arch = get_mageia_version_arch()
+            from ..core.config import get_accepted_versions
+            import platform
+
+            accepted_versions, _, _ = get_accepted_versions(db)
+            arch = platform.machine()
 
             files_status = {}
             files_lock = threading.Lock()
@@ -3633,7 +3694,10 @@ def cmd_media_update(args, db: PackageDatabase) -> int:
                 # Same filter as sync_all_files_xml
                 media_version = m.get('mageia_version', '')
                 media_arch = m.get('architecture', '')
-                version_ok = not media_version or not version or media_version == version
+                if accepted_versions:
+                    version_ok = not media_version or media_version in accepted_versions
+                else:
+                    version_ok = True
                 arch_ok = not media_arch or not arch or media_arch == arch
                 if version_ok and arch_ok:
                     files_media_list.append(m['name'])
@@ -5889,6 +5953,75 @@ def cmd_cache_stats(args, db: PackageDatabase) -> int:
     return 0
 
 
+def cmd_cache_rebuild_fts(args, db: PackageDatabase) -> int:
+    """Handle cache rebuild-fts command - rebuild FTS index for file search."""
+    import time
+    import urllib.request
+    import json
+
+    # Check current FTS state
+    stats = db.get_fts_stats()
+
+    print(f"\nFTS Index Status:")
+    print(f"  Available: {'yes' if stats['available'] else 'no'}")
+    print(f"  Current:   {'yes' if stats['current'] else 'no'}")
+    print(f"  Files in package_files: {stats['pf_count']:,}")
+    print(f"  Files in FTS index:     {stats['fts_count']:,}")
+
+    if stats['last_rebuild']:
+        from datetime import datetime
+        rebuild_time = datetime.fromtimestamp(stats['last_rebuild'])
+        print(f"  Last rebuild: {rebuild_time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    print(f"\nRebuilding FTS index...", flush=True)
+
+    # Try to use urpmd API if running (avoids database lock issues)
+    from ..core.config import DEV_PORT, PROD_PORT, is_dev_mode
+    port = DEV_PORT if is_dev_mode() else PROD_PORT
+
+    try:
+        req = urllib.request.Request(
+            f'http://localhost:{port}/api/rebuild-fts',
+            data=b'{}',
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            result = json.loads(resp.read().decode())
+
+        if result.get('success'):
+            print(f"\nDone: {result.get('indexed', 0):,} files indexed in {result.get('elapsed', 0)}s")
+            print("  (rebuilt via urpmd)")
+            return 0
+        elif result.get('error'):
+            print(f"Error from urpmd: {result['error']}")
+            return 1
+    except urllib.error.URLError:
+        # urpmd not running, do it directly
+        pass
+    except Exception as e:
+        # urpmd error, try direct rebuild
+        print(f"  urpmd unavailable ({e}), rebuilding directly...")
+
+    # Direct rebuild (urpmd not running)
+    start_time = time.time()
+    last_progress = [0]
+
+    def progress_callback(current: int, total: int):
+        pct = int(current * 100 / total) if total > 0 else 0
+        # Show progress every 10%
+        if pct >= last_progress[0] + 10 or current == total:
+            print(f"  {pct}% ({current:,} / {total:,} files)", flush=True)
+            last_progress[0] = (pct // 10) * 10
+
+    indexed = db.rebuild_fts_index(progress_callback=progress_callback)
+
+    elapsed = time.time() - start_time
+    print(f"\nDone: {indexed:,} files indexed in {elapsed:.1f}s")
+
+    return 0
+
+
 def _extract_version(pkg_name: str) -> str:
     """Extract version from package name (e.g., php8.4-fpm -> 8.4)."""
     import re
@@ -6318,7 +6451,7 @@ def _create_resolver(db: 'PackageDatabase', args, **kwargs) -> 'Resolver':
 
     Args:
         db: Package database
-        args: Parsed arguments (may contain root, urpm_root)
+        args: Parsed arguments (may contain root, urpm_root, allow_arch)
         **kwargs: Additional arguments to pass to Resolver
 
     Returns:
@@ -6334,6 +6467,19 @@ def _create_resolver(db: 'PackageDatabase', args, **kwargs) -> 'Resolver':
     # Default arch if not provided
     if 'arch' not in kwargs:
         kwargs['arch'] = platform.machine()
+
+    # Handle --allow-arch: build allowed_arches list
+    # Default: [system_arch, 'noarch']
+    # With --allow-arch: add specified architectures
+    if 'allowed_arches' not in kwargs:
+        allow_arch = getattr(args, 'allow_arch', None)
+        if allow_arch:
+            # User specified additional architectures
+            arch = kwargs.get('arch', platform.machine())
+            allowed_arches = [arch, 'noarch'] + list(allow_arch)
+            # Remove duplicates while preserving order
+            seen = set()
+            kwargs['allowed_arches'] = [x for x in allowed_arches if not (x in seen or seen.add(x))]
 
     return Resolver(db, root=root, urpm_root=urpm_root, **kwargs)
 
@@ -8558,8 +8704,8 @@ def cmd_erase(args, db: PackageDatabase) -> int:
         signal.signal(signal.SIGINT, original_handler)
 
 
-def cmd_update(args, db: PackageDatabase) -> int:
-    """Handle update/upgrade command."""
+def cmd_upgrade(args, db: PackageDatabase) -> int:
+    """Handle upgrade command - upgrade packages."""
     import platform
     import signal
 
@@ -8583,12 +8729,6 @@ def cmd_update(args, db: PackageDatabase) -> int:
     _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
     _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
-    # If --lists, just update media metadata
-    if getattr(args, 'lists', False):
-        # Reuse media update logic
-        args.name = None  # Update all
-        return cmd_media_update(args, db)
-
     from ..core.resolver import Resolver, format_size, set_solver_debug
     from ..core.install import check_root
     from pathlib import Path
@@ -8605,13 +8745,8 @@ def cmd_update(args, db: PackageDatabase) -> int:
 
     # Determine what to upgrade
     packages = getattr(args, 'packages', []) or []
-    # --all flag OR (upgrade/u command with no packages) = full system upgrade
-    upgrade_all = getattr(args, 'all', False) or (args.command in ('upgrade', 'u') and not packages)
-
-    if not packages and not upgrade_all:
-        print("Specify packages to update, or use --all/-a for full system upgrade")
-        print("Use --lists/-l to update media metadata only")
-        return 1
+    # No packages = full system upgrade (apt-style: urpm upgrade = upgrade all)
+    upgrade_all = not packages
 
     # Separate local RPM files from package names
     local_rpm_paths = []
@@ -10530,6 +10665,198 @@ def cmd_peer(args, db: PackageDatabase) -> int:
 
     else:
         print(f"Unknown peer command: {args.peer_command}")
+        return 1
+
+
+def cmd_appstream(args, db: PackageDatabase) -> int:
+    """Handle appstream command - manage AppStream metadata."""
+    import gzip
+    from datetime import datetime
+    from pathlib import Path
+    from ..core.config import get_system_version, get_base_dir
+    from ..core.appstream import AppStreamManager
+    from . import colors
+
+    appstream_mgr = AppStreamManager(db, get_base_dir())
+
+    if args.appstream_command in ('generate', 'gen', None):
+        media_name = getattr(args, 'media', None)
+
+        if media_name:
+            # Generate for specific media
+            media = db.get_media(media_name)
+            if not media:
+                print(colors.error(f"Media '{media_name}' not found"))
+                return 1
+
+            print(f"Generating AppStream for {media_name}...")
+            xml_str, count = appstream_mgr.generate_for_media(
+                media['id'], media_name
+            )
+
+            output_path = appstream_mgr.get_media_appstream_path(media_name)
+            appstream_mgr._ensure_dirs()
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(xml_str)
+
+            print(colors.ok(f"Generated {count} components -> {output_path}"))
+            return 0
+
+        else:
+            # Generate for all enabled media and merge
+            print("Generating AppStream for all enabled media...")
+
+            media_list = db.list_media()
+            enabled_media = [m for m in media_list if m['enabled']]
+
+            total = 0
+            for media in enabled_media:
+                xml_str, count = appstream_mgr.generate_for_media(
+                    media['id'], media['name']
+                )
+
+                output_path = appstream_mgr.get_media_appstream_path(media['name'])
+                appstream_mgr._ensure_dirs()
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(xml_str)
+
+                print(f"  {media['name']}: {count} components")
+                total += count
+
+            # Merge all catalogs
+            print("\nMerging catalogs...")
+            total_merged, media_count = appstream_mgr.merge_all_catalogs()
+            print(colors.ok(f"Merged {total_merged} components from {media_count} media"))
+            print(f"Output: {appstream_mgr.catalog_path}")
+
+            print("\nTo refresh the AppStream cache, run:")
+            print("  sudo appstreamcli refresh-cache --force")
+            return 0
+
+    elif args.appstream_command == 'status':
+        # Show AppStream status for all media
+        status_list = appstream_mgr.get_status()
+
+        if not status_list:
+            print("No media configured")
+            return 0
+
+        # Header
+        print(f"{'Media':<30} {'Source':<12} {'Components':>10} {'Last Updated':<20}")
+        print("-" * 75)
+
+        for item in status_list:
+            name = item['media_name'][:29]
+            source = item['source']
+            count = item['component_count']
+            mtime = item['last_updated']
+
+            if mtime > 0:
+                updated = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+            else:
+                updated = '-'
+
+            # Color source
+            if source == 'upstream':
+                source_str = colors.ok(source)
+            elif source == 'generated':
+                source_str = colors.warning(source)
+            elif source == 'missing':
+                source_str = colors.error(source)
+            else:
+                source_str = source
+
+            print(f"{name:<30} {source_str:<21} {count:>10} {updated:<20}")
+
+        # Summary
+        print("-" * 75)
+        total = sum(s['component_count'] for s in status_list)
+        upstream = sum(1 for s in status_list if s['source'] == 'upstream')
+        generated = sum(1 for s in status_list if s['source'] == 'generated')
+        missing = sum(1 for s in status_list if s['source'] == 'missing')
+
+        print(f"Total: {total} components | upstream: {upstream}, generated: {generated}, missing: {missing}")
+
+        # Check merged catalog
+        if appstream_mgr.catalog_path.exists():
+            mtime = appstream_mgr.catalog_path.stat().st_mtime
+            updated = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+            print(f"\nMerged catalog: {appstream_mgr.catalog_path} (updated: {updated})")
+        else:
+            print(f"\nMerged catalog: {colors.warning('not found')} (run 'urpm appstream merge')")
+
+        return 0
+
+    elif args.appstream_command == 'merge':
+        # Merge per-media files into unified catalog
+        print("Merging AppStream catalogs...")
+
+        total, media_count = appstream_mgr.merge_all_catalogs(
+            progress_callback=lambda msg: print(f"  {msg}")
+        )
+
+        if total == 0:
+            print(colors.warning("No components found. Run 'urpm media update' first."))
+            return 1
+
+        print(colors.ok(f"Merged {total} components from {media_count} media"))
+        print(f"Output: {appstream_mgr.catalog_path}")
+
+        # Refresh system cache if requested
+        if getattr(args, 'refresh', False):
+            print("\nRefreshing system AppStream cache...")
+            if appstream_mgr.refresh_system_cache():
+                print(colors.ok("Cache refreshed"))
+            else:
+                print(colors.warning("Cache refresh failed (appstreamcli may not be installed)"))
+
+        return 0
+
+    elif args.appstream_command == 'init-distro':
+        # Create OS metainfo file for AppStream
+        metainfo_dir = Path('/usr/share/metainfo')
+        metainfo_file = metainfo_dir / 'org.mageia.mageia.metainfo.xml'
+
+        if metainfo_file.exists() and not getattr(args, 'force', False):
+            print(f"OS metainfo file already exists: {metainfo_file}")
+            print("Use --force to overwrite")
+            return 1
+
+        # Get system version
+        version = get_system_version() or 'unknown'
+
+        metainfo_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<component type="operating-system">
+  <id>org.mageia.mageia</id>
+  <name>Mageia</name>
+  <summary>Mageia Linux Distribution</summary>
+  <description>
+    <p>Mageia is a GNU/Linux-based, Free Software operating system.
+    It is a community project, supported by a nonprofit organization
+    of elected contributors.</p>
+  </description>
+  <url type="homepage">https://www.mageia.org</url>
+  <metadata_license>CC0-1.0</metadata_license>
+  <releases>
+    <release version="{version}" />
+  </releases>
+</component>
+'''
+        try:
+            metainfo_dir.mkdir(parents=True, exist_ok=True)
+            with open(metainfo_file, 'w', encoding='utf-8') as f:
+                f.write(metainfo_content)
+            print(colors.ok(f"OS metainfo file created: {metainfo_file}"))
+            return 0
+        except PermissionError:
+            print(colors.error(f"Permission denied. Run with sudo."))
+            return 1
+        except Exception as e:
+            print(colors.error(f"Failed to create metainfo: {e}"))
+            return 1
+
+    else:
+        print(f"Unknown appstream command: {args.appstream_command}")
         return 1
 
 
@@ -13600,8 +13927,12 @@ def main(argv=None) -> int:
         elif args.command in ('erase', 'e'):
             return cmd_erase(args, db)
 
-        elif args.command in ('update', 'up', 'upgrade', 'u'):
-            return cmd_update(args, db)
+        elif args.command == 'update':
+            # apt-style: update = metadata only
+            return cmd_media_update(args, db)
+
+        elif args.command in ('upgrade', 'u'):
+            return cmd_upgrade(args, db)
 
         elif args.command in ('list', 'l'):
             return cmd_list(args, db)
@@ -13683,12 +14014,14 @@ def main(argv=None) -> int:
                 return cmd_not_implemented(args, db)
 
         elif args.command in ('cache', 'c'):
-            if args.cache_command == 'info':
+            if args.cache_command == 'info' or args.cache_command is None:
                 return cmd_cache_info(args, db)
             elif args.cache_command == 'clean':
                 return cmd_cache_clean(args, db)
             elif args.cache_command == 'rebuild':
                 return cmd_cache_rebuild(args, db)
+            elif args.cache_command == 'rebuild-fts':
+                return cmd_cache_rebuild_fts(args, db)
             elif args.cache_command == 'stats':
                 return cmd_cache_stats(args, db)
             else:
@@ -13761,6 +14094,9 @@ def main(argv=None) -> int:
 
         elif args.command == 'peer':
             return cmd_peer(args, db)
+
+        elif args.command == 'appstream':
+            return cmd_appstream(args, db)
 
         else:
             return cmd_not_implemented(args, db)

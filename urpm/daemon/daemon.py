@@ -315,6 +315,34 @@ class UrpmDaemon:
             logger.error(f"Error refreshing metadata: {e}")
             return {'error': str(e)}
 
+    def rebuild_fts(self) -> Dict[str, Any]:
+        """Rebuild FTS index for fast file search.
+
+        Returns:
+            Dict with rebuild results
+        """
+        if not self.scheduler:
+            return {'error': 'Scheduler not initialized'}
+
+        try:
+            import time
+            start_time = time.time()
+
+            # Call scheduler's rebuild method
+            self.scheduler._rebuild_fts_index()
+
+            elapsed = time.time() - start_time
+            stats = self.db.get_fts_stats() if self.db else {}
+
+            return {
+                'success': True,
+                'indexed': stats.get('fts_count', 0),
+                'elapsed': round(elapsed, 1),
+            }
+        except Exception as e:
+            logger.error(f"Error rebuilding FTS index: {e}")
+            return {'error': str(e)}
+
     def get_peers(self) -> List[Dict[str, Any]]:
         """Get list of known peers."""
         if self.discovery:

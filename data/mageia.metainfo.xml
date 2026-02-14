@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="operating-system">
+  <id>org.mageia.mageia</id>
+  <name>Mageia</name>
+  <summary>Mageia Linux Distribution</summary>
+  <summary xml:lang="fr">Distribution Linux Mageia</summary>
+  <description>
+    <p>Mageia is a free, community-driven Linux distribution based on Mandriva Linux.</p>
+    <p xml:lang="fr">Mageia est une distribution Linux libre et communautaire basée sur Mandriva Linux.</p>
+  </description>
+  <url type="homepage">https://www.mageia.org</url>
+  <url type="bugtracker">https://bugs.mageia.org</url>
+  <url type="help">https://wiki.mageia.org</url>
+  <url type="donation">https://www.mageia.org/donate/</url>
+  <metadata_license>CC0-1.0</metadata_license>
+  <developer id="org.mageia">
+    <name>Mageia Community</name>
+  </developer>
+  <releases>
+    <release version="10" date="2025-01-01">
+      <description>
+        <p>Mageia 10 release</p>
+      </description>
+    </release>
+    <release version="9" date="2023-08-28">
+      <description>
+        <p>Mageia 9 release</p>
+      </description>
+    </release>
+  </releases>
+  <project_group>Mageia</project_group>
+  <icon type="remote" width="256" height="256">https://www.mageia.org/g/media/logo/mageia-256.png</icon>
+</component>

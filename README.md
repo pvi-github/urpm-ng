@@ -129,6 +129,7 @@ urpm i <package>              # Short alias
 --force                       # Force despite dependency problems
 --nosignature                 # Skip GPG verification (not recommended)
 --prefer=<prefs>              # Guide alternative choices (see below)
+--allow-arch <arch>           # Allow additional architectures (e.g., i686 for wine/steam)
 ```
 
 #### Preference-guided installation
@@ -150,6 +151,20 @@ Preference syntax:
 
 Preferences work by checking package REQUIRES and PROVIDES, not package names.
 
+#### Architecture filtering
+
+By default, urpm only considers packages matching your system architecture and `noarch`. This prevents accidental installation of i686 packages on x86_64 systems when 32-bit media are enabled.
+
+To install 32-bit packages (wine, steam, multilib):
+
+```bash
+urpm install wine --allow-arch i686
+urpm install steam --allow-arch i686
+
+# Multiple architectures
+urpm install mypackage --allow-arch i686 --allow-arch armv7hl
+```
+
 ### Remove packages
 
 ```bash
@@ -164,17 +179,26 @@ urpm remove <package>         # Alternative alias
 --force                       # Force despite dependency problems
 ```
 
-### Upgrade system
+### Update metadata (apt-style)
+
+```bash
+urpm update                   # Update all media metadata
+urpm update "Core Release"    # Update specific media
+urpm update --files           # Also sync files.xml
+```
+
+### Upgrade packages
 
 ```bash
 urpm upgrade                  # Upgrade all packages
-urpm up                       # Short alias
+urpm u                        # Short alias
 urpm upgrade <package>        # Upgrade specific packages
 
 # Options
 --auto                        # Non-interactive mode
---without-recommends          # Skip recommended packages
+--with-recommends             # Install recommended packages
 --with-suggests               # Also install suggested packages
+--allow-arch <arch>           # Allow additional architectures (e.g., i686)
 ```
 
 ### Auto-remove orphans
@@ -686,6 +710,76 @@ The daemon automatically performs:
 ## P2P Package Sharing
 
 When multiple machines on the same LAN run urpmd, they automatically discover each other and can share cached RPM packages, reducing bandwidth usage.
+
+---
+
+# GUI Integration (Discover / GNOME Software)
+
+urpm-ng provides a PackageKit backend allowing graphical software centers to manage packages.
+
+## Installation
+
+```bash
+urpm install pk-backend-urpm
+```
+
+This installs:
+- `libpk_backend_urpm.so` - PackageKit backend
+- D-Bus service `org.mageia.Urpm.v1` - Privileged operations
+- PolicyKit policies - Authorization prompts
+- AppStream configuration - Software catalog metadata
+
+## Supported Applications
+
+- **KDE Discover** - Full support (search, install, remove, updates)
+- **GNOME Software** - Full support (search, install, remove, updates)
+
+## How It Works
+
+```
+┌─────────────────┐
+│  Discover /     │
+│  GNOME Software │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│   PackageKit    │
+│ (libpk_backend_ │
+│    urpm.so)     │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  D-Bus Service  │
+│  + PolicyKit    │
+│ (org.mageia.    │
+│   Urpm.v1)      │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  urpm-ng core   │
+│  (Python)       │
+└─────────────────┘
+```
+
+## Troubleshooting
+
+```bash
+# Check if D-Bus service is running
+systemctl status urpm-dbus.service
+
+# Check PackageKit backend
+pkcon backend-details
+
+# Restart services after update
+systemctl restart packagekit.service
+systemctl restart urpm-dbus.service
+
+# Check D-Bus interface
+gdbus introspect --system --dest org.mageia.Urpm.v1 \
+  --object-path /org/mageia/Urpm/v1
+```
+
+---
 
 # Development & contributing
 

@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<!--
+  D-Bus interface for urpm package management.
+
+  Bus name:    org.mageia.Urpm.v1
+  Object path: /org/mageia/Urpm/v1
+
+  Read-only methods require no authentication.
+  Write methods (Install, Remove, Upgrade, Refresh) require PolicyKit auth.
+-->
+<node name="/org/mageia/Urpm/v1">
+  <interface name="org.mageia.Urpm.v1">
+
+    <!-- Read-only methods (no auth required) -->
+
+    <method name="SearchPackages">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Search packages by name or provides"/>
+      <arg name="pattern" type="s" direction="in"/>
+      <arg name="search_provides" type="b" direction="in"/>
+      <arg name="results" type="s" direction="out"/>
+    </method>
+
+    <method name="GetPackageInfo">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Get detailed info for a package"/>
+      <arg name="identifier" type="s" direction="in"/>
+      <arg name="info" type="s" direction="out"/>
+    </method>
+
+    <method name="ResolvePackages">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Batch resolve: get installed status for multiple packages"/>
+      <arg name="names" type="as" direction="in"/>
+      <arg name="results" type="s" direction="out"/>
+    </method>
+
+    <method name="SearchFiles">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Search for files matching a pattern"/>
+      <arg name="pattern" type="s" direction="in"/>
+      <arg name="results" type="s" direction="out"/>
+    </method>
+
+    <method name="GetPackageFiles">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Get list of files in a package"/>
+      <arg name="nevra" type="s" direction="in"/>
+      <arg name="files" type="s" direction="out"/>
+    </method>
+
+    <method name="GetInstalledPackages">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Get list of all installed packages"/>
+      <arg name="packages" type="s" direction="out"/>
+    </method>
+
+    <method name="GetUpdates">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Get list of available updates"/>
+      <arg name="result" type="s" direction="out"/>
+    </method>
+
+    <method name="PreviewInstall">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Preview what would be installed (dry-run resolution)"/>
+      <arg name="packages" type="as" direction="in"/>
+      <arg name="result" type="s" direction="out"/>
+    </method>
+
+    <method name="WhatRequires">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Find packages that require a given package"/>
+      <arg name="package" type="s" direction="in"/>
+      <arg name="packages" type="s" direction="out"/>
+    </method>
+
+    <method name="DownloadPackages">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Download packages to a directory without installing"/>
+      <arg name="packages" type="as" direction="in"/>
+      <arg name="directory" type="s" direction="in"/>
+      <arg name="result" type="s" direction="out"/>
+    </method>
+
+    <method name="CancelOperation">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Request cancellation of current operation"/>
+      <arg name="success" type="b" direction="out"/>
+    </method>
+
+    <!-- Write methods (require PolicyKit authentication) -->
+
+    <method name="InstallPackages">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Install packages (async, emits progress signals)"/>
+      <annotation name="org.freedesktop.DBus.PolicyKit"
+        value="org.mageia.urpm.install"/>
+      <arg name="packages" type="as" direction="in"/>
+      <arg name="options" type="a{sv}" direction="in"/>
+      <arg name="success" type="b" direction="out"/>
+      <arg name="error" type="s" direction="out"/>
+    </method>
+
+    <method name="InstallFiles">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Install local RPM files"/>
+      <annotation name="org.freedesktop.DBus.PolicyKit"
+        value="org.mageia.urpm.install"/>
+      <arg name="paths" type="as" direction="in"/>
+      <arg name="result" type="s" direction="out"/>
+    </method>
+
+    <method name="RemovePackages">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Remove packages (async, emits progress signals)"/>
+      <annotation name="org.freedesktop.DBus.PolicyKit"
+        value="org.mageia.urpm.remove"/>
+      <arg name="packages" type="as" direction="in"/>
+      <arg name="options" type="a{sv}" direction="in"/>
+      <arg name="success" type="b" direction="out"/>
+      <arg name="error" type="s" direction="out"/>
+    </method>
+
+    <method name="UpgradePackages">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Upgrade all packages (async, emits progress signals)"/>
+      <annotation name="org.freedesktop.DBus.PolicyKit"
+        value="org.mageia.urpm.upgrade"/>
+      <arg name="options" type="a{sv}" direction="in"/>
+      <arg name="success" type="b" direction="out"/>
+      <arg name="error" type="s" direction="out"/>
+    </method>
+
+    <method name="RefreshMetadata">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Refresh media metadata (async, emits progress signals)"/>
+      <annotation name="org.freedesktop.DBus.PolicyKit"
+        value="org.mageia.urpm.refresh"/>
+      <arg name="success" type="b" direction="out"/>
+      <arg name="error" type="s" direction="out"/>
+    </method>
+
+    <!-- Signals -->
+
+    <signal name="OperationProgress">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Emitted during async operations"/>
+      <arg name="operation_id" type="s"/>
+      <arg name="phase" type="s"/>
+      <arg name="package" type="s"/>
+      <arg name="current" type="u"/>
+      <arg name="total" type="u"/>
+      <arg name="message" type="s"/>
+    </signal>
+
+    <signal name="OperationComplete">
+      <annotation name="org.freedesktop.DBus.Description"
+        value="Emitted when an async operation completes"/>
+      <arg name="operation_id" type="s"/>
+      <arg name="success" type="b"/>
+      <arg name="message" type="s"/>
+    </signal>
+
+  </interface>
+</node>

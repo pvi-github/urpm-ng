@@ -25,6 +25,7 @@ SYNTHESIS_PATH = "media_info/synthesis.hdlist.cz"
 HDLIST_PATH = "media_info/hdlist.cz"
 MD5SUM_PATH = "media_info/MD5SUM"
 FILES_XML_PATH = "media_info/files.xml.lzma"
+APPSTREAM_PATH = "media_info/appstream.xml.lzma"
 
 
 # Import from config
@@ -69,7 +70,8 @@ class SyncResult:
 
 def download_file(url: str, dest: Path,
                   progress_callback: Callable[[int, int], None] = None,
-                  timeout: int = 30) -> DownloadResult:
+                  timeout: int = 30,
+                  ip_mode: str = 'auto') -> DownloadResult:
     """Download a file from URL to destination.
 
     Args:
@@ -77,11 +79,25 @@ def download_file(url: str, dest: Path,
         dest: Destination path
         progress_callback: Optional callback(downloaded_bytes, total_bytes)
         timeout: Connection timeout in seconds
+        ip_mode: IP version preference ('auto', 'ipv4', 'ipv6', 'dual')
 
     Returns:
         DownloadResult with success status and metadata
     """
+    import socket
+    from .config import get_socket_family_for_ip_mode
+
+    # Force IPv4/IPv6 by patching getaddrinfo temporarily
+    family = get_socket_family_for_ip_mode(ip_mode)
+    original_getaddrinfo = socket.getaddrinfo
+
+    def patched_getaddrinfo(host, port, fam=0, *args, **kwargs):
+        # Force the socket family for hostname resolution
+        return original_getaddrinfo(host, port, family, *args, **kwargs)
+
     try:
+        socket.getaddrinfo = patched_getaddrinfo
+
         req = urllib.request.Request(url)
         req.add_header('User-Agent', 'urpm/0.1')
 
@@ -117,6 +133,8 @@ def download_file(url: str, dest: Path,
         return DownloadResult(success=False, error=f"URL error: {e.reason}")
     except Exception as e:
         return DownloadResult(success=False, error=str(e))
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
 
 
 def get_media_base_url(media_url: str) -> str:
@@ -221,8 +239,9 @@ def download_from_server(url: str, dest: Path, server: dict,
         except Exception as e:
             return DownloadResult(success=False, error=str(e))
     else:
-        # HTTP(S) download
-        return download_file(url, dest, progress_callback, timeout)
+        # HTTP(S) download - use server's IP mode preference
+        ip_mode = server.get('ip_mode', 'auto') if server else 'auto'
+        return download_file(url, dest, progress_callback, timeout, ip_mode=ip_mode)
 
 
 def get_effective_media_url(db, media: dict) -> Tuple[Optional[dict], Optional[str]]:
@@ -338,7 +357,8 @@ def sync_media(db: PackageDatabase, media_name: str,
                progress_callback: Callable[[str, int, int], None] = None,
                force: bool = False,
                download_hdlist: bool = False,
-               urpm_root: str = None) -> SyncResult:
+               urpm_root: str = None,
+               skip_appstream: bool = False) -> SyncResult:
     """Synchronize a media source.
 
     Downloads synthesis (and optionally hdlist), parses and imports into DB.
@@ -351,6 +371,7 @@ def sync_media(db: PackageDatabase, media_name: str,
         force: Force update even if MD5 matches
         download_hdlist: Also download hdlist for full metadata
         urpm_root: If set, store files in <urpm_root>/var/lib/urpm/
+        skip_appstream: Skip AppStream sync (default: False)
 
     Returns:
         SyncResult with status
@@ -505,6 +526,26 @@ def sync_media(db: PackageDatabase, media_name: str,
         # Update media sync info (thread-safe)
         db.update_media_sync_info(media_id, result.md5)
 
+        # Sync AppStream metadata
+        appstream_synced = False
+        if not skip_appstream:
+            if progress_callback:
+                progress_callback("syncing appstream", 0, 0)
+            try:
+                from .appstream import AppStreamManager
+                appstream_mgr = AppStreamManager(db, base_dir)
+                appstream_result = appstream_mgr.sync_media_appstream(
+                    media_id=media_id,
+                    media_name=media_name,
+                    media_url=media_url,
+                    progress_callback=lambda msg: progress_callback("appstream", 0, 0) if progress_callback else None
+                )
+                appstream_synced = appstream_result.success
+            except Exception as e:
+                # AppStream sync failure is not fatal
+                import logging
+                logging.getLogger(__name__).warning(f"AppStream sync failed for {media_name}: {e}")
+
         if progress_callback:
             progress_callback("done", count, count)
 
@@ -520,7 +561,8 @@ def sync_all_media(db: PackageDatabase,
                    progress_callback: Callable[[str, str, int, int], None] = None,
                    force: bool = False,
                    max_workers: int = 4,
-                   urpm_root: str = None) -> List[Tuple[str, SyncResult]]:
+                   urpm_root: str = None,
+                   skip_appstream: bool = False) -> List[Tuple[str, SyncResult]]:
     """Synchronize all enabled media in parallel.
 
     Args:
@@ -529,6 +571,7 @@ def sync_all_media(db: PackageDatabase,
         force: Force update even if MD5 matches
         max_workers: Maximum parallel downloads (default: 4)
         urpm_root: If set, store files in <urpm_root>/var/lib/urpm/
+        skip_appstream: Skip AppStream sync and merge (default: False)
 
     Returns:
         List of (media_name, SyncResult) tuples
@@ -555,7 +598,8 @@ def sync_all_media(db: PackageDatabase,
         def media_progress(stage, current, total):
             thread_safe_progress(media_name, stage, current, total)
 
-        result = sync_media(db, media_name, media_progress, force=force, urpm_root=urpm_root)
+        result = sync_media(db, media_name, media_progress, force=force,
+                           urpm_root=urpm_root, skip_appstream=skip_appstream)
         return (media_name, result)
 
     # Use parallel execution
@@ -579,6 +623,27 @@ def sync_all_media(db: PackageDatabase,
     # Sort by original order
     name_order = {m['name']: i for i, m in enumerate(enabled_media)}
     results.sort(key=lambda x: name_order.get(x[0], 999))
+
+    # Merge AppStream catalogs and refresh system cache
+    if not skip_appstream:
+        try:
+            from .appstream import AppStreamManager
+            base_dir = get_base_dir(urpm_root=urpm_root)
+            appstream_mgr = AppStreamManager(db, base_dir)
+
+            if progress_callback:
+                progress_callback("__appstream__", "merging catalogs", 0, 0)
+
+            total_components, media_count = appstream_mgr.merge_all_catalogs()
+
+            if total_components > 0:
+                if progress_callback:
+                    progress_callback("__appstream__", "refreshing cache", 0, 0)
+                appstream_mgr.refresh_system_cache()
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"AppStream merge failed: {e}")
 
     return results
 
@@ -918,14 +983,23 @@ def sync_all_files_xml(
             return []
 
     # Filter by version and architecture if requested
-    version, arch = get_mageia_version_arch()
-    if filter_version and (version or arch):
+    if filter_version:
+        from .config import get_accepted_versions
+        import platform
+
+        # Get accepted versions (respects version-mode config)
+        accepted_versions, _, _ = get_accepted_versions(db)
+        arch = platform.machine()
+
         filtered_media = []
         for m in all_media:
             media_version = m.get('mageia_version', '')
             media_arch = m.get('architecture', '')
-            # Check version match (accept if media version is empty or matches)
-            version_ok = not media_version or not version or media_version == version
+            # Check version match using accepted_versions set
+            if accepted_versions:
+                version_ok = not media_version or media_version in accepted_versions
+            else:
+                version_ok = True  # No filtering if accepted_versions is None
             # Check arch match (accept if media arch is empty or matches)
             arch_ok = not media_arch or not arch or media_arch == arch
             if version_ok and arch_ok:

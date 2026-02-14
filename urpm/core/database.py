@@ -1888,6 +1888,10 @@ def _get_accepted_versions(self) -> Optional[set]:
                     if limit and len(results) >= limit:
                         break
 
+        # Add installed status by checking RPM database
+        for pkg in results:
+            pkg['installed'] = self._is_installed(pkg['name'])
+
         return results
 
     def get_package(self, name: str) -> Optional[Dict]:
@@ -1926,6 +1930,7 @@ def _get_accepted_versions(self) -> Optional[set]:
         pkg['obsoletes'] = self._get_deps(pkg['id'], 'obsoletes')
         pkg['recommends'] = self._get_deps(pkg['id'], 'recommends')
         pkg['suggests'] = self._get_deps(pkg['id'], 'suggests')
+        pkg['installed'] = self._is_installed(pkg['name'])
 
         return pkg
 
@@ -1948,8 +1953,23 @@ def _get_accepted_versions(self) -> Optional[set]:
         pkg['obsoletes'] = self._get_deps(pkg['id'], 'obsoletes')
         pkg['recommends'] = self._get_deps(pkg['id'], 'recommends')
         pkg['suggests'] = self._get_deps(pkg['id'], 'suggests')
+        pkg['installed'] = self._is_installed(pkg['name'])
 
         return pkg
+
+    def _is_installed(self, name: str) -> bool:
+        """Check if a package is installed in the RPM database."""
+        try:
+            import subprocess
+            # Use rpm -q directly to avoid any Python rpm module caching issues
+            result = subprocess.run(
+                ['rpm', '-q', name],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     def find_package_by_nevra(self, name: str, evr: str, arch: str) -> Optional[Dict]:
         """Find a package by name, evr (epoch:version-release), and arch.
@@ -2027,6 +2047,88 @@ def _get_accepted_versions(self) -> Optional[set]:
             return None
         else:
             return self.get_package(identifier)
+
+    def get_packages_by_names(self, names: List[str]) -> List[Dict]:
+        """Batch get packages by names (for resolve operations).
+
+        Returns basic info only (no dependencies) for efficiency.
+        Much faster than calling get_package() N times.
+
+        Args:
+            names: List of package names
+
+        Returns:
+            List of dicts with name, version, release, arch, summary, installed
+        """
+        if not names:
+            return []
+
+        # Build version filter
+        version_join, version_filter, version_params = self._build_version_filter()
+
+        # Query all packages at once
+        placeholders = ','.join(['?' for _ in names])
+        names_lower = [n.lower() for n in names]
+
+        if version_join:
+            query = f"""
+                SELECT p.name, p.version, p.release, p.arch, p.summary
+                FROM packages p
+                {version_join}
+                WHERE p.name_lower IN ({placeholders}) {version_filter}
+            """
+            params = tuple(names_lower) + version_params
+        else:
+            query = f"""
+                SELECT name, version, release, arch, summary
+                FROM packages
+                WHERE name_lower IN ({placeholders})
+            """
+            params = tuple(names_lower)
+
+        cursor = self.conn.execute(query, params)
+        rows = cursor.fetchall()
+
+        # Build result dict by name (handle duplicates - keep first/latest)
+        seen = {}
+        for row in rows:
+            name = row[0]
+            if name not in seen:
+                seen[name] = {
+                    'name': name,
+                    'version': row[1],
+                    'release': row[2],
+                    'arch': row[3],
+                    'summary': row[4] or '',
+                }
+
+        # Check installed status in batch using single rpm call
+        import subprocess
+        installed_set = set()
+        try:
+            # Query all at once: rpm -q returns 0 for each installed package
+            result = subprocess.run(
+                ['rpm', '-q', '--qf', '%{NAME}\\n'] + list(seen.keys()),
+                capture_output=True,
+                timeout=30
+            )
+            # Parse output - rpm prints package name for installed, error for not
+            for line in result.stdout.decode().splitlines():
+                line = line.strip()
+                if line and not line.startswith('package '):  # skip "package X is not installed"
+                    installed_set.add(line)
+        except Exception:
+            pass
+
+        # Build results preserving input order
+        results = []
+        for name in names:
+            if name in seen:
+                pkg = seen[name].copy()
+                pkg['installed'] = name in installed_set
+                results.append(pkg)
+
+        return results
 
     def _get_deps(self, pkg_id: int, table: str) -> List[str]:
         """Get dependencies from a specific table."""
@@ -3340,6 +3442,27 @@ def _get_accepted_versions(self) -> Optional[set]:
 
         return total_files, total_packages
 
+    def get_package_files(self, nevra: str) -> List[str]:
+        """Get list of files for a specific package.
+
+        Args:
+            nevra: Package NEVRA (e.g., bash-5.2.21-1.mga10.x86_64)
+
+        Returns:
+            List of full file paths
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT dir_path, filename
+            FROM package_files
+            WHERE pkg_nevra = ?
+            ORDER BY dir_path, filename
+        """, (nevra,))
+
+        return [f"{row[0]}/{row[1]}" for row in cursor.fetchall()]
+
     def search_files(
         self,
         pattern: str,
@@ -3859,6 +3982,14 @@ def _get_accepted_versions(self) -> Optional[set]:
             conn.commit()
             return 0
 
+        # Checkpoint WAL before rebuild to start with clean state
+        cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+        # Close cursor and commit to clear any active statements
+        # This is required before _recreate_fts_table() can commit
+        cursor.close()
+        conn.commit()
+
         # Drop and recreate FTS table for clean rebuild
         # This creates the table if it doesn't exist, or recreates it for clean state
         self._recreate_fts_table()
@@ -3906,6 +4037,10 @@ def _get_accepted_versions(self) -> Optional[set]:
                 # Commit after each batch to release write lock
                 # This allows other processes to access the DB during rebuild
                 conn.commit()
+
+                # Checkpoint WAL every 500k rows to prevent it from growing too large
+                if indexed % 500000 < batch_size:
+                    cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
                 if progress_callback:
                     progress_callback(indexed, total)

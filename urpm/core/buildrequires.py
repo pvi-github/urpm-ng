@@ -146,7 +146,7 @@ def rpm_dep_to_solver_format(dep: str) -> str:
     """Convert RPM dependency format to solver format.
 
     RPM format: "name >= 1.0" or "name"
-    Solver format: "name[>= 1.0]" or "name"
+    Solver format: "name >= 1.0" or "name" (same, libsolv uses this directly)
 
     Args:
         dep: Dependency string in RPM format.
@@ -166,10 +166,8 @@ def rpm_dep_to_solver_format(dep: str) -> str:
 
     if match:
         name, op, version = match.groups()
-        # Normalize = to ==
-        if op == '=':
-            op = '=='
-        return f"{name}[{op} {version}]"
+        # libsolv expects "name op version" format directly
+        return f"{name} {op} {version}"
 
     return dep.strip()
 
