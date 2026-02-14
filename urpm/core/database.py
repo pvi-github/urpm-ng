@@ -1770,7 +1770,7 @@ class PackageDatabase:
     # Package queries
     # =========================================================================
 
-def _get_accepted_versions(self) -> Optional[set]:
+    def _get_accepted_versions(self) -> Optional[set]:
         """Get the set of accepted media versions for queries.
 
         Uses get_accepted_versions() which respects the version-mode config.
