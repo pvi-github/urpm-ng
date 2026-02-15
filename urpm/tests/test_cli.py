@@ -71,17 +71,17 @@ class TestParser:
 
     def test_media_add(self):
         parser = create_parser()
-        args = parser.parse_args(['media', 'add', 'Core', 'http://example.com', '--update'])
+        args = parser.parse_args(['media', 'add', '--name=Core', 'http://example.com', '--update'])
         assert args.media_command == 'add'
         assert args.name == 'Core'
         assert args.url == 'http://example.com'
         assert args.update is True
 
-    def test_update_command(self):
+    def test_upgrade_command(self):
         parser = create_parser()
-        args = parser.parse_args(['update', '--all', '-y'])
-        assert args.command == 'update'
-        assert args.all is True
+        args = parser.parse_args(['upgrade', '--allow-arch=i686', '-y'])
+        assert args.command == 'upgrade'
+        assert args.allow_arch == ["i686"]
         assert args.auto is True
 
     def test_list_command(self):

@@ -8903,6 +8903,7 @@ def cmd_upgrade(args, db: PackageDatabase) -> int:
     dl_results = []
     downloaded = 0
 
+
     if download_items:
         print(f"\nDownloading {len(download_items)} packages...")
         dl_opts = InstallOptions(
