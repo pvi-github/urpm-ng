@@ -1990,10 +1990,27 @@ def _resolve_virtual_package(db: PackageDatabase, pkg_name: str, auto: bool, ins
     """
     import re
 
-    # Find all providers
+    # Check if pkg_name is a real package (not just a capability)
+    real_pkg = db.get_package(pkg_name)
+
+    # Find all providers of this capability
     providers = db.whatprovides(pkg_name)
+
+    # If real package exists, add it to providers if not already there
+    if real_pkg:
+        provider_names = {p['name'] for p in providers}
+        if pkg_name not in provider_names:
+            # Add the real package as a provider option
+            providers.append({'name': pkg_name, 'id': real_pkg['id'],
+                            'version': real_pkg['version'], 'release': real_pkg['release'],
+                            'arch': real_pkg['arch'], 'nevra': real_pkg['nevra']})
+
     if not providers:
-        # Not a virtual package, return as-is
+        # Not a virtual package and no providers, return as-is (will fail later)
+        return [pkg_name]
+
+    # If only ONE provider and it matches the requested name, use it directly
+    if len(providers) == 1 and providers[0]['name'] == pkg_name:
         return [pkg_name]
 
     # Group providers by family
