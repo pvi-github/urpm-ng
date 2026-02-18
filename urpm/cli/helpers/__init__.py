@@ -31,6 +31,26 @@ from .kernel import (
     find_old_kernels,
     find_faildeps,
 )
+from .resolver import (
+    extract_version,
+    group_by_version,
+    create_resolver,
+)
+from .media import (
+    KNOWN_VERSIONS,
+    KNOWN_ARCHES,
+    KNOWN_CLASSES,
+    KNOWN_TYPES,
+    generate_media_name,
+    generate_short_name,
+    generate_server_name,
+    parse_mageia_media_url,
+    parse_custom_media_url,
+    fetch_media_pubkey,
+    get_gpg_key_info,
+    is_key_in_rpm_keyring,
+    import_gpg_key,
+)
 
 __all__ = [
     # Package helpers
@@ -61,4 +81,22 @@ __all__ = [
     'is_running_kernel',
     'find_old_kernels',
     'find_faildeps',
+    # Resolver helpers
+    'extract_version',
+    'group_by_version',
+    'create_resolver',
+    # Media helpers
+    'KNOWN_VERSIONS',
+    'KNOWN_ARCHES',
+    'KNOWN_CLASSES',
+    'KNOWN_TYPES',
+    'generate_media_name',
+    'generate_short_name',
+    'generate_server_name',
+    'parse_mageia_media_url',
+    'parse_custom_media_url',
+    'fetch_media_pubkey',
+    'get_gpg_key_info',
+    'is_key_in_rpm_keyring',
+    'import_gpg_key',
 ]
