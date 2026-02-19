@@ -91,6 +91,11 @@ from .depends import (
     cmd_whatsuggests,
     cmd_why,
 )
+from .build import (
+    cmd_cleanup,
+    cmd_mkimage,
+    cmd_build,
+)
 
 __all__ = [
     # Cache commands
@@ -171,4 +176,8 @@ __all__ = [
     'cmd_suggests',
     'cmd_whatsuggests',
     'cmd_why',
+    # Build commands
+    'cmd_cleanup',
+    'cmd_mkimage',
+    'cmd_build',
 ]
