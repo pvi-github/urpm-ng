@@ -82,6 +82,15 @@ from .cleanup import (
     cmd_unhold,
     cmd_cleandeps,
 )
+from .depends import (
+    cmd_depends,
+    cmd_rdepends,
+    cmd_recommends,
+    cmd_whatrecommends,
+    cmd_suggests,
+    cmd_whatsuggests,
+    cmd_why,
+)
 
 __all__ = [
     # Cache commands
@@ -154,4 +163,12 @@ __all__ = [
     'cmd_hold',
     'cmd_unhold',
     'cmd_cleandeps',
+    # Dependency commands
+    'cmd_depends',
+    'cmd_rdepends',
+    'cmd_recommends',
+    'cmd_whatrecommends',
+    'cmd_suggests',
+    'cmd_whatsuggests',
+    'cmd_why',
 ]
