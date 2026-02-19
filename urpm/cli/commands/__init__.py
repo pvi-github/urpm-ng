@@ -10,6 +10,10 @@ from .cache import (
 from .peer import (
     cmd_peer,
 )
+from .config import (
+    cmd_config,
+    cmd_key,
+)
 
 __all__ = [
     # Cache commands
@@ -20,4 +24,7 @@ __all__ = [
     'cmd_cache_rebuild_fts',
     # Peer commands
     'cmd_peer',
+    # Config commands
+    'cmd_config',
+    'cmd_key',
 ]
