@@ -57,6 +57,14 @@ from .media import (
     parse_urpmi_cfg,
     STANDARD_MEDIA_TYPES,
 )
+from .query import (
+    cmd_search,
+    cmd_show,
+    cmd_list,
+    cmd_provides,
+    cmd_whatprovides,
+    cmd_find,
+)
 
 __all__ = [
     # Cache commands
@@ -109,4 +117,11 @@ __all__ = [
     'cmd_media_autoconfig',
     'parse_urpmi_cfg',
     'STANDARD_MEDIA_TYPES',
+    # Query commands
+    'cmd_search',
+    'cmd_show',
+    'cmd_list',
+    'cmd_provides',
+    'cmd_whatprovides',
+    'cmd_find',
 ]
