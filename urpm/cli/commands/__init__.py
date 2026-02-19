@@ -19,6 +19,17 @@ from .history import (
     cmd_undo,
     cmd_rollback,
 )
+from .server import (
+    cmd_server_list,
+    cmd_server_add,
+    cmd_server_remove,
+    cmd_server_enable,
+    cmd_server_disable,
+    cmd_server_priority,
+    cmd_server_test,
+    cmd_server_ipmode,
+    cmd_server_autoconfig,
+)
 
 __all__ = [
     # Cache commands
@@ -36,4 +47,14 @@ __all__ = [
     'cmd_history',
     'cmd_undo',
     'cmd_rollback',
+    # Server commands
+    'cmd_server_list',
+    'cmd_server_add',
+    'cmd_server_remove',
+    'cmd_server_enable',
+    'cmd_server_disable',
+    'cmd_server_priority',
+    'cmd_server_test',
+    'cmd_server_ipmode',
+    'cmd_server_autoconfig',
 ]
