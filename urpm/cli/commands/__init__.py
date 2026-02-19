@@ -41,6 +41,22 @@ from .mirror import (
     cmd_mirror_sync,
     cmd_mirror_ratelimit,
 )
+from .media import (
+    cmd_media_list,
+    cmd_init,
+    cmd_media_add,
+    cmd_media_remove,
+    cmd_media_enable,
+    cmd_media_disable,
+    cmd_media_update,
+    cmd_media_import,
+    cmd_media_set,
+    cmd_media_seed_info,
+    cmd_media_link,
+    cmd_media_autoconfig,
+    parse_urpmi_cfg,
+    STANDARD_MEDIA_TYPES,
+)
 
 __all__ = [
     # Cache commands
@@ -78,4 +94,19 @@ __all__ = [
     'cmd_mirror_clean',
     'cmd_mirror_sync',
     'cmd_mirror_ratelimit',
+    # Media commands
+    'cmd_media_list',
+    'cmd_init',
+    'cmd_media_add',
+    'cmd_media_remove',
+    'cmd_media_enable',
+    'cmd_media_disable',
+    'cmd_media_update',
+    'cmd_media_import',
+    'cmd_media_set',
+    'cmd_media_seed_info',
+    'cmd_media_link',
+    'cmd_media_autoconfig',
+    'parse_urpmi_cfg',
+    'STANDARD_MEDIA_TYPES',
 ]
