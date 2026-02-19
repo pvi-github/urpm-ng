@@ -72,6 +72,9 @@ from .install import (
 from .remove import (
     cmd_erase,
 )
+from .upgrade import (
+    cmd_upgrade,
+)
 
 __all__ = [
     # Cache commands
@@ -136,4 +139,6 @@ __all__ = [
     'cmd_download',
     # Remove commands
     'cmd_erase',
+    # Upgrade commands
+    'cmd_upgrade',
 ]
