@@ -30,6 +30,17 @@ from .server import (
     cmd_server_ipmode,
     cmd_server_autoconfig,
 )
+from .mirror import (
+    cmd_mirror_status,
+    cmd_mirror_enable,
+    cmd_mirror_disable,
+    cmd_mirror_quota,
+    cmd_mirror_disable_version,
+    cmd_mirror_enable_version,
+    cmd_mirror_clean,
+    cmd_mirror_sync,
+    cmd_mirror_ratelimit,
+)
 
 __all__ = [
     # Cache commands
@@ -57,4 +68,14 @@ __all__ = [
     'cmd_server_test',
     'cmd_server_ipmode',
     'cmd_server_autoconfig',
+    # Mirror commands
+    'cmd_mirror_status',
+    'cmd_mirror_enable',
+    'cmd_mirror_disable',
+    'cmd_mirror_quota',
+    'cmd_mirror_disable_version',
+    'cmd_mirror_enable_version',
+    'cmd_mirror_clean',
+    'cmd_mirror_sync',
+    'cmd_mirror_ratelimit',
 ]
