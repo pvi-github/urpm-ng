@@ -65,6 +65,10 @@ from .query import (
     cmd_whatprovides,
     cmd_find,
 )
+from .install import (
+    cmd_install,
+    cmd_download,
+)
 
 __all__ = [
     # Cache commands
@@ -124,4 +128,7 @@ __all__ = [
     'cmd_provides',
     'cmd_whatprovides',
     'cmd_find',
+    # Install commands
+    'cmd_install',
+    'cmd_download',
 ]
