@@ -96,6 +96,9 @@ from .build import (
     cmd_mkimage,
     cmd_build,
 )
+from .appstream import (
+    cmd_appstream,
+)
 
 __all__ = [
     # Cache commands
@@ -180,4 +183,6 @@ __all__ = [
     'cmd_cleanup',
     'cmd_mkimage',
     'cmd_build',
+    # AppStream command
+    'cmd_appstream',
 ]
