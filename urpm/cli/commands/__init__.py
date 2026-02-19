@@ -75,6 +75,13 @@ from .remove import (
 from .upgrade import (
     cmd_upgrade,
 )
+from .cleanup import (
+    cmd_autoremove,
+    cmd_mark,
+    cmd_hold,
+    cmd_unhold,
+    cmd_cleandeps,
+)
 
 __all__ = [
     # Cache commands
@@ -141,4 +148,10 @@ __all__ = [
     'cmd_erase',
     # Upgrade commands
     'cmd_upgrade',
+    # Cleanup commands
+    'cmd_autoremove',
+    'cmd_mark',
+    'cmd_hold',
+    'cmd_unhold',
+    'cmd_cleandeps',
 ]
