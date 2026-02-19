@@ -14,6 +14,11 @@ from .config import (
     cmd_config,
     cmd_key,
 )
+from .history import (
+    cmd_history,
+    cmd_undo,
+    cmd_rollback,
+)
 
 __all__ = [
     # Cache commands
@@ -27,4 +32,8 @@ __all__ = [
     # Config commands
     'cmd_config',
     'cmd_key',
+    # History commands
+    'cmd_history',
+    'cmd_undo',
+    'cmd_rollback',
 ]
