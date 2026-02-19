@@ -1912,6 +1912,252 @@ Examples:
 # Command handlers
 # =============================================================================
 
+def _resolve_with_alternatives(resolver, packages: list, choices: dict,
+                               auto_mode: bool, preferences: 'PreferencesMatcher' = None,
+                               local_packages: set = None) -> tuple:
+    """Resolve packages, handling alternatives interactively with bloc detection.
+
+    Args:
+        resolver: Resolver instance
+        packages: List of package names to resolve
+        choices: Dict mapping capability -> chosen package (modified in place)
+        auto_mode: If True, use first choice automatically; if False, ask user
+        preferences: PreferencesMatcher instance
+        local_packages: Set of package names from local RPM files
+
+    Returns:
+        Tuple of (result, aborted) where result is the Resolution and aborted
+        is True if user cancelled during alternative selection.
+    """
+    if local_packages is None:
+        local_packages = set()
+    from . import colors
+    import solv
+
+    if preferences is None:
+        preferences = PreferencesMatcher()
+
+    def match_preference(name: str) -> bool:
+        """Check if a name matches any preference."""
+        return preferences.match_provider_name(name)
+
+    def expand_choice(pkg_name: str, choices: dict):
+        """Expand a choice to capabilities provided AND required by the package.
+
+        When user chooses php8.4-fpm-nginx:
+        - Record it for capabilities it PROVIDES (php-webinterface, etc.)
+        - Also resolve its REQUIRES (nginx) and add them to choices
+        """
+        if resolver.pool is None:
+            return
+
+        sel = resolver.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
+        for s in sel.solvables():
+            if s.repo and s.repo.name != '@System':
+                # Propagate to provided capabilities
+                for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                    prov_cap = str(dep).split()[0]
+                    if prov_cap.startswith(('lib', '/', 'pkgconfig(', 'rpmlib(')):
+                        continue
+                    if prov_cap == pkg_name or '(' in prov_cap:
+                        continue
+                    if prov_cap not in choices:
+                        choices[prov_cap] = pkg_name
+
+                # Propagate required packages to choices
+                new_choices = []
+                for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                    req_cap = str(dep).split()[0]
+                    if req_cap.startswith(('lib', '/', 'pkgconfig(', 'rpmlib(')):
+                        continue
+                    if '(' in req_cap or req_cap in choices:
+                        continue
+                    # Find the provider for this require
+                    req_dep = resolver.pool.Dep(req_cap)
+                    providers = [p for p in resolver.pool.whatprovides(req_dep)
+                                if p.repo and p.repo.name != '@System']
+                    if len(providers) == 1:
+                        # Only one provider - auto-select it
+                        provider_name = providers[0].name
+                        choices[req_cap] = provider_name
+                        new_choices.append(provider_name)
+                break
+
+        # Recursively expand new choices (but avoid infinite loops)
+        for new_pkg in new_choices:
+            if new_pkg != pkg_name:
+                expand_choice(new_pkg, choices)
+
+    patterns_resolved = False
+    preferences_applied = False
+
+    while True:
+        # First pass: create pool and resolve preferences
+        if not patterns_resolved:
+            # Create pool without solving to resolve preferences
+            # Preserve pool only if it has @LocalRPMs repo (for local RPM installation)
+            has_local_rpms = resolver.pool is not None and any(
+                r.name == '@LocalRPMs' for r in resolver.pool.repos
+            )
+            if not has_local_rpms:
+                resolver.pool = resolver._create_pool()
+            if resolver.pool:
+                preferences.resolve_patterns(resolver.pool)
+                patterns_resolved = True
+
+                # Check for version conflicts in resolved_packages (e.g., php8.4-fpm vs php8.5-fpm)
+                if not preferences_applied and len(preferences.resolved_packages) > 1:
+                    version_groups = _group_by_version(preferences.resolved_packages)
+                    # Remove None key (packages without version like nginx, lighttpd)
+                    versionless = version_groups.pop(None, set())
+                    if len(version_groups) > 1 and not auto_mode:
+                        # Multiple versions detected, ask user
+                        print(f"\nMultiple versions in preferences:")
+                        sorted_versions = sorted(version_groups.keys())
+                        for i, ver in enumerate(sorted_versions, 1):
+                            pkgs = version_groups[ver]
+                            print(f"  {i}. {ver} ({', '.join(sorted(pkgs)[:3])}{'...' if len(pkgs) > 3 else ''})")
+
+                        while True:
+                            try:
+                                choice = input(f"Choice? [1-{len(sorted_versions)}] ")
+                                idx = int(choice) - 1
+                                if 0 <= idx < len(sorted_versions):
+                                    chosen_version = sorted_versions[idx]
+                                    # Keep packages of chosen version + versionless packages
+                                    preferences.resolved_packages = version_groups[chosen_version] | versionless
+                                    # Re-compute compatible providers
+                                    preferences._compatible_providers.clear()
+                                    preferences._find_compatible_providers(resolver.pool)
+                                    break
+                            except (ValueError, EOFError, KeyboardInterrupt):
+                                print("\nAborted")
+                                return None, True
+
+                    preferences_applied = True
+
+                # NOTE: We no longer pre-validate preferences here.
+                # Instead, preferences are applied during the iterative resolution
+                # when alternatives are encountered (see match_preference() below).
+                # This avoids false conflicts from aggressive LOCKing.
+
+        # Pass favored/disfavored to help solver make consistent choices
+        # but don't pre-validate - let the iterative process handle conflicts
+        favored = preferences.resolved_packages | preferences._compatible_providers
+        result = resolver.resolve_install(
+            packages,
+            choices=choices,
+            favored_packages=favored,
+            explicit_disfavor=preferences.disfavored_packages,
+            preference_patterns=preferences.name_patterns,
+            local_packages=local_packages
+        )
+
+        # Handle alternatives (multiple providers for same capability)
+        if result.alternatives:
+            # Collect all alternative capabilities
+            alt_caps = [alt.capability for alt in result.alternatives]
+
+            # Detect blocs among alternatives
+            bloc_info = resolver.detect_blocs(alt_caps)
+
+            if bloc_info['blocs'] and not auto_mode:
+                bloc_choices = _handle_bloc_choices(
+                    bloc_info, preferences, choices, interactive=True
+                )
+
+                if bloc_choices:
+                    for bloc_key, cap_providers in bloc_choices.items():
+                        for cap, provider in cap_providers.items():
+                            choices[cap] = provider
+                            expand_choice(provider, choices)
+                continue
+
+            elif bloc_info['blocs'] and auto_mode:
+                bloc_choices = _handle_bloc_choices(
+                    bloc_info, preferences, choices, interactive=False
+                )
+                if bloc_choices:
+                    for bloc_key, cap_providers in bloc_choices.items():
+                        for cap, provider in cap_providers.items():
+                            choices[cap] = provider
+                            expand_choice(provider, choices)
+                continue
+
+            # No blocs detected - handle alternatives individually
+            if not auto_mode:
+                for alt in result.alternatives:
+                    # Skip if already chosen
+                    if alt.capability in choices:
+                        continue
+
+                    # Filter providers based on preferences
+                    filtered = preferences.filter_providers(alt.providers)
+
+                    # If only one after filtering, auto-select
+                    if len(filtered) == 1:
+                        choices[alt.capability] = filtered[0]
+                        expand_choice(filtered[0], choices)
+                        continue
+
+                    # Try to match preference
+                    matched = None
+                    for prov in filtered:
+                        if match_preference(prov):
+                            matched = prov
+                            break
+
+                    if matched:
+                        choices[alt.capability] = matched
+                        expand_choice(matched, choices)
+                        continue
+
+                    # No preference matched, ask user
+                    if alt.required_by:
+                        print(f"\n{alt.capability} (required by {alt.required_by}):")
+                    else:
+                        print(f"\n{alt.capability}:")
+                    for i, provider in enumerate(filtered[:8], 1):
+                        print(f"  {i}. {provider}")
+                    if len(filtered) > 8:
+                        print(f"  ... and {len(filtered) - 8} more")
+
+                    while True:
+                        try:
+                            choice = input(f"Choice? [1-{min(len(filtered), 8)}] ")
+                            idx = int(choice) - 1
+                            if 0 <= idx < len(filtered):
+                                chosen_pkg = filtered[idx]
+                                choices[alt.capability] = chosen_pkg
+                                expand_choice(chosen_pkg, choices)
+                                break
+                        except ValueError:
+                            pass
+                        except (EOFError, KeyboardInterrupt):
+                            print("\nAborted")
+                            return result, True
+                # Re-resolve with new choices
+                continue
+
+            else:
+                # Auto mode without blocs: use preferences or first choice
+                for alt in result.alternatives:
+                    filtered = preferences.filter_providers(alt.providers)
+                    matched = None
+                    for prov in filtered:
+                        if match_preference(prov):
+                            matched = prov
+                            break
+                    chosen_pkg = matched if matched else filtered[0]
+                    choices[alt.capability] = chosen_pkg
+                    expand_choice(chosen_pkg, choices)
+                continue
+
+        break  # No more alternatives, exit loop
+
+    return result, False
+
+
 def cmd_cleanup(args, db: PackageDatabase) -> int:
     """Handle cleanup command - unmount chroot filesystems."""
     import subprocess
