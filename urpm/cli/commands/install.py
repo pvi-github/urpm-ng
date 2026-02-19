@@ -1,5 +1,6 @@
 """Package installation and download commands."""
 
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,6 +27,9 @@ from ..helpers.alternatives import (
 from ..helpers.package import (
     resolve_virtual_package as _resolve_virtual_package,
 )
+
+# Debug flag for install operations
+DEBUG_INSTALL = False
 
 
 def cmd_install(args, db: 'PackageDatabase') -> int:
