@@ -26,8 +26,8 @@ classifiers = [
     "Topic :: System :: Software Distribution",
 ]
 dependencies = [
-  "solv",
-  "zstandard"
+  "zstandard",
+  "solv"
 ]
 
 [project.optional-dependencies]
