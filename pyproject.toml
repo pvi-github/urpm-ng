@@ -26,6 +26,8 @@ classifiers = [
     "Topic :: System :: Software Distribution",
 ]
 dependencies = [
+  "pygobject",
+  "rpm",
   "solv",
   "zstandard"
 ]

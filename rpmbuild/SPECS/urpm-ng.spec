@@ -15,22 +15,19 @@ Source1:        pk-backend-urpm.tar.gz
 # Note: No BuildArch:noarch because we also build the C backend
 
 # Python build requirements
+BuildRequires:  meson
 BuildRequires:  pyproject-rpm-macros
 BuildRequires:  python3-devel
-BuildRequires:  python3-wheel
-BuildRequires:  python3-setuptools
-BuildRequires:  python3-solv
-BuildRequires:  python3-rpm
-BuildRequires:  python3-zstandard
-BuildRequires:  meson
+BuildRequires:  python3dist(pygobject)
+BuildRequires:  python3dist(rpm)
+BuildRequires:  python3dist(setuptools)
+BuildRequires:  python3dist(solv)
+BuildRequires:  python3dist(wheel)
+BuildRequires:  python3dist(zstandard)
 
-Requires:       python3
-Requires:       python3-solv
-Requires:       python3-rpm
-Requires:       python3-zstandard
-Requires:       python3-gobject
 Requires:       gnupg2
 Requires:       polkit
+Requires:       python3-gobject
 
 Requires(post):   systemd
 Requires(preun):  systemd
