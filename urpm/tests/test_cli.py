@@ -1,6 +1,7 @@
 """Tests for CLI"""
 
 import pytest
+
 from urpm.cli.main import create_parser
 
 
