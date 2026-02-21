@@ -470,7 +470,6 @@ class Installer:
         ts = rpm.TransactionSet(self.root or '/')
 
         errors = []
-        total = len(package_names)
         found = 0
 
         # Add packages to erase

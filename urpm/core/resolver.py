@@ -482,6 +482,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         for name in package_names:
             # Parse version constraint if present (formats: "name >= ver" or "name[>= ver]")
             base_name = name
+            # TODO: version_constraint isn't used yet
             version_constraint = None
 
             # Handle "name op version" format (space-separated)
@@ -716,6 +717,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
         # Build dependency graph
         graph = {name: [] for name in resolved_names}
+        # TODO: requested_lower isn't used yet
         requested_lower = {n.lower() for n in requested_names}
 
         for name in resolved_names:

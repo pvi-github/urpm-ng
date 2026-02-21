@@ -370,7 +370,6 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 pass
 
         # Initialize empty rpmdb in the chroot
-        rpmdb_dir = root_path / "var/lib/rpm"
         print(f"Initializing rpmdb...")
         result = subprocess.run(
             ['rpm', '--root', urpm_root, '--initdb'],
@@ -485,7 +484,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         try:
             start = time.time()
             req = Request(test_url, method='HEAD')
-            with urlopen(req, timeout=5) as resp:
+            with urlopen(req, timeout=5):
                 latency = (time.time() - start) * 1000
                 return (candidate, latency)
         except Exception:
@@ -1863,7 +1862,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
             req = Request(test_url, method='HEAD')
             req.add_header('User-Agent', 'urpm-ng')
             start = time.time()
-            with urlopen(req, timeout=5) as response:
+            with urlopen(req, timeout=5):
                 latency = time.time() - start
                 return (latency, url)
         except Exception:
@@ -1910,6 +1909,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     skipped = 0
 
     # First, add servers from best mirrors
+    # TODO: this server isn't actually used
     server_to_use = None
     for latency, mirror_url in best_mirrors[:1]:  # Just use the best one
         base_url = extract_base_url(mirror_url, release, arch)

@@ -289,7 +289,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
         return 0
 
-    except Exception as e:
+    except Exception:
         db.abort_transaction(transaction_id)
         raise
     finally:
@@ -647,7 +647,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
 
         return 0
 
-    except Exception as e:
+    except Exception:
         db.abort_transaction(transaction_id)
         raise
     finally:

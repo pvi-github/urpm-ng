@@ -79,6 +79,7 @@ def verify_rpm_signature(rpm_path: Path) -> tuple:
     try:
         with open(rpm_path, 'rb') as f:
             # hdrFromFdno verifies signature when VSFlags allows it
+            # TODO: hdr isn't used yet
             hdr = ts.hdrFromFdno(f.fileno())
             return (True, None)
     except rpm.error as e:

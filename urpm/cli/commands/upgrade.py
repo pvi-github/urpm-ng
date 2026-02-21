@@ -413,7 +413,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
         return 0
 
-    except Exception as e:
+    except Exception:
         ops.abort_transaction(transaction_id)
         raise
     finally:

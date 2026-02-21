@@ -303,6 +303,7 @@ Examples:
     # =========================================================================
     # cleanup - Unmount chroot filesystems
     # =========================================================================
+    # TODO: cleanup_parser isn't used yet
     cleanup_parser = subparsers.add_parser(
         'cleanup',
         help='Unmount chroot filesystems (/dev, /proc)',
@@ -1750,6 +1751,7 @@ Examples:
     )
 
     # peer list / ls - list known peers and their stats
+    # TODO: peer_list isn't used yet
     peer_list = peer_subparsers.add_parser(
         'list', aliases=['ls'],
         help='List peers and download statistics'
@@ -1844,6 +1846,7 @@ Examples:
     )
 
     # appstream status
+    # TODO: appstream_status isn't used yet
     appstream_status = appstream_subparsers.add_parser(
         'status',
         help='Show AppStream status for all media'

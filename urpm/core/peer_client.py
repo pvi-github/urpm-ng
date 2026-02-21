@@ -249,7 +249,6 @@ class PeerClient:
             sock.sendto(data, ('<broadcast>', self.discovery_port))
 
             # Collect responses
-            end_time = socket.getdefaulttimeout()
             while True:
                 try:
                     response_data, addr = sock.recvfrom(4096)

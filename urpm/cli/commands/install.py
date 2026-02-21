@@ -354,7 +354,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     all_to_install = [a.name for a in result.actions]
     if with_suggests:
         suggests = []
-        suggest_alternatives = []
         packages_to_check = all_to_install[:]
         checked_packages = set(p.lower() for p in all_to_install)
         max_iterations = 10  # Safety limit against infinite loops
@@ -530,7 +529,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 break
     else:
         suggests = []
-        suggest_alternatives = []
 
     # Calculate sizes for initial display
     rec_size = sum(a.size for a in rec_pkgs)
@@ -594,8 +592,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         # If resolution failed and we have suggests, try removing problematic suggests
         skipped_suggests = {}  # suggest_name -> reason
         if not result.success and install_suggests and suggests:
-            suggest_names_set = set(suggest_names)
-
             # Find suggests mentioned in problems and store the reason
             for prob in result.problems:
                 prob_str = str(prob)
@@ -657,6 +653,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     sug_pkgs = [a for a in install_actions if a.reason == InstallReason.SUGGESTED]
 
     # Build set of explicit package names for history recording
+    # TODO: explicit_names isn't used yet
     explicit_names = set(a.name.lower() for a in explicit_pkgs)
 
     # Calculate final sizes
@@ -912,7 +909,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
         return 0
 
-    except Exception as e:
+    except Exception:
         ops.abort_transaction(transaction_id)
         raise
     finally:

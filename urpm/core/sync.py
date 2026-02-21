@@ -525,20 +525,19 @@ def sync_media(db: PackageDatabase, media_name: str,
         db.update_media_sync_info(media_id, result.md5)
 
         # Sync AppStream metadata
-        appstream_synced = False
         if not skip_appstream:
             if progress_callback:
                 progress_callback("syncing appstream", 0, 0)
             try:
                 from .appstream import AppStreamManager
                 appstream_mgr = AppStreamManager(db, base_dir)
+                # TODO: appstream_result isn't used
                 appstream_result = appstream_mgr.sync_media_appstream(
                     media_id=media_id,
                     media_name=media_name,
                     media_url=media_url,
                     progress_callback=lambda msg: progress_callback("appstream", 0, 0) if progress_callback else None
                 )
-                appstream_synced = appstream_result.success
             except Exception as e:
                 # AppStream sync failure is not fatal
                 import logging
@@ -759,7 +758,7 @@ def sync_files_xml(
             if e.code == 404:
                 continue  # Try next server
             return FilesXmlResult(success=False, error=f"HTTP error: {e.code}")
-        except Exception as e:
+        except Exception:
             continue  # Try next server
 
     if not files_xml_downloaded:

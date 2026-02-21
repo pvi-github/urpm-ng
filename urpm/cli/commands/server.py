@@ -440,7 +440,7 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
         try:
             start = time.time()
             req = Request(test_url, method='HEAD')
-            with urlopen(req, timeout=5) as resp:
+            with urlopen(req, timeout=5):
                 latency = (time.time() - start) * 1000
                 return (candidate, latency)
         except Exception:

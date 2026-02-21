@@ -163,6 +163,7 @@ def get_blacklist() -> set:
     }
 
     # Dynamic: running kernel
+    # TODO: running is not actually used yet
     running = get_running_kernel()
     # Add kernel packages matching running version
     # The kernel name pattern is kernel-<variant>-<version>-<release>.<arch>
