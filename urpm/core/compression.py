@@ -8,6 +8,8 @@ Auto-detects and handles multiple compression formats:
 - bzip2 (legacy)
 """
 
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Union
 
@@ -16,10 +18,6 @@ MAGIC_ZSTD = b'\x28\xb5\x2f\xfd'
 MAGIC_GZIP = b'\x1f\x8b'
 MAGIC_XZ = b'\xfd7zXZ\x00'
 MAGIC_BZ2 = b'BZ'
-
-
-import subprocess
-import shutil
 
 
 def _decompress_zstd_subprocess(data: bytes) -> bytes:

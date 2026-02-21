@@ -8,15 +8,19 @@ import hashlib
 import shutil
 import tempfile
 import time
-import urllib.request
 import urllib.error
-from pathlib import Path
-from typing import Optional, Callable, Tuple, List, Dict
+import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
 
-from .synthesis import parse_synthesis
+# Import from config
+from .config import build_media_url, get_base_dir, get_media_local_path, is_local_server
+# Deprecated imports (kept for migration)
+from .config import get_hostname_from_url, get_media_dir
+
 from .database import PackageDatabase
-
+from .synthesis import parse_synthesis
 
 # Default paths for media metadata
 SYNTHESIS_PATH = "media_info/synthesis.hdlist.cz"
@@ -24,12 +28,6 @@ HDLIST_PATH = "media_info/hdlist.cz"
 MD5SUM_PATH = "media_info/MD5SUM"
 FILES_XML_PATH = "media_info/files.xml.lzma"
 APPSTREAM_PATH = "media_info/appstream.xml.lzma"
-
-
-# Import from config
-from .config import get_base_dir, get_media_local_path, build_media_url, is_local_server
-# Deprecated imports (kept for migration)
-from .config import get_hostname_from_url, get_media_dir
 
 
 def get_media_cache_dir(media_name: str, media_url: str, base_dir: Path = None) -> Path:
