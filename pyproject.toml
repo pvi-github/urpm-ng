@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "urpm"
-version = "0.2.1"
+version = "0.3.0"
 description = "Modern package manager for Mageia Linux"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -25,10 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Software Distribution",
 ]
-dependencies = [
-  "zstandard",
-  "solv"
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [

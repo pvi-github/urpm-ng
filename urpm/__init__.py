@@ -7,5 +7,5 @@ A complete rewrite of urpmi in Python, featuring:
 - Modern CLI with short aliases
 """
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 __author__ = "Mageia Community"
