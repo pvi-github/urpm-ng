@@ -492,7 +492,7 @@ class PoolMixin:
     def add_local_rpms(self, rpm_infos: List[Dict]) -> None:
         """Add local RPM files to the resolver pool.
 
-        This creates a special @LocalRPMs repository containing the local
+        This creates or reuses a special @LocalRPMs repository containing the local
         packages so they can be resolved alongside repository packages.
 
         Args:
@@ -503,9 +503,15 @@ class PoolMixin:
         if self.pool is None:
             self.pool = self._create_pool()
 
-        # Create local RPMs repository
-        local_repo = self.pool.add_repo("@LocalRPMs")
-        local_repo.appdata = {"type": "local"}
+        # Find existing @LocalRPMs repo or create new one
+        local_repo = None
+        for repo in self.pool.repos:
+            if repo.name == '@LocalRPMs':
+                local_repo = repo
+                break
+        if local_repo is None:
+            local_repo = self.pool.add_repo("@LocalRPMs")
+            local_repo.appdata = {"type": "local"}
 
         for info in rpm_infos:
             s = local_repo.add_solvable()
@@ -517,9 +523,11 @@ class PoolMixin:
                 s.evr = f"{info['version']}-{info['release']}"
             s.arch = info['arch']
 
-            # Versioned self-provide
-            s.add_deparray(solv.SOLVABLE_PROVIDES,
-                self.pool.Dep(info['name']).Rel(solv.REL_EQ, self.pool.Dep(s.evr)))
+            # Versioned self-provide - use Dep with relation ID
+            name_id = self.pool.str2id(info['name'], True)
+            evr_id = self.pool.str2id(s.evr, True)
+            rel_id = self.pool.rel2id(name_id, evr_id, solv.REL_EQ, True)
+            s.add_deparray(solv.SOLVABLE_PROVIDES, solv.Dep(self.pool, rel_id))
 
             # Add provides
             for cap in info.get('provides', []):

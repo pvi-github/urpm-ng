@@ -53,7 +53,6 @@ For desktop integration (Discover, GNOME Software), install urpm-ng-desktop.
 %package core
 Summary:        Core CLI and resolver for urpm-ng
 Group:          System/Configuration/Packaging
-BuildArch:      noarch
 
 Requires:       python3
 Requires:       python3-solv
@@ -77,7 +76,6 @@ desktop integration. Useful for container images and minimal installs.
 %package daemon
 Summary:        Background daemon and P2P sharing for urpm-ng
 Group:          System/Configuration/Packaging
-BuildArch:      noarch
 
 Requires:       %{name}-core = %{version}-%{release}
 Requires(post):   systemd
@@ -96,7 +94,6 @@ Background daemon for urpm-ng providing:
 %package appstream
 Summary:        AppStream integration for urpm-ng
 Group:          System/Configuration/Packaging
-BuildArch:      noarch
 
 Requires:       %{name}-core = %{version}-%{release}
 
@@ -131,7 +128,6 @@ Includes D-Bus service and PolicyKit integration.
 %package desktop
 Summary:        Desktop integration for urpm-ng
 Group:          System/Configuration/Packaging
-BuildArch:      noarch
 
 Requires:       %{name} = %{version}-%{release}
 Requires:       %{name}-packagekit-backend = %{version}-%{release}
@@ -149,7 +145,6 @@ Includes: core CLI, daemon, PackageKit backend, and AppStream support.
 %package build
 Summary:        Container image building tools for urpm-ng
 Group:          System/Configuration/Packaging
-BuildArch:      noarch
 
 Requires:       %{name}-core = %{version}-%{release}
 
@@ -166,7 +161,6 @@ Requires Docker or Podman to function.
 %package all
 Summary:        Complete urpm-ng installation
 Group:          System/Configuration/Packaging
-BuildArch:      noarch
 
 Requires:       %{name}-desktop = %{version}-%{release}
 Requires:       %{name}-build = %{version}-%{release}

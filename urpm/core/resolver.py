@@ -161,11 +161,15 @@ def get_solver_debug() -> SolverDebug:
 # Regex to parse capability strings like "name[op version]"
 CAP_REGEX = re.compile(r'^([^\[]+)(?:\[([<>=!]+)\s*(.+)\])?$')
 
+# Regex to parse RPM-style capability strings like "name >= version"
+RPM_CAP_REGEX = re.compile(r'^(\S+)\s+(>=|<=|=|>|<)\s+(.+)$')
+
 # Map string operators to libsolv flags
 OP_FLAGS = {
     '>=': solv.REL_GT | solv.REL_EQ,
     '<=': solv.REL_LT | solv.REL_EQ,
     '==': solv.REL_EQ,
+    '=': solv.REL_EQ,
     '>': solv.REL_GT,
     '<': solv.REL_LT,
 }
@@ -193,6 +197,15 @@ def parse_capability(pool: solv.Pool, cap_str: str) -> solv.Dep:
 
     # Strip [*] scriptlet marker if present (can appear anywhere)
     cap_str = cap_str.replace('[*]', '')
+
+    # Handle RPM-style format: "name >= version" or "name = version"
+    if '[' not in cap_str and ' ' in cap_str:
+        rpm_match = RPM_CAP_REGEX.match(cap_str)
+        if rpm_match:
+            name, op, version = rpm_match.groups()
+            flags = OP_FLAGS.get(op)
+            if flags:
+                return pool.Dep(name).Rel(flags, pool.Dep(version))
 
     # Handle simple case (no brackets left)
     if '[' not in cap_str:

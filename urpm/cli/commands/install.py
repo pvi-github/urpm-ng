@@ -164,6 +164,42 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         else:
             package_names.append(pkg)
 
+    # Scan directories of local RPMs for sibling packages (potential dependencies)
+    # Also scan sibling architecture directories (e.g., ../x86_64/, ../noarch/)
+    sibling_rpm_infos = []
+    if local_rpm_paths:
+        scanned_dirs = set()
+        explicit_paths = set(local_rpm_paths)
+        for rpm_path in local_rpm_paths:
+            parent_dir = Path(rpm_path).parent
+            # Collect directories to scan: current + sibling arch dirs
+            dirs_to_scan = [parent_dir]
+            # Check if parent looks like RPMS/<arch>/ structure
+            grandparent = parent_dir.parent
+            if grandparent.name in ('RPMS', 'rpms'):
+                # Scan all arch subdirectories
+                for arch_dir in grandparent.iterdir():
+                    if arch_dir.is_dir() and arch_dir not in dirs_to_scan:
+                        dirs_to_scan.append(arch_dir)
+            # Scan all directories
+            for scan_dir in dirs_to_scan:
+                if scan_dir in scanned_dirs:
+                    continue
+                scanned_dirs.add(scan_dir)
+                # Find all .rpm files in this directory
+                for rpm_file in scan_dir.glob('*.rpm'):
+                    # Skip already-explicit RPMs and debuginfo/debugsource
+                    if str(rpm_file.resolve()) in explicit_paths:
+                        continue
+                    if '-debuginfo-' in rpm_file.name or '-debugsource-' in rpm_file.name:
+                        continue
+                    # Read header
+                    info = read_rpm_header(rpm_file)
+                    if info:
+                        sibling_rpm_infos.append(info)
+        if sibling_rpm_infos:
+            print(colors.dim(f"Found {len(sibling_rpm_infos)} sibling RPMs (available for dependencies)"))
+
     # If we have local RPMs, show what we're installing
     if local_rpm_infos:
         print(f"Local RPM files ({len(local_rpm_infos)}):")
@@ -229,6 +265,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Add local RPMs to resolver pool before resolution
     if local_rpm_infos:
         resolver.add_local_rpms(local_rpm_infos)
+    # Add sibling RPMs as potential dependency sources
+    if sibling_rpm_infos:
+        resolver.add_local_rpms(sibling_rpm_infos)
 
     if nodeps:
         # --nodeps: build actions directly without dependency resolution
@@ -543,6 +582,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         resolver = _create_resolver(db, args, install_recommends=install_recommends_final)
         if local_rpm_infos:
             resolver.add_local_rpms(local_rpm_infos)
+        if sibling_rpm_infos:
+            resolver.add_local_rpms(sibling_rpm_infos)
         result, aborted = _resolve_with_alternatives(
             resolver, final_packages, choices, args.auto, preferences,
             local_packages=local_pkg_names
@@ -571,6 +612,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 resolver = _create_resolver(db, args, install_recommends=install_recommends_final)
                 if local_rpm_infos:
                     resolver.add_local_rpms(local_rpm_infos)
+                if sibling_rpm_infos:
+                    resolver.add_local_rpms(sibling_rpm_infos)
                 result, aborted = _resolve_with_alternatives(
                     resolver, retry_packages, choices, args.auto, preferences,
                     local_packages=local_pkg_names

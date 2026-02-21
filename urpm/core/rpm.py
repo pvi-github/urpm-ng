@@ -64,7 +64,7 @@ def read_rpm_header(rpm_path: Path) -> Optional[Dict[str, Any]]:
             nevra = f"{name}-{version}-{release}.{arch}"
 
         def get_deps(tag) -> List[str]:
-            """Extract dependency list from header."""
+            """Extract dependency list from header (names only)."""
             deps = hdr[tag]
             if not deps:
                 return []
@@ -72,6 +72,36 @@ def read_rpm_header(rpm_path: Path) -> Optional[Dict[str, Any]]:
             if isinstance(deps, str):
                 return [deps] if deps else []
             return list(deps) if deps else []
+
+        def get_versioned_deps(name_tag, version_tag, flags_tag) -> List[str]:
+            """Extract versioned dependencies combining name, version and flags."""
+            names = hdr[name_tag] or []
+            versions = hdr[version_tag] or []
+            flags_list = hdr[flags_tag] or []
+
+            result = []
+            for i, dep_name in enumerate(names):
+                if not dep_name:
+                    continue
+                ver = versions[i] if i < len(versions) else ''
+                flags = flags_list[i] if i < len(flags_list) else 0
+
+                if ver and flags:
+                    # Convert RPM flags to operator string
+                    op = ''
+                    if flags & rpm.RPMSENSE_LESS:
+                        op += '<'
+                    if flags & rpm.RPMSENSE_GREATER:
+                        op += '>'
+                    if flags & rpm.RPMSENSE_EQUAL:
+                        op += '='
+                    if op:
+                        result.append(f"{dep_name} {op} {ver}")
+                    else:
+                        result.append(dep_name)
+                else:
+                    result.append(dep_name)
+            return result
 
         return {
             'name': name,
@@ -82,14 +112,14 @@ def read_rpm_header(rpm_path: Path) -> Optional[Dict[str, Any]]:
             'nevra': nevra,
             'size': size,
             'path': str(path.resolve()),
-            'requires': get_deps(rpm.RPMTAG_REQUIRENAME),
-            'provides': get_deps(rpm.RPMTAG_PROVIDENAME),
-            'conflicts': get_deps(rpm.RPMTAG_CONFLICTNAME),
-            'obsoletes': get_deps(rpm.RPMTAG_OBSOLETENAME),
-            'recommends': get_deps(rpm.RPMTAG_RECOMMENDNAME) if hasattr(rpm, 'RPMTAG_RECOMMENDNAME') else [],
-            'suggests': get_deps(rpm.RPMTAG_SUGGESTNAME) if hasattr(rpm, 'RPMTAG_SUGGESTNAME') else [],
-            'supplements': get_deps(rpm.RPMTAG_SUPPLEMENTNAME) if hasattr(rpm, 'RPMTAG_SUPPLEMENTNAME') else [],
-            'enhances': get_deps(rpm.RPMTAG_ENHANCENAME) if hasattr(rpm, 'RPMTAG_ENHANCENAME') else [],
+            'requires': get_versioned_deps(rpm.RPMTAG_REQUIRENAME, rpm.RPMTAG_REQUIREVERSION, rpm.RPMTAG_REQUIREFLAGS),
+            'provides': get_versioned_deps(rpm.RPMTAG_PROVIDENAME, rpm.RPMTAG_PROVIDEVERSION, rpm.RPMTAG_PROVIDEFLAGS),
+            'conflicts': get_versioned_deps(rpm.RPMTAG_CONFLICTNAME, rpm.RPMTAG_CONFLICTVERSION, rpm.RPMTAG_CONFLICTFLAGS),
+            'obsoletes': get_versioned_deps(rpm.RPMTAG_OBSOLETENAME, rpm.RPMTAG_OBSOLETEVERSION, rpm.RPMTAG_OBSOLETEFLAGS),
+            'recommends': get_versioned_deps(rpm.RPMTAG_RECOMMENDNAME, rpm.RPMTAG_RECOMMENDVERSION, rpm.RPMTAG_RECOMMENDFLAGS) if hasattr(rpm, 'RPMTAG_RECOMMENDNAME') else [],
+            'suggests': get_versioned_deps(rpm.RPMTAG_SUGGESTNAME, rpm.RPMTAG_SUGGESTVERSION, rpm.RPMTAG_SUGGESTFLAGS) if hasattr(rpm, 'RPMTAG_SUGGESTNAME') else [],
+            'supplements': get_versioned_deps(rpm.RPMTAG_SUPPLEMENTNAME, rpm.RPMTAG_SUPPLEMENTVERSION, rpm.RPMTAG_SUPPLEMENTFLAGS) if hasattr(rpm, 'RPMTAG_SUPPLEMENTNAME') else [],
+            'enhances': get_versioned_deps(rpm.RPMTAG_ENHANCENAME, rpm.RPMTAG_ENHANCEVERSION, rpm.RPMTAG_ENHANCEFLAGS) if hasattr(rpm, 'RPMTAG_ENHANCENAME') else [],
         }
     except Exception:
         return None

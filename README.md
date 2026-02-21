@@ -20,41 +20,38 @@ Use the Mageia Control Center (MCC) > Security > Firewall, or edit `/etc/shorewa
 
 ## Installation
 
-### Required packages
+### Packages
 
-You'll need :
+urpm-ng is split into several packages for flexibility:
 
-- **python3-solv** - SAT-based dependency resolution
-- **python3-zstandard** - Decompression of synthesis.hdlist.cz files
+| Package | Description |
+|---------|-------------|
+| `urpm-ng-core` | Minimal: CLI, resolver, database |
+| `urpm-ng-daemon` | Background daemon + P2P sharing |
+| `urpm-ng` | Standard install (core + daemon) |
+| `urpm-ng-desktop` | Desktop integration (Discover, GNOME Software) |
+| `urpm-ng-build` | Container build tools (mkimage, build) |
+| `urpm-ng-all` | Everything |
 
-Normally installation process through RPM install will automatically install them.
-
-If you want to install them manually:
-
-```bash
-urpmi python3-solv python3-zstandard
-```
-### Standard installation
+**Choose the right package:**
+- **Minimal/container install**: `urpm-ng-core`
+- **Standard CLI usage**: `urpm-ng`
+- **Desktop with GUI software centers**: `urpm-ng-desktop`
+- **Package builders**: `urpm-ng-build`
 
 ### RPM Install
 
 Get last Release from https://github.com/pvi-github/urpm-ng/releases
 
-Download the RPM file that matches your Mageia version, and install it.
+Download the RPM files that match your Mageia version and install them.
 
-Nota : at first install through rpm it will try to import its config from urpmi
+Note: At first install, urpm-ng will try to import its config from urpmi.
 
-```bash
-# Mettez la dernière version à la place du 0.1.16
-export URPM_VERSION=0.1.16
+1. Go to https://github.com/pvi-github/urpm-ng/releases
+2. Download all RPMs for your Mageia version into a dedicated folder
+3. From that folder, run: `cd ~/Downloads/urpm-ng && urpmi *.rpm`
 
-curl --follow https://github.com/pvi-github/urpm-ng/releases/download/$URPM_VERSION/urpm-ng-$URPM_VERSION-1.$(rpm -qa | sed -ne "s/^mageia-release-Default[^m]*//p").noarch.rpm -o urpm-ng-$URPM_VERSION-1.$(rpm -qa | sed -ne "s/^mageia-release-Default[^m]*//p").noarch.rpm
-
-urpmi --auto urpm-ng-$URPM_VERSION-1.$(rpm -qa | sed -ne "s/^mageia-release-Default[^m]*//p").noarch.rpm
-
-# Run urpm 
-./bin/urpm --help
-```
+Note: At first install, urpm-ng will import its config from urpmi.
 
 ## Configuration
 
@@ -720,7 +717,12 @@ urpm-ng provides a PackageKit backend allowing graphical software centers to man
 ## Installation
 
 ```bash
-urpm install pk-backend-urpm
+urpm install urpm-ng-desktop
+```
+
+Or install the backend directly:
+```bash
+urpm install urpm-ng-packagekit-backend
 ```
 
 This installs:
