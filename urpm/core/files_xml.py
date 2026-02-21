@@ -54,9 +54,11 @@ def parse_files_xml(
 
     # Determine if compressed
     if path.suffix == '.lzma' or str(path).endswith('.xml.lzma'):
-        opener = lambda p: lzma.open(p, 'rb')
+        def opener(p):
+            return lzma.open(p, 'rb')
     else:
-        opener = lambda p: open(p, 'rb')
+        def opener(p):
+            return open(p, 'rb')
 
     pkg_count = 0
     file_count = 0
@@ -160,18 +162,23 @@ def search_files_xml(
             regex = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
         else:
             regex = re.compile(fnmatch.translate(pattern))
-        match_func = lambda f: regex.match(f)
+        def match_func(f):
+            return regex.match(f)
     elif exact_match:
         if case_sensitive:
-            match_func = lambda f: f == pattern
+            def match_func(f):
+                return f == pattern
         else:
-            match_func = lambda f: f.lower() == pattern_lower
+            def match_func(f):
+                return f.lower() == pattern_lower
     else:
         # Substring match
         if case_sensitive:
-            match_func = lambda f: pattern in f
+            def match_func(f):
+                return pattern in f
         else:
-            match_func = lambda f: pattern_lower in f.lower()
+            def match_func(f):
+                 return pattern_lower in f.lower()
 
     for nevra, files in parse_files_xml(path):
         for filepath in files:
@@ -205,9 +212,11 @@ def extract_nevras_from_files_xml(path: Path) -> Set[str]:
 
     # Determine if compressed
     if path.suffix == '.lzma' or str(path).endswith('.xml.lzma'):
-        opener = lambda p: lzma.open(p, 'rb')
+        def opener(p):
+            return lzma.open(p, 'rb')
     else:
-        opener = lambda p: open(p, 'rb')
+        def opener(p):
+            return open(p, 'rb')
 
     try:
         with opener(path) as f:
