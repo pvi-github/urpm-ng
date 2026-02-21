@@ -12,6 +12,7 @@ Provides a modern CLI with short aliases:
 """
 
 import argparse
+import importlib
 import sys
 
 from .. import __version__
@@ -85,15 +86,11 @@ def check_dependencies() -> list:
     missing = []
 
     # Check libsolv (required for dependency resolution)
-    try:
-        import solv
-    except ImportError:
+    if not importlib.util.find_spec('solv'):
         missing.append(('python3-solv', 'dependency resolution'))
 
     # Check zstandard (required for .cz decompression)
-    try:
-        import zstandard
-    except ImportError:
+    if not importlib.util.find_spec('zstandard'):
         missing.append(('python3-zstandard', 'synthesis decompression'))
 
     return missing

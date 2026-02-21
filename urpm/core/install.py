@@ -4,6 +4,7 @@ RPM installation module
 Handles package installation using python3-rpm bindings.
 """
 
+import importlib
 import logging
 import os
 import rpm
@@ -562,11 +563,7 @@ class Installer:
 
 def check_rpm_available() -> bool:
     """Check if rpm module is available."""
-    try:
-        import rpm
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec('rpm') is not None
 
 
 def check_root() -> bool:

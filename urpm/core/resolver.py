@@ -4,20 +4,17 @@ Dependency resolver using libsolv
 Uses the SAT-based libsolv library for fast, correct dependency resolution.
 """
 
+import importlib
 import re
 import solv
 from typing import List, Dict
 from dataclasses import dataclass
 from enum import Enum
 
-try:
-    import rpm
-    HAS_RPM = True
-except ImportError:
-    HAS_RPM = False
-
 from .database import PackageDatabase
 from .resolution import PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin
+
+HAS_RPM = importlib.util.find_spec('rpm') is not None
 
 
 class VersionConflictError(Exception):
