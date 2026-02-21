@@ -39,9 +39,9 @@ urpm-ng is split into several packages for flexibility:
 - **Desktop with GUI software centers**: `urpm-ng-desktop`
 - **Package builders**: `urpm-ng-build`
 
-### RPM Install (one-liner)
+### RPM Install or Update... works in all cases (one-liner)
 
-Copy and paste in a terminal:
+Copy and paste and execute in a terminal:
 
 ```bash
 mkdir -p $HOME/tmp/urpm-ng && cd $HOME/tmp/urpm-ng && \
@@ -52,7 +52,7 @@ echo "Downloading urpm-ng $VER for Mageia $MGAVER ($ARCH)..." && \
 curl -s "https://api.github.com/repos/pvi-github/urpm-ng/releases/tags/$VER" | \
   grep browser_download_url | grep '\.rpm"' | cut -d'"' -f4 | \
   grep -v '\.src\.rpm' | grep -v '\-debuginfo' | grep -v '\-debugsource' | \
-  grep "mga${MGAVER}" | grep "\.${ARCH}\.\|\.noarch\." | xargs -n1 curl -LO && \
+  grep "mga${MGAVER}" | grep "\.${ARCH}\.\|\.noarch\." | xargs -n1 curl -sLO && \
 if urpm --version 2>/dev/null | grep -qE 'urpm 0\.[3-9]\.|urpm [1-9]\.'; then \
   su -c "urpm i --reinstall $HOME/tmp/urpm-ng/urpm-ng-all-*.rpm"; \
 else \
