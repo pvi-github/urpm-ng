@@ -39,17 +39,26 @@ urpm-ng is split into several packages for flexibility:
 - **Desktop with GUI software centers**: `urpm-ng-desktop`
 - **Package builders**: `urpm-ng-build`
 
-### RPM Install
+### RPM Install (one-liner)
 
-Get last Release from https://github.com/pvi-github/urpm-ng/releases
+Copy and paste in a terminal:
 
-Download the RPM files that match your Mageia version and install them.
-
-Note: At first install, urpm-ng will try to import its config from urpmi.
-
-1. Go to https://github.com/pvi-github/urpm-ng/releases
-2. Download all RPMs for your Mageia version into a dedicated folder
-3. From that folder, run: `cd ~/Downloads/urpm-ng && urpmi *.rpm`
+```bash
+mkdir -p $HOME/tmp/urpm-ng && cd $HOME/tmp/urpm-ng && \
+MGAVER=$(rpm -q --qf '%{version}' mageia-release-Default 2>/dev/null | cut -d. -f1) && \
+ARCH=$(uname -m) && \
+VER=$(curl -s https://api.github.com/repos/pvi-github/urpm-ng/releases | grep -m1 '"tag_name"' | cut -d'"' -f4) && \
+echo "Downloading urpm-ng $VER for Mageia $MGAVER ($ARCH)..." && \
+curl -s "https://api.github.com/repos/pvi-github/urpm-ng/releases/tags/$VER" | \
+  grep browser_download_url | grep '\.rpm"' | cut -d'"' -f4 | \
+  grep -v '\.src\.rpm' | grep -v '\-debuginfo' | grep -v '\-debugsource' | \
+  grep "mga${MGAVER}" | grep "\.${ARCH}\.\|\.noarch\." | xargs -n1 curl -LO && \
+if urpm --version 2>/dev/null | grep -qE 'urpm 0\.[3-9]\.|urpm [1-9]\.'; then \
+  su -c "urpm i --reinstall $HOME/tmp/urpm-ng/urpm-ng-all-*.rpm"; \
+else \
+  su -c "urpmi $HOME/tmp/urpm-ng/*.rpm && urpm mark auto \$(rpm -qa 'urpm-ng-*' | grep -v urpm-ng-all | sed 's/-[0-9].*//')"; \
+fi
+```
 
 Note: At first install, urpm-ng will import its config from urpmi.
 
