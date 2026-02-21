@@ -379,7 +379,7 @@ class UrpmDBusService:
 
             actions = result.actions
             if not actions:
-                logger.info(f"_run_install: No actions - packages may already be installed")
+                logger.info("_run_install: No actions - packages may already be installed")
                 self._emit_complete(op_id, True, "Nothing to do")
                 self._return_invocation(invocation, True, "Nothing to do")
                 return
@@ -462,10 +462,10 @@ class UrpmDBusService:
                 })
 
             msg = json.dumps({'message': f"Installed {len(rpm_paths)} package(s)", 'packages': installed_pkgs})
-            logger.info(f"_run_install: emitting complete, success=True")
+            logger.info("_run_install: emitting complete, success=True")
             self._emit_complete(op_id, True, msg)
             self._return_invocation(invocation, True, msg)
-            logger.info(f"_run_install: done")
+            logger.info("_run_install: done")
 
         except Exception as e:
             logger.exception(f"Install failed: {e}")

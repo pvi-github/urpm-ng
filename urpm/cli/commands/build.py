@@ -109,9 +109,9 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     # Check if image already exists
     if container.image_exists(tag):
         print(colors.error(f"\nError: Image '{tag}' already exists."))
-        print(f"\nTo replace it, first remove the existing image:")
+        print("\nTo replace it, first remove the existing image:")
         print(f"  {runtime.name} rmi {tag}")
-        print(f"\nThen run mkimage again.")
+        print("\nThen run mkimage again.")
         return 1
 
     # Base packages for build image
@@ -160,7 +160,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         if free_gb < MIN_SPACE_GB:
             print(colors.error(f"Insufficient disk space in {workdir}"))
             print(colors.error(f"  Available: {free_gb:.1f} GB, required: {MIN_SPACE_GB} GB"))
-            print(colors.dim(f"  Use --workdir to specify a different location"))
+            print(colors.dim("  Use --workdir to specify a different location"))
             return 1
     except OSError as e:
         print(colors.warning(f"Could not check disk space: {e}"))
@@ -243,7 +243,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
                     print(colors.dim(f"  DEBUG: rpmdb.sqlite size: {rpmdb_sqlite.stat().st_size} bytes"))
         else:
             if DEBUG_MKIMAGE:
-                print(colors.error(f"  DEBUG: RPM db dir does not exist!"))
+                print(colors.error("  DEBUG: RPM db dir does not exist!"))
 
         check = subprocess.run(
             ['rpm', '--root', tmpdir, '-q', 'filesystem'],
@@ -272,10 +272,10 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
                 print(colors.success(f"  DEBUG: /bin is symlink -> {bin_path.resolve()}"))
         elif bin_path.exists():
             if DEBUG_MKIMAGE:
-                print(colors.error(f"  DEBUG: /bin exists but is NOT a symlink!"))
+                print(colors.error("  DEBUG: /bin exists but is NOT a symlink!"))
         else:
             if DEBUG_MKIMAGE:
-                print(colors.error(f"  DEBUG: /bin does not exist!"))
+                print(colors.error("  DEBUG: /bin does not exist!"))
 
         # Now install remaining packages (filesystem already provides /bin -> usr/bin etc)
         remaining_packages = [p for p in packages if p != 'filesystem']
@@ -396,7 +396,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             )
             ret = cmd_install(urpm_local_args, chroot_db)
             if ret != 0:
-                print(colors.error(f"Failed to install urpm"))
+                print(colors.error("Failed to install urpm"))
                 return ret
             print(colors.success(f"  Installed {rpm_path.name}"))
         else:
@@ -427,7 +427,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             print(f"  Chroot size: {size_mb:.1f} MB")
         except Exception:
             pass
-        print(f"  Archiving and importing (this may take a moment)...", end='', flush=True)
+        print("  Archiving and importing (this may take a moment)...", end='', flush=True)
         # Use podman unshare for import when not root (same UID/GID mapping as install)
         if not container.import_from_dir(tmpdir, tag, use_unshare=use_noscripts):
             print()  # newline after "..."
@@ -440,11 +440,11 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         size = images[0]['size'] if images else 'unknown'
 
         print(colors.success(f"\n{'='*60}"))
-        print(colors.success(f"Image created successfully!"))
+        print(colors.success("Image created successfully!"))
         print(colors.success(f"{'='*60}"))
         print(f"  Tag:  {tag}")
         print(f"  Size: {size}")
-        print(f"\nUsage:")
+        print("\nUsage:")
         print(f"  {runtime.name} run -it {tag} /bin/bash")
         print(f"  urpm build --image {tag} ./package.src.rpm")
 
@@ -456,7 +456,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
 
     finally:
         if not keep_chroot:
-            print(f"\nCleaning up temporary directory...")
+            print("\nCleaning up temporary directory...")
             shutil.rmtree(tmpdir, ignore_errors=True)
         else:
             print(f"\nChroot kept at: {tmpdir}")
@@ -502,7 +502,7 @@ def _cleanup_chroot_for_image(root: str):
     var_tmp = os.path.join(root, 'var', 'tmp')
     if not os.path.exists(var_tmp):
         os.makedirs(var_tmp, mode=0o1777, exist_ok=True)
-        print(f"  Created /var/tmp")
+        print("  Created /var/tmp")
 
     # Create /etc/machine-id if missing (required by systemd, dbus, etc.)
     machine_id_path = os.path.join(root, 'etc', 'machine-id')
@@ -512,7 +512,7 @@ def _cleanup_chroot_for_image(root: str):
             machine_id = uuid.uuid4().hex  # 32 hex chars, no dashes
             with open(machine_id_path, 'w') as f:
                 f.write(machine_id + '\n')
-            print(f"  Created /etc/machine-id")
+            print("  Created /etc/machine-id")
         except (IOError, OSError):
             pass
 
@@ -559,7 +559,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             valid_sources.append(source_path)
         elif source_path.suffix == '.rpm':
             print(colors.warning(f"Binary RPM cannot be built: {source}"))
-            print(colors.dim(f"  Use a .src.rpm or .spec file instead"))
+            print(colors.dim("  Use a .src.rpm or .spec file instead"))
             continue
         else:
             print(colors.warning(f"Unsupported source type: {source}"))
@@ -617,7 +617,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     print(f"  Output:  {output_dir}")
 
     if fail_count > 0:
-        print(f"\nFailed packages:")
+        print("\nFailed packages:")
         for source, success, msg in results:
             if not success:
                 print(f"  {colors.error('X')} {source.name}: {msg}")
@@ -704,14 +704,14 @@ def _build_single_package(
         container.exec(cid, ['/bin/update-ca-trust', 'extract'])
 
         # 3. Copy source into container
-        print(f"  Copying source...")
+        print("  Copying source...")
 
         if source_path.suffix == '.rpm' and '.src.' in source_path.name:
             # Source RPM - install it to extract spec and sources
             if not container.cp(str(source_path), f"{cid}:/root/rpmbuild/SRPMS/"):
                 return (source_path, False, "Failed to copy SRPM")
 
-            print(f"  Installing SRPM...")
+            print("  Installing SRPM...")
             result = container.exec(cid, [
                 'rpm', '-ivh', f'/root/rpmbuild/SRPMS/{source_path.name}'
             ])
@@ -740,13 +740,13 @@ def _build_single_package(
                 # Copy entire directory content at once
                 container.cp(f"{sources_dir}/.", f"{cid}:/root/rpmbuild/SOURCES/")
             else:
-                print(colors.warning(f"  Warning: No SOURCES directory found"))
+                print(colors.warning("  Warning: No SOURCES directory found"))
 
         else:
             return (source_path, False, f"Unsupported source type: {source_path.suffix}")
 
         # 4. Install rpm-build (provides rpmbuild)
-        print(f"  Installing rpm-build...")
+        print("  Installing rpm-build...")
         ret = container.exec_stream(cid, [
             'urpm', 'install', '--auto', '--sync', 'rpm-build'
         ])
@@ -754,15 +754,15 @@ def _build_single_package(
             return (source_path, False, "Failed to install rpm-build")
 
         # 5. Install build dependencies
-        print(f"  Installing BuildRequires...")
+        print("  Installing BuildRequires...")
         ret = container.exec_stream(cid, [
             'urpm', 'install', '--auto', '--sync', '--builddeps', spec_path
         ])
         if ret != 0:
-            return (source_path, False, f"BuildRequires install failed")
+            return (source_path, False, "BuildRequires install failed")
 
         # 6. Build the package
-        print(f"  Building...")
+        print("  Building...")
         result = container.exec_stream(cid, [
             'rpmbuild', '-ba', spec_path
         ])
@@ -770,7 +770,7 @@ def _build_single_package(
             return (source_path, False, "rpmbuild failed")
 
         # 7. Copy results out
-        print(f"  Retrieving results...")
+        print("  Retrieving results...")
 
         # Determine output location
         if is_spec_build and workspace:

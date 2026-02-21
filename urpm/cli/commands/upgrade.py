@@ -31,7 +31,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     # Check for previous background install errors
     prev_error = check_background_error()
     if prev_error:
-        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning("Warning: Previous background operation had an error:"))
         print(colors.warning(f"  {prev_error}"))
         print(colors.dim("  (This message will not appear again)"))
         clear_background_error()
@@ -358,10 +358,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         )
 
         # Clear the line after last progress
-        print(f"\r\033[K", end='')
+        print("\r\033[K", end='')
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Operation interrupted"))
+            print(colors.warning("\n  Operation interrupted"))
             ops.abort_transaction(transaction_id)
             return 130
 
@@ -380,7 +380,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                         print(colors.success(f"  {', '.join(msg_parts)}"))
                 else:
                     upgrade_success = False
-                    print(colors.error(f"\nUpgrade failed:"))
+                    print(colors.error("\nUpgrade failed:"))
                     for err in op_result.errors[:3]:
                         print(f"  {colors.error(err)}")
 

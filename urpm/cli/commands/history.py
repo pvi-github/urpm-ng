@@ -498,7 +498,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                     print(colors.success(f"  {installed_count} packages reinstalled"))
 
             elif not_found and not rpm_paths:
-                print(colors.warning(f"  Could not reinstall: packages not found in repositories"))
+                print(colors.warning("  Could not reinstall: packages not found in repositories"))
 
         if interrupted:
             db.abort_transaction(undo_trans_id)

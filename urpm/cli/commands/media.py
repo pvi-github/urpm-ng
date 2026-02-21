@@ -370,7 +370,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 pass
 
         # Initialize empty rpmdb in the chroot
-        print(f"Initializing rpmdb...")
+        print("Initializing rpmdb...")
         result = subprocess.run(
             ['rpm', '--root', urpm_root, '--initdb'],
             capture_output=True, text=True
@@ -380,7 +380,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             return 1
 
         # Import Mageia GPG key into the chroot
-        print(f"Importing Mageia GPG key...")
+        print("Importing Mageia GPG key...")
         # Try to copy host's Mageia key to chroot
         key_paths = [
             '/etc/pki/rpm-gpg/RPM-GPG-KEY-Mageia',
@@ -418,7 +418,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 return 1
 
     # Fetch mirrorlist
-    print(f"Fetching mirrorlist...", end=' ', flush=True)
+    print("Fetching mirrorlist...", end=' ', flush=True)
 
     try:
         req = Request(mirrorlist_url, headers={'User-Agent': 'urpm/0.1'})
@@ -508,12 +508,12 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     results.sort(key=lambda x: x[1])
     best_mirrors = results[:3]
 
-    print(f"\nBest mirrors:")
+    print("\nBest mirrors:")
     for candidate, latency in best_mirrors:
         print(f"  {candidate['host']} ({latency:.0f}ms)")
 
     # Add servers
-    print(f"\nAdding servers...")
+    print("\nAdding servers...")
     servers_added = []
 
     for candidate, latency in best_mirrors:
@@ -601,7 +601,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         return 1
 
     # Link servers to media
-    print(f"\nLinking servers to media...")
+    print("\nLinking servers to media...")
     for server in servers_added:
         for media in media_added:
             if not db.server_media_link_exists(server['id'], media['id']):
@@ -611,7 +611,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
 
     # Sync media unless --no-sync
     if not getattr(args, 'no_sync', False):
-        print(f"\nSyncing media metadata...")
+        print("\nSyncing media metadata...")
         # Trigger sync for all media
         for media in media_added:
             media_name = media.get('name', '')
@@ -1022,7 +1022,7 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
 
         # Sync files.xml if requested
         if sync_files:
-            print(f"\nSyncing files.xml...")
+            print("\nSyncing files.xml...")
 
             # Track status for each media (same pattern as synthesis sync)
             # Filter by version/arch like sync_all_files_xml does

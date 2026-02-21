@@ -263,7 +263,7 @@ def cmd_cache_rebuild_fts(args, db: 'PackageDatabase') -> int:
     # Check current FTS state
     stats = db.get_fts_stats()
 
-    print(f"\nFTS Index Status:")
+    print("\nFTS Index Status:")
     print(f"  Available: {'yes' if stats['available'] else 'no'}")
     print(f"  Current:   {'yes' if stats['current'] else 'no'}")
     print(f"  Files in package_files: {stats['pf_count']:,}")
@@ -274,7 +274,7 @@ def cmd_cache_rebuild_fts(args, db: 'PackageDatabase') -> int:
         rebuild_time = datetime.fromtimestamp(stats['last_rebuild'])
         print(f"  Last rebuild: {rebuild_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    print(f"\nRebuilding FTS index...", flush=True)
+    print("\nRebuilding FTS index...", flush=True)
 
     # Try to use urpmd API if running (avoids database lock issues)
     port = DEV_PORT if is_dev_mode() else PROD_PORT

@@ -928,7 +928,7 @@ class OrphansMixin:
                     f.write(f"Initial candidates: {len(to_remove) + len(removed_from_candidates)}\n")
                     f.write(f"Removed from candidates: {len(removed_from_candidates)}\n")
                     f.write(f"Final to_remove: {len(to_remove)}\n\n")
-                    f.write(f"Packages that must stay (R=Requires, M=Recommends, S=Suggests):\n")
+                    f.write("Packages that must stay (R=Requires, M=Recommends, S=Suggests):\n")
                     for pkg in sorted(removed_from_candidates.keys()):
                         blocker, dep_type, cap = removed_from_candidates[pkg]
                         f.write(f"  {pkg} <-[{dep_type}]- {blocker} (via {cap})\n")

@@ -186,7 +186,7 @@ def cmd_server_add(args, db: 'PackageDatabase') -> int:
         for _, media_name in sorted(found, key=lambda x: x[1]):
             print(f"  {colors.success('+')} {media_name}")
     else:
-        print(colors.warning(f"No existing media found on this server"))
+        print(colors.warning("No existing media found on this server"))
 
     return 0
 

@@ -562,12 +562,12 @@ def main():
     parser.add_argument(
         '--dev',
         action='store_true',
-        help=f'Force development mode (auto-detected from .urpm.local or dev tree)'
+        help='Force development mode (auto-detected from .urpm.local or dev tree)'
     )
     parser.add_argument(
         '--prod',
         action='store_true',
-        help=f'Force production mode (ignore .urpm.local)'
+        help='Force production mode (ignore .urpm.local)'
     )
 
     args = parser.parse_args()

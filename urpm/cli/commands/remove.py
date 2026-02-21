@@ -32,7 +32,7 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
     # Check for previous background errors
     prev_error = check_background_error()
     if prev_error:
-        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning("Warning: Previous background operation had an error:"))
         print(colors.warning(f"  {prev_error}"))
         print(colors.dim("  (This message will not appear again)"))
         clear_background_error()
@@ -246,7 +246,7 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
 
         if not queue_result.success:
-            print(colors.error(f"\nErase failed:"))
+            print(colors.error("\nErase failed:"))
             if queue_result.operations:
                 for err in queue_result.operations[0].errors[:3]:
                     print(f"  {colors.error(err)}")
@@ -258,7 +258,7 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             return 1
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Erase interrupted"))
+            print(colors.warning("\n  Erase interrupted"))
             ops.abort_transaction(transaction_id)
             return 130
 

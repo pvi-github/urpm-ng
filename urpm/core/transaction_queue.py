@@ -477,7 +477,7 @@ queue._child_process_standalone()
 
                 if op.op_type == OperationType.INSTALL:
                     if DEBUG_USERNS:
-                        print(f"[userns child] executing install...", file=sys.stderr)
+                        print("[userns child] executing install...", file=sys.stderr)
                         sys.stderr.flush()
                     success, count, errors = self._execute_install(op, pipe_state, release_parent_after=False)
                     if DEBUG_USERNS:
@@ -794,7 +794,7 @@ queue._child_process_standalone()
         # Check dependencies
         if not op.force:
             if DEBUG_EXECINSTALL:
-                print(f"[_execute_install] checking dependencies...", file=sys.stderr)
+                print("[_execute_install] checking dependencies...", file=sys.stderr)
                 sys.stderr.flush()
             unresolved = ts.check()
             if unresolved:
@@ -803,13 +803,13 @@ queue._child_process_standalone()
                 errors = [f"Dependency: {prob}" for prob in unresolved]
                 return False, 0, errors
             if DEBUG_EXECINSTALL:
-                print(f"[_execute_install] dependencies OK", file=sys.stderr)
+                print("[_execute_install] dependencies OK", file=sys.stderr)
                 sys.stderr.flush()
 
         # Order transaction
         ts.order()
         if DEBUG_EXECINSTALL:
-            print(f"[_execute_install] transaction ordered", file=sys.stderr)
+            print("[_execute_install] transaction ordered", file=sys.stderr)
             sys.stderr.flush()
 
         if op.test:

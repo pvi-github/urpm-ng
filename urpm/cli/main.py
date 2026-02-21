@@ -104,7 +104,7 @@ def print_missing_dependencies(missing: list):
     print("ERROR: Missing required Python modules:\n", file=sys.stderr)
     for pkg, purpose in missing:
         print(f"  - {pkg} ({purpose})", file=sys.stderr)
-    print(f"\nInstall with:", file=sys.stderr)
+    print("\nInstall with:", file=sys.stderr)
     print(f"  urpmi {' '.join(pkg for pkg, _ in missing)}", file=sys.stderr)
 
 
