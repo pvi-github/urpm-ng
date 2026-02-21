@@ -14,7 +14,7 @@ The D-Bus service calls check_authorization() before each operation.
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import Tuple
 
 from .context import AuthContext, Permission
 

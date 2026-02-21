@@ -4,13 +4,14 @@ RPM installation module
 Handles package installation using python3-rpm bindings.
 """
 
+import importlib
 import logging
 import os
 import rpm
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Callable, Optional
+from typing import List, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -470,7 +471,6 @@ class Installer:
         ts = rpm.TransactionSet(self.root or '/')
 
         errors = []
-        total = len(package_names)
         found = 0
 
         # Add packages to erase
@@ -563,11 +563,7 @@ class Installer:
 
 def check_rpm_available() -> bool:
     """Check if rpm module is available."""
-    try:
-        import rpm
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec('rpm') is not None
 
 
 def check_root() -> bool:

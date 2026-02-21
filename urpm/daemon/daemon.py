@@ -6,7 +6,6 @@ import os
 import signal
 import sys
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -14,11 +13,11 @@ from typing import Optional, List, Dict, Any
 # Imports are relative to package - bin/urpmd handles sys.path
 from ..core.database import PackageDatabase
 from ..core.config import (
-    PROD_BASE_DIR, PROD_DB_PATH, PROD_PID_FILE, PROD_PORT,
-    DEV_BASE_DIR, DEV_DB_PATH, DEV_PID_FILE, DEV_PORT,
+    PROD_PID_FILE, PROD_PORT,
+    DEV_PID_FILE, DEV_PORT,
     is_dev_mode, get_db_path, get_base_dir,
 )
-from .server import UrpmdServer, DEFAULT_PORT, DEFAULT_HOST
+from .server import UrpmdServer, DEFAULT_HOST
 from .scheduler import Scheduler
 from .discovery import PeerDiscovery
 
@@ -563,12 +562,12 @@ def main():
     parser.add_argument(
         '--dev',
         action='store_true',
-        help=f'Force development mode (auto-detected from .urpm.local or dev tree)'
+        help='Force development mode (auto-detected from .urpm.local or dev tree)'
     )
     parser.add_argument(
         '--prod',
         action='store_true',
-        help=f'Force production mode (ignore .urpm.local)'
+        help='Force production mode (ignore .urpm.local)'
     )
 
     args = parser.parse_args()

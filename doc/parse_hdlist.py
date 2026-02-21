@@ -36,7 +36,6 @@ RPM_STRING = 6
 
 def read_header(f):
     """Lit un header RPM depuis un flux"""
-    pos = f.tell()
     magic = f.read(3)
     
     if not magic or len(magic) < 3:
@@ -46,8 +45,8 @@ def read_header(f):
         # Pas un header RPM, probablement le trailer
         return None
     
-    version = f.read(1)
-    reserved = f.read(4)
+    _version = f.read(1)
+    _reserved = f.read(4)
     
     nindex = struct.unpack('>I', f.read(4))[0]
     hsize = struct.unpack('>I', f.read(4))[0]

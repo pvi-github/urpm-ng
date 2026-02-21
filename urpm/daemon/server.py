@@ -3,8 +3,6 @@
 import json
 import logging
 import mimetypes
-import os
-import sys
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path

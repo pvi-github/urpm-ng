@@ -147,12 +147,12 @@ def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, in
             installed_str = ', '.join(sorted(installed_families))
             print(f"\nWarning: '{pkg_name}' is only provided by {provider_name}")
             print(f"         but you have {installed_str} installed.")
-            print(f"         This will likely cause conflicts!")
+            print("         This will likely cause conflicts!")
             if auto:
                 print("Aborting (use explicit package name to force)")
                 return []
             try:
-                answer = input(f"\nInstall anyway? [y/N] ").strip()
+                answer = input("\nInstall anyway? [y/N] ").strip()
                 if answer.lower() not in ('y', 'yes'):
                     return []
             except (EOFError, KeyboardInterrupt):
@@ -173,7 +173,7 @@ def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, in
         print(f"  {len(sorted_families) + 1}) All")
 
         try:
-            choice = input(f"\nChoice [1]: ").strip() or "1"
+            choice = input("\nChoice [1]: ").strip() or "1"
             if choice == str(len(sorted_families) + 1):
                 return [families[f][0]['name'] for f in sorted_families]
             idx = int(choice) - 1
@@ -205,7 +205,7 @@ def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, in
     print(f"  {len(sorted_families) + 1}) All")
 
     try:
-        choice = input(f"\nChoice [1]: ").strip() or "1"
+        choice = input("\nChoice [1]: ").strip() or "1"
         if choice == str(len(sorted_families) + 1):
             return [matching_families[f][0]['name'] for f in sorted_families]
         idx = int(choice) - 1

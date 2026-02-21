@@ -8,17 +8,19 @@ import hashlib
 import shutil
 import tempfile
 import time
-import urllib.request
 import urllib.error
-from pathlib import Path
-from typing import Optional, Callable, Tuple, List, Dict
+import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
 
-from .compression import decompress, decompress_stream
-from .synthesis import parse_synthesis
-from .hdlist import parse_hdlist
+# Import from config
+from .config import build_media_url, get_base_dir, get_media_local_path, is_local_server
+# Deprecated imports (kept for migration)
+from .config import get_hostname_from_url, get_media_dir
+
 from .database import PackageDatabase
-
+from .synthesis import parse_synthesis
 
 # Default paths for media metadata
 SYNTHESIS_PATH = "media_info/synthesis.hdlist.cz"
@@ -26,12 +28,6 @@ HDLIST_PATH = "media_info/hdlist.cz"
 MD5SUM_PATH = "media_info/MD5SUM"
 FILES_XML_PATH = "media_info/files.xml.lzma"
 APPSTREAM_PATH = "media_info/appstream.xml.lzma"
-
-
-# Import from config
-from .config import get_base_dir, get_media_local_path, build_server_url, build_media_url, is_local_server
-# Deprecated imports (kept for migration)
-from .config import get_hostname_from_url, get_media_dir
 
 
 def get_media_cache_dir(media_name: str, media_url: str, base_dir: Path = None) -> Path:
@@ -527,20 +523,19 @@ def sync_media(db: PackageDatabase, media_name: str,
         db.update_media_sync_info(media_id, result.md5)
 
         # Sync AppStream metadata
-        appstream_synced = False
         if not skip_appstream:
             if progress_callback:
                 progress_callback("syncing appstream", 0, 0)
             try:
                 from .appstream import AppStreamManager
                 appstream_mgr = AppStreamManager(db, base_dir)
+                # TODO: appstream_result isn't used
                 appstream_result = appstream_mgr.sync_media_appstream(
                     media_id=media_id,
                     media_name=media_name,
                     media_url=media_url,
                     progress_callback=lambda msg: progress_callback("appstream", 0, 0) if progress_callback else None
                 )
-                appstream_synced = appstream_result.success
             except Exception as e:
                 # AppStream sync failure is not fatal
                 import logging
@@ -761,7 +756,7 @@ def sync_files_xml(
             if e.code == 404:
                 continue  # Try next server
             return FilesXmlResult(success=False, error=f"HTTP error: {e.code}")
-        except Exception as e:
+        except Exception:
             continue  # Try next server
 
     if not files_xml_downloaded:
@@ -967,9 +962,7 @@ def sync_all_files_xml(
         List of (media_name, FilesXmlResult) tuples
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from queue import PriorityQueue
     from .files_xml import parse_files_xml
-    import threading
 
     # Get all enabled media
     all_media = [m for m in db.list_media() if m.get('enabled', True)]

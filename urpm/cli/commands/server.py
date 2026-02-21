@@ -186,7 +186,7 @@ def cmd_server_add(args, db: 'PackageDatabase') -> int:
         for _, media_name in sorted(found, key=lambda x: x[1]):
             print(f"  {colors.success('+')} {media_name}")
     else:
-        print(colors.warning(f"No existing media found on this server"))
+        print(colors.warning("No existing media found on this server"))
 
     return 0
 
@@ -319,7 +319,6 @@ def cmd_server_ipmode(args, db: 'PackageDatabase') -> int:
 def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     """Handle server autoconfig command - auto-discover servers from Mageia mirrorlist."""
     from .. import colors
-    from ..helpers.media import generate_server_name as _generate_server_name
     from urllib.request import urlopen, Request
     from urllib.error import URLError, HTTPError
     from urllib.parse import urlparse
@@ -441,7 +440,7 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
         try:
             start = time.time()
             req = Request(test_url, method='HEAD')
-            with urlopen(req, timeout=5) as resp:
+            with urlopen(req, timeout=5):
                 latency = (time.time() - start) * 1000
                 return (candidate, latency)
         except Exception:

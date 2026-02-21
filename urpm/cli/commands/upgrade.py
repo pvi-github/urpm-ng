@@ -14,15 +14,10 @@ from ..helpers.debug import (
     copy_installed_deps_list as _copy_installed_deps_list,
 )
 from ..helpers.resolver import create_resolver as _create_resolver
-from ..helpers.alternatives import (
-    PreferencesMatcher,
-    _resolve_with_alternatives,
-)
 
 
 def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     """Handle upgrade command - upgrade packages."""
-    import platform
     import signal
     import time
 
@@ -36,7 +31,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     # Check for previous background install errors
     prev_error = check_background_error()
     if prev_error:
-        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning("Warning: Previous background operation had an error:"))
         print(colors.warning(f"  {prev_error}"))
         print(colors.dim("  (This message will not appear again)"))
         clear_background_error()
@@ -46,7 +41,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
     _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
-    from ...core.resolver import Resolver, format_size, set_solver_debug
+    from ...core.resolver import format_size, set_solver_debug
     from ...core.install import check_root
     from pathlib import Path
     from ...core.rpm import is_local_rpm, read_rpm_header
@@ -363,10 +358,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         )
 
         # Clear the line after last progress
-        print(f"\r\033[K", end='')
+        print("\r\033[K", end='')
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Operation interrupted"))
+            print(colors.warning("\n  Operation interrupted"))
             ops.abort_transaction(transaction_id)
             return 130
 
@@ -385,7 +380,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                         print(colors.success(f"  {', '.join(msg_parts)}"))
                 else:
                     upgrade_success = False
-                    print(colors.error(f"\nUpgrade failed:"))
+                    print(colors.error("\nUpgrade failed:"))
                     for err in op_result.errors[:3]:
                         print(f"  {colors.error(err)}")
 
@@ -418,7 +413,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
         return 0
 
-    except Exception as e:
+    except Exception:
         ops.abort_transaction(transaction_id)
         raise
     finally:

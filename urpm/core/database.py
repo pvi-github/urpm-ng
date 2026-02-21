@@ -10,7 +10,7 @@ import hashlib
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
+from typing import Dict, List, Optional, Any, Iterator, Set
 
 from .db import (
     MediaMixin, ServerMixin, ConstraintsMixin,
@@ -805,8 +805,8 @@ class PackageDatabase(
                 logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
                 if "locked" in str(e):
                     raise RuntimeError(
-                        f"Database migration failed: database is locked.\n"
-                        f"Try: sudo systemctl stop urpmd && urpm --version && sudo systemctl start urpmd"
+                        "Database migration failed: database is locked.\n"
+                        "Try: sudo systemctl stop urpmd && urpm --version && sudo systemctl start urpmd"
                     )
                 raise RuntimeError(f"Database migration failed: {e}")
 

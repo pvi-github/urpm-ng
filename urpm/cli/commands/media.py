@@ -7,12 +7,7 @@ if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
 from ..helpers.media import (
-    KNOWN_VERSIONS,
     KNOWN_ARCHES,
-    KNOWN_CLASSES,
-    KNOWN_TYPES,
-    generate_media_name as _generate_media_name,
-    generate_short_name as _generate_short_name,
     generate_server_name as _generate_server_name,
     parse_mageia_media_url,
     parse_custom_media_url,
@@ -375,8 +370,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 pass
 
         # Initialize empty rpmdb in the chroot
-        rpmdb_dir = root_path / "var/lib/rpm"
-        print(f"Initializing rpmdb...")
+        print("Initializing rpmdb...")
         result = subprocess.run(
             ['rpm', '--root', urpm_root, '--initdb'],
             capture_output=True, text=True
@@ -386,7 +380,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             return 1
 
         # Import Mageia GPG key into the chroot
-        print(f"Importing Mageia GPG key...")
+        print("Importing Mageia GPG key...")
         # Try to copy host's Mageia key to chroot
         key_paths = [
             '/etc/pki/rpm-gpg/RPM-GPG-KEY-Mageia',
@@ -424,7 +418,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 return 1
 
     # Fetch mirrorlist
-    print(f"Fetching mirrorlist...", end=' ', flush=True)
+    print("Fetching mirrorlist...", end=' ', flush=True)
 
     try:
         req = Request(mirrorlist_url, headers={'User-Agent': 'urpm/0.1'})
@@ -490,7 +484,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         try:
             start = time.time()
             req = Request(test_url, method='HEAD')
-            with urlopen(req, timeout=5) as resp:
+            with urlopen(req, timeout=5):
                 latency = (time.time() - start) * 1000
                 return (candidate, latency)
         except Exception:
@@ -514,12 +508,12 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     results.sort(key=lambda x: x[1])
     best_mirrors = results[:3]
 
-    print(f"\nBest mirrors:")
+    print("\nBest mirrors:")
     for candidate, latency in best_mirrors:
         print(f"  {candidate['host']} ({latency:.0f}ms)")
 
     # Add servers
-    print(f"\nAdding servers...")
+    print("\nAdding servers...")
     servers_added = []
 
     for candidate, latency in best_mirrors:
@@ -607,7 +601,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         return 1
 
     # Link servers to media
-    print(f"\nLinking servers to media...")
+    print("\nLinking servers to media...")
     for server in servers_added:
         for media in media_added:
             if not db.server_media_link_exists(server['id'], media['id']):
@@ -617,7 +611,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
 
     # Sync media unless --no-sync
     if not getattr(args, 'no_sync', False):
-        print(f"\nSyncing media metadata...")
+        print("\nSyncing media metadata...")
         # Trigger sync for all media
         for media in media_added:
             media_name = media.get('name', '')
@@ -1028,7 +1022,7 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
 
         # Sync files.xml if requested
         if sync_files:
-            print(f"\nSyncing files.xml...")
+            print("\nSyncing files.xml...")
 
             # Track status for each media (same pattern as synthesis sync)
             # Filter by version/arch like sync_all_files_xml does
@@ -1411,7 +1405,6 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
 def cmd_media_set(args, db: 'PackageDatabase') -> int:
     """Handle media set command - modify media settings."""
     from .. import colors
-    from datetime import datetime
 
     # Handle --all option for sync_files
     use_all = getattr(args, 'all', False)
@@ -1534,7 +1527,6 @@ def cmd_media_seed_info(args, db: 'PackageDatabase') -> int:
     """Show seed set info for a media."""
     from .. import colors
     import json
-    from pathlib import Path
     from ...core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
 
     media = db.get_media(args.name)
@@ -1870,7 +1862,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
             req = Request(test_url, method='HEAD')
             req.add_header('User-Agent', 'urpm-ng')
             start = time.time()
-            with urlopen(req, timeout=5) as response:
+            with urlopen(req, timeout=5):
                 latency = time.time() - start
                 return (latency, url)
         except Exception:
@@ -1917,6 +1909,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     skipped = 0
 
     # First, add servers from best mirrors
+    # TODO: this server isn't actually used
     server_to_use = None
     for latency, mirror_url in best_mirrors[:1]:  # Just use the best one
         base_url = extract_base_url(mirror_url, release, arch)

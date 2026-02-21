@@ -144,7 +144,6 @@ class FilesMixin:
             List of dicts with keys: file_path, pkg_nevra, media_id, media_name
         """
         import logging
-        import os.path
 
         logger = logging.getLogger(__name__)
 

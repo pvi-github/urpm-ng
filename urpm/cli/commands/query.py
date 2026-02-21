@@ -261,7 +261,6 @@ def cmd_show(args, db: 'PackageDatabase') -> int:
 
 def cmd_list(args, db: 'PackageDatabase') -> int:
     """Handle list command."""
-    import platform
 
     filter_type = getattr(args, 'filter', 'installed')
 
@@ -370,7 +369,6 @@ def cmd_provides(args, db: 'PackageDatabase') -> int:
         ts = rpm.TransactionSet()
 
         # Try exact name first
-        found = False
         for hdr in ts.dbMatch('name', pkg_name):
             # If NEVRA was given, check it matches
             version = hdr[rpm.RPMTAG_VERSION]
@@ -391,7 +389,6 @@ def cmd_provides(args, db: 'PackageDatabase') -> int:
                     provides.append(f"{prov} = {ver}")
                 else:
                     provides.append(prov)
-            found = True
             break
 
     except ImportError:

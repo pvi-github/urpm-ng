@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from urpm.core.rpmsrate import RpmsrateParser, PackageEntry, Section
+from urpm.core.rpmsrate import RpmsrateParser
 
 
 # Sample rpmsrate content for testing

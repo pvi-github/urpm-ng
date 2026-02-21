@@ -4,9 +4,9 @@ import logging
 import random
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
@@ -623,7 +623,6 @@ class Scheduler:
 
         logger.info(f"Seed set: {len(seed_names)} package names")
 
-        from ..core.download import Downloader, DownloadItem
 
         for media in media_to_replicate:
             try:
@@ -644,7 +643,6 @@ class Scheduler:
             Set of package names in the seed set
         """
         import json
-        from pathlib import Path
         from ..core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
 
         # Default sections (same as DVD content)

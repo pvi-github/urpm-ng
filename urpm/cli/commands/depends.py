@@ -1135,7 +1135,7 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
 
     if not direct_rdeps:
         print(f"{colors.bold(pkg_name)}: {colors.warning('orphan')} (nothing requires it)")
-        print(f"\nThis package can be removed with: urpm autoremove --orphans")
+        print("\nThis package can be removed with: urpm autoremove --orphans")
         return 0
 
     # For each direct rdep, find ALL paths to explicit packages using ONLY requires
@@ -1174,7 +1174,7 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
 
     if not explicit_branches:
         print(f"{colors.bold(pkg_name)}: {colors.warning('orphan')} (no explicit package requires it)")
-        print(f"\nThis package can be removed with: urpm autoremove --orphans")
+        print("\nThis package can be removed with: urpm autoremove --orphans")
         return 0
 
     # Group by explicit package

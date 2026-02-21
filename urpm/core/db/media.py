@@ -4,7 +4,7 @@ import time
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import sqlite3
+    pass
 
 
 class MediaMixin:

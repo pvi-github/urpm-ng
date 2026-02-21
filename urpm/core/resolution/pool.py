@@ -36,7 +36,7 @@ class PoolMixin:
         """
         from ..config import get_media_local_path, get_base_dir, get_system_version
         from ..compression import decompress_stream
-        from ..resolver import get_solver_debug, parse_capability, VersionConflictError
+        from ..resolver import get_solver_debug, VersionConflictError
 
         debug = get_solver_debug()
 

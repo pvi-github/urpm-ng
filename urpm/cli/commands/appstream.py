@@ -1,6 +1,5 @@
 """AppStream metadata command."""
 
-import gzip
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -187,7 +186,7 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
             print(colors.ok(f"OS metainfo file created: {metainfo_file}"))
             return 0
         except PermissionError:
-            print(colors.error(f"Permission denied. Run with sudo."))
+            print(colors.error("Permission denied. Run with sudo."))
             return 1
         except Exception as e:
             print(colors.error(f"Failed to create metainfo: {e}"))

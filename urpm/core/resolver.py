@@ -4,23 +4,17 @@ Dependency resolver using libsolv
 Uses the SAT-based libsolv library for fast, correct dependency resolution.
 """
 
+import importlib
 import re
 import solv
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict
 from dataclasses import dataclass
 from enum import Enum
 
-try:
-    import rpm
-    HAS_RPM = True
-except ImportError:
-    HAS_RPM = False
-
 from .database import PackageDatabase
-from .config import get_media_local_path, get_base_dir, get_system_version
-from .compression import decompress_stream
 from .resolution import PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin
+
+HAS_RPM = importlib.util.find_spec('rpm') is not None
 
 
 class VersionConflictError(Exception):
@@ -485,6 +479,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         for name in package_names:
             # Parse version constraint if present (formats: "name >= ver" or "name[>= ver]")
             base_name = name
+            # TODO: version_constraint isn't used yet
             version_constraint = None
 
             # Handle "name op version" format (space-separated)
@@ -719,6 +714,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
         # Build dependency graph
         graph = {name: [] for name in resolved_names}
+        # TODO: requested_lower isn't used yet
         requested_lower = {n.lower() for n in requested_names}
 
         for name in resolved_names:

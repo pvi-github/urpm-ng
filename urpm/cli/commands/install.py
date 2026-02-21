@@ -36,7 +36,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     """Handle install command."""
     import signal
     import solv
-    from ...core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction, TransactionType
+    from ...core.resolver import Resolution, format_size, set_solver_debug, PackageAction, TransactionType
     from ...core.operations import PackageOperations, InstallOptions
     from ...core.background_install import (
         check_background_error, clear_background_error,
@@ -55,7 +55,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Check for previous background install errors
     prev_error = check_background_error()
     if prev_error:
-        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning("Warning: Previous background operation had an error:"))
         print(colors.warning(f"  {prev_error}"))
         print(colors.dim("  (This message will not appear again)"))
         clear_background_error()
@@ -354,7 +354,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     all_to_install = [a.name for a in result.actions]
     if with_suggests:
         suggests = []
-        suggest_alternatives = []
         packages_to_check = all_to_install[:]
         checked_packages = set(p.lower() for p in all_to_install)
         max_iterations = 10  # Safety limit against infinite loops
@@ -409,7 +408,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     print(f"  {len(filtered) + 1}) All")
 
                     try:
-                        choice = input(f"\nChoice [1]: ").strip() or "1"
+                        choice = input("\nChoice [1]: ").strip() or "1"
                         if choice == str(len(filtered) + 1):
                             # "All" selected - add all providers
                             for prov_name in filtered:
@@ -530,7 +529,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 break
     else:
         suggests = []
-        suggest_alternatives = []
 
     # Calculate sizes for initial display
     rec_size = sum(a.size for a in rec_pkgs)
@@ -547,7 +545,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         rec_names = [f"{a.name}-{a.evr}" for a in rec_pkgs]
         display.print_package_list(rec_names, max_lines=5)
         try:
-            answer = input(f"\nInstall recommended packages? [Y/n] ")
+            answer = input("\nInstall recommended packages? [Y/n] ")
             install_recommends_final = answer.lower() not in ('n', 'no')
         except EOFError:
             print("\nAborted")
@@ -560,7 +558,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         sug_names = [f"{a.name}-{a.evr}" for a in suggests]
         display.print_package_list(sug_names, max_lines=5)
         try:
-            answer = input(f"\nInstall suggested packages? [Y/n] ")
+            answer = input("\nInstall suggested packages? [Y/n] ")
             install_suggests = answer.lower() not in ('n', 'no')
         except EOFError:
             print("\nAborted")
@@ -594,8 +592,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         # If resolution failed and we have suggests, try removing problematic suggests
         skipped_suggests = {}  # suggest_name -> reason
         if not result.success and install_suggests and suggests:
-            suggest_names_set = set(suggest_names)
-
             # Find suggests mentioned in problems and store the reason
             for prob in result.problems:
                 prob_str = str(prob)
@@ -657,6 +653,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     sug_pkgs = [a for a in install_actions if a.reason == InstallReason.SUGGESTED]
 
     # Build set of explicit package names for history recording
+    # TODO: explicit_names isn't used yet
     explicit_names = set(a.name.lower() for a in explicit_pkgs)
 
     # Calculate final sizes
@@ -879,7 +876,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
 
         if not queue_result.success:
-            print(colors.error(f"\nInstallation failed:"))
+            print(colors.error("\nInstallation failed:"))
             if queue_result.operations:
                 for err in queue_result.operations[0].errors[:3]:
                     print(f"  {colors.error(err)}")
@@ -889,7 +886,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             return 1
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Installation interrupted"))
+            print(colors.warning("\n  Installation interrupted"))
             ops.abort_transaction(transaction_id)
             return 130
 
@@ -912,7 +909,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
         return 0
 
-    except Exception as e:
+    except Exception:
         ops.abort_transaction(transaction_id)
         raise
     finally:
@@ -927,9 +924,8 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     """
     import time
     import platform
-    from pathlib import Path
 
-    from ...core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction
+    from ...core.resolver import Resolution, format_size, set_solver_debug, PackageAction
     from ...core.download import Downloader, DownloadItem
     from ...core.config import get_base_dir
     from .. import colors
@@ -1005,7 +1001,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     auto_mode = getattr(args, 'auto', False)
 
     # Show what we're downloading
-    print(colors.info(f"\nResolving packages for download..."))
+    print(colors.info("\nResolving packages for download..."))
     if target_release:
         print(f"  Target release: {target_release}")
     print(f"  Target arch: {target_arch}")
@@ -1208,7 +1204,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     if downloaded > 0:
         _notify_urpmd_cache_invalidate()
 
-    print(colors.success(f"\nPackages saved to cache. Use 'urpm install' to install them."))
+    print(colors.success("\nPackages saved to cache. Use 'urpm install' to install them."))
     return 0
 
 

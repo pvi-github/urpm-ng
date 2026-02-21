@@ -9,7 +9,6 @@ import os
 import pwd
 from dataclasses import dataclass
 from enum import Flag, auto
-from typing import Optional
 
 
 class Permission(Flag):

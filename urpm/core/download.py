@@ -8,7 +8,6 @@ dynamic peer failure tracking and reassignment.
 
 import hashlib
 import logging
-import os
 import queue
 import threading
 import urllib.request
@@ -20,8 +19,7 @@ from typing import List, Optional, Callable, Tuple, Dict, Set
 from .database import PackageDatabase
 from .config import get_base_dir, is_dev_mode
 from .peer_client import (
-    PeerClient, Peer, create_download_plan, summarize_download_plan,
-    DownloadAssignment
+    PeerClient, Peer, create_download_plan, DownloadAssignment
 )
 
 logger = logging.getLogger(__name__)
@@ -81,6 +79,7 @@ def verify_rpm_signature(rpm_path: Path) -> tuple:
     try:
         with open(rpm_path, 'rb') as f:
             # hdrFromFdno verifies signature when VSFlags allows it
+            # TODO: hdr isn't used yet
             hdr = ts.hdrFromFdno(f.fileno())
             return (True, None)
     except rpm.error as e:
@@ -837,7 +836,6 @@ class Downloader:
             DownloadResult with status
         """
         import time
-        import socket
 
         # Check cache first
         cache_path = self.get_cache_path(item)

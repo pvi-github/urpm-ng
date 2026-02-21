@@ -6,12 +6,10 @@ This module provides:
 - _handle_bloc_choices: Handle bloc-based alternative choices
 """
 
-import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...core.database import PackageDatabase
-    from ...core.resolver import Resolver, Resolution
+    pass
 
 from .resolver import _group_by_version
 
@@ -209,9 +207,9 @@ class PreferencesMatcher:
 
         if DEBUG_PREFERENCES:
             if 'php8.4-fpm-apache' in self._compatible_providers:
-                print(f"DEBUG: php8.4-fpm-apache IS in _compatible_providers")
+                print("DEBUG: php8.4-fpm-apache IS in _compatible_providers")
             else:
-                print(f"DEBUG: php8.4-fpm-apache NOT in _compatible_providers")
+                print("DEBUG: php8.4-fpm-apache NOT in _compatible_providers")
                 print(f"DEBUG: provided_caps sample: {list(provided_caps)[:10]}")
 
     def match_bloc_version(self, bloc_defining_caps: dict, bloc_key: str) -> bool:
@@ -526,7 +524,6 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
     """
     if local_packages is None:
         local_packages = set()
-    from .. import colors
     import solv
 
     if preferences is None:
@@ -607,7 +604,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                     versionless = version_groups.pop(None, set())
                     if len(version_groups) > 1 and not auto_mode:
                         # Multiple versions detected, ask user
-                        print(f"\nMultiple versions in preferences:")
+                        print("\nMultiple versions in preferences:")
                         sorted_versions = sorted(version_groups.keys())
                         for i, ver in enumerate(sorted_versions, 1):
                             pkgs = version_groups[ver]
