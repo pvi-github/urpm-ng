@@ -469,7 +469,6 @@ def _cleanup_chroot_for_image(root: str):
     """
     import glob
 
-    from .. import colors
 
     cleanup_patterns = [
         'var/cache/urpmi/*',

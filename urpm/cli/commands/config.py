@@ -5,7 +5,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...core.database import PackageDatabase
+    pass
 
 from ..helpers.kernel import (
     read_config as _read_config,

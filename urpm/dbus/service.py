@@ -17,14 +17,11 @@ Usage:
 
 import json
 import logging
-import os
 import platform
 import signal
 import sys
 import threading
 import uuid
-from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

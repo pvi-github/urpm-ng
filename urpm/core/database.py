@@ -10,7 +10,7 @@ import hashlib
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
+from typing import Dict, List, Optional, Any, Iterator, Set
 
 from .db import (
     MediaMixin, ServerMixin, ConstraintsMixin,

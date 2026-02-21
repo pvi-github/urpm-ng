@@ -319,7 +319,6 @@ def cmd_server_ipmode(args, db: 'PackageDatabase') -> int:
 def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     """Handle server autoconfig command - auto-discover servers from Mageia mirrorlist."""
     from .. import colors
-    from ..helpers.media import generate_server_name as _generate_server_name
     from urllib.request import urlopen, Request
     from urllib.error import URLError, HTTPError
     from urllib.parse import urlparse

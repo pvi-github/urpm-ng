@@ -8,10 +8,9 @@ The audit log is append-only and intended for security review.
 
 import json
 import logging
-import os
 import time
 from pathlib import Path
-from typing import Optional, List
+from typing import List
 
 from .context import AuthContext
 

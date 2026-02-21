@@ -12,7 +12,7 @@ import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 from .config import PROD_PORT, DEV_PORT, PROD_DISCOVERY_PORT, DEV_DISCOVERY_PORT, is_dev_mode
 from .. import __version__

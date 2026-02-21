@@ -8,7 +8,7 @@ each package definition.
 
 import re
 from pathlib import Path
-from typing import Dict, Iterator, List, Any, Optional, Tuple
+from typing import Dict, Iterator, List, Any, Tuple
 
 from .compression import decompress
 

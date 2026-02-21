@@ -1,6 +1,5 @@
 """AppStream metadata command."""
 
-import gzip
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING

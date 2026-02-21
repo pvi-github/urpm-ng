@@ -411,7 +411,6 @@ class DownloadProgressDisplay:
         Args:
             Same as render()
         """
-        import sys
 
         # Get terminal width to truncate lines (avoid wrapping issues)
         term_width = get_terminal_width()

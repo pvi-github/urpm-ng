@@ -14,9 +14,7 @@ from pathlib import Path
 from typing import Optional, Callable, Tuple, List, Dict
 from dataclasses import dataclass
 
-from .compression import decompress, decompress_stream
 from .synthesis import parse_synthesis
-from .hdlist import parse_hdlist
 from .database import PackageDatabase
 
 
@@ -29,7 +27,7 @@ APPSTREAM_PATH = "media_info/appstream.xml.lzma"
 
 
 # Import from config
-from .config import get_base_dir, get_media_local_path, build_server_url, build_media_url, is_local_server
+from .config import get_base_dir, get_media_local_path, build_media_url, is_local_server
 # Deprecated imports (kept for migration)
 from .config import get_hostname_from_url, get_media_dir
 
@@ -967,9 +965,7 @@ def sync_all_files_xml(
         List of (media_name, FilesXmlResult) tuples
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from queue import PriorityQueue
     from .files_xml import parse_files_xml
-    import threading
 
     # Get all enabled media
     all_media = [m for m in db.list_media() if m.get('enabled', True)]

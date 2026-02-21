@@ -1,6 +1,5 @@
 """Tests for synthesis parser"""
 
-import pytest
 from urpm.core.synthesis import parse_nevra, parse_dependency
 
 

@@ -1,8 +1,6 @@
 import time
-from urpm.cli.display import DownloadProgressDisplay, format_size
-from urpm.core.download import DownloadProgress, Downloader, DownloadItem, DownloadResult
-import pytest
-from pathlib import Path
+from urpm.cli.display import DownloadProgressDisplay
+from urpm.core.download import DownloadProgress
 
 def test_download_progress_samples_and_speed():
     # Test 1: Create DownloadProgress instance

@@ -6,12 +6,10 @@ This module provides:
 - _handle_bloc_choices: Handle bloc-based alternative choices
 """
 
-import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...core.database import PackageDatabase
-    from ...core.resolver import Resolver, Resolution
+    pass
 
 from .resolver import _group_by_version
 
@@ -526,7 +524,6 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
     """
     if local_packages is None:
         local_packages = set()
-    from .. import colors
     import solv
 
     if preferences is None:

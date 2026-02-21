@@ -8,7 +8,6 @@ dynamic peer failure tracking and reassignment.
 
 import hashlib
 import logging
-import os
 import queue
 import threading
 import urllib.request
@@ -20,8 +19,7 @@ from typing import List, Optional, Callable, Tuple, Dict, Set
 from .database import PackageDatabase
 from .config import get_base_dir, is_dev_mode
 from .peer_client import (
-    PeerClient, Peer, create_download_plan, summarize_download_plan,
-    DownloadAssignment
+    PeerClient, Peer, create_download_plan, DownloadAssignment
 )
 
 logger = logging.getLogger(__name__)
@@ -837,7 +835,6 @@ class Downloader:
             DownloadResult with status
         """
         import time
-        import socket
 
         # Check cache first
         cache_path = self.get_cache_path(item)

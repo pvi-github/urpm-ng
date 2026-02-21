@@ -7,12 +7,7 @@ if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
 from ..helpers.media import (
-    KNOWN_VERSIONS,
     KNOWN_ARCHES,
-    KNOWN_CLASSES,
-    KNOWN_TYPES,
-    generate_media_name as _generate_media_name,
-    generate_short_name as _generate_short_name,
     generate_server_name as _generate_server_name,
     parse_mageia_media_url,
     parse_custom_media_url,
@@ -1411,7 +1406,6 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
 def cmd_media_set(args, db: 'PackageDatabase') -> int:
     """Handle media set command - modify media settings."""
     from .. import colors
-    from datetime import datetime
 
     # Handle --all option for sync_files
     use_all = getattr(args, 'all', False)
@@ -1534,7 +1528,6 @@ def cmd_media_seed_info(args, db: 'PackageDatabase') -> int:
     """Show seed set info for a media."""
     from .. import colors
     import json
-    from pathlib import Path
     from ...core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
 
     media = db.get_media(args.name)

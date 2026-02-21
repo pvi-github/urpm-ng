@@ -36,7 +36,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     """Handle install command."""
     import signal
     import solv
-    from ...core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction, TransactionType
+    from ...core.resolver import Resolution, format_size, set_solver_debug, PackageAction, TransactionType
     from ...core.operations import PackageOperations, InstallOptions
     from ...core.background_install import (
         check_background_error, clear_background_error,
@@ -927,9 +927,8 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     """
     import time
     import platform
-    from pathlib import Path
 
-    from ...core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction
+    from ...core.resolver import Resolution, format_size, set_solver_debug, PackageAction
     from ...core.download import Downloader, DownloadItem
     from ...core.config import get_base_dir
     from .. import colors

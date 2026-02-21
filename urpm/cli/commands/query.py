@@ -261,7 +261,6 @@ def cmd_show(args, db: 'PackageDatabase') -> int:
 
 def cmd_list(args, db: 'PackageDatabase') -> int:
     """Handle list command."""
-    import platform
 
     filter_type = getattr(args, 'filter', 'installed')
 

@@ -197,7 +197,7 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
     from ..helpers.debug import notify_urpmd_cache_invalidate as _notify_urpmd_cache_invalidate
     from ...core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
     from ...core.download import Downloader, DownloadItem
-    from ...core.config import get_media_local_path, build_media_url
+    from ...core.config import get_media_local_path
     import json
 
     # Default sections (same as DVD content)

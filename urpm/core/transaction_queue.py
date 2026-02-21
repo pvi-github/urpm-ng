@@ -439,7 +439,6 @@ queue._child_process_standalone()
     def _child_process_standalone(self):
         """Child process logic for userns mode - writes to stdout."""
         import sys
-        import rpm
 
         write_file = sys.stdout
 
@@ -617,7 +616,6 @@ queue._child_process_standalone()
 
     def _child_process(self, read_fd: int, write_fd: int):
         """Child: execute operations sequentially."""
-        import rpm
 
         os.close(read_fd)
         write_file = os.fdopen(write_fd, 'w', buffering=1)  # Line buffered

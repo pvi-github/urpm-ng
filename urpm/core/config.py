@@ -24,7 +24,6 @@ Directory structure:
     # Comments start with #
 """
 
-import os
 import sys
 from pathlib import Path
 from typing import Optional

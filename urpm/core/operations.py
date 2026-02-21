@@ -14,8 +14,7 @@ Auth integration:
 """
 
 import logging
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Tuple
 
@@ -27,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Optional auth imports - available when urpm.auth is installed
 try:
-    from ..auth.context import AuthContext, Permission, AuthError
+    from ..auth.context import AuthContext, Permission
     from ..auth.audit import AuditLogger
     _HAS_AUTH = True
 except ImportError:

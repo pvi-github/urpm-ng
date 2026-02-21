@@ -18,10 +18,9 @@ from ..helpers.resolver import create_resolver as _create_resolver
 
 def cmd_erase(args, db: 'PackageDatabase') -> int:
     """Handle erase (remove) command."""
-    import platform
     import signal
 
-    from ...core.resolver import Resolver, format_size, set_solver_debug
+    from ...core.resolver import format_size, set_solver_debug
     from ...core.install import check_root
     from ...core.operations import PackageOperations, InstallOptions
     from ...core.background_install import (

@@ -12,70 +12,10 @@ Provides a modern CLI with short aliases:
 """
 
 import argparse
-import shutil
-import subprocess
 import sys
-import time
-from pathlib import Path
 
 from .. import __version__
 from ..core.database import PackageDatabase
-from .helpers.package import (
-    extract_pkg_name as _extract_pkg_name,
-    extract_family as _extract_family,
-    get_installed_families as _get_installed_families,
-    resolve_virtual_package as _resolve_virtual_package,
-)
-from .helpers.debug import (
-    DEBUG_LAST_INSTALLED_DEPS,
-    DEBUG_LAST_REMOVED_DEPS,
-    DEBUG_INSTALLED_DEPS_COPY,
-    DEBUG_PREV_INSTALLED_DEPS,
-    write_debug_file as _write_debug_file,
-    clear_debug_file as _clear_debug_file,
-    copy_installed_deps_list as _copy_installed_deps_list,
-    notify_urpmd_cache_invalidate as _notify_urpmd_cache_invalidate,
-)
-from .helpers.kernel import (
-    CONFIG_FILE,
-    get_running_kernel as _get_running_kernel,
-    get_root_fstype as _get_root_fstype,
-    get_blacklist as _get_blacklist,
-    get_redlist as _get_redlist,
-    read_config as _read_config,
-    write_config as _write_config,
-    get_user_blacklist as _get_user_blacklist,
-    get_user_redlist as _get_user_redlist,
-    get_kernel_keep as _get_kernel_keep,
-    is_running_kernel as _is_running_kernel,
-    find_old_kernels as _find_old_kernels,
-    find_faildeps as _find_faildeps,
-)
-from .helpers.resolver import (
-    extract_version as _extract_version,
-    group_by_version as _group_by_version,
-    create_resolver as _create_resolver,
-)
-from .helpers.alternatives import (
-    PreferencesMatcher,
-    _resolve_with_alternatives,
-    _handle_bloc_choices,
-)
-from .helpers.media import (
-    KNOWN_VERSIONS,
-    KNOWN_ARCHES,
-    KNOWN_CLASSES,
-    KNOWN_TYPES,
-    generate_media_name as _generate_media_name,
-    generate_short_name as _generate_short_name,
-    generate_server_name as _generate_server_name,
-    parse_mageia_media_url,
-    parse_custom_media_url,
-    fetch_media_pubkey as _fetch_media_pubkey,
-    get_gpg_key_info as _get_gpg_key_info,
-    is_key_in_rpm_keyring as _is_key_in_rpm_keyring,
-    import_gpg_key as _import_gpg_key,
-)
 from .commands.cache import (
     cmd_cache_info,
     cmd_cache_clean,
@@ -100,8 +40,7 @@ from .commands.media import (
     cmd_media_list, cmd_init, cmd_media_add, cmd_media_remove,
     cmd_media_enable, cmd_media_disable, cmd_media_update,
     cmd_media_import, cmd_media_set, cmd_media_seed_info,
-    cmd_media_link, cmd_media_autoconfig, parse_urpmi_cfg,
-    STANDARD_MEDIA_TYPES,
+    cmd_media_link, cmd_media_autoconfig,
 )
 from .commands.query import (
     cmd_search, cmd_show, cmd_list, cmd_provides, cmd_whatprovides, cmd_find,
@@ -116,7 +55,7 @@ from .commands.upgrade import (
     cmd_upgrade,
 )
 from .commands.cleanup import (
-    cmd_autoremove, cmd_mark, cmd_hold, cmd_unhold, cmd_cleandeps,
+    cmd_autoremove, cmd_mark, cmd_hold, cmd_unhold,
 )
 from .commands.depends import (
     cmd_depends, cmd_rdepends, cmd_recommends, cmd_whatrecommends,

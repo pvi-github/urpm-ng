@@ -6,8 +6,7 @@ Uses the SAT-based libsolv library for fast, correct dependency resolution.
 
 import re
 import solv
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict
 from dataclasses import dataclass
 from enum import Enum
 
@@ -18,8 +17,6 @@ except ImportError:
     HAS_RPM = False
 
 from .database import PackageDatabase
-from .config import get_media_local_path, get_base_dir, get_system_version
-from .compression import decompress_stream
 from .resolution import PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin
 
 

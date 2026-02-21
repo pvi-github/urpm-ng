@@ -9,13 +9,11 @@ These tests verify:
 6. Cycle detection (A->B->C->A)
 """
 
-import pytest
-from unittest.mock import Mock, MagicMock, patch
-from typing import List, Dict, Set
+from typing import List, Dict
 
 import solv
 
-from urpm.core.resolver import Resolver, Alternative, PackageAction
+from urpm.core.resolver import Resolver
 
 
 class MockSolvable:

@@ -14,15 +14,10 @@ from ..helpers.debug import (
     copy_installed_deps_list as _copy_installed_deps_list,
 )
 from ..helpers.resolver import create_resolver as _create_resolver
-from ..helpers.alternatives import (
-    PreferencesMatcher,
-    _resolve_with_alternatives,
-)
 
 
 def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     """Handle upgrade command - upgrade packages."""
-    import platform
     import signal
     import time
 
@@ -46,7 +41,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
     _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
-    from ...core.resolver import Resolver, format_size, set_solver_debug
+    from ...core.resolver import format_size, set_solver_debug
     from ...core.install import check_root
     from pathlib import Path
     from ...core.rpm import is_local_rpm, read_rpm_header
