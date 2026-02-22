@@ -1147,7 +1147,7 @@ def parse_urpmi_cfg(filepath: str) -> list:
     """Parse urpmi.cfg file and return list of media configurations.
 
     Returns:
-        List of dicts with keys: name, url, enabled, update
+        List of dicts with keys: name, url, enabled, update, uses_mirrorlist
     """
     import re
 
@@ -1156,15 +1156,24 @@ def parse_urpmi_cfg(filepath: str) -> list:
     with open(filepath, 'r') as f:
         content = f.read()
 
-    # Pattern to match media blocks:
+    # Pattern 1: Media with URL on same line
     # Name\ With\ Spaces URL {
     #   options...
     # }
-    # The name can have escaped spaces (\ ) and the URL follows
-    # URL can be: https://..., http://..., file://..., or /local/path
-    pattern = r'([^\s{]+(?:\\ [^\s{]+)*)\s+((?:https?|file)://[^\s{]+|/[^\s{]+)\s*\{([^}]*)\}'
+    pattern_with_url = r'([^\s{]+(?:\\ [^\s{]+)*)\s+((?:https?|file)://[^\s{]+|/[^\s{]+)\s*\{([^}]*)\}'
 
-    for match in re.finditer(pattern, content):
+    # Pattern 2: Media without URL (uses mirrorlist)
+    # Name\ With\ Spaces {
+    #   mirrorlist: $MIRRORLIST
+    #   with-dir: media/core/release
+    # }
+    # Must NOT match the global empty block at start
+    pattern_no_url = r'([^\s{]+(?:\\ [^\s{]+)+)\s*\{([^}]*)\}'
+
+    matched_names = set()
+
+    # First pass: media with direct URLs
+    for match in re.finditer(pattern_with_url, content):
         raw_name = match.group(1)
         url_or_path = match.group(2)
         options_block = match.group(3)
@@ -1177,6 +1186,7 @@ def parse_urpmi_cfg(filepath: str) -> list:
 
         # Unescape the name (replace '\ ' with ' ')
         name = raw_name.replace('\\ ', ' ')
+        matched_names.add(name)
 
         # Parse options
         enabled = True
@@ -1188,14 +1198,53 @@ def parse_urpmi_cfg(filepath: str) -> list:
                 enabled = False
             elif line == 'update':
                 update = True
-            # key-ids is informational, we don't use it currently
 
         media_list.append({
             'name': name,
             'url': url,
             'enabled': enabled,
             'update': update,
+            'uses_mirrorlist': False,
         })
+
+    # Second pass: media without URL (mirrorlist-based)
+    for match in re.finditer(pattern_no_url, content):
+        raw_name = match.group(1)
+        options_block = match.group(2)
+
+        # Unescape the name
+        name = raw_name.replace('\\ ', ' ')
+
+        # Skip if already matched with URL or if it's an empty/global block
+        if name in matched_names:
+            continue
+
+        # Check if this uses mirrorlist
+        has_mirrorlist = 'mirrorlist:' in options_block
+        with_dir = None
+
+        # Parse options
+        enabled = True
+        update = False
+
+        for line in options_block.split('\n'):
+            line = line.strip()
+            if line == 'ignore':
+                enabled = False
+            elif line == 'update':
+                update = True
+            elif line.startswith('with-dir:'):
+                with_dir = line.split(':', 1)[1].strip()
+
+        if has_mirrorlist:
+            media_list.append({
+                'name': name,
+                'url': None,
+                'enabled': enabled,
+                'update': update,
+                'uses_mirrorlist': True,
+                'with_dir': with_dir,
+            })
 
     return media_list
 
@@ -1318,15 +1367,19 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
         print(colors.warning("No media found in file"))
         return 0
 
+    # Separate mirrorlist-based media from direct URL media
+    mirrorlist_media = [m for m in media_list if m.get('uses_mirrorlist', False)]
+    direct_media = [m for m in media_list if not m.get('uses_mirrorlist', False)]
+
     # Get existing media names
     existing = {m['name'].lower(): m['name'] for m in db.list_media()}
 
-    # Categorize media
+    # Categorize direct URL media
     to_add = []
     to_skip = []
     to_replace = []
 
-    for media in media_list:
+    for media in direct_media:
         if media['name'].lower() in existing:
             if args.replace:
                 to_replace.append(media)
@@ -1337,7 +1390,12 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
 
     # Show summary
     print(f"\n{colors.bold('Import from:')} {filepath}")
-    print(f"  Found: {len(media_list)} media")
+    print(f"  Found: {len(media_list)} media ({len(direct_media)} with URL, {len(mirrorlist_media)} mirrorlist-based)")
+
+    if mirrorlist_media:
+        print(f"\n  {colors.warning('Skipped (mirrorlist-based):')} {len(mirrorlist_media)}")
+        print(colors.dim("    These use $MIRRORLIST and require autoconfig."))
+        print(colors.dim("    Run: urpm media autoconfig -r <version>"))
 
     if to_add:
         print(f"\n  {colors.success('To add:')} {len(to_add)}")
