@@ -58,6 +58,7 @@ Requires:       python3
 Requires:       python3-solv
 Requires:       python3-rpm
 Requires:       python3-zstandard
+Requires:       python3-pyyaml
 Requires:       gnupg2
 
 %description core
@@ -255,6 +256,10 @@ install -Dm644 man/en/man8/urpmd.8 %{buildroot}%{_mandir}/man8/urpmd.8
 install -Dm644 man/fr/man1/urpm.1 %{buildroot}%{_mandir}/fr/man1/urpm.1
 install -Dm644 man/fr/man8/urpmd.8 %{buildroot}%{_mandir}/fr/man8/urpmd.8
 
+# Install mkimage profiles
+install -dm755 %{buildroot}%{_datadir}/urpm/profiles
+install -m644 data/profiles/*.yaml %{buildroot}%{_datadir}/urpm/profiles/
+
 # ============================================================================
 # Scripts for urpm-ng-daemon
 # ============================================================================
@@ -389,6 +394,9 @@ fi
 %{_sysconfdir}/bash_completion.d/urpm
 %{_mandir}/man1/urpm.1*
 %{_mandir}/fr/man1/urpm.1*
+%dir %{_datadir}/urpm
+%dir %{_datadir}/urpm/profiles
+%{_datadir}/urpm/profiles/*.yaml
 
 # ============================================================================
 # Files for urpm-ng-daemon
