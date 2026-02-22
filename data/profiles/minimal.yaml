@@ -1,0 +1,18 @@
+# mkimage profile: minimal
+# Minimal usable system with urpm
+
+description: Minimal usable system with urpm
+
+packages:
+  - filesystem
+  - basesystem-minimal
+  - coreutils
+  - grep
+  - sed
+  - findutils
+  - bash
+  - rpm
+  - curl
+  - wget
+  - ca-certificates
+  - urpmi

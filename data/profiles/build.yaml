@@ -1,0 +1,31 @@
+# mkimage profile: build
+# RPM build environment
+
+description: RPM build environment
+
+packages:
+  - filesystem
+  - basesystem-minimal
+  - coreutils
+  - grep
+  - sed
+  - findutils
+  - bash
+  - rpm
+  - rpm-build
+  - curl
+  - wget
+  - ca-certificates
+  - urpmi
+  - make
+  - gcc
+  - gcc-c++
+  - patch
+  - diffutils
+  - tar
+  - gzip
+  - bzip2
+  - xz
+  - unzip
+  - which
+  - file

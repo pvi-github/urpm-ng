@@ -22,6 +22,75 @@ from .install import cmd_install
 DEBUG_MKIMAGE = False
 DEBUG_BUILD = True
 
+def _get_profile_dirs() -> list:
+    """Get profile directories, including dev mode path."""
+    dirs = [
+        Path('/usr/share/urpm/profiles'),
+        Path('/etc/urpm/profiles'),
+    ]
+    # Dev mode: also check data/profiles/ relative to package
+    dev_path = Path(__file__).parent.parent.parent.parent / 'data' / 'profiles'
+    if dev_path.exists():
+        dirs.insert(0, dev_path)
+    return dirs
+
+
+def load_profiles() -> dict:
+    """Load mkimage profiles from YAML files.
+
+    Searches in order:
+    1. /usr/share/urpm/profiles/*.yaml (system, from package)
+    2. /etc/urpm/profiles/*.yaml (local admin additions)
+
+    If a local profile has the same name as a system profile,
+    the local one is ignored with a warning.
+
+    Returns:
+        Dict mapping profile name to {'description': str, 'packages': list}
+    """
+    import yaml
+
+    profiles = {}
+    profile_dirs = _get_profile_dirs()
+
+    for i, profile_dir in enumerate(profile_dirs):
+        is_system = (i == 0)  # First dir has priority
+
+        if not profile_dir.exists():
+            continue
+
+        for yaml_file in sorted(profile_dir.glob('*.yaml')):
+            name = yaml_file.stem
+
+            # Check for duplicate
+            if name in profiles:
+                if not is_system:
+                    print(f"Warning: local profile '{name}' ignored "
+                          f"(system profile exists, use a different name)")
+                continue
+
+            try:
+                with open(yaml_file, 'r') as f:
+                    data = yaml.safe_load(f)
+
+                if not isinstance(data, dict):
+                    continue
+
+                profiles[name] = {
+                    'description': data.get('description', ''),
+                    'packages': data.get('packages', []),
+                }
+
+            except Exception as e:
+                print(f"Warning: failed to load profile {yaml_file}: {e}")
+
+    return profiles
+
+
+def get_profile_names() -> list:
+    """Get list of available profile names for argument parser."""
+    return list(load_profiles().keys())
+
 
 def cmd_cleanup(args, db: 'PackageDatabase') -> int:
     """Handle cleanup command - unmount chroot filesystems."""
@@ -90,6 +159,10 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     from ...core.database import PackageDatabase
     from .. import colors
 
+    # Set locale to C to avoid perl warnings in scriptlets
+    os.environ['LC_ALL'] = 'C'
+    os.environ['LANGUAGE'] = 'C'
+
     release = args.release
     arch = getattr(args, 'arch', None) or platform.machine()
     tag = args.tag
@@ -114,25 +187,19 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         print(f"\nThen run mkimage again.")
         return 1
 
-    # Base packages for build image
-    packages = [
-        'filesystem',         # Must be first - creates base directory structure
-        'basesystem-minimal',
-        'coreutils',          # Essential: ls, cp, mv, cat, etc.
-        'grep',               # Essential: used by bash profile scripts
-        'sed',                # Essential: used by bash profile scripts
-        'findutils',          # Essential: find, xargs
-        'vim-minimal',
-        'locales',
-        'locales-en',
-        'bash',
-        'rpm',
-        'curl',
-        'wget',
-        'ca-certificates',    # SSL certificates for pip/https
-        'cronie',
-        'urpmi',
-    ]
+    # Load profile
+    profile_name = getattr(args, 'profile', 'build')
+    profiles = load_profiles()
+
+    if profile_name not in profiles:
+        print(colors.error(f"Error: unknown profile '{profile_name}'"))
+        print(f"\nAvailable profiles:")
+        for name, info in sorted(profiles.items()):
+            print(f"  {name}: {info['description']}")
+        return 1
+
+    profile = profiles[profile_name]
+    packages = list(profile['packages'])  # Copy to avoid modifying original
 
     # Add extra packages if specified
     extra_packages = getattr(args, 'packages', None)
@@ -142,6 +209,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     print(f"\nCreating image: {tag}")
     print(f"  Release: {release}")
     print(f"  Architecture: {arch}")
+    print(f"  Profile: {profile_name} ({profile['description']})")
     print(f"  Packages: {len(packages)}")
 
     # Determine working directory (default: ~/.cache/urpm/mkimage)
@@ -177,7 +245,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         chroot_db = PackageDatabase(db_path=chroot_db_path)
 
         # 1. Initialize chroot with urpm
-        print("\n[1/5] Initializing chroot...")
+        print("\n[1/8] Initializing chroot...")
         init_args = argparse.Namespace(
             urpm_root=tmpdir,
             release=release,
@@ -196,12 +264,41 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         # Use noscripts when not root (user namespace) - scriptlets often fail
         use_noscripts = os.geteuid() != 0
 
-        # Install filesystem FIRST in separate transaction
-        # This ensures /bin -> usr/bin symlinks are created before other packages
+        # Install setup+filesystem with --noscripts to avoid "group shadow does not exist"
+        # The scriptlets of glibc (dependency) run before setup's files are in place
+        print("\n[2/8] Installing setup (--noscripts)...")
+        setup_args = argparse.Namespace(
+            urpm_root=tmpdir,
+            root=tmpdir,
+            packages=['setup'],
+            auto=True,
+            without_recommends=True,
+            with_suggests=False,
+            download_only=False,
+            nodeps=False,
+            nosignature=False,
+            noscripts=True,  # Always noscripts for bootstrap to avoid group warnings
+            force=False,
+            reinstall=False,
+            debug=None,
+            watched=None,
+            prefer=None,
+            all=False,
+            test=False,
+            sync=True,
+            allow_no_root=True,
+            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
+        )
+        ret = cmd_install(setup_args, chroot_db)
+        if ret != 0:
+            print(colors.error("Failed to install setup"))
+            return ret
+
+        # Install filesystem to create directory structure and symlinks
         if use_noscripts:
-            print("\n[2/5] Installing filesystem (--noscripts)...")
+            print("\n[3/8] Installing filesystem (--noscripts)...")
         else:
-            print("\n[2/5] Installing filesystem...")
+            print("\n[3/8] Installing filesystem...")
         fs_args = argparse.Namespace(
             urpm_root=tmpdir,
             root=tmpdir,
@@ -222,6 +319,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             test=False,
             sync=True,
             allow_no_root=True,
+            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
         )
         ret = cmd_install(fs_args, chroot_db)
         if ret != 0:
@@ -260,10 +358,11 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             pkg_count = len(qa_result.stdout.strip().split('\n')) if qa_result.stdout.strip() else 0
             if DEBUG_MKIMAGE:
                 print(colors.dim(f"  DEBUG: rpm -qa shows {pkg_count} packages"))
-            if pkg_count > 0 and pkg_count < 10:
-                print(colors.dim(f"  DEBUG: packages: {qa_result.stdout.strip()}"))
+                if pkg_count > 0 and pkg_count < 10:
+                    print(colors.dim(f"  DEBUG: packages: {qa_result.stdout.strip()}"))
         else:
-            print(colors.success(f"  DEBUG: filesystem installed: {check.stdout.strip()}"))
+            if DEBUG_MKIMAGE:
+                print(colors.success(f"  DEBUG: filesystem installed: {check.stdout.strip()}"))
 
         # Check symlinks
         bin_path = Path(tmpdir) / 'bin'
@@ -277,12 +376,42 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             if DEBUG_MKIMAGE:
                 print(colors.error(f"  DEBUG: /bin does not exist!"))
 
-        # Now install remaining packages (filesystem already provides /bin -> usr/bin etc)
-        remaining_packages = [p for p in packages if p != 'filesystem']
+        # Install coreutils separately to ensure basename/dirname are available
+        # for other packages' scriptlets
+        print("\n[4/8] Installing coreutils...")
+        coreutils_args = argparse.Namespace(
+            urpm_root=tmpdir,
+            root=tmpdir,
+            packages=['coreutils'],
+            auto=True,
+            without_recommends=True,
+            with_suggests=False,
+            download_only=False,
+            nodeps=False,
+            nosignature=False,
+            noscripts=use_noscripts,
+            force=False,
+            reinstall=False,
+            debug=None,
+            watched=None,
+            prefer=None,
+            all=False,
+            test=False,
+            sync=True,
+            allow_no_root=True,
+            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
+        )
+        ret = cmd_install(coreutils_args, chroot_db)
+        if ret != 0:
+            print(colors.error("Failed to install coreutils"))
+            return ret
+
+        # Now install remaining packages
+        remaining_packages = [p for p in packages if p not in ('setup', 'filesystem', 'coreutils')]
         if use_noscripts:
-            print("\n[2.5/6] Installing packages (--noscripts for user namespace)...")
+            print("\n[5/8] Installing packages (--noscripts for user namespace)...")
         else:
-            print("\n[2.5/6] Installing packages...")
+            print("\n[5/8] Installing packages...")
         install_args = argparse.Namespace(
             urpm_root=tmpdir,
             root=tmpdir,
@@ -303,6 +432,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             test=False,
             sync=True,  # Wait for all scriptlets to complete
             allow_no_root=True,  # Installing to user-owned chroot
+            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
         )
         ret = cmd_install(install_args, chroot_db)
         if ret != 0:
@@ -310,9 +440,11 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             return ret
 
         # 3. Install urpm (this project)
-        print("\n[3/6] Installing urpm...")
+        print("\n[6/8] Installing urpm...")
 
         # First try from repos (for when it's officially available)
+        # Use noscripts=True because urpm-ng's post-install runs autoconfig
+        # which would conflict with the config already set up by cmd_init
         urpm_install_args = argparse.Namespace(
             urpm_root=tmpdir,
             root=tmpdir,
@@ -323,7 +455,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             download_only=False,
             nodeps=False,
             nosignature=False,
-            noscripts=use_noscripts,
+            noscripts=True,  # Skip post-install autoconfig (already done by cmd_init)
             force=False,
             reinstall=False,
             debug=None,
@@ -333,6 +465,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             test=False,
             sync=True,  # Wait for all scriptlets to complete
             allow_no_root=True,  # Installing to user-owned chroot
+            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
         )
         ret = cmd_install(urpm_install_args, chroot_db)
 
@@ -340,18 +473,21 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             # urpm not in repos - look for local RPM
             print("  urpm not found in repositories, looking for local RPM...")
 
-            # Search common locations
-            search_paths = [
+            # Search common locations (all architectures)
+            search_dirs = [
                 Path.home() / 'Downloads',
-                Path('./rpmbuild/RPMS/noarch'),
-                Path.home() / 'rpmbuild/RPMS/noarch',
+                Path('./rpmbuild/RPMS'),
+                Path.home() / 'rpmbuild/RPMS',
                 Path('.'),
             ]
 
             urpm_rpm = None
-            for search_path in search_paths:
-                if search_path.exists():
-                    candidates = list(search_path.glob('urpm-ng-*.noarch.rpm'))
+            for search_dir in search_dirs:
+                if search_dir.exists():
+                    # Search recursively for urpm-ng-core or urpm-ng RPMs
+                    candidates = list(search_dir.glob('**/urpm-ng-core-*.rpm'))
+                    if not candidates:
+                        candidates = list(search_dir.glob('**/urpm-ng-*.rpm'))
                     if candidates:
                         # Take most recent
                         urpm_rpm = max(candidates, key=lambda p: p.stat().st_mtime)
@@ -372,7 +508,8 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
                 print("  Build it with: make rpm")
                 return 1
 
-            # Install RPM using urpm with sync mode (waits for all scriptlets)
+            # Install RPM using urpm with noscripts (post-install autoconfig
+            # would conflict with config already set up by cmd_init)
             urpm_local_args = argparse.Namespace(
                 urpm_root=tmpdir,
                 root=tmpdir,
@@ -383,7 +520,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
                 download_only=False,
                 nodeps=False,
                 nosignature=True,  # Local build, no signature
-                noscripts=use_noscripts,
+                noscripts=True,  # Skip post-install autoconfig (already done by cmd_init)
                 force=False,
                 reinstall=False,
                 debug=None,
@@ -393,6 +530,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
                 test=False,
                 sync=True,  # Wait for all scriptlets to complete
                 allow_no_root=True,  # Installing to user-owned chroot
+                config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
             )
             ret = cmd_install(urpm_local_args, chroot_db)
             if ret != 0:
@@ -403,18 +541,17 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             print(colors.success("  urpm installed from repositories"))
 
         # 4. Cleanup chroot to reduce image size
-        print("\n[4/6] Cleaning up chroot...")
-        # Close chroot database to flush all data before image creation
+        print("\n[7/8] Cleaning up chroot...")
+        # Ensure database is closed (may already be closed before urpm install)
         chroot_db.close()
         _cleanup_chroot_for_image(tmpdir)
 
-        # 5. Unmount filesystems
-        print("\n[5/6] Unmounting filesystems...")
+        # Unmount any filesystems
         cleanup_args = argparse.Namespace(urpm_root=tmpdir)
         cmd_cleanup(cleanup_args, db)
 
-        # 6. Create container image
-        print(f"\n[6/6] Creating container image {tag}...")
+        # 5. Create container image
+        print(f"\n[8/8] Creating container image {tag}...")
         # Estimate chroot size for user feedback
         try:
             total_size = sum(
@@ -474,7 +611,8 @@ def _cleanup_chroot_for_image(root: str):
     cleanup_patterns = [
         'var/cache/urpmi/*',
         'var/cache/dnf/*',
-        'var/lib/urpm/medias/*/RPMS.*.cache',
+        'var/lib/urpm/medias/**/*.rpm',     # Downloaded RPM packages (recursive)
+        'var/lib/urpm/medias/**/*.cache',   # Cache files (recursive)
         'var/log/*',
         'tmp/*',
         'var/tmp/*',
@@ -482,11 +620,14 @@ def _cleanup_chroot_for_image(root: str):
         'usr/share/doc/*',
         'usr/share/man/*',
         'usr/share/info/*',
+        'etc/**/*.rpmnew',                  # Config file backups (new version)
+        'etc/**/*.rpmold',                  # Config file backups (old version)
+        'etc/**/*.rpmsave',                 # Config file backups (saved)
     ]
 
     removed = 0
     for pattern in cleanup_patterns:
-        for path in glob.glob(os.path.join(root, pattern)):
+        for path in glob.glob(os.path.join(root, pattern), recursive=True):
             try:
                 if os.path.isfile(path):
                     os.remove(path)

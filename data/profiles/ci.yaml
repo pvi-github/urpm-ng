@@ -1,0 +1,24 @@
+# mkimage profile: ci
+# CI/testing environment for urpm-ng
+
+description: CI/testing environment for urpm-ng
+
+packages:
+  - filesystem
+  - basesystem-minimal
+  - coreutils
+  - grep
+  - sed
+  - findutils
+  - bash
+  - rpm
+  - curl
+  - wget
+  - ca-certificates
+  - urpmi
+  - git
+  - python3-solv
+  - python3-rpm
+  - python3-zstandard
+  - python3-pytest
+  - python3-pip
