@@ -238,6 +238,9 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     print(f"\nBuilding chroot in {tmpdir}...")
 
     try:
+        # Create tmp dir in chroot
+        chroot_tmp_path = Path(tmpdir) / "tmp"
+        chroot_tmp_path.mkdir(parents=True, exist_ok=True)
         # Create a PackageDatabase specific to the chroot
         # This ensures media configuration is stored IN the chroot, not on the host
         chroot_db_path = Path(tmpdir) / "var/lib/urpm/packages.db"
@@ -372,6 +375,44 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         elif bin_path.exists():
             if DEBUG_MKIMAGE:
                 print(colors.error(f"  DEBUG: /bin exists but is NOT a symlink!"))
+            # Mageia 9: /bin is a real directory, create /bin/false and /bin/true
+            # for useradd scriptlets that run before coreutils is installed
+            for cmd, exitcode in [('false', 1), ('true', 0)]:
+                cmd_path = bin_path / cmd
+                if not cmd_path.exists():
+                    usr_cmd = Path(tmpdir) / 'usr' / 'bin' / cmd
+                    if usr_cmd.exists():
+                        cmd_path.symlink_to(f'/usr/bin/{cmd}')
+                    else:
+                        with open(cmd_path, 'w') as f:
+                            f.write(f'#!/bin/sh\nexit {exitcode}\n')
+                        os.chmod(cmd_path, 0o755)
+            for cmd, exitcode in [('false', 1), ('true', 0)]:
+                cmd_path = bin_path / cmd
+                if not cmd_path.exists():
+                    usr_cmd = Path(tmpdir) / 'usr' / 'bin' / cmd
+                    if usr_cmd.exists():
+                        cmd_path.symlink_to(f'/usr/bin/{cmd}')
+                    else:
+                        with open(cmd_path, 'w') as f:
+                            f.write(f'#!/bin/sh\nexit {exitcode}\n')
+                        os.chmod(cmd_path, 0o755)
+            if DEBUG_MKIMAGE:
+                print(colors.dim(f"  DEBUG: Created /bin/false and /bin/true stubs"))
+            # Mageia 9: when /bin is real dir, provide /bin/bash and /bin/grep early
+            for cmd in ['bash', 'grep', 'sh']:
+                usr_cmd = Path(tmpdir) / 'usr' / 'bin' / cmd
+                if not usr_cmd.exists():
+                    cmd_path = bin_path / cmd
+                    if cmd_path.exists():
+                        usr_cmd.symlink_to(f'/bin/{cmd}')
+                    else:
+                        # Fallback minimal wrapper
+                        with open(usr_cmd, 'w') as f:
+                            f.write('#!/bin/sh\nexec /bin/' + cmd + ' "$@"\n')
+                        os.chmod(cmd_path, 0o755)
+            if DEBUG_MKIMAGE:
+                print(colors.dim(f"  DEBUG: Created /usr/bin/grep and /usr/bin/bash stubs"))
         else:
             if DEBUG_MKIMAGE:
                 print(colors.error(f"  DEBUG: /bin does not exist!"))
@@ -647,19 +688,20 @@ def _cleanup_chroot_for_image(root: str):
         print(f"  Created /var/tmp")
 
     # Fix PATH for Mageia 9 compatibility (/bin and /sbin are separate)
-    profile_d = os.path.join(root, 'etc', 'profile.d')
-    if os.path.isdir(profile_d):
-        path_script = os.path.join(profile_d, 'zz-path-compat.sh')
-        if not os.path.exists(path_script):
-            try:
-                with open(path_script, 'w') as f:
-                    f.write('# Mageia 9 compatibility: add /bin /sbin if not symlinks\n')
-                    f.write('[ -d /bin ] && [ ! -L /bin ] && export PATH="$PATH:/bin"\n')
-                    f.write('[ -d /sbin ] && [ ! -L /sbin ] && export PATH="$PATH:/sbin"\n')
-                os.chmod(path_script, 0o644)
-                print(f"  Created /etc/profile.d/zz-path-compat.sh")
-            except (IOError, OSError):
-                pass
+    # Must be in /etc/bashrc for non-login interactive shells (podman run -it)
+    bashrc_path = os.path.join(root, 'etc', 'bashrc')
+    if os.path.exists(bashrc_path):
+        try:
+            with open(bashrc_path, 'r') as f:
+                bashrc_content = f.read()
+            if 'path-compat' not in bashrc_content:
+                with open(bashrc_path, 'a') as f:
+                    f.write('\n# Mageia 9 compatibility: add /bin /sbin if not symlinks\n')
+                    f.write('[ -d /bin ] && [ ! -L /bin ] && [[ ":$PATH:" != *":/bin:"* ]] && export PATH="$PATH:/bin"\n')
+                    f.write('[ -d /sbin ] && [ ! -L /sbin ] && [[ ":$PATH:" != *":/sbin:"* ]] && export PATH="$PATH:/sbin"\n')
+                print(f"  Added PATH fix to /etc/bashrc")
+        except (IOError, OSError):
+            pass
 
     # Create /etc/machine-id if missing (required by systemd, dbus, etc.)
     machine_id_path = os.path.join(root, 'etc', 'machine-id')
@@ -878,6 +920,7 @@ def _build_single_package(
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/BUILD'])
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/RPMS'])
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/SRPMS'])
+        container.exec(cid, ['mkdir', '-p', '/tmp'])
 
         # DEBUG SSL IN BUILD... TODO: do that in mkimage
         container.exec(cid, ['/bin/update-ca-trust', 'extract'])
