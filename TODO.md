@@ -8,10 +8,19 @@
 
 ## En cours
 
-### Alternatives (OR deps)
-- [ ] Tests intensifs install avec alternatives
-- [ ] Valider mode --auto
-- [ ] Valider re-résolution après choix utilisateur
+### Config files (.rpmnew)
+- [x] `--config-policy=keep|replace|ask` pour install/upgrade
+- [ ] `--config-policy=merge` : diff interactif (vimdiff/meld)
+
+### Container builds
+- [x] `--with-rpms` pour pré-installer des RPMs locaux
+- [x] Profils YAML pour mkimage (`build`, `ci`, `minimal`)
+- [x] Output workspace correct (`RPMS/x86_64/`, `SRPMS/`, `SPECS/log.<Name>`)
+- [ ] SSL `update-ca-trust` à intégrer dans mkimage (pas en post-build)
+
+### Import urpmi.cfg
+- [x] Parser configs avec `mirrorlist: $MIRRORLIST`
+- [x] Message suggérant autoconfig pour media officiels
 
 ---
 
@@ -21,9 +30,10 @@
 - [ ] Détecter reboot nécessaire (kernel, glibc, systemd)
 - [ ] Lister services à redémarrer
 
-### daemon config
+### daemon
 - [ ] Fichier `/etc/urpm/daemon.conf`
 - [ ] Options: `log_destination` (syslog|file), `log_file`, `log_level`
+- [ ] Reload config à chaud (SIGHUP)
 - [ ] Intégrer config auto-install (scheduling, policies)
 
 ### Documentation
@@ -33,6 +43,11 @@
 ### Download options
 - [ ] Option `--download-only` sur upgrade
 - [ ] Option `--destdir <path>` pour spécifier répertoire destination
+
+### Alternatives (OR deps)
+- [ ] Tests intensifs install avec alternatives
+- [ ] Valider mode --auto
+- [ ] Valider re-résolution après choix utilisateur
 
 ---
 
@@ -82,6 +97,8 @@
 - [ ] swap (remove+install combiné)
 - [ ] check intégrité BDD
 - [ ] debuginfo-install
+- [ ] history reinstall : intégrer resolver/downloader proprement
+- [ ] rpmsrate LOCALES : rendre configurable
 
 ### Compatibilité legacy
 - [ ] Wrappers urpmi/urpme/urpmq/urpmf avec mapping options
@@ -121,6 +138,17 @@
 
 <details>
 <summary>Voir les fonctionnalités complétées</summary>
+
+### v0.3.x
+- [x] `--config-policy` pour install/upgrade (keep, replace, ask)
+- [x] `--with-rpms` pour build (pré-install RPMs locaux)
+- [x] Profils YAML mkimage (build, ci, minimal)
+- [x] Output workspace rpmbuild (RPMS/arch/, SRPMS/, SPECS/log.*)
+- [x] Import urpmi.cfg avec mirrorlist $MIRRORLIST
+- [x] Modularisation CLI (urpm/cli/commands/)
+- [x] Modularisation database (urpm/core/db/)
+- [x] Modularisation resolver (urpm/core/resolution/)
+- [x] Sous-paquets RPM (core, daemon, build, desktop, etc.)
 
 ### v0.2.x
 - [x] D-Bus service (org.mageia.Urpm.v1)
