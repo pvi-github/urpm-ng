@@ -501,7 +501,6 @@ queue._child_process_standalone()
                     if DEBUG_USERNS:
                         print(f"[userns child] install result: success={success} count={count} errors={errors} rpmnew={len(rpmnew_files)}", file=sys.stderr)
                         sys.stderr.flush()
-                    # TODO: Send rpmnew_files back to parent via pipe message
                 else:
                     success, count, errors = self._execute_erase(op, pipe_state, release_parent_after=False)
                     rpmnew_files = []
