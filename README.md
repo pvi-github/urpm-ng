@@ -598,10 +598,12 @@ urpm provides a complete container-based build system for RPM packages using Doc
 
 ```bash
 urpm mkimage --release 10 --tag mageia:10-build
+urpm mkimage --release 10 --tag mageia:10-ci --profile ci
 
 # Options
 -r, --release <version>       # Mageia version (e.g., 10, cauldron)
 -t, --tag <tag>               # Image tag (e.g., mageia:10-build)
+--profile <name>              # Package profile (default: build)
 --arch <arch>                 # Target architecture (default: host)
 -p, --packages <list>         # Additional packages (comma-separated)
 --runtime docker|podman       # Container runtime (default: auto-detect)
@@ -609,21 +611,43 @@ urpm mkimage --release 10 --tag mageia:10-build
 -w, --workdir <path>          # Working directory for chroot (default: /tmp)
 ```
 
+### Profiles
+
+Profiles define which packages are installed in the image:
+
+| Profile | Description |
+|---------|-------------|
+| `build` | RPM build environment (default): rpm-build, gcc, make, etc. |
+| `ci` | CI/testing: python3-pytest, git, python3-solv, etc. |
+| `minimal` | Minimal usable system with urpm |
+
+Profiles are loaded from:
+- `/usr/share/urpm/profiles/*.yaml` (system, from package)
+- `/etc/urpm/profiles/*.yaml` (local additions)
+
 ### Build packages
 
 ```bash
-# Build from source RPM
-urpm build --image mageia:10-build ./foo-1.0-1.mga10.src.rpm
+# Build from source RPM (output to ./build-output/)
+urpm build -i mageia:10-build foo-1.0-1.mga10.src.rpm
 
-# Build from spec file (sources auto-copied from SOURCES/)
-urpm build --image mageia:10-build ./workspace/SPECS/foo.spec
+# Build from spec file (output to workspace/RPMS/ and SRPMS/)
+urpm build -i mageia:10-build SPECS/foo.spec
+
+# Build with local dependencies (e.g., libfoo built previously)
+urpm build -i mageia:10-build SPECS/bar.spec -w 'RPMS/x86_64/libfoo*.rpm'
+
+# Multiple local dependencies
+urpm build -i mageia:10-build SPECS/app.spec \
+    -w 'RPMS/x86_64/libfoo*.rpm' -w 'RPMS/x86_64/libbar*.rpm'
 
 # Multiple builds in parallel
-urpm build --image mageia:10-build *.src.rpm --parallel 4
+urpm build -i mageia:10-build *.src.rpm --parallel 4
 
 # Options
 -i, --image <tag>             # Docker/Podman image to use
--o, --output <dir>            # Output directory (default: ./build-output)
+-o, --output <dir>            # Output directory for SRPM builds (default: ./build-output)
+-w, --with-rpms <pattern>     # Pre-install local RPMs before build (glob, repeatable)
 --runtime docker|podman       # Container runtime (default: auto-detect)
 -j, --parallel <N>            # Number of parallel builds (default: 1)
 --keep-container              # Keep container after build (for debugging)

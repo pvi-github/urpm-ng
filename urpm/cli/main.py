@@ -476,6 +476,12 @@ Examples:
         action='store_true',
         help='Wait for all scriptlets and triggers to complete before returning'
     )
+    install_parser.add_argument(
+        '--config-policy',
+        choices=['keep', 'replace', 'ask'],
+        default='keep',
+        help='Config file conflict policy: keep existing (default), replace with package version, or ask'
+    )
 
     # =========================================================================
     # download / dl - Download packages without installing
@@ -551,8 +557,13 @@ Examples:
 The image contains a minimal system with urpmi configured to use
 the official Mageia mirrors. Use with 'urpm build' for isolated builds.
 
+Profiles are loaded from:
+  /usr/share/urpm/profiles/*.yaml (system)
+  /etc/urpm/profiles/*.yaml (local additions)
+
 Examples:
   urpm mkimage --release 10 --tag mageia:10-build
+  urpm mkimage --release 10 --tag mageia:10-ci --profile ci
   urpm mkimage --release cauldron --tag mageia:cauldron-build --runtime podman
 '''
     )
@@ -565,6 +576,11 @@ Examples:
         '--tag', '-t',
         required=True,
         help='Docker/Podman image tag (e.g., mageia:10-build)'
+    )
+    mkimage_parser.add_argument(
+        '--profile',
+        default='build',
+        help='Package profile (default: build). See /usr/share/urpm/profiles/'
     )
     mkimage_parser.add_argument(
         '--arch',
@@ -599,12 +615,25 @@ Examples:
         description='''Build RPM packages in isolated containers.
 
 Each build runs in a fresh container that is destroyed after completion,
-ensuring a clean build environment. Results are copied to --output directory.
+ensuring a clean build environment.
+
+Output locations:
+  - .spec files: results go to workspace/RPMS/ and workspace/SRPMS/
+  - .src.rpm files: results go to --output directory (default: ./build-output)
 
 Examples:
-  urpm build --image mageia:10-build ./foo-1.0-1.mga10.src.rpm
-  urpm build --image mageia:10-build ./foo.spec
-  urpm build --image mageia:10-build *.src.rpm --output ~/results/
+  # Build a spec file (output to ./RPMS/ and ./SRPMS/)
+  urpm build -i mageia:10-build SPECS/foo.spec
+
+  # Build a SRPM (output to ./build-output/foo/)
+  urpm build -i mageia:10-build foo-1.0-1.mga10.src.rpm
+
+  # Build with local dependencies (e.g., libfoo built previously)
+  urpm build -i mageia:10-build SPECS/bar.spec -w 'RPMS/x86_64/libfoo*.rpm'
+
+  # Multiple local dependencies
+  urpm build -i mageia:10-build SPECS/app.spec \\
+      -w 'RPMS/x86_64/libfoo*.rpm' -w 'RPMS/x86_64/libbar*.rpm'
 '''
     )
     build_parser.add_argument(
@@ -618,8 +647,15 @@ Examples:
     )
     build_parser.add_argument(
         '--output', '-o',
-        default='./build-output',
-        help='Output directory for built RPMs (default: ./build-output)'
+        default=None,
+        help='Output directory for SRPM builds (default: ./build-output)'
+    )
+    build_parser.add_argument(
+        '--with-rpms', '-w',
+        action='append',
+        default=[],
+        metavar='PATTERN',
+        help='Pre-install local RPMs in container before build (glob pattern, repeatable)'
     )
     build_parser.add_argument(
         '--runtime',
@@ -1036,6 +1072,12 @@ Examples:
         action='append',
         metavar='ARCH',
         help='Allow additional architectures (e.g., --allow-arch i686 for wine/steam)'
+    )
+    upgrade_parser.add_argument(
+        '--config-policy',
+        choices=['keep', 'replace', 'ask'],
+        default='keep',
+        help='Config file conflict policy: keep existing (default), replace with package version, or ask'
     )
 
     # =========================================================================

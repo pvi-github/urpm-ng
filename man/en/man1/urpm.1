@@ -375,7 +375,7 @@ Allow additional architectures (e.g., \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Container Build System
 .TP
-.B mkimage \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR
+.B mkimage \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fIname\fR]
 Create a minimal Docker/Podman image for RPM builds.
 .RS
 .TP
@@ -384,6 +384,11 @@ Mageia version (e.g., 10, cauldron).
 .TP
 .BR \-t ", " \-\-tag " " \fItag\fR
 Image tag (e.g., mageia:10-build).
+.TP
+.B \-\-profile " " \fIname\fR
+Package profile (default: build). Available profiles: build (RPM build environment),
+ci (CI/testing), minimal (minimal system with urpm). Profiles are loaded from
+/usr/share/urpm/profiles/*.yaml and /etc/urpm/profiles/*.yaml.
 .TP
 .B \-\-arch " " \fIarch\fR
 Target architecture (default: host).
@@ -409,7 +414,13 @@ Build RPM packages in isolated containers.
 Docker/Podman image to use.
 .TP
 .BR \-o ", " \-\-output " " \fIdir\fR
-Output directory (default: ./build-output or workspace/{RPMS,SRPMS}).
+Output directory for SRPM builds (default: ./build-output).
+For .spec files, results go to workspace/RPMS/ and workspace/SRPMS/.
+.TP
+.BR \-w ", " \-\-with\-rpms " " \fIpattern\fR
+Pre-install local RPMs in container before build. Useful when building
+a package that depends on a library you just built locally. Supports glob
+patterns and can be repeated. Example: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
 .TP
 .B \-\-runtime " " docker|podman
 Container runtime (default: auto-detect).
@@ -422,8 +433,7 @@ Keep container after build (for debugging).
 .PP
 Sources can be .src.rpm files or .spec files. For .spec files, sources are
 automatically copied from the SOURCES/ directory (supports workspace/SPECS/
-and workspace/SOURCES/ layouts). Results go to workspace/RPMS/ and
-workspace/SRPMS/ for spec builds.
+and workspace/SOURCES/ layouts).
 .RE
 .SH FILES
 .TP

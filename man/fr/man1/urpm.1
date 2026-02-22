@@ -376,7 +376,7 @@ Autorise des architectures supplementaires (ex: \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Systeme de build en conteneurs
 .TP
-.B mkimage \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR
+.B mkimage \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInom\fR]
 Cree une image Docker/Podman minimale pour les builds RPM.
 .RS
 .TP
@@ -385,6 +385,11 @@ Version Mageia (ex: 10, cauldron).
 .TP
 .BR \-t ", " \-\-tag " " \fItag\fR
 Tag de l'image (ex: mageia:10-build).
+.TP
+.B \-\-profile " " \fInom\fR
+Profil de paquets (defaut: build). Profils disponibles : build (environnement
+de build RPM), ci (CI/tests), minimal (systeme minimal avec urpm). Les profils
+sont charges depuis /usr/share/urpm/profiles/*.yaml et /etc/urpm/profiles/*.yaml.
 .TP
 .B \-\-arch " " \fIarch\fR
 Architecture cible (defaut: hote).
@@ -410,7 +415,13 @@ Construit des paquets RPM dans des conteneurs isoles.
 Image Docker/Podman a utiliser.
 .TP
 .BR \-o ", " \-\-output " " \fIrep\fR
-Repertoire de sortie (defaut: ./build-output ou workspace/{RPMS,SRPMS}).
+Repertoire de sortie pour les builds SRPM (defaut: ./build-output).
+Pour les fichiers .spec, les resultats vont dans workspace/RPMS/ et workspace/SRPMS/.
+.TP
+.BR \-w ", " \-\-with\-rpms " " \fImotif\fR
+Pre-installe des RPMs locaux dans le conteneur avant le build. Utile pour
+construire un paquet qui depend d'une bibliotheque que vous venez de compiler.
+Supporte les patterns glob et peut etre repete. Exemple: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
 .TP
 .B \-\-runtime " " docker|podman
 Runtime conteneur (defaut: auto-detection).
@@ -423,8 +434,7 @@ Conserver le conteneur apres le build (pour debug).
 .PP
 Les sources peuvent etre des fichiers .src.rpm ou .spec. Pour les fichiers .spec,
 les sources sont automatiquement copiees depuis le repertoire SOURCES/ (supporte
-les arborescences workspace/SPECS/ et workspace/SOURCES/). Les resultats vont
-dans workspace/RPMS/ et workspace/SRPMS/ pour les builds spec.
+les arborescences workspace/SPECS/ et workspace/SOURCES/).
 .RE
 .SH FICHIERS
 .TP

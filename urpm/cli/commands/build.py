@@ -661,15 +661,28 @@ def _cleanup_chroot_for_image(root: str):
 
 def cmd_build(args, db: 'PackageDatabase') -> int:
     """Build RPM package(s) in isolated containers."""
+    import glob as globmod
     from ...core.container import detect_runtime, Container
     from .. import colors
 
     image = args.image
     sources = args.sources
-    output_dir = Path(args.output)
+    output_dir = Path(args.output) if args.output else Path('./build-output')
     parallel = getattr(args, 'parallel', 1)
     keep_container = getattr(args, 'keep_container', False)
     runtime_name = getattr(args, 'runtime', None)
+    with_rpms_patterns = getattr(args, 'with_rpms', []) or []
+
+    # Expand glob patterns for --with-rpms
+    with_rpms = []
+    for pattern in with_rpms_patterns:
+        expanded = globmod.glob(pattern)
+        if expanded:
+            with_rpms.extend(Path(p) for p in expanded if p.endswith('.rpm'))
+        elif Path(pattern).exists():
+            with_rpms.append(Path(pattern))
+        else:
+            print(colors.warning(f"No RPMs found matching: {pattern}"))
 
     # Detect container runtime
     try:
@@ -711,12 +724,10 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
         print(colors.error("No valid sources to build"))
         return 1
 
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     print(f"\nBuilding {len(valid_sources)} package(s)")
     print(f"  Image:  {image}")
-    print(f"  Output: {output_dir}")
+    if with_rpms:
+        print(f"  Pre-install: {len(with_rpms)} local RPM(s)")
     if parallel > 1:
         print(f"  Parallel: {parallel}")
 
@@ -725,7 +736,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     def build_one(source_path: Path) -> tuple:
         """Build a single package. Returns (source, success, message)."""
         return _build_single_package(
-            container, image, source_path, output_dir, keep_container
+            container, image, source_path, output_dir, keep_container, with_rpms
         )
 
     if parallel > 1 and len(valid_sources) > 1:
@@ -811,13 +822,24 @@ def _build_single_package(
     image: str,
     source_path: Path,
     output_dir: Path,
-    keep_container: bool
+    keep_container: bool,
+    with_rpms: list = None
 ) -> tuple:
     """Build a single package in a container.
+
+    Args:
+        container: Container runtime wrapper
+        image: Container image to use
+        source_path: Path to .spec or .src.rpm file
+        output_dir: Output directory for SRPM builds
+        keep_container: Keep container after build for debugging
+        with_rpms: List of local RPM paths to install before build
 
     Returns:
         Tuple of (source_path, success, message)
     """
+    if with_rpms is None:
+        with_rpms = []
     from .. import colors
 
     cid = None
@@ -894,6 +916,24 @@ def _build_single_package(
         ])
         if ret != 0:
             return (source_path, False, "Failed to install rpm-build")
+
+        # 4b. Install local RPMs (dependencies built locally)
+        if with_rpms:
+            print(f"  Installing {len(with_rpms)} local RPM(s)...")
+            # Create temp directory for local RPMs
+            container.exec(cid, ['mkdir', '-p', '/tmp/local-rpms'])
+            # Copy all local RPMs and build list of paths
+            rpm_paths_in_container = []
+            for rpm_path in with_rpms:
+                if not container.cp(str(rpm_path), f"{cid}:/tmp/local-rpms/"):
+                    return (source_path, False, f"Failed to copy {rpm_path.name}")
+                rpm_paths_in_container.append(f"/tmp/local-rpms/{rpm_path.name}")
+            # Install all local RPMs at once
+            ret = container.exec_stream(cid, [
+                'urpm', 'install', '--auto', '--sync', '--nosignature'
+            ] + rpm_paths_in_container)
+            if ret != 0:
+                return (source_path, False, "Failed to install local RPMs")
 
         # 5. Install build dependencies
         print(f"  Installing BuildRequires...")
