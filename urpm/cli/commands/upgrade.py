@@ -18,6 +18,7 @@ from ..helpers.alternatives import (
     PreferencesMatcher,
     _resolve_with_alternatives,
 )
+from .install import _apply_config_policy
 
 
 def cmd_upgrade(args, db: 'PackageDatabase') -> int:
@@ -324,6 +325,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             test=getattr(args, 'test', False),
             root=rpm_root or "/",
             sync=getattr(args, 'sync', False),
+            config_policy=getattr(args, 'config_policy', 'keep'),
         )
 
         remove_names = [a.name for a in removes] if removes else []
@@ -383,6 +385,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                         msg_parts.append(f"{len(remove_names)} removed (obsoleted)")
                     if msg_parts:
                         print(colors.success(f"  {', '.join(msg_parts)}"))
+                    # Apply config policy for .rpmnew files
+                    if op_result.rpmnew_files:
+                        _apply_config_policy(op_result.rpmnew_files, upgrade_opts.config_policy)
                 else:
                     upgrade_success = False
                     print(colors.error(f"\nUpgrade failed:"))

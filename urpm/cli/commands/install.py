@@ -1,7 +1,13 @@
-"""Package installation and download commands."""
+"""Package installation and download commands.
 
+TODO: Add --config-policy=merge for interactive diff/merge of config files
+"""
+
+import os
+import subprocess
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, List
 
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
@@ -30,6 +36,70 @@ from ..helpers.package import (
 
 # Debug flag for install operations
 DEBUG_INSTALL = False
+
+
+def _apply_config_policy(rpmnew_files: List[str], policy: str) -> int:
+    """Apply config policy to .rpmnew files created during this transaction.
+
+    Args:
+        rpmnew_files: List of .rpmnew file paths created during install
+        policy: 'keep' (do nothing), 'replace' (use new configs), 'ask' (prompt)
+
+    Returns:
+        Number of config files processed
+    """
+    from .. import colors
+
+    if policy == 'keep' or not rpmnew_files:
+        return 0
+
+    processed = 0
+
+    for rpmnew in rpmnew_files:
+        rpmnew_path = Path(rpmnew)
+        if not rpmnew_path.exists():
+            continue
+
+        original = rpmnew_path.with_suffix('')  # Remove .rpmnew suffix
+        rpmold = Path(str(original) + '.rpmold')
+
+        if policy == 'replace':
+            try:
+                if original.exists():
+                    original.rename(rpmold)
+                rpmnew_path.rename(original)
+                processed += 1
+            except OSError as e:
+                print(colors.warning(f"  Config: failed to replace {original}: {e}"))
+
+        elif policy == 'ask':
+            print(f"\n  Config conflict: {original}")
+            print(f"    [k] Keep existing (new saved as .rpmnew)")
+            print(f"    [r] Replace with new (old saved as .rpmold)")
+            print(f"    [d] Show diff")
+
+            while True:
+                choice = input("  Choice [k/r/d]: ").strip().lower()
+                if choice == 'k':
+                    break
+                elif choice == 'r':
+                    try:
+                        if original.exists():
+                            original.rename(rpmold)
+                        rpmnew_path.rename(original)
+                        processed += 1
+                    except OSError as e:
+                        print(colors.warning(f"  Failed to replace: {e}"))
+                    break
+                elif choice == 'd':
+                    subprocess.run(['diff', '-u', str(original), str(rpmnew_path)])
+                else:
+                    print("  Invalid choice")
+
+    if processed > 0 and policy == 'replace':
+        print(f"  {processed} config file(s) updated (old saved as .rpmold)")
+
+    return processed
 
 
 def cmd_install(args, db: 'PackageDatabase') -> int:
@@ -863,6 +933,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             root=rpm_root or "/",
             use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
             sync=getattr(args, 'sync', False),
+            config_policy=getattr(args, 'config_policy', 'keep'),
         )
 
         # Progress callback
@@ -898,6 +969,13 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             print(colors.success(f"  {installed_count} packages installed, {len(remove_pkgs)} removed"))
         else:
             print(colors.success(f"  {installed_count} packages installed"))
+
+        # Apply config policy for .rpmnew files
+        if queue_result.operations:
+            rpmnew_files = queue_result.operations[0].rpmnew_files
+            if rpmnew_files:
+                _apply_config_policy(rpmnew_files, install_opts.config_policy)
+
         ops.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility

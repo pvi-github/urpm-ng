@@ -45,6 +45,18 @@ DEBUG_USERNS = False
 logger = logging.getLogger(__name__)
 
 
+def _list_rpmnew_files(root: str = "/") -> set:
+    """List all .rpmnew files in /etc under the given root.
+
+    Used to detect which .rpmnew files were created during a transaction
+    by comparing before/after sets.
+    """
+    etc_path = Path(root) / "etc"
+    if not etc_path.exists():
+        return set()
+    return {str(p) for p in etc_path.glob("**/*.rpmnew")}
+
+
 class OperationType(Enum):
     """Type of RPM operation."""
     INSTALL = "install"
@@ -75,6 +87,7 @@ class OperationResult:
     success: bool
     count: int = 0
     errors: List[str] = field(default_factory=list)
+    rpmnew_files: List[str] = field(default_factory=list)  # Config files saved as .rpmnew
 
 
 @dataclass
@@ -101,6 +114,7 @@ class QueueProgressMessage:
     count: int = 0
     error: str = ""
     errors: List[str] = field(default_factory=list)
+    rpmnew_files: List[str] = field(default_factory=list)  # Config files saved as .rpmnew
 
     def to_json(self) -> str:
         return json.dumps({
@@ -113,6 +127,7 @@ class QueueProgressMessage:
             'count': self.count,
             'error': self.error,
             'errors': self.errors,
+            'rpmnew_files': self.rpmnew_files,
         })
 
     @classmethod
@@ -128,6 +143,7 @@ class QueueProgressMessage:
             count=d.get('count', 0),
             error=d.get('error', ''),
             errors=d.get('errors', []),
+            rpmnew_files=d.get('rpmnew_files', []),
         )
 
 
@@ -392,6 +408,7 @@ queue._child_process_standalone()
                 elif msg.msg_type == 'op_done':
                     if current_op_result:
                         current_op_result.count = msg.count or 0
+                        current_op_result.rpmnew_files = msg.rpmnew_files or []
                         results.append(current_op_result)
                         current_op_result = None
                 elif msg.msg_type == 'op_error':
@@ -480,18 +497,21 @@ queue._child_process_standalone()
                     if DEBUG_USERNS:
                         print(f"[userns child] executing install...", file=sys.stderr)
                         sys.stderr.flush()
-                    success, count, errors = self._execute_install(op, pipe_state, release_parent_after=False)
+                    success, count, errors, rpmnew_files = self._execute_install(op, pipe_state, release_parent_after=False)
                     if DEBUG_USERNS:
-                        print(f"[userns child] install result: success={success} count={count} errors={errors}", file=sys.stderr)
+                        print(f"[userns child] install result: success={success} count={count} errors={errors} rpmnew={len(rpmnew_files)}", file=sys.stderr)
                         sys.stderr.flush()
+                    # TODO: Send rpmnew_files back to parent via pipe message
                 else:
                     success, count, errors = self._execute_erase(op, pipe_state, release_parent_after=False)
+                    rpmnew_files = []
 
                 if success:
                     write_file.write(QueueProgressMessage(
                         msg_type='op_done',
                         operation_id=op.operation_id,
-                        count=count
+                        count=count,
+                        rpmnew_files=rpmnew_files
                     ).to_json() + "\n")
                 else:
                     write_file.write(QueueProgressMessage(
@@ -565,6 +585,7 @@ queue._child_process_standalone()
                     # Operation completed successfully
                     if current_op_result:
                         current_op_result.count = msg.count
+                        current_op_result.rpmnew_files = msg.rpmnew_files or []
                         results.append(current_op_result)
                     current_op_result = None
 
@@ -666,7 +687,7 @@ queue._child_process_standalone()
                     # (before rpmdb sync which can take 30-60 seconds)
                     is_last_install = (i + 1 >= len(self.operations) or
                                        self.operations[i + 1].op_type != OperationType.INSTALL)
-                    success, count, errors = self._execute_install(
+                    success, count, errors, rpmnew_files = self._execute_install(
                         op,
                         pipe_state,
                         release_parent_after=(is_last_foreground or is_last_install)
@@ -679,13 +700,15 @@ queue._child_process_standalone()
                         pipe_state,
                         release_parent_after=((op.background or is_last_op) and not pipe_state['closed'])
                     )
+                    rpmnew_files = []
 
                 if not pipe_state['closed']:
                     if success:
                         write_file.write(QueueProgressMessage(
                             msg_type='op_done',
                             operation_id=op.operation_id,
-                            count=count
+                            count=count,
+                            rpmnew_files=rpmnew_files
                         ).to_json() + "\n")
                     else:
                         write_file.write(QueueProgressMessage(
@@ -733,13 +756,16 @@ queue._child_process_standalone()
         op: QueuedOperation,
         pipe_state: dict,
         release_parent_after: bool = False
-    ) -> Tuple[bool, int, List[str]]:
+    ) -> Tuple[bool, int, List[str], List[str]]:
         """Execute an install operation.
 
         Args:
             op: The operation to execute
             pipe_state: Dict with 'closed' bool and 'file' write handle
             release_parent_after: If True, send parent_can_exit after last package
+
+        Returns:
+            Tuple of (success, count, errors, rpmnew_files)
         """
         import rpm
         import sys
@@ -777,7 +803,7 @@ queue._child_process_standalone()
                 print(f"[_execute_install] ERROR adding {path}: {e}", file=sys.stderr)
                 sys.stderr.flush()
                 errors.append(f"{Path(path).name}: {e}")
-                return False, 0, errors
+                return False, 0, errors, []
 
         if DEBUG_EXECINSTALL:
             print(f"[_execute_install] added {added_count} packages to transaction", file=sys.stderr)
@@ -803,7 +829,7 @@ queue._child_process_standalone()
                 print(f"[_execute_install] unresolved deps: {unresolved}", file=sys.stderr)
                 sys.stderr.flush()
                 errors = [f"Dependency: {prob}" for prob in unresolved]
-                return False, 0, errors
+                return False, 0, errors, []
             if DEBUG_EXECINSTALL:
                 print(f"[_execute_install] dependencies OK", file=sys.stderr)
                 sys.stderr.flush()
@@ -815,7 +841,7 @@ queue._child_process_standalone()
             sys.stderr.flush()
 
         if op.test:
-            return True, len(rpm_paths), []
+            return True, len(rpm_paths), [], []
 
         # Set up callback
         total = len(rpm_paths)
@@ -869,12 +895,14 @@ queue._child_process_standalone()
                 # Release parent early when all packages are closed AND no errors seen
                 # ts.run() will continue in background for rpmdb sync/scriptlets
                 # If errors occur later, we'll alert on stderr
+                # Note: rpmnew_files not available yet (ts.run() still in progress)
                 if (closed_count[0] == total and release_parent_after
                         and not extraction_error[0] and not pipe_state['closed']):
                     pipe_state['file'].write(QueueProgressMessage(
                         msg_type='op_done',
                         operation_id=op.operation_id,
-                        count=total
+                        count=total,
+                        rpmnew_files=[]  # Not available during early release
                     ).to_json() + "\n")
                     pipe_state['file'].write(QueueProgressMessage(
                         msg_type='parent_can_exit'
@@ -912,9 +940,17 @@ queue._child_process_standalone()
             print(f"[_execute_install] calling ts.run() with {total} packages", file=sys.stderr)
             sys.stderr.flush()
         _log_background(f"Starting install: {total} packages")
+
+        # Track .rpmnew files created during this transaction
+        rpmnew_before = _list_rpmnew_files(self.root or "/")
         problems = ts.run(callback, '')
+        rpmnew_after = _list_rpmnew_files(self.root or "/")
+        new_rpmnew_files = list(rpmnew_after - rpmnew_before)
+
         if DEBUG_EXECINSTALL:
             print(f"[_execute_install] ts.run() returned: problems={problems}", file=sys.stderr)
+            if new_rpmnew_files:
+                print(f"[_execute_install] new .rpmnew files: {new_rpmnew_files}", file=sys.stderr)
             sys.stderr.flush()
 
         # Clean up any remaining FDs
@@ -945,7 +981,8 @@ queue._child_process_standalone()
                         pipe_state['file'].write(QueueProgressMessage(
                             msg_type='op_done',
                             operation_id=op.operation_id,
-                            count=total
+                            count=total,
+                            rpmnew_files=new_rpmnew_files
                         ).to_json() + "\n")
                         pipe_state['file'].write(QueueProgressMessage(
                             msg_type='parent_can_exit'
@@ -953,7 +990,7 @@ queue._child_process_standalone()
                         pipe_state['file'].flush()
                         pipe_state['file'].close()
                         pipe_state['closed'] = True
-                    return True, total, []
+                    return True, total, [], new_rpmnew_files
                 problems = real_problems
 
             print(f"[_execute_install] PROBLEMS: {problems}", file=sys.stderr)
@@ -976,9 +1013,9 @@ queue._child_process_standalone()
                 _log_background("ALERT: Installation failed after parent was released!")
                 # Return success=True because parent already got op_done
                 # The alert on stderr is the notification
-                return True, current[0], []
+                return True, current[0], [], new_rpmnew_files
 
-            return False, current[0], errors
+            return False, current[0], errors, new_rpmnew_files
 
         _log_background(f"Transaction completed: {total} packages")
 
@@ -987,7 +1024,8 @@ queue._child_process_standalone()
             pipe_state['file'].write(QueueProgressMessage(
                 msg_type='op_done',
                 operation_id=op.operation_id,
-                count=total
+                count=total,
+                rpmnew_files=new_rpmnew_files
             ).to_json() + "\n")
             pipe_state['file'].write(QueueProgressMessage(
                 msg_type='parent_can_exit'
@@ -997,7 +1035,7 @@ queue._child_process_standalone()
             pipe_state['closed'] = True
             _log_background("Parent released after transaction complete")
 
-        return True, total, []
+        return True, total, [], new_rpmnew_files
 
     def _execute_erase(
         self,

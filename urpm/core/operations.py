@@ -49,6 +49,7 @@ class InstallOptions:
     root: str = "/"
     use_userns: bool = False
     sync: bool = False
+    config_policy: str = "keep"  # keep, replace, or ask
 
 
 class PackageOperations:
