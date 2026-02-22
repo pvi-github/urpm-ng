@@ -945,50 +945,52 @@ def _build_single_package(
 
         # 6. Build the package
         print(f"  Building...")
+        # Get package name from spec for log naming (log.<Name>)
+        result = container.exec(cid, ['rpmspec', '-q', '--srpm', '--qf', '%{name}', spec_path])
+        pkg_name = result.stdout.strip() if result.returncode == 0 else source_path.stem
+        container_log = f'/tmp/log.{pkg_name}'
         result = container.exec_stream(cid, [
-            'rpmbuild', '-ba', spec_path
+            'bash', '-c', f'rpmbuild -ba {spec_path} 2>&1 | tee {container_log}'
         ])
-        if result != 0:
-            return (source_path, False, "rpmbuild failed")
+        build_failed = result != 0
 
         # 7. Copy results out
-        print(f"  Retrieving results...")
-
         # Determine output location
         if is_spec_build and workspace:
             # For spec builds, output to workspace/{RPMS,SRPMS}
             rpms_dir = workspace / 'RPMS'
             srpms_dir = workspace / 'SRPMS'
+            log_dir = workspace / 'SPECS'
         else:
             # For SRPM builds, output to specified output_dir
             pkg_output = output_dir / source_path.stem.replace('.src', '')
             pkg_output.mkdir(parents=True, exist_ok=True)
             rpms_dir = pkg_output / 'RPMS'
             srpms_dir = pkg_output / 'SRPMS'
+            log_dir = pkg_output
 
         rpms_dir.mkdir(parents=True, exist_ok=True)
         srpms_dir.mkdir(parents=True, exist_ok=True)
 
-        container.cp(f"{cid}:/root/rpmbuild/RPMS/.", str(rpms_dir))
-        container.cp(f"{cid}:/root/rpmbuild/SRPMS/.", str(srpms_dir))
+        # Copy build log (always, even on failure)
+        log_file = log_dir / f"log.{pkg_name}"
+        if container.cp(f"{cid}:{container_log}", str(log_file)):
+            print(f"  Build log: {log_file}")
 
-        # 8. Copy build log (to SPECS directory for spec builds)
-        if is_spec_build and workspace:
-            log_dir = workspace / 'SPECS'
-        else:
-            log_dir = rpms_dir.parent
-        # Get build.log if exists
-        result = container.exec(cid, ['cat', '/root/rpmbuild/BUILD/build.log'])
-        if result.returncode == 0 and result.stdout:
-            log_file = log_dir / f"{source_path.stem}.build.log"
-            log_file.write_text(result.stdout)
+        if build_failed:
+            return (source_path, False, f"rpmbuild failed (see {log_file})")
+
+        print(f"  Copying RPMs to {rpms_dir}/")
+        container.cp(f"{cid}:/root/rpmbuild/RPMS/.", str(rpms_dir))
+
+        print(f"  Copying SRPMs to {srpms_dir}/")
+        container.cp(f"{cid}:/root/rpmbuild/SRPMS/.", str(srpms_dir))
 
         # Count built packages
         rpm_count = len(list(rpms_dir.rglob('*.rpm')))
         srpm_count = len(list(srpms_dir.rglob('*.rpm')))
 
-        output_location = workspace if (is_spec_build and workspace) else rpms_dir.parent
-        return (source_path, True, f"{rpm_count} RPMs, {srpm_count} SRPMs -> {output_location}")
+        return (source_path, True, f"{rpm_count} RPMs, {srpm_count} SRPMs")
 
     except Exception as e:
         return (source_path, False, str(e))
