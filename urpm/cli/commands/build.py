@@ -646,6 +646,21 @@ def _cleanup_chroot_for_image(root: str):
         os.makedirs(var_tmp, mode=0o1777, exist_ok=True)
         print(f"  Created /var/tmp")
 
+    # Fix PATH for Mageia 9 compatibility (/bin and /sbin are separate)
+    profile_d = os.path.join(root, 'etc', 'profile.d')
+    if os.path.isdir(profile_d):
+        path_script = os.path.join(profile_d, 'zz-path-compat.sh')
+        if not os.path.exists(path_script):
+            try:
+                with open(path_script, 'w') as f:
+                    f.write('# Mageia 9 compatibility: add /bin /sbin if not symlinks\n')
+                    f.write('[ -d /bin ] && [ ! -L /bin ] && export PATH="$PATH:/bin"\n')
+                    f.write('[ -d /sbin ] && [ ! -L /sbin ] && export PATH="$PATH:/sbin"\n')
+                os.chmod(path_script, 0o644)
+                print(f"  Created /etc/profile.d/zz-path-compat.sh")
+            except (IOError, OSError):
+                pass
+
     # Create /etc/machine-id if missing (required by systemd, dbus, etc.)
     machine_id_path = os.path.join(root, 'etc', 'machine-id')
     if not os.path.exists(machine_id_path):
