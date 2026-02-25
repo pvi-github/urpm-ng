@@ -83,9 +83,20 @@
 - [ ] Cohérence avec `urpm seed`
 
 ### rpmdrake-ng
-- [ ] IHM complète
+- [ ] IHM complète (voir [doc/SPEC-RPMDRAKE-NG.md](doc/SPEC-RPMDRAKE-NG.md))
 - [ ] Recherche multicritères
 - [ ] Gestion médias/peers/config
+
+#### Améliorations futures rpmdrake-ng
+- [ ] Screenshots AppStream dans panneau détails
+- [ ] Indicateur mises à jour sécurité (MGASA) : badge ou icône
+- [ ] Changelog preview (tooltip ou ligne dépliable)
+- [ ] Favoris/signets : marquer des paquets surveillés
+- [ ] Collections : sauvegarder/partager des listes de paquets
+- [ ] Mode simulation (dry-run visuel)
+- [ ] Jauge espace disque avant/après dans confirmation
+- [ ] ETA estimé téléchargement + installation
+- [ ] Historique avec "Annuler cette transaction" (rollback)
 
 ---
 
