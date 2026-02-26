@@ -133,6 +133,11 @@
 ### whatprovides
 - [ ] Contraintes de version (== < <= > >=) pour filtrer
 
+### Nommage API (cohérence avec urpme)
+- [ ] Renommer `resolve_remove` → `resolve_erase`
+- [ ] Renommer `TransactionType.REMOVE` → `TransactionType.ERASE`
+- [ ] Renommer `execute_erase` reste correct (déjà "erase")
+
 ---
 
 ## Phase différée (entreprise)

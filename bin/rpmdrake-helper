@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""rpmdrake-ng transaction helper.
+
+This script is invoked via pkexec to execute package operations as root.
+"""
+
+import sys
+from pathlib import Path
+
+# Add package to path
+pkg_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(pkg_dir))
+
+from rpmdrake.helper import run_helper
+
+if __name__ == "__main__":
+    run_helper()

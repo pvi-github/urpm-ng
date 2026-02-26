@@ -561,19 +561,19 @@ class PackageOperations:
         """Get list of all installed packages.
 
         Returns:
-            List of dicts with name, version, release, arch, summary
+            List of dicts with name, version, release, arch, summary, group
         """
         import subprocess
 
         result = subprocess.run(
-            ['rpm', '-qa', '--qf', '%{NAME}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\t%{SUMMARY}\\n'],
+            ['rpm', '-qa', '--qf', '%{NAME}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\t%{SUMMARY}\\t%{GROUP}\\n'],
             capture_output=True,
             timeout=60
         )
 
         packages = []
         for line in result.stdout.decode(errors='replace').splitlines():
-            parts = line.split('\t', 4)
+            parts = line.split('\t', 5)
             if len(parts) >= 4:
                 packages.append({
                     'name': parts[0],
@@ -581,6 +581,7 @@ class PackageOperations:
                     'release': parts[2],
                     'arch': parts[3],
                     'summary': parts[4] if len(parts) > 4 else '',
+                    'group': parts[5] if len(parts) > 5 else '',
                     'installed': True,
                 })
 

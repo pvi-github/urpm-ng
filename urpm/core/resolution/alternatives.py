@@ -16,7 +16,7 @@ class AlternativesMixin:
     """
 
     def _find_alternatives(self, solver, trans, actions: list,
-                           max_providers: int = 10) -> list:
+                           max_providers: int = 100) -> list:
         """Find cases where multiple packages could satisfy a dependency.
 
         Uses two approaches:
