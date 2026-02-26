@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Mageia</vendor>
+  <vendor_url>https://www.mageia.org/</vendor_url>
+
+  <action id="org.mageia.rpmdrake.transaction">
+    <description>Install, remove or update packages</description>
+    <description xml:lang="fr">Installer, supprimer ou mettre à jour des paquets</description>
+    <message>Authentication is required to manage software packages</message>
+    <message xml:lang="fr">L'authentification est requise pour gérer les paquets logiciels</message>
+    <icon_name>system-software-install</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/rpmdrake-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>
