@@ -2,9 +2,8 @@
 
 Modern graphical package manager for Mageia Linux.
 
-## Overview
-
 rpmdrake-ng is a Qt6-based graphical interface for managing packages on Mageia Linux. It is built on top of the urpm-ng core library, providing a modern and responsive user experience.
+
 <img width="1930" height="1155" alt="image" src="https://github.com/user-attachments/assets/4e498637-6530-404b-8759-616ecd52c5f6" />
 <img width="1804" height="953" alt="image" src="https://github.com/user-attachments/assets/dd70b678-ace4-40eb-8fdb-4c6bc4cf2116" />
 
@@ -18,34 +17,42 @@ rpmdrake-ng is a Qt6-based graphical interface for managing packages on Mageia L
 - **Parallel downloads**: Progress display with multiple download slots
 - **Keyboard shortcuts**: Efficient navigation without mouse
 
-## Requirements
+## Prerequisites
 
-- Python 3.9+
-- PySide6 (Qt6 for Python)
-- urpm-ng-core >= 0.3.0
-- PolicyKit (for privilege escalation)
+### Distribution
+
+Mageia 9 or Mageia 10.
+
+### Dependencies
+
+rpmdrake-ng requires urpm-ng-core. See the [main README](../README.md) for urpm-ng installation.
 
 ## Installation
 
-### From RPM (recommended)
+### RPM Install (one-liner)
+
+rpmdrake-ng is not yet in official Mageia repositories. Install from GitHub releases:
 
 ```bash
-sudo urpm install rpmdrake-ng
+mkdir -p $HOME/tmp/rpmdrake && cd $HOME/tmp/rpmdrake && \
+MGAVER=$(rpm -q --qf '%{version}' mageia-release-Default 2>/dev/null | cut -d. -f1) && \
+ARCH=$(uname -m) && \
+VER=$(curl -s https://api.github.com/repos/pvi-github/urpm-ng/releases | grep -m1 '"tag_name"' | cut -d'"' -f4) && \
+echo "Downloading rpmdrake-ng for Mageia $MGAVER..." && \
+curl -s "https://api.github.com/repos/pvi-github/urpm-ng/releases/tags/$VER" | \
+  grep browser_download_url | grep 'rpmdrake-ng.*\.rpm"' | cut -d'"' -f4 | \
+  grep -v '\.src\.rpm' | grep "mga${MGAVER}" | head -1 | xargs curl -sLO && \
+su -c "urpm i $HOME/tmp/rpmdrake/rpmdrake-ng-*.rpm"
 ```
 
-### From source
-
-```bash
-cd rpmdrake
-pip install -e .
-```
+Note: urpm-ng must be installed first. See [urpm-ng installation](../README.md#installation).
 
 ## Usage
 
 Launch from the application menu or run:
 
 ```bash
-rpmdrake
+rpmdrake-ng
 ```
 
 ### Keyboard shortcuts
