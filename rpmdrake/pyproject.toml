@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "urpm"
+name = "rpmdrake-ng"
 version = "0.4.0"
-description = "Modern package manager for Mageia Linux"
+description = "Modern graphical package manager for Mageia Linux"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
@@ -15,8 +15,8 @@ authors = [
 requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Environment :: Console",
-    "Intended Audience :: System Administrators",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -34,9 +34,7 @@ dev = [
 ]
 
 [project.scripts]
-urpm = "urpm.cli.main:main"
-urpmd = "urpm.daemon.daemon:main"
-urpm-dbus-service = "urpm.dbus.service:main"
+rpmdrake-ng = "rpmdrake.qt.main:main"
 
 [project.urls]
 Homepage = "https://mageia.org"
@@ -44,13 +42,8 @@ Repository = "https://github.com/mageia/urpm-ng"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["urpm*"]
+include = ["rpmdrake", "rpmdrake.*"]
 
 [tool.pytest.ini_options]
-testpaths = ["urpm/tests"]
+testpaths = ["rpmdrake/tests"]
 python_files = ["test_*.py"]
-filterwarnings = [
-    # libsolv SWIG bindings bug - upstream issue, not ours
-    "ignore:builtin type Swig.*:DeprecationWarning",
-    "ignore:builtin type swigvarlink.*:DeprecationWarning",
-]

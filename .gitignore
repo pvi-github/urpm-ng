@@ -62,3 +62,11 @@ rpmbuild/SRPMS/
 rpmbuild/BUILD/
 rpmbuild/BUILDROOT/
 rpmbuild/SPECS/log.*
+
+# rpmdrake RPM build
+rpmdrake/rpmbuild/SOURCES/*.tar.gz
+rpmdrake/rpmbuild/RPMS/
+rpmdrake/rpmbuild/SRPMS/
+rpmdrake/rpmbuild/BUILD/
+rpmdrake/rpmbuild/BUILDROOT/
+rpmdrake/rpmbuild/SPECS/log.*

@@ -315,7 +315,7 @@ class TransactionQueue:
             return self._parent_process(read_fd, write_fd, progress_callback, sync, pid)
         else:
             # Child process - never returns
-            self._child_process(read_fd, write_fd)
+            self._child_process(read_fd, write_fd, sync)
 
     def _execute_with_userns(
         self,
@@ -635,7 +635,7 @@ queue._child_process_standalone()
             overall_error=overall_error
         )
 
-    def _child_process(self, read_fd: int, write_fd: int):
+    def _child_process(self, read_fd: int, write_fd: int, sync: bool = False):
         """Child: execute operations sequentially."""
         import rpm
 
@@ -693,11 +693,12 @@ queue._child_process_standalone()
                     )
                 else:
                     # For erase: release parent after if it's background OR if it's the last operation
+                    # BUT NOT in sync mode (we need to send progress and wait for completion)
                     is_last_op = (i + 1 >= len(self.operations))
                     success, count, errors = self._execute_erase(
                         op,
                         pipe_state,
-                        release_parent_after=((op.background or is_last_op) and not pipe_state['closed'])
+                        release_parent_after=((op.background or is_last_op) and not pipe_state['closed'] and not sync)
                     )
                     rpmnew_files = []
 
@@ -1051,23 +1052,13 @@ queue._child_process_standalone()
         """
         import rpm
 
-        # For background erase, release parent immediately (before erase starts)
-        if release_parent_after and not pipe_state['closed']:
-            pipe_state['file'].write(QueueProgressMessage(
-                msg_type='parent_can_exit'
-            ).to_json() + "\n")
-            pipe_state['file'].flush()
-            pipe_state['file'].close()
-            pipe_state['closed'] = True
-            _log_background("Parent released, starting background erase...")
-
         package_names = op.targets
         errors = []
 
         ts = rpm.TransactionSet(self.root or '/')
         ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
 
-        # Find installed packages
+        # Find installed packages FIRST (to know the count before releasing parent)
         found = []
         for name in package_names:
             mi = ts.dbMatch('name', name)
@@ -1079,6 +1070,23 @@ queue._child_process_standalone()
         if not found:
             errors.append("No packages found to erase")
             return False, 0, errors
+
+        # For background erase, release parent after determining count
+        # Send op_done BEFORE parent_can_exit so parent gets the count
+        if release_parent_after and not pipe_state['closed']:
+            pipe_state['file'].write(QueueProgressMessage(
+                msg_type='op_done',
+                operation_id=op.operation_id,
+                count=len(found),
+                rpmnew_files=[]
+            ).to_json() + "\n")
+            pipe_state['file'].write(QueueProgressMessage(
+                msg_type='parent_can_exit'
+            ).to_json() + "\n")
+            pipe_state['file'].flush()
+            pipe_state['file'].close()
+            pipe_state['closed'] = True
+            _log_background("Parent released, starting background erase...")
 
         # Check dependencies
         if not op.force:

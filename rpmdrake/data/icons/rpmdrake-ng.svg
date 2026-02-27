@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Background circle -->
+  <circle cx="24" cy="24" r="22" fill="#2196f3"/>
+  <!-- Package box -->
+  <rect x="12" y="16" width="24" height="20" rx="2" fill="white"/>
+  <!-- Package flap -->
+  <polygon points="12,16 24,8 36,16" fill="#1976d2"/>
+  <!-- Arrow down -->
+  <polygon points="24,38 18,30 21,30 21,24 27,24 27,30 30,30" fill="#2196f3"/>
+</svg>

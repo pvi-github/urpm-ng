@@ -86,6 +86,9 @@ class Controller:
         self._cache_term: str = ""
         self._cache_results: List[dict] = []
 
+        # Current transaction helper (for cancel)
+        self._current_helper = None
+
     # =========================================================================
     # Package List Management
     # =========================================================================
@@ -831,25 +834,55 @@ class Controller:
             self.view.show_error("Erreur", f"Résolution impossible: {e}")
             return
 
-        from .helper_client import HelperClient, TransactionResult
+        from .helper_client import HelperClient, TransactionResult, DownloadSlotInfo
 
         self.view.show_loading(True)
+        self.view.start_transaction(action)
 
         def on_status(message: str):
             self.view.on_progress('status', message, 0, 0)
 
-        def on_download_progress(name: str, current: int, total: int):
-            self.view.on_progress('download', name, current, total)
+        def on_download_progress(
+            name: str,
+            current: int,
+            total: int,
+            bytes_done: int,
+            bytes_total: int,
+            slots: list
+        ):
+            # Convert DownloadSlotInfo to dicts for signal passing
+            slot_dicts = []
+            for s in slots:
+                if isinstance(s, DownloadSlotInfo):
+                    slot_dicts.append({
+                        'slot': s.slot,
+                        'name': s.name,
+                        'bytes_done': s.bytes_done,
+                        'bytes_total': s.bytes_total,
+                        'source': s.source,
+                        'source_type': s.source_type,
+                    })
+                else:
+                    slot_dicts.append(s)
+            self.view.on_download_progress(current, total, bytes_done, bytes_total, slot_dicts)
 
         def on_install_progress(name: str, current: int, total: int):
-            self.view.on_progress('install', name, current, total)
+            # Use appropriate method based on action type
+            if action == 'erase':
+                self.view.on_erase_progress(name, current, total)
+            else:
+                self.view.on_install_progress(name, current, total)
 
         def on_error(message: str):
+            self._current_helper = None
             self.view.show_loading(False)
+            self.view.finish_transaction()
             self.view.show_error("Erreur", message)
 
         def on_done(result: TransactionResult):
+            self._current_helper = None
             self.view.show_loading(False)
+            self.view.finish_transaction()
             self.view.on_transaction_complete(
                 result.success,
                 {
@@ -867,6 +900,7 @@ class Controller:
             on_error=on_error,
             on_done=on_done,
         )
+        self._current_helper = client
 
         if action == 'install':
             client.install(packages, choices=choices)
@@ -877,6 +911,14 @@ class Controller:
                 client.upgrade_all(choices=choices)
             else:
                 client.upgrade(packages, choices=choices)
+
+    def cancel_transaction(self) -> None:
+        """Cancel the current transaction if any."""
+        if self._current_helper:
+            self._current_helper.cancel()
+            self._current_helper = None
+            self.view.finish_transaction()
+            self.view.show_loading(False)
 
     def _build_resolution_summary(self, resolution, action: str, requested_set: Set[str]) -> dict:
         """Build detailed summary of resolution for confirmation dialog.

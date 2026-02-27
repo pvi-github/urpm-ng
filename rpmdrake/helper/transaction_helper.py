@@ -234,11 +234,31 @@ class TransactionHelper:
                                   item_bytes=None, item_total=None, slots_status=None):
                 if self.cancelled:
                     return False
+
+                # Build slots info for parallel display
+                slots = []
+                if slots_status:
+                    for slot, prog in slots_status:
+                        if prog is not None:
+                            slots.append({
+                                "slot": slot,
+                                "name": prog.name,
+                                "bytes_done": prog.bytes_done,
+                                "bytes_total": prog.bytes_total,
+                                "source": prog.source,
+                                "source_type": prog.source_type,
+                            })
+                        else:
+                            slots.append({"slot": slot, "name": None})
+
                 self._send({
                     "type": "download_progress",
                     "name": name,
                     "current": pkg_num,
-                    "total": pkg_total
+                    "total": pkg_total,
+                    "bytes_done": bytes_done,
+                    "bytes_total": bytes_total,
+                    "slots": slots,
                 })
                 return True
 
