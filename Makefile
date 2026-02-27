@@ -12,6 +12,7 @@ version:
 	$(SED) -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' urpm/__init__.py
 	$(SED) -i 's/^version = .*/version = "$(VERSION)"/' pyproject.toml
 	$(SED) -i 's/^%define version .*/%define version $(VERSION)/' rpmbuild/SPECS/urpm-ng.spec
+	$(MAKE) -C rpmdrake version
 
 tarball: version
 	$(SED) -i 's/^%define version.*/%define version $(VERSION)/' rpmbuild/SPECS/$(NAME).spec
@@ -36,8 +37,14 @@ install-completion:
 rpm: tarball
 	cd rpmbuild && $(BM) -l SPECS/$(NAME).spec
 
+rpm-rpmdrake:
+	$(MAKE) -C rpmdrake rpm
+
+rpm-all: rpm rpm-rpmdrake
+
 clean:
 	$(RM) -f rpmbuild/SOURCES/$(NAME)-*.tar.gz
 	$(RM) -f rpmbuild/SOURCES/pk-backend-urpm.tar.gz
+	$(MAKE) -C rpmdrake clean
 
-.PHONY: version tarball install-completion rpm clean
+.PHONY: version tarball install-completion rpm rpm-rpmdrake rpm-all clean

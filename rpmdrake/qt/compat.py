@@ -38,6 +38,7 @@ __all__ = [
     "QShortcut",
     "QAction",
     "QMouseEvent",
+    "QKeyEvent",
     "QCheckBox",
     "QGroupBox",
     "QTreeWidget",
@@ -52,6 +53,7 @@ __all__ = [
     "QBrush",
     "QFont",
     "QFontMetrics",
+    "QTimer",
 ]
 
 try:
@@ -66,6 +68,7 @@ try:
         QModelIndex,
         QRect,
         QSize,
+        QTimer,
     )
     from PySide6.QtWidgets import (
         QApplication,
@@ -103,6 +106,7 @@ try:
         QShortcut,
         QAction,
         QMouseEvent,
+        QKeyEvent,
         QColor,
         QBrush,
         QFont,
@@ -122,6 +126,7 @@ except ImportError:
         QModelIndex,
         QRect,
         QSize,
+        QTimer,
     )
     from PyQt6.QtWidgets import (
         QApplication,
@@ -159,6 +164,7 @@ except ImportError:
         QShortcut,
         QAction,
         QMouseEvent,
+        QKeyEvent,
         QColor,
         QBrush,
         QFont,

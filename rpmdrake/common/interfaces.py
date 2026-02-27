@@ -133,6 +133,63 @@ class ViewInterface(ABC):
         """
         pass
 
+    def start_transaction(self) -> None:
+        """Signal start of a transaction.
+
+        The view should show a progress widget/indicator.
+        """
+        pass
+
+    def on_download_progress(
+        self,
+        pkg_current: int,
+        pkg_total: int,
+        bytes_done: int,
+        bytes_total: int,
+        slots: list
+    ) -> None:
+        """Update download progress with parallel slot details.
+
+        Args:
+            pkg_current: Number of completed packages.
+            pkg_total: Total number of packages to download.
+            bytes_done: Total bytes downloaded so far.
+            bytes_total: Total bytes to download.
+            slots: List of slot info dicts with keys:
+                - slot: int, slot number (0-3)
+                - name: str or None, package name (None if idle)
+                - bytes_done: int, bytes downloaded for this package
+                - bytes_total: int, total bytes for this package
+                - source: str, server or peer name
+                - source_type: str, 'server', 'peer', or 'cache'
+        """
+        pass
+
+    def on_install_progress(self, name: str, current: int, total: int) -> None:
+        """Update install progress.
+
+        Args:
+            name: Current package being installed.
+            current: Number of packages installed so far.
+            total: Total number of packages to install.
+        """
+        pass
+
+    def start_rpmdb_sync(self) -> None:
+        """Signal start of rpmdb sync phase.
+
+        The view should show an indeterminate progress indicator
+        while waiting for the database sync.
+        """
+        pass
+
+    def finish_transaction(self) -> None:
+        """Signal end of transaction.
+
+        The view should hide the progress widget/indicator.
+        """
+        pass
+
     def show_action_confirmation(self, action: str, packages: List[str]) -> bool:
         """Show confirmation dialog before executing an action.
 

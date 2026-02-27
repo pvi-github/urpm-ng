@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=RPMdrake
+Name[fr]=RPMdrake
+GenericName=Package Manager
+GenericName[fr]=Gestionnaire de paquets
+Comment=Install, remove and update packages
+Comment[fr]=Installer, supprimer et mettre à jour des paquets
+Exec=rpmdrake-ng
+Icon=rpmdrake
+Terminal=false
+Type=Application
+Categories=System;PackageManager;Settings;
+Keywords=package;rpm;install;update;software;
+Keywords[fr]=paquet;rpm;installer;mise à jour;logiciel;

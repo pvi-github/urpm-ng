@@ -8,11 +8,22 @@ import os
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-__all__ = ["HelperClient", "TransactionResult"]
+__all__ = ["HelperClient", "TransactionResult", "DownloadSlotInfo"]
+
+
+@dataclass
+class DownloadSlotInfo:
+    """Info about a single download slot."""
+    slot: int
+    name: Optional[str] = None
+    bytes_done: int = 0
+    bytes_total: int = 0
+    source: str = ""
+    source_type: str = ""  # 'server', 'peer', 'cache'
 
 
 @dataclass
@@ -30,7 +41,7 @@ class HelperClient:
     def __init__(
         self,
         on_status: Callable[[str], None] = None,
-        on_download_progress: Callable[[str, int, int], None] = None,
+        on_download_progress: Callable[[str, int, int, int, int, List[DownloadSlotInfo]], None] = None,
         on_install_progress: Callable[[str, int, int], None] = None,
         on_error: Callable[[str], None] = None,
         on_done: Callable[[TransactionResult], None] = None,
@@ -39,7 +50,8 @@ class HelperClient:
 
         Args:
             on_status: Called with status messages.
-            on_download_progress: Called with (name, current, total) during download.
+            on_download_progress: Called with (name, current, total, bytes_done, bytes_total, slots)
+                                  during download. slots is a list of DownloadSlotInfo.
             on_install_progress: Called with (name, current, total) during install.
             on_error: Called with error messages.
             on_done: Called when transaction completes.
@@ -56,16 +68,16 @@ class HelperClient:
     def _get_helper_path(self) -> str:
         """Get path to the helper script."""
         # Try installed path first
-        installed = "/usr/libexec/rpmdrake-helper"
+        installed = "/usr/libexec/rpmdrake-ng-helper"
         if os.path.exists(installed):
             return installed
 
         # Development path
-        dev_path = Path(__file__).parent.parent.parent / "bin" / "rpmdrake-helper"
+        dev_path = Path(__file__).parent.parent.parent / "bin" / "rpmdrake-ng-helper"
         if dev_path.exists():
             return str(dev_path)
 
-        raise FileNotFoundError("rpmdrake-helper not found")
+        raise FileNotFoundError("rpmdrake-ng-helper not found")
 
     def _start_helper(self) -> bool:
         """Start the helper process via pkexec."""
@@ -128,10 +140,24 @@ class HelperClient:
 
         elif msg_type == "download_progress":
             if self.on_download_progress:
+                # Parse slots info
+                slots = []
+                for slot_data in msg.get("slots", []):
+                    slots.append(DownloadSlotInfo(
+                        slot=slot_data.get("slot", 0),
+                        name=slot_data.get("name"),
+                        bytes_done=slot_data.get("bytes_done", 0),
+                        bytes_total=slot_data.get("bytes_total", 0),
+                        source=slot_data.get("source", ""),
+                        source_type=slot_data.get("source_type", ""),
+                    ))
                 self.on_download_progress(
                     msg.get("name", ""),
                     msg.get("current", 0),
-                    msg.get("total", 0)
+                    msg.get("total", 0),
+                    msg.get("bytes_done", 0),
+                    msg.get("bytes_total", 0),
+                    slots
                 )
 
         elif msg_type == "install_progress" or msg_type == "erase_progress":

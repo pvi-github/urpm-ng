@@ -29,6 +29,12 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
     _update_packages = Signal(list)
     _show_loading = Signal(bool)
     _show_progress = Signal(str, str, int, int, float)
+    _show_download_progress = Signal(int, int, int, int, list)  # pkg_cur, pkg_tot, bytes, bytes_tot, slots
+    _show_install_progress = Signal(str, int, int)  # name, current, total
+    _show_erase_progress = Signal(str, int, int)  # name, current, total
+    _start_transaction = Signal(str)  # action: install, upgrade, erase
+    _finish_transaction = Signal()
+    _start_rpmdb_sync = Signal()
     _show_question = Signal(str, str, str, list)
     _show_complete = Signal(bool, dict)
     _show_error = Signal(str, str)
@@ -43,6 +49,12 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         self._update_packages.connect(self._do_update_packages)
         self._show_loading.connect(self._do_show_loading)
         self._show_progress.connect(self._do_show_progress)
+        self._show_download_progress.connect(self._do_show_download_progress)
+        self._show_install_progress.connect(self._do_show_install_progress)
+        self._show_erase_progress.connect(self._do_show_erase_progress)
+        self._start_transaction.connect(self._do_start_transaction)
+        self._finish_transaction.connect(self._do_finish_transaction)
+        self._start_rpmdb_sync.connect(self._do_start_rpmdb_sync)
         self._show_question.connect(self._do_show_question)
         self._show_complete.connect(self._do_show_complete)
         self._show_error.connect(self._do_show_error)
@@ -97,6 +109,41 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
     def on_filter_state_changed(self) -> None:
         """Update filter panel when state changes programmatically."""
         self._filter_changed.emit()
+
+    def start_transaction(self, action: str = "install") -> None:
+        """Signal start of a transaction (show progress widget).
+
+        Args:
+            action: 'install', 'upgrade', or 'erase'
+        """
+        self._start_transaction.emit(action)
+
+    def on_erase_progress(self, name: str, current: int, total: int) -> None:
+        """Update erase/remove progress."""
+        self._show_erase_progress.emit(name, current, total)
+
+    def on_download_progress(
+        self,
+        pkg_current: int,
+        pkg_total: int,
+        bytes_done: int,
+        bytes_total: int,
+        slots: list
+    ) -> None:
+        """Update download progress with slot details."""
+        self._show_download_progress.emit(pkg_current, pkg_total, bytes_done, bytes_total, slots)
+
+    def on_install_progress(self, name: str, current: int, total: int) -> None:
+        """Update install progress."""
+        self._show_install_progress.emit(name, current, total)
+
+    def start_rpmdb_sync(self) -> None:
+        """Signal start of rpmdb sync phase."""
+        self._start_rpmdb_sync.emit()
+
+    def finish_transaction(self) -> None:
+        """Signal end of transaction (hide progress widget)."""
+        self._finish_transaction.emit()
 
     def show_action_confirmation(self, action: str, packages: List[str]) -> bool:
         """Show confirmation dialog before executing an action."""
@@ -354,18 +401,33 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
         btn_confirm = QPushButton(f"Confirmer {title}")
         btn_confirm.setMinimumWidth(140)
-        btn_confirm.setStyleSheet("""
-            QPushButton {
-                background-color: #4caf50;
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #45a049; }
-            QPushButton:pressed { background-color: #3d8b40; }
-        """)
+        # Red for erase, green for install/upgrade
+        if action == 'erase':
+            btn_confirm.setStyleSheet("""
+                QPushButton {
+                    background-color: #f44336;
+                    color: white;
+                    font-weight: bold;
+                    padding: 6px 16px;
+                    border: none;
+                    border-radius: 4px;
+                }
+                QPushButton:hover { background-color: #d32f2f; }
+                QPushButton:pressed { background-color: #b71c1c; }
+            """)
+        else:
+            btn_confirm.setStyleSheet("""
+                QPushButton {
+                    background-color: #4caf50;
+                    color: white;
+                    font-weight: bold;
+                    padding: 6px 16px;
+                    border: none;
+                    border-radius: 4px;
+                }
+                QPushButton:hover { background-color: #45a049; }
+                QPushButton:pressed { background-color: #3d8b40; }
+            """)
 
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_confirm)
@@ -399,11 +461,69 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         total: int,
         speed: float
     ) -> None:
-        """Show progress on main thread."""
+        """Show progress on main thread (legacy, for status messages)."""
         status = f"{phase}: {name} ({current}/{total})"
         if speed > 0:
             status += f" - {speed / 1024 / 1024:.1f} MB/s"
-        self.window.statusBar().showMessage(status)
+        self.window.show_status_message(status)
+
+    @Slot(str)
+    def _do_start_transaction(self, action: str) -> None:
+        """Start transaction display."""
+        self.window.progress_widget.start_transaction(action)
+
+    @Slot(int, int, int, int, list)
+    def _do_show_download_progress(
+        self,
+        pkg_current: int,
+        pkg_total: int,
+        bytes_done: int,
+        bytes_total: int,
+        slots: list
+    ) -> None:
+        """Show download progress with slot details."""
+        from .widgets.download_progress import SlotInfo
+        # Convert slot dicts to SlotInfo objects
+        slot_infos = []
+        for s in slots:
+            if isinstance(s, dict):
+                slot_infos.append(SlotInfo(
+                    slot=s.get('slot', 0),
+                    name=s.get('name'),
+                    bytes_done=s.get('bytes_done', 0),
+                    bytes_total=s.get('bytes_total', 0),
+                    source=s.get('source', ''),
+                    source_type=s.get('source_type', ''),
+                ))
+            else:
+                slot_infos.append(s)
+        self.window.progress_widget.update_download(
+            pkg_current, pkg_total, bytes_done, bytes_total, slot_infos
+        )
+
+    @Slot(str, int, int)
+    def _do_show_install_progress(self, name: str, current: int, total: int) -> None:
+        """Show install progress."""
+        self.window.progress_widget.update_install(name, current, total)
+
+    @Slot(str, int, int)
+    def _do_show_erase_progress(self, name: str, current: int, total: int) -> None:
+        """Show erase progress."""
+        self.window.progress_widget.update_erase(name, current, total)
+
+    @Slot()
+    def _do_start_rpmdb_sync(self) -> None:
+        """Start rpmdb sync display."""
+        self.window.progress_widget.start_rpmdb_sync()
+
+    @Slot()
+    def _do_finish_transaction(self) -> None:
+        """Finish transaction display."""
+        self.window.progress_widget.finish()
+
+    def connect_cancel(self, callback) -> None:
+        """Connect the cancel button to a callback."""
+        self.window.progress_widget.cancel_requested.connect(callback)
 
     @Slot(str, str, str, list)
     def _do_show_question(
@@ -512,7 +632,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         )
 
         if result == QMessageBox.StandardButton.Yes:
-            self.window.statusBar().showMessage(f"Exécution de {action}...")
+            self.window.show_status_message(f"Exécution de {action}...")
 
     @Slot()
     def _do_filter_changed(self) -> None:

@@ -1,0 +1,7 @@
+#!/usr/bin/python3
+"""Transaction helper for rpmdrake-ng.
+
+This script is called via pkexec to perform privileged operations.
+"""
+from rpmdrake.helper.transaction_helper import run_helper
+run_helper()

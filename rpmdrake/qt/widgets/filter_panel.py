@@ -246,8 +246,8 @@ class FilterPanel(QWidget):
             lambda checked: self._on_display_toggled('tasks', checked)
         )
 
-        # Category tree
-        self.category_tree.itemClicked.connect(self._on_category_clicked)
+        # Category tree (both click and keyboard)
+        self.category_tree.currentItemChanged.connect(self._on_category_changed)
 
     def _on_state_toggled(self, state: PackageState, checked: bool) -> None:
         """Handle state filter toggle."""
@@ -402,8 +402,10 @@ class FilterPanel(QWidget):
         all_item.setSelected(True)
         self.category_tree.setCurrentItem(all_item)
 
-    def _on_category_clicked(self, item: QTreeWidgetItem, column: int) -> None:
-        """Handle category tree item click."""
-        category = item.data(0, Qt.ItemDataRole.UserRole)
+    def _on_category_changed(self, current: QTreeWidgetItem, previous: QTreeWidgetItem) -> None:
+        """Handle category tree selection change (mouse or keyboard)."""
+        if current is None:
+            return
+        category = current.data(0, Qt.ItemDataRole.UserRole)
         self.controller.set_category_filter(category)
         self.filter_changed.emit()

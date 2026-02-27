@@ -1,0 +1,99 @@
+.TH RPMDRAKE-NG 1 "Février 2025" "rpmdrake-ng 0.1.0" "Commandes utilisateur"
+.SH NOM
+rpmdrake-ng \- gestionnaire de paquets graphique pour Mageia Linux
+.SH SYNOPSIS
+.B rpmdrake-ng
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B rpmdrake-ng
+est une interface graphique Qt6 moderne pour la gestion des paquets sur
+Mageia Linux. Il offre un moyen intuitif de rechercher, installer,
+supprimer et mettre à jour des paquets.
+.PP
+rpmdrake-ng est construit sur la bibliothèque urpm-ng, offrant une
+résolution rapide des dépendances avec libsolv et le support des
+téléchargements parallèles.
+.SH OPTIONS
+.TP
+.B \-\-help
+Affiche le message d'aide et quitte.
+.TP
+.B \-\-version
+Affiche les informations de version et quitte.
+.SH RACCOURCIS CLAVIER
+.TP
+.B Ctrl+F
+Met le focus sur le champ de recherche.
+.TP
+.B Ctrl+A
+Sélectionne tous les paquets visibles.
+.TP
+.B Escape
+Désélectionne tous les paquets.
+.TP
+.B Ctrl+I
+Installe les paquets sélectionnés.
+.TP
+.B Ctrl+R
+Supprime les paquets sélectionnés.
+.TP
+.B Ctrl+U
+Met à jour les paquets sélectionnés.
+.TP
+.B Ctrl++
+Zoom avant (augmente la taille de police).
+.TP
+.B Ctrl+-
+Zoom arrière (diminue la taille de police).
+.TP
+.B F5
+Rafraîchit la liste des paquets.
+.SH ÉTATS DES PAQUETS
+Les paquets sont affichés avec des indicateurs visuels :
+.TP
+.B Bleu (gras)
+Paquet installé explicitement.
+.TP
+.B Bleu foncé
+Installé comme dépendance.
+.TP
+.B Violet
+Paquet orphelin (plus nécessaire).
+.TP
+.B Ambre
+Mise à jour disponible.
+.TP
+.B Rouge
+Conflit de paquet.
+.SH FILTRES
+Le panneau de filtres permet de filtrer les paquets par :
+.TP
+.B État
+Tous, Installés, Non installés, Mises à jour disponibles, Orphelins.
+.TP
+.B Groupe
+Catégories de paquets (Développement, Système, Réseau, etc.).
+.TP
+.B Média
+Dépôts de paquets.
+.SH AUTHENTIFICATION
+L'installation, la suppression et les mises à jour de paquets nécessitent
+les privilèges root. rpmdrake-ng utilise PolicyKit pour demander
+l'authentification si nécessaire.
+.SH FICHIERS
+.TP
+.I /etc/urpm/
+Répertoire de configuration d'urpm-ng.
+.TP
+.I ~/.config/rpmdrake/
+Préférences utilisateur (taille de fenêtre, niveau de zoom).
+.SH VOIR AUSSI
+.BR urpm (1),
+.BR urpmd (8)
+.SH BOGUES
+Signaler les bogues sur https://github.com/pvi-github/urpm-ng/issues
+.SH AUTEUR
+Communauté Mageia
+.SH COPYRIGHT
+Copyright \(co 2025 Communauté Mageia.
+Licence GPLv3+ : GNU GPL version 3 ou ultérieure.

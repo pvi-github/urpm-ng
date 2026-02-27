@@ -1,0 +1,96 @@
+.TH RPMDRAKE-NG 1 "February 2025" "rpmdrake-ng 0.1.0" "User Commands"
+.SH NAME
+rpmdrake-ng \- graphical package manager for Mageia Linux
+.SH SYNOPSIS
+.B rpmdrake-ng
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B rpmdrake-ng
+is a modern Qt6 graphical interface for managing packages on Mageia Linux.
+It provides an intuitive way to search, install, remove, and update packages.
+.PP
+rpmdrake-ng is built on top of the urpm-ng core library, providing fast
+dependency resolution using libsolv and support for parallel downloads.
+.SH OPTIONS
+.TP
+.B \-\-help
+Display help message and exit.
+.TP
+.B \-\-version
+Display version information and exit.
+.SH KEYBOARD SHORTCUTS
+.TP
+.B Ctrl+F
+Focus the search field.
+.TP
+.B Ctrl+A
+Select all visible packages.
+.TP
+.B Escape
+Deselect all packages.
+.TP
+.B Ctrl+I
+Install selected packages.
+.TP
+.B Ctrl+R
+Remove selected packages.
+.TP
+.B Ctrl+U
+Update selected packages.
+.TP
+.B Ctrl++
+Zoom in (increase font size).
+.TP
+.B Ctrl+-
+Zoom out (decrease font size).
+.TP
+.B F5
+Refresh package list.
+.SH PACKAGE STATES
+Packages in the list are displayed with visual indicators:
+.TP
+.B Blue (bold)
+Explicitly installed package.
+.TP
+.B Dark blue
+Installed as dependency.
+.TP
+.B Purple
+Orphan package (no longer required).
+.TP
+.B Amber
+Update available.
+.TP
+.B Red
+Package conflict.
+.SH FILTERS
+The filter panel allows filtering packages by:
+.TP
+.B State
+All, Installed, Not installed, Updates available, Orphans.
+.TP
+.B Group
+Package categories (Development, System, Network, etc.).
+.TP
+.B Media
+Package repositories.
+.SH AUTHENTICATION
+Package installation, removal, and updates require root privileges.
+rpmdrake-ng uses PolicyKit to request authentication when needed.
+.SH FILES
+.TP
+.I /etc/urpm/
+Configuration directory for urpm-ng.
+.TP
+.I ~/.config/rpmdrake/
+User preferences (window size, zoom level).
+.SH SEE ALSO
+.BR urpm (1),
+.BR urpmd (8)
+.SH BUGS
+Report bugs at https://github.com/pvi-github/urpm-ng/issues
+.SH AUTHOR
+Mageia Community
+.SH COPYRIGHT
+Copyright \(co 2025 Mageia Community.
+License GPLv3+: GNU GPL version 3 or later.

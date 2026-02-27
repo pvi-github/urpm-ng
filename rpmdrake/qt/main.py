@@ -11,15 +11,14 @@ from .compat import (
     QVBoxLayout,
     QHBoxLayout,
     QSplitter,
-    QStatusBar,
     QPushButton,
     QLabel,
-    QProgressBar,
     QKeySequence,
     QShortcut,
     QFont,
     QToolButton,
     QMenu,
+    QFrame,
 )
 
 from urpm.core.database import PackageDatabase
@@ -29,6 +28,7 @@ from .view import QtView
 from .widgets.search_bar import SearchBar
 from .widgets.package_list import PackageList
 from .widgets.filter_panel import FilterPanel
+from .widgets.download_progress import CollapsibleProgressWidget, SlotInfo
 
 __all__ = ["MainWindow", "main"]
 
@@ -79,6 +79,9 @@ class MainWindow(QMainWindow):
         self._create_layout()
         self._create_shortcuts()
         self._connect_signals()
+
+        # Connect cancel button to controller
+        self.progress_widget.cancel_requested.connect(self.controller.cancel_transaction)
 
         # Apply initial row height for package list
         self.package_list.update_row_height(self._font_size)
@@ -194,17 +197,24 @@ class MainWindow(QMainWindow):
         self.filter_panel.setMinimumWidth(200)
         self.filter_panel.setMaximumWidth(300)
 
-        # Loading indicator
-        self.loading_bar = QProgressBar()
-        self.loading_bar.setRange(0, 0)  # Indeterminate
-        self.loading_bar.hide()
+        # Custom bottom bar (replaces QStatusBar for expandable progress)
+        self.bottom_bar = QWidget()
+        bottom_layout = QVBoxLayout(self.bottom_bar)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(0)
 
-        # Status bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
+        # Progress widget (collapsible)
+        self.progress_widget = CollapsibleProgressWidget(num_slots=4)
+        bottom_layout.addWidget(self.progress_widget)
+
+        # Status line
+        self.status_frame = QFrame()
+        self.status_frame.setFrameStyle(QFrame.Shape.StyledPanel)
+        status_layout = QHBoxLayout(self.status_frame)
+        status_layout.setContentsMargins(8, 4, 8, 4)
         self.status_label = QLabel("Prêt")
-        self.status_bar.addWidget(self.status_label)
-        self.status_bar.addPermanentWidget(self.loading_bar)
+        status_layout.addWidget(self.status_label)
+        bottom_layout.addWidget(self.status_frame)
 
     def _create_layout(self) -> None:
         """Create layout."""
@@ -238,6 +248,9 @@ class MainWindow(QMainWindow):
         splitter.setSizes([700, 250])
 
         main_layout.addWidget(splitter, stretch=1)
+
+        # Bottom bar (progress + status)
+        main_layout.addWidget(self.bottom_bar)
 
     def _create_shortcuts(self) -> None:
         """Create keyboard shortcuts."""
@@ -312,16 +325,26 @@ class MainWindow(QMainWindow):
         self.controller.refresh_after_transaction()
         self.filter_panel.populate_categories()
         self.set_loading(False)
-        self.statusBar().showMessage("Liste rafraîchie", 2000)
+        self.show_status_message("Liste rafraîchie", 2000)
 
     def set_loading(self, loading: bool) -> None:
         """Show or hide loading indicator."""
         if loading:
-            self.loading_bar.show()
             self.status_label.setText("Chargement...")
         else:
-            self.loading_bar.hide()
             self.status_label.setText("Prêt")
+
+    def show_status_message(self, message: str, timeout: int = 0) -> None:
+        """Show a message in the status bar.
+
+        Args:
+            message: Message to show.
+            timeout: Auto-clear after this many ms (0 = permanent).
+        """
+        self.status_label.setText(message)
+        if timeout > 0:
+            from .compat import QTimer
+            QTimer.singleShot(timeout, lambda: self.status_label.setText("Prêt"))
 
     def _apply_font_size(self) -> None:
         """Apply font size to entire application."""
@@ -337,20 +360,20 @@ class MainWindow(QMainWindow):
         if self._font_size < self.MAX_FONT_SIZE:
             self._font_size += 1
             self._apply_font_size()
-            self.statusBar().showMessage(f"Zoom: {self._font_size} pt", 2000)
+            self.show_status_message(f"Zoom: {self._font_size} pt", 2000)
 
     def zoom_out(self) -> None:
         """Decrease font size."""
         if self._font_size > self.MIN_FONT_SIZE:
             self._font_size -= 1
             self._apply_font_size()
-            self.statusBar().showMessage(f"Zoom: {self._font_size} pt", 2000)
+            self.show_status_message(f"Zoom: {self._font_size} pt", 2000)
 
     def zoom_reset(self) -> None:
         """Reset font size to default."""
         self._font_size = self.DEFAULT_FONT_SIZE
         self._apply_font_size()
-        self.statusBar().showMessage(f"Zoom: {self._font_size} pt (défaut)", 2000)
+        self.show_status_message(f"Zoom: {self._font_size} pt (défaut)", 2000)
 
     def wheelEvent(self, event) -> None:
         """Handle mouse wheel with Ctrl for zoom."""

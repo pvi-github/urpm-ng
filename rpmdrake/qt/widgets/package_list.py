@@ -56,7 +56,7 @@ class PackageTableModel(QAbstractTableModel):
         'installed': QColor('#2196f3'),   # Bright blue for explicitly installed
         'dep': QColor('#0d47a1'),         # Dark blue for dependencies
         'orphan': QColor('#9966cc'),      # Soft purple for orphans
-        'update': QColor('#e6a030'),      # Soft orange for updates
+        'update': QColor('#8b6914'),      # Muted amber/brown for updates (easy on eyes)
         'available': None,                # Default color
         'conflict': QColor('#cc4444'),    # Soft red for conflicts
     }
@@ -200,7 +200,9 @@ class PackageTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.CheckStateRole and index.column() == self.COL_CHECKBOX:
             row = index.row()
             if 0 <= row < len(self._packages):
-                self._packages[row].selected = (value == Qt.CheckState.Checked)
+                # Handle both enum and int for compatibility with PySide6 6.4.x
+                value_int = getattr(value, 'value', value) if hasattr(value, 'value') else value
+                self._packages[row].selected = (value_int == 2)  # 2 = Checked
                 self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
                 return True
 
@@ -310,8 +312,11 @@ class CheckboxDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         if index.column() == PackageTableModel.COL_CHECKBOX:
-            # Draw checkbox
-            checked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
+            # Draw checkbox - handle both enum and int for PySide6 compatibility
+            current = index.data(Qt.ItemDataRole.CheckStateRole)
+            checked = (current == Qt.CheckState.Checked or
+                       getattr(current, 'value', current) == 2 or
+                       current == 2)
 
             checkbox_option = QStyleOptionButton()
             checkbox_option.state = QStyle.StateFlag.State_Enabled
@@ -336,10 +341,16 @@ class CheckboxDelegate(QStyledItemDelegate):
 
     def editorEvent(self, event, model, option, index):
         if index.column() == PackageTableModel.COL_CHECKBOX:
-            if event.type() == QMouseEvent.Type.MouseButtonRelease:
-                # Toggle checkbox
+            # Mouse click only - keyboard handled by PackageList.keyPressEvent
+            event_type_val = getattr(event.type(), 'value', event.type())
+            # MouseButtonRelease = 3 in Qt
+            if event_type_val == 3:
                 current = index.data(Qt.ItemDataRole.CheckStateRole)
-                new_value = Qt.CheckState.Unchecked if current == Qt.CheckState.Checked else Qt.CheckState.Checked
+                # Handle both enum and int returns for compatibility
+                is_checked = (current == Qt.CheckState.Checked or
+                              getattr(current, 'value', current) == 2 or
+                              current == 2)
+                new_value = Qt.CheckState.Unchecked if is_checked else Qt.CheckState.Checked
                 model.setData(index, new_value, Qt.ItemDataRole.CheckStateRole)
                 return True
         return super().editorEvent(event, model, option, index)
@@ -390,16 +401,33 @@ class PackageList(QTableView):
         header.setSectionResizeMode(PackageTableModel.COL_VERSION, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(PackageTableModel.COL_SUMMARY, QHeaderView.ResizeMode.Stretch)
 
-        # Fixed column widths
-        self.setColumnWidth(PackageTableModel.COL_CHECKBOX, 30)
-        self.setColumnWidth(PackageTableModel.COL_NUMBER, 50)
-        self.setColumnWidth(PackageTableModel.COL_STATE, 60)  # Wider for 🅘🅤 double icons
-        self.setColumnWidth(PackageTableModel.COL_NAME, 200)
-        self.setColumnWidth(PackageTableModel.COL_VERSION, 150)
+        # Column widths are set dynamically in update_row_height() based on font size
 
         # Connect signals
         self.doubleClicked.connect(self._on_double_click)
         self._model.dataChanged.connect(self._on_data_changed)
+
+    def keyPressEvent(self, event) -> None:
+        """Handle key press events."""
+        # Space toggles checkbox for current row
+        # Key_Space = 32 in Qt, check both enum and int for compatibility
+        key = event.key()
+        is_space = (key == 32 or key == Qt.Key.Key_Space or
+                    (hasattr(key, 'value') and key.value == 32))
+        if is_space:
+            index = self.currentIndex()
+            if index.isValid():
+                # Get checkbox index for this row
+                checkbox_index = self._model.index(index.row(), PackageTableModel.COL_CHECKBOX)
+                current = checkbox_index.data(Qt.ItemDataRole.CheckStateRole)
+                # Handle both enum and int returns for compatibility
+                is_checked = (current == Qt.CheckState.Checked or
+                              (hasattr(current, 'value') and current.value == 2) or
+                              current == 2)
+                new_value = Qt.CheckState.Unchecked if is_checked else Qt.CheckState.Checked
+                self._model.setData(checkbox_index, new_value, Qt.ItemDataRole.CheckStateRole)
+                return
+        super().keyPressEvent(event)
 
     def set_packages(self, packages: List[PackageDisplayInfo]) -> None:
         """Set the package list.
@@ -429,7 +457,7 @@ class PackageList(QTableView):
                     self.selection_changed.emit(pkg.name, pkg.selected)
 
     def update_row_height(self, font_size: int) -> None:
-        """Update row height based on font size.
+        """Update row height and column widths based on font size.
 
         Args:
             font_size: Current font size in points.
@@ -444,3 +472,17 @@ class PackageList(QTableView):
         row_height = (line_height * 2) + 8  # 2 lines + 8px padding
 
         self.verticalHeader().setDefaultSectionSize(row_height)
+
+        # Update column widths based on font metrics
+        char_width = metrics.horizontalAdvance("M")  # Use 'M' as reference
+
+        # Checkbox: ~2 chars
+        self.setColumnWidth(PackageTableModel.COL_CHECKBOX, char_width * 2 + 10)
+        # Number: ~4 chars for "9999"
+        self.setColumnWidth(PackageTableModel.COL_NUMBER, char_width * 4 + 10)
+        # State: ~3 chars for "🅘🅤" (circled letters are wide)
+        self.setColumnWidth(PackageTableModel.COL_STATE, char_width * 4 + 10)
+        # Name: ~20 chars
+        self.setColumnWidth(PackageTableModel.COL_NAME, char_width * 20)
+        # Version: ~15 chars
+        self.setColumnWidth(PackageTableModel.COL_VERSION, char_width * 15)
