@@ -5,6 +5,7 @@ Modern graphical package manager for Mageia Linux.
 ## Overview
 
 rpmdrake-ng is a Qt6-based graphical interface for managing packages on Mageia Linux. It is built on top of the urpm-ng core library, providing a modern and responsive user experience.
+<img width="1930" height="1155" alt="image" src="https://github.com/user-attachments/assets/4e498637-6530-404b-8759-616ecd52c5f6" />
 
 ## Features
 
