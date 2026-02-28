@@ -18,6 +18,7 @@ CLAUDE.md
 bin/rebuild.sh
 bin/recup.sh
 prout.*
+po/locale/**/*.mo
 
 # Python
 __pycache__/
@@ -49,6 +50,8 @@ env/
 # IDE
 .idea/
 .vscode/
+.kdev4/
+*.kdev4
 *.swp
 *.swo
 *.*~
