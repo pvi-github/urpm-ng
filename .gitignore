@@ -13,6 +13,9 @@ debug*.txt
 
 # Dev
 .urpm.local
+bin/rebuild.sh
+bin/recup.sh
+prout.*
 
 # Python
 __pycache__/
