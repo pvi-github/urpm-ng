@@ -404,6 +404,10 @@ def main() -> int:
     app.setApplicationDisplayName("rpmdrake-ng")
     app.setOrganizationName("Mageia")
 
+    # Initialize translations (after QApplication, before widgets)
+    from rpmdrake.i18n import init_qt_translation
+    init_qt_translation(app)
+
     window = MainWindow()
     window.show()
 

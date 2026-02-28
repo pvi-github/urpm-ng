@@ -1,5 +1,5 @@
 %define name rpmdrake-ng
-%define version 0.4.0
+%define version 0.4.1
 %define release 1
 
 Name:           %{name}
@@ -97,7 +97,7 @@ install -Dm644 man/en/man1/rpmdrake-ng.1 %{buildroot}%{_mandir}/man1/rpmdrake-ng
 install -Dm644 man/fr/man1/rpmdrake-ng.1 %{buildroot}%{_mandir}/fr/man1/rpmdrake-ng.1
 
 # Install transaction helper to libexec (called via pkexec)
-install -Dm755 rpmdrake/bin/rpmdrake-ng-helper %{buildroot}%{_libexecdir}/rpmdrake-ng-helper
+install -Dm755 bin/rpmdrake-ng-helper %{buildroot}%{_libexecdir}/rpmdrake-ng-helper
 
 # ============================================================================
 # Post-install scripts

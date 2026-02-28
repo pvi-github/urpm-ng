@@ -1993,6 +1993,10 @@ def cmd_not_implemented(args, db: PackageDatabase) -> int:
 
 def main(argv=None) -> int:
     """Main CLI entry point."""
+    # Initialize i18n first, before any translatable output
+    from urpm.i18n import init as init_i18n
+    init_i18n()
+
     # Check required dependencies first
     missing = check_dependencies()
     if missing:

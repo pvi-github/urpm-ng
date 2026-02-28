@@ -47,4 +47,53 @@ clean:
 	$(RM) -f rpmbuild/SOURCES/pk-backend-urpm.tar.gz
 	$(MAKE) -C rpmdrake clean
 
-.PHONY: version tarball install-completion rpm rpm-rpmdrake rpm-all clean
+# ============================================================================
+# Internationalization (i18n)
+# ============================================================================
+
+XGETTEXT = /usr/bin/xgettext
+MSGMERGE = /usr/bin/msgmerge
+MSGFMT = /usr/bin/msgfmt
+PO_DIR = po
+DOMAIN = urpm
+LINGUAS = fr de es pt
+
+pot:
+	$(XGETTEXT) --language=Python --keyword=_ --keyword=N_ \
+		--keyword=ngettext:1,2 --from-code=UTF-8 --force-po \
+		--package-name=$(NAME) --package-version=$(VERSION) \
+		--msgid-bugs-address=i18n@mageia.org \
+		--copyright-holder="Mageia" \
+		--output=$(PO_DIR)/$(DOMAIN).pot \
+		$$($(CAT) $(PO_DIR)/POTFILES.in)
+
+po-update: pot
+	@for lang in $(LINGUAS); do \
+		if [ -f $(PO_DIR)/$$lang.po ]; then \
+			echo "Updating $$lang.po..."; \
+			$(MSGMERGE) --update --backup=none $(PO_DIR)/$$lang.po $(PO_DIR)/$(DOMAIN).pot; \
+		else \
+			echo "Creating $$lang.po..."; \
+			msginit --no-translator --locale=$$lang \
+				--input=$(PO_DIR)/$(DOMAIN).pot --output=$(PO_DIR)/$$lang.po; \
+		fi \
+	done
+
+mo:
+	@for lang in $(LINGUAS); do \
+		$(MKDIR) -p $(PO_DIR)/locale/$$lang/LC_MESSAGES; \
+		echo "Compiling $$lang.mo..."; \
+		$(MSGFMT) -o $(PO_DIR)/locale/$$lang/LC_MESSAGES/$(DOMAIN).mo \
+			$(PO_DIR)/$$lang.po; \
+	done
+
+po-stats:
+	@for lang in $(LINGUAS); do \
+		echo "$$lang:"; \
+		msgfmt --statistics $(PO_DIR)/$$lang.po 2>&1 | sed 's/^/  /'; \
+	done
+
+clean-i18n:
+	$(RM) -rf $(PO_DIR)/locale
+
+.PHONY: version tarball install-completion rpm rpm-rpmdrake rpm-all clean pot po-update mo po-stats clean-i18n
