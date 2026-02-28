@@ -177,38 +177,60 @@ def parse_mageia_media_url(url: str) -> dict | None:
 def parse_custom_media_url(url: str) -> dict | None:
     """Parse a custom (non-Mageia) media URL.
 
-    For custom URLs, we can't auto-detect version/arch.
-    We use the hostname as base and the path as relative_path.
+    Attempts best-effort detection of version/arch from the URL path
+    using the same pattern as official Mageia URLs (version/arch/media/).
+    If not detected, version and arch are set to None.
 
     Args:
         url: Full URL to a custom media
 
     Returns:
         Dict with parsed components, or None if invalid.
-        Keys: protocol, host, base_path, relative_path
+        Keys: protocol, host, base_path, relative_path, version, arch
     """
     parsed = urlparse(url.rstrip('/'))
 
     if parsed.scheme == 'file':
         protocol = 'file'
         host = ''
-        # For file://, everything is the path
-        relative_path = parsed.path.lstrip('/')
-        base_path = ''
+        path = parsed.path
     elif parsed.scheme in ('http', 'https'):
         protocol = parsed.scheme
         host = parsed.netloc
-        # For http(s), base_path is empty, relative_path is the full path
-        relative_path = parsed.path.lstrip('/')
-        base_path = ''
+        path = parsed.path
     else:
         return None
+
+    # Best-effort version/arch detection from URL path
+    # Look for pattern: version/arch/media/ (same as official Mageia URLs)
+    version = None
+    arch = None
+    parts = [p for p in path.split('/') if p]
+    try:
+        media_idx = parts.index('media')
+        if media_idx >= 2:
+            candidate_arch = parts[media_idx - 1]
+            candidate_version = parts[media_idx - 2]
+            if candidate_arch in KNOWN_ARCHES and candidate_version in KNOWN_VERSIONS:
+                version = candidate_version
+                arch = candidate_arch
+    except ValueError:
+        pass  # No 'media' in path, that's fine for custom URLs
+
+    if protocol == 'file':
+        relative_path = path.lstrip('/')
+        base_path = ''
+    else:
+        relative_path = path.lstrip('/')
+        base_path = ''
 
     return {
         'protocol': protocol,
         'host': host,
         'base_path': base_path,
         'relative_path': relative_path,
+        'version': version,
+        'arch': arch,
         'is_official': False,
     }
 

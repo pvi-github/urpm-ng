@@ -292,7 +292,13 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     for pkg in package_names:
         pkg_name = _extract_pkg_name(pkg)
         concrete = _resolve_virtual_package(db, pkg_name, auto_mode, install_all)
-        resolved_packages.extend(concrete)
+        # If virtual resolution changed the name, use that;
+        # otherwise preserve the original string (may contain version info
+        # like "firefox-release-147.0.3" that libsolv SELECTION_CANON can parse)
+        if len(concrete) == 1 and concrete[0] == pkg_name and pkg != pkg_name:
+            resolved_packages.append(pkg)
+        else:
+            resolved_packages.extend(concrete)
         # Record the choice so resolver doesn't ask again for this capability
         # Only record if single provider was selected (not "All")
         if len(concrete) == 1 and concrete[0] != pkg_name:

@@ -1277,6 +1277,10 @@ For legacy mode (non-Mageia URL with explicit name):
         action='store_true',
         help=_('Allow unsigned packages (custom media only)')
     )
+    media_add.add_argument(
+        '--version',
+        help=_('Target Mageia version (custom media only, e.g. 9, 10, cauldron)')
+    )
 
     # media remove / r
     media_remove = media_subparsers.add_parser(

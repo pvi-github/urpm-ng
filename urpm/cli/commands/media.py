@@ -672,12 +672,16 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
 
         parsed['name'] = name
         parsed['short_name'] = short_name
-        # For custom, we need version/arch from system or args
-        # Default to current system
+        # Version priority: --version flag > detected from URL > system version
         import platform
+        from ...core.config import get_system_version
         machine = platform.machine()
-        parsed['version'] = getattr(args, 'version', 'custom')
-        parsed['arch'] = machine if machine in KNOWN_ARCHES else 'x86_64'
+        explicit_version = getattr(args, 'version', None)
+        if explicit_version:
+            parsed['version'] = explicit_version
+        elif not parsed.get('version'):
+            parsed['version'] = get_system_version()
+        parsed['arch'] = parsed.get('arch') or (machine if machine in KNOWN_ARCHES else 'x86_64')
 
     else:
         # Official mode: auto-parse URL
