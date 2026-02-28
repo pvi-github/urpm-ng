@@ -13,6 +13,8 @@ debug*.txt
 
 # Dev
 .urpm.local
+CLAUDE.md
+.omc/
 bin/rebuild.sh
 bin/recup.sh
 prout.*
