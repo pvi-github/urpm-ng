@@ -177,7 +177,7 @@ class TransactionHelper:
 
         try:
             resolver = Resolver(self.db)
-            resolution = resolver.resolve_install(packages, choices=choices or {})
+            resolution = resolver.resolve_upgrade(package_names=packages)
 
             if not resolution.success:
                 problems = "; ".join(resolution.problems) if resolution.problems else "Resolution failed"

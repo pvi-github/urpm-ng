@@ -788,9 +788,9 @@ class Controller:
                 elif action == 'upgrade':
                     if packages == ['__all__']:
                         resolution = resolver.resolve_upgrade()
-                        break  # Full upgrade doesn't support alternatives loop
                     else:
-                        resolution = resolver.resolve_install(packages, choices=choices)
+                        resolution = resolver.resolve_upgrade(package_names=packages)
+                    break  # Upgrade doesn't support alternatives loop
                 else:
                     self.view.show_loading(False)
                     return
