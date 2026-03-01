@@ -104,8 +104,20 @@ class Controller:
             # Notify view to update filter checkboxes
             if hasattr(self.view, 'on_filter_state_changed'):
                 self.view.on_filter_state_changed()
+        else:
+            # Pre-select all upgradeable packages so user just clicks "Màj"
+            for name_lower in self._upgradeable_packages:
+                # Find the actual package name (preserving case)
+                for p in self._installed_packages:
+                    if p['name'].lower() == name_lower:
+                        self.selection.add(p['name'])
+                        break
 
         self._refresh_packages()
+
+        # Update selection display after packages are loaded
+        if self.selection:
+            self._update_selection_display()
 
     def refresh_after_transaction(self) -> None:
         """Refresh package list after a transaction completes."""

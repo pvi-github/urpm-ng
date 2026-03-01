@@ -16,8 +16,6 @@ from .compat import (
     QKeySequence,
     QShortcut,
     QFont,
-    QToolButton,
-    QMenu,
     QFrame,
 )
 
@@ -89,6 +87,12 @@ class MainWindow(QMainWindow):
         # Load initial data
         self.controller.load_initial()
 
+        # Update button states after pre-selection of upgrades
+        has_selection = len(self.controller.selection) > 0
+        self.btn_install.setEnabled(has_selection)
+        self.btn_remove.setEnabled(has_selection)
+        self.btn_upgrade.setEnabled(has_selection)
+
         # Populate categories after groups are loaded
         self.filter_panel.populate_categories()
 
@@ -128,50 +132,21 @@ class MainWindow(QMainWindow):
             QPushButton:disabled { background-color: #ef9a9a; }
         """)
 
-        # Upgrade button with dropdown menu
-        self.btn_upgrade = QToolButton()
-        self.btn_upgrade.setText("⬆ Màj")
-        self.btn_upgrade.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        # Upgrade button
+        self.btn_upgrade = QPushButton("⬆ Màj")
         self.btn_upgrade.setStyleSheet("""
-            QToolButton {
+            QPushButton {
                 background-color: #2196f3;
                 color: white;
                 font-weight: bold;
-                padding: 6px 12px;
+                padding: 6px 16px;
                 border: none;
                 border-radius: 4px;
             }
-            QToolButton:hover { background-color: #1976d2; }
-            QToolButton:pressed { background-color: #1565c0; }
-            QToolButton:disabled { background-color: #90caf9; }
-            QToolButton::menu-button {
-                background-color: #1976d2;
-                border-left: 1px solid #1565c0;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-                width: 20px;
-            }
-            QToolButton::menu-button:hover { background-color: #1565c0; }
-            QToolButton::menu-arrow { image: none; }
+            QPushButton:hover { background-color: #1976d2; }
+            QPushButton:pressed { background-color: #1565c0; }
+            QPushButton:disabled { background-color: #90caf9; }
         """)
-
-        # Menu for upgrade all
-        self.upgrade_menu = QMenu(self)
-        self.upgrade_menu.setStyleSheet("""
-            QMenu {
-                background-color: #2196f3;
-                color: white;
-                border: none;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 16px;
-                border-radius: 2px;
-            }
-            QMenu::item:selected { background-color: #1976d2; }
-        """)
-        self.action_upgrade_all = self.upgrade_menu.addAction("⏫ Tout mettre à jour")
-        self.btn_upgrade.setMenu(self.upgrade_menu)
 
         self.btn_refresh = QPushButton("🔄")
         self.btn_refresh.setToolTip("Rafraîchir la liste")
@@ -295,7 +270,6 @@ class MainWindow(QMainWindow):
         self.btn_install.clicked.connect(self.controller.install_selection)
         self.btn_remove.clicked.connect(self.controller.erase_selection)
         self.btn_upgrade.clicked.connect(self.controller.upgrade_selection)
-        self.action_upgrade_all.triggered.connect(self.controller.upgrade_all)
         self.btn_refresh.clicked.connect(self._on_refresh)
 
     def _on_selection_changed(self, name: str, selected: bool) -> None:
