@@ -104,6 +104,24 @@ def ngettext(singular: str, plural: str, n: int) -> str:
     return _translation.ngettext(singular, plural, n)
 
 
+def confirm_yes(response: str) -> bool:
+    """Check if a user response means 'yes' in the current locale.
+
+    Accepts English 'y'/'yes' plus the localized equivalents.
+    Translators should translate "y" and "yes" to their locale's
+    single-letter and full-word confirmations (e.g., "o"/"oui" in French).
+
+    Args:
+        response: Raw user input string.
+
+    Returns:
+        True if the response is affirmative.
+    """
+    r = response.strip().lower()
+    # Always accept English, plus whatever the locale defines
+    return r in ('y', 'yes', _('y'), _('yes'))
+
+
 def N_(message: str) -> str:
     """Mark a string for extraction without translating.
 

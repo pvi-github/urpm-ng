@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -14,7 +15,7 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
     servers = db.list_servers(enabled_only=not show_all)
 
     if not servers:
-        print(colors.info("No servers configured"))
+        print(colors.info(_("No servers configured")))
         return 0
 
     # Calculate column widths dynamically (no truncation)
@@ -26,7 +27,7 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
     print("-" * (name_width + host_width + 35))
 
     for srv in servers:
-        status = colors.success("enabled") if srv['enabled'] else colors.dim("disabled")
+        status = colors.success(_("enabled")) if srv['enabled'] else colors.dim(_("disabled"))
         ip_mode = srv.get('ip_mode', 'auto')
         # Pad first, then colorize (ANSI codes break alignment)
         ip_padded = f"{ip_mode:>6}"
@@ -57,8 +58,8 @@ def cmd_server_add(args, db: 'PackageDatabase') -> int:
     parsed = urlparse(url)
 
     if parsed.scheme not in ('http', 'https', 'file'):
-        print(colors.error(f"Invalid protocol: {parsed.scheme}"))
-        print("Supported protocols: http, https, file")
+        print(colors.error(_("Invalid protocol: {protocol}").format(protocol=parsed.scheme)))
+        print(_("Supported protocols: http, https, file"))
         return 1
 
     protocol = parsed.scheme
@@ -68,21 +69,21 @@ def cmd_server_add(args, db: 'PackageDatabase') -> int:
     # Check if server already exists
     existing = db.get_server_by_location(protocol, host, base_path)
     if existing:
-        print(colors.warning(f"Server already exists: {existing['name']}"))
+        print(colors.warning(_("Server already exists: {name}").format(name=existing['name'])))
         return 1
 
     # Check if name is taken
     if db.get_server(args.name):
-        print(colors.error(f"Server name already exists: {args.name}"))
+        print(colors.error(_("Server name already exists: {name}").format(name=args.name)))
         return 1
 
     # Test IP connectivity for remote servers
     ip_mode = 'auto'
     if protocol in ('http', 'https'):
         port = 443 if protocol == 'https' else 80
-        print(f"Testing connectivity to {host}...")
+        print(_("Testing connectivity to {host}...").format(host=host))
         ip_mode = test_server_ip_connectivity(host, port, timeout=5.0)
-        print(f"  IP mode: {ip_mode}")
+        print("  " + _("IP mode: {mode}").format(mode=ip_mode))
 
     # Add server
     is_official = not args.custom
@@ -102,14 +103,14 @@ def cmd_server_add(args, db: 'PackageDatabase') -> int:
         # Set detected ip_mode
         db.set_server_ip_mode_by_id(server_id, ip_mode)
 
-        print(colors.success(f"Added server: {args.name}"))
-        print(f"  URL: {url}")
-        print(f"  Priority: {priority}")
-        print(f"  IP mode: {ip_mode}")
+        print(colors.success(_("Added server: {name}").format(name=args.name)))
+        print("  " + _("URL: {url}").format(url=url))
+        print("  " + _("Priority: {priority}").format(priority=priority))
+        print("  " + _("IP mode: {mode}").format(mode=ip_mode))
         if not enabled:
-            print(colors.dim("  Status: disabled"))
+            print(colors.dim(_("  Status: disabled")))
     except Exception as e:
-        print(colors.error(f"Failed to add server: {e}"))
+        print(colors.error(_("Failed to add server: {error}").format(error=e)))
         return 1
 
     # Scan existing media to see which ones this server provides
@@ -124,7 +125,7 @@ def cmd_server_add(args, db: 'PackageDatabase') -> int:
     if not media_to_scan:
         return 0
 
-    print(f"\nScanning {len(media_to_scan)} media...", end=' ', flush=True)
+    print("\n" + ngettext("Scanning {count} media...", "Scanning {count} media...", len(media_to_scan)).format(count=len(media_to_scan)), end=' ', flush=True)
 
     # Build base URL
     server = {'protocol': protocol, 'host': host, 'base_path': base_path}
@@ -181,12 +182,12 @@ def cmd_server_add(args, db: 'PackageDatabase') -> int:
     for media_id, media_name in found:
         db.link_server_media(server_id, media_id)
 
-    print(f"{len(found)} found")
+    print(_("{count} found").format(count=len(found)))
     if found:
-        for _, media_name in sorted(found, key=lambda x: x[1]):
+        for _url, media_name in sorted(found, key=lambda x: x[1]):
             print(f"  {colors.success('+')} {media_name}")
     else:
-        print(colors.warning(f"No existing media found on this server"))
+        print(colors.warning(_("No existing media found on this server")))
 
     return 0
 
@@ -197,11 +198,11 @@ def cmd_server_remove(args, db: 'PackageDatabase') -> int:
 
     server = db.get_server(args.name)
     if not server:
-        print(colors.error(f"Server not found: {args.name}"))
+        print(colors.error(_("Server not found: {name}").format(name=args.name)))
         return 1
 
     db.remove_server(args.name)
-    print(colors.success(f"Removed server: {args.name}"))
+    print(colors.success(_("Removed server: {name}").format(name=args.name)))
     return 0
 
 
@@ -211,15 +212,15 @@ def cmd_server_enable(args, db: 'PackageDatabase') -> int:
 
     server = db.get_server(args.name)
     if not server:
-        print(colors.error(f"Server not found: {args.name}"))
+        print(colors.error(_("Server not found: {name}").format(name=args.name)))
         return 1
 
     if server['enabled']:
-        print(colors.info(f"Server already enabled: {args.name}"))
+        print(colors.info(_("Server already enabled: {name}").format(name=args.name)))
         return 0
 
     db.enable_server(args.name, True)
-    print(colors.success(f"Enabled server: {args.name}"))
+    print(colors.success(_("Enabled server: {name}").format(name=args.name)))
     return 0
 
 
@@ -229,15 +230,15 @@ def cmd_server_disable(args, db: 'PackageDatabase') -> int:
 
     server = db.get_server(args.name)
     if not server:
-        print(colors.error(f"Server not found: {args.name}"))
+        print(colors.error(_("Server not found: {name}").format(name=args.name)))
         return 1
 
     if not server['enabled']:
-        print(colors.info(f"Server already disabled: {args.name}"))
+        print(colors.info(_("Server already disabled: {name}").format(name=args.name)))
         return 0
 
     db.enable_server(args.name, False)
-    print(colors.success(f"Disabled server: {args.name}"))
+    print(colors.success(_("Disabled server: {name}").format(name=args.name)))
     return 0
 
 
@@ -247,11 +248,11 @@ def cmd_server_priority(args, db: 'PackageDatabase') -> int:
 
     server = db.get_server(args.name)
     if not server:
-        print(colors.error(f"Server not found: {args.name}"))
+        print(colors.error(_("Server not found: {name}").format(name=args.name)))
         return 1
 
     db.set_server_priority(args.name, args.priority)
-    print(colors.success(f"Set priority for {args.name}: {args.priority}"))
+    print(colors.success(_("Set priority for {name}: {priority}").format(name=args.name, priority=args.priority)))
     return 0
 
 
@@ -264,7 +265,7 @@ def cmd_server_test(args, db: 'PackageDatabase') -> int:
         # Test specific server
         server = db.get_server(args.name)
         if not server:
-            print(colors.error(f"Server not found: {args.name}"))
+            print(colors.error(_("Server not found: {name}").format(name=args.name)))
             return 1
         servers = [server]
     else:
@@ -272,29 +273,29 @@ def cmd_server_test(args, db: 'PackageDatabase') -> int:
         servers = db.list_servers(enabled_only=True)
 
     if not servers:
-        print(colors.info("No servers to test"))
+        print(colors.info(_("No servers to test")))
         return 0
 
     errors = 0
     for srv in servers:
         if srv['protocol'] == 'file':
-            print(f"{srv['name']}: local filesystem (skipped)")
+            print(f"{srv['name']}: " + _("local filesystem (skipped)"))
             continue
 
         host = srv['host']
         port = 443 if srv['protocol'] == 'https' else 80
-        print(f"Testing {srv['name']} ({host})...", end=' ', flush=True)
+        print(_("Testing {name} ({host})...").format(name=srv['name'], host=host), end=' ', flush=True)
 
         old_mode = srv.get('ip_mode', 'auto')
         new_mode = test_server_ip_connectivity(host, port, timeout=5.0)
 
         if new_mode == 'auto':
             # Could not test
-            print(colors.warning(f"unreachable (keeping {old_mode})"))
+            print(colors.warning(_("unreachable (keeping {mode})").format(mode=old_mode)))
             errors += 1
         elif new_mode != old_mode:
             db.set_server_ip_mode(srv['name'], new_mode)
-            print(colors.success(f"{new_mode} (was {old_mode})"))
+            print(colors.success(_("{new_mode} (was {old_mode})").format(new_mode=new_mode, old_mode=old_mode)))
         else:
             print(f"{new_mode}")
 
@@ -307,12 +308,12 @@ def cmd_server_ipmode(args, db: 'PackageDatabase') -> int:
 
     server = db.get_server(args.name)
     if not server:
-        print(colors.error(f"Server not found: {args.name}"))
+        print(colors.error(_("Server not found: {name}").format(name=args.name)))
         return 1
 
     old_mode = server.get('ip_mode', 'auto')
     db.set_server_ip_mode(args.name, args.mode)
-    print(colors.success(f"Set IP mode for {args.name}: {args.mode} (was {old_mode})"))
+    print(colors.success(_("Set IP mode for {name}: {new_mode} (was {old_mode})").format(name=args.name, new_mode=args.mode, old_mode=old_mode)))
     return 0
 
 
@@ -342,8 +343,8 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
             pass
 
     if not version:
-        print(colors.error("Cannot detect Mageia version from /etc/os-release"))
-        print(colors.dim("Use --release to specify manually (e.g., --release 9)"))
+        print(colors.error(_("Cannot detect Mageia version from /etc/os-release")))
+        print(colors.dim(_("Use --release to specify manually (e.g., --release 9)")))
         return 1
 
     import platform
@@ -354,12 +355,12 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     existing_count = len(existing_servers)
 
     if existing_count >= TARGET_SERVERS:
-        print(f"Already have {existing_count} enabled servers (target: {TARGET_SERVERS})")
-        print(colors.dim("Use 'urpm server remove' to remove some first if needed."))
+        print(_("Already have {count} enabled servers (target: {target})").format(count=existing_count, target=TARGET_SERVERS))
+        print(colors.dim(_("Use 'urpm server remove' to remove some first if needed.")))
         return 0
 
     needed = TARGET_SERVERS - existing_count
-    print(f"Have {existing_count} enabled servers, need {needed} more to reach {TARGET_SERVERS}")
+    print(_("Have {count} enabled servers, need {needed} more to reach {target}").format(count=existing_count, needed=needed, target=TARGET_SERVERS))
 
     # Get all servers for duplicate check
     all_servers = db.list_servers()
@@ -373,22 +374,22 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     # Fetch mirrorlist
     mirrorlist_url = f"https://www.mageia.org/mirrorlist/?release={version}&arch={arch}&section=core&repo=release"
 
-    print(f"Fetching mirrorlist for Mageia {version} ({arch})...", end=' ', flush=True)
+    print(_("Fetching mirrorlist for Mageia {version} ({arch})...").format(version=version, arch=arch), end=' ', flush=True)
 
     try:
         with urlopen(mirrorlist_url, timeout=60) as response:
             content = response.read().decode('utf-8').strip()
             mirror_urls = content.split('\n') if content else []
     except (URLError, HTTPError) as e:
-        print(colors.error(f"failed: {e}"))
+        print(colors.error(_("failed: {error}").format(error=e)))
         return 1
 
     if not mirror_urls or not any(u.strip() for u in mirror_urls):
-        print(colors.warning("empty"))
-        print(colors.dim("The mirrorlist may not be available yet for this version."))
+        print(colors.warning(_("empty")))
+        print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
         return 0
 
-    print(f"{len(mirror_urls)} mirrors")
+    print(ngettext("{count} mirror", "{count} mirrors", len(mirror_urls)).format(count=len(mirror_urls)))
 
     # Pattern to strip from URLs: {version}/{arch}/media/core/release/
     suffix_pattern = re.compile(rf'{re.escape(version)}/{re.escape(arch)}/media/core/release/?$')
@@ -427,12 +428,12 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
         })
 
     if not candidates:
-        print("No new servers to add")
+        print(_("No new servers to add"))
         if skipped_duplicate:
-            print(colors.dim(f"  ({skipped_duplicate} already configured)"))
+            print(colors.dim("  " + _("({count} already configured)").format(count=skipped_duplicate)))
         return 0
 
-    print(f"Testing latency to {len(candidates)} candidates...", end=' ', flush=True)
+    print(_("Testing latency to {count} candidates...").format(count=len(candidates)), end=' ', flush=True)
 
     # Test latency to each candidate in parallel
     def test_latency(candidate):
@@ -455,10 +456,10 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
             if latency is not None:
                 results.append((candidate, latency))
 
-    print(f"{len(results)} reachable")
+    print(_("{count} reachable").format(count=len(results)))
 
     if not results:
-        print(colors.warning("No reachable mirrors found"))
+        print(colors.warning(_("No reachable mirrors found")))
         return 0
 
     # Sort by latency and take the best N
@@ -466,7 +467,7 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     best = results[:needed]
 
     if args.dry_run:
-        print(f"\nWould add {len(best)} server(s):")
+        print("\n" + ngettext("Would add {count} server:", "Would add {count} servers:", len(best)).format(count=len(best)))
         for candidate, latency in best:
             print(f"  {candidate['host']} ({latency:.0f}ms)")
         return 0
@@ -486,11 +487,11 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
             server_id = db.add_server(
                 shortname, candidate['scheme'], candidate['host'], candidate['base_path']
             )
-            print(colors.success(f"  Added: {shortname} ({latency:.0f}ms)"))
+            print(colors.success("  " + _("Added: {name} ({latency}ms)").format(name=shortname, latency=f"{latency:.0f}")))
             existing_names.add(shortname)
             added_servers.append((server_id, shortname))
         except Exception as e:
-            print(colors.warning(f"  Failed to add {shortname}: {e}"))
+            print(colors.warning("  " + _("Failed to add {name}: {error}").format(name=shortname, error=e)))
 
     if not added_servers:
         return 0
@@ -499,7 +500,7 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     all_media = db.list_media()
     enabled_media = [m for m in all_media if m.get('enabled', 1)]
     if not enabled_media:
-        print("\nNo enabled media to scan")
+        print(_("\nNo enabled media to scan"))
         return 0
 
     media_to_scan = [(m['id'], m['name'], m.get('relative_path', ''))
@@ -508,7 +509,7 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     if not media_to_scan:
         return 0
 
-    print(f"\nScanning {len(media_to_scan)} enabled media...", end=' ', flush=True)
+    print("\n" + _("Scanning {count} enabled media...").format(count=len(media_to_scan)), end=' ', flush=True)
 
     # For each new server, check which media it provides
     from ...core.config import build_server_url
@@ -536,11 +537,14 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
                     db.link_server_media(server_id, media_id)
                     total_links += 1
 
-    print(f"{total_links} links created")
+    print(_("{count} links created").format(count=total_links))
 
     # Summary
-    print(f"\nAdded {len(added_servers)} server(s), now have {existing_count + len(added_servers)} enabled")
+    print("\n" + ngettext(
+        "Added {added} server, now have {total} enabled",
+        "Added {added} servers, now have {total} enabled",
+        len(added_servers)).format(added=len(added_servers), total=existing_count + len(added_servers)))
     if skipped_protocol:
-        print(colors.dim(f"Skipped {skipped_protocol} (ftp/other protocol)"))
+        print(colors.dim(_("Skipped {count} (ftp/other protocol)").format(count=skipped_protocol)))
 
     return 0

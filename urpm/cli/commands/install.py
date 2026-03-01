@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
+from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -70,16 +71,16 @@ def _apply_config_policy(rpmnew_files: List[str], policy: str) -> int:
                 rpmnew_path.rename(original)
                 processed += 1
             except OSError as e:
-                print(colors.warning(f"  Config: failed to replace {original}: {e}"))
+                print(colors.warning("  " + _("Config: failed to replace {path}: {error}").format(path=original, error=e)))
 
         elif policy == 'ask':
-            print(f"\n  Config conflict: {original}")
-            print(f"    [k] Keep existing (new saved as .rpmnew)")
-            print(f"    [r] Replace with new (old saved as .rpmold)")
-            print(f"    [d] Show diff")
+            print("\n  " + _("Config conflict: {path}").format(path=original))
+            print("    " + _("[k] Keep existing (new saved as .rpmnew)"))
+            print("    " + _("[r] Replace with new (old saved as .rpmold)"))
+            print("    " + _("[d] Show diff"))
 
             while True:
-                choice = input("  Choice [k/r/d]: ").strip().lower()
+                choice = input(_("  Choice [k/r/d]: ")).strip().lower()
                 if choice == 'k':
                     break
                 elif choice == 'r':
@@ -89,15 +90,15 @@ def _apply_config_policy(rpmnew_files: List[str], policy: str) -> int:
                         rpmnew_path.rename(original)
                         processed += 1
                     except OSError as e:
-                        print(colors.warning(f"  Failed to replace: {e}"))
+                        print(colors.warning("  " + _("Failed to replace: {error}").format(error=e)))
                     break
                 elif choice == 'd':
                     subprocess.run(['diff', '-u', str(original), str(rpmnew_path)])
                 else:
-                    print("  Invalid choice")
+                    print(_("  Invalid choice"))
 
     if processed > 0 and policy == 'replace':
-        print(f"  {processed} config file(s) updated (old saved as .rpmold)")
+        print("  " + ngettext("{count} config file updated (old saved as .rpmold)", "{count} config files updated (old saved as .rpmold)", processed).format(count=processed))
 
     return processed
 
@@ -125,9 +126,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Check for previous background install errors
     prev_error = check_background_error()
     if prev_error:
-        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning(_("Warning: Previous background operation had an error:")))
         print(colors.warning(f"  {prev_error}"))
-        print(colors.dim("  (This message will not appear again)"))
+        print(colors.dim(_("  (This message will not appear again)")))
         clear_background_error()
 
     # Debug: save previous state and clear debug files at start
@@ -138,15 +139,15 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     nodeps = getattr(args, 'nodeps', False)
     download_only = getattr(args, 'download_only', False)
     if nodeps and not download_only:
-        print(colors.error("Error: --nodeps requires --download-only"))
+        print(colors.error(_("Error: --nodeps requires --download-only")))
         return 1
 
     # Check root privileges early (unless allowed to skip for mkimage)
     from ...core.install import check_root
     allow_no_root = getattr(args, 'allow_no_root', False)
     if not download_only and not allow_no_root and not check_root():
-        print(colors.error("Error: root privileges required for installation"))
-        print("Try: sudo urpm install <packages>")
+        print(colors.error(_("Error: root privileges required for installation")))
+        print(_("Try: sudo urpm install <packages>"))
         return 1
 
     # Handle --builddeps option (install build dependencies from spec/SRPM)
@@ -159,45 +160,45 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 # Auto-detect mode
                 specs = list_specs_in_workdir()
                 if len(specs) > 1:
-                    print(colors.info("Multiple .spec files found:"))
+                    print(colors.info(_("Multiple .spec files found:")))
                     for i, spec in enumerate(specs, 1):
                         print(f"  {i}. {spec.name}")
                     if getattr(args, 'auto', False):
-                        print(colors.error("Error: Multiple .spec files found. Specify which one to use."))
+                        print(colors.error(_("Error: Multiple .spec files found. Specify which one to use.")))
                         return 1
                     try:
-                        choice = input("Select spec file (number): ").strip()
+                        choice = input(_("Select spec file (number): ")).strip()
                         idx = int(choice) - 1
                         if 0 <= idx < len(specs):
                             builddeps = str(specs[idx])
                         else:
-                            print(colors.error("Invalid choice"))
+                            print(colors.error(_("Invalid choice")))
                             return 1
                     except (ValueError, KeyboardInterrupt):
-                        print("\nAborted.")
+                        print(_("\nAborted."))
                         return 1
                 else:
                     builddeps = 'AUTO'
 
             target = None if builddeps == 'AUTO' else builddeps
             reqs, source = get_buildrequires(target)
-            print(colors.info(f"Build dependencies from: {source}"))
-            print(f"  Found {len(reqs)} BuildRequires")
+            print(colors.info(_("Build dependencies from: {source}").format(source=source)))
+            print("  " + _("Found {count} BuildRequires").format(count=len(reqs)))
 
             # Replace packages list with build requirements (convert to solver format)
             args.packages = [rpm_dep_to_solver_format(req) for req in reqs]
 
         except FileNotFoundError as e:
-            print(colors.error(f"Error: {e}"))
+            print(colors.error(_("Error: {error}").format(error=e)))
             return 1
         except ValueError as e:
-            print(colors.error(f"Error: {e}"))
+            print(colors.error(_("Error: {error}").format(error=e)))
             return 1
 
     # Check that we have something to install
     if not args.packages and not builddeps:
-        print(colors.error("Error: No packages specified"))
-        print("Usage: urpm install <packages> or urpm install --builddeps <spec>")
+        print(colors.error(_("Error: No packages specified")))
+        print(_("Usage: urpm install <packages> or urpm install --builddeps <spec>"))
         return 1
 
     # Separate local RPM files from package names
@@ -214,20 +215,20 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         if is_local_rpm(pkg):
             path = Path(pkg)
             if not path.exists():
-                print(colors.error(f"Error: file not found: {pkg}"))
+                print(colors.error(_("Error: file not found: {path}").format(path=pkg)))
                 return 1
             # Read RPM header
             info = read_rpm_header(path)
             if not info:
-                print(colors.error(f"Error: cannot read RPM file: {pkg}"))
+                print(colors.error(_("Error: cannot read RPM file: {path}").format(path=pkg)))
                 return 1
             # Verify signature
             if verify_sigs:
                 valid, error = verify_rpm_signature(path)
                 if not valid:
-                    print(colors.error(f"Error: signature verification failed for {pkg}"))
+                    print(colors.error(_("Error: signature verification failed for {path}").format(path=pkg)))
                     print(colors.error(f"  {error}"))
-                    print(colors.dim("  Use --nosignature to skip verification (not recommended)"))
+                    print(colors.dim(_("  Use --nosignature to skip verification (not recommended)")))
                     return 1
             local_rpm_paths.append(str(path.resolve()))
             local_rpm_infos.append(info)
@@ -268,11 +269,11 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     if info:
                         sibling_rpm_infos.append(info)
         if sibling_rpm_infos:
-            print(colors.dim(f"Found {len(sibling_rpm_infos)} sibling RPMs (available for dependencies)"))
+            print(colors.dim(_("Found {count} sibling RPMs (available for dependencies)").format(count=len(sibling_rpm_infos))))
 
     # If we have local RPMs, show what we're installing
     if local_rpm_infos:
-        print(f"Local RPM files ({len(local_rpm_infos)}):")
+        print(_("Local RPM files ({count}):").format(count=len(local_rpm_infos)))
         for info in local_rpm_infos:
             print(f"  {info['nevra']}")
 
@@ -314,7 +315,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     resolved_packages = unique_packages
 
     if not resolved_packages:
-        print("Aborted.")
+        print(_("Aborted."))
         return 1
 
     from ...core.resolver import InstallReason
@@ -370,11 +371,11 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 reason=InstallReason.EXPLICIT
             ))
         if not_found:
-            print(colors.error(f"Packages not found ({len(not_found)}):"))
+            print(colors.error(_("Packages not found ({count}):").format(count=len(not_found))))
             for p in not_found[:10]:
                 print(f"  {p}")
             if len(not_found) > 10:
-                print(f"  ... and {len(not_found) - 10} more")
+                print("  " + _("... and {count} more").format(count=len(not_found) - 10))
             return 1
         result = Resolution(success=True, actions=actions, problems=[])
         aborted = False
@@ -390,7 +391,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         return 1
 
     if not result.success:
-        print("Resolution failed:")
+        print(_("Resolution failed:"))
         for p in result.problems:
             print(f"  {p}")
         return 1
@@ -419,7 +420,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 result.actions.append(reinstall_action)
 
     if not result.actions:
-        print("Nothing to do")
+        print(_("Nothing to do"))
         return 0
 
     # Categorize packages by install reason
@@ -482,10 +483,10 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     print(f"\n{alt.capability} ({alt.required_by}):")
                     for i, provider in enumerate(filtered, 1):
                         print(f"  {i}) {provider}")
-                    print(f"  {len(filtered) + 1}) All")
+                    print(f"  {len(filtered) + 1}) " + _("All"))
 
                     try:
-                        choice = input(f"\nChoice [1]: ").strip() or "1"
+                        choice = input("\n" + _("Choice [1]: ")).strip() or "1"
                         if choice == str(len(filtered) + 1):
                             # "All" selected - add all providers
                             for prov_name in filtered:
@@ -532,7 +533,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                                             new_packages_from_alternatives.append(s.name)
                                         break
                     except (ValueError, EOFError, KeyboardInterrupt):
-                        print("\nAborted")
+                        print(_("\nAborted"))
                         return 1
 
             elif new_alternatives and args.auto:
@@ -618,28 +619,28 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
     # In interactive mode: ask about recommends (unless --without-recommends)
     if rec_pkgs and not args.auto and not without_recommends:
-        print(f"\n{colors.success(f'Recommended packages ({len(rec_pkgs)})')} - {format_size(rec_size)}")
+        print("\n" + colors.success(_("Recommended packages ({count})").format(count=len(rec_pkgs))) + " - " + format_size(rec_size))
         from .. import display
         rec_names = [f"{a.name}-{a.evr}" for a in rec_pkgs]
         display.print_package_list(rec_names, max_lines=5)
         try:
-            answer = input(f"\nInstall recommended packages? [Y/n] ")
+            answer = input("\n" + _("Install recommended packages? [Y/n] "))
             install_recommends_final = answer.lower() not in ('n', 'no')
         except EOFError:
-            print("\nAborted")
+            print(_("\nAborted"))
             return 1
 
     # In interactive mode with --with-suggests: ask about suggests
     if suggests and not args.auto:
-        print(f"\n{colors.warning(f'Suggested packages ({len(suggests)})')} - {format_size(sug_size)}")
+        print("\n" + colors.warning(_("Suggested packages ({count})").format(count=len(suggests))) + " - " + format_size(sug_size))
         from .. import display
         sug_names = [f"{a.name}-{a.evr}" for a in suggests]
         display.print_package_list(sug_names, max_lines=5)
         try:
-            answer = input(f"\nInstall suggested packages? [Y/n] ")
+            answer = input("\n" + _("Install suggested packages? [Y/n] "))
             install_suggests = answer.lower() not in ('n', 'no')
         except EOFError:
-            print("\nAborted")
+            print(_("\nAborted"))
             return 1
 
     # Re-resolve with final preferences (recommends + suggests)
@@ -701,7 +702,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 suggest_names = remaining_suggests
 
         if not result.success:
-            print("Resolution failed:")
+            print(_("Resolution failed:"))
             for p in result.problems:
                 print(f"  {p}")
             return 1
@@ -709,7 +710,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         # Show skipped suggests with reasons
         if skipped_suggests:
             from .. import colors
-            print(f"\n{colors.warning('Skipped suggests:')}")
+            print("\n" + colors.warning(_("Skipped suggests:")))
             for sug in sorted(skipped_suggests.keys()):
                 reason = skipped_suggests[sug]
                 print(f"  {colors.dim(sug)}: {reason}")
@@ -743,49 +744,49 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     total_size = sum(a.size for a in final_actions if a.action.value in ('install', 'upgrade', 'reinstall'))
 
     # Show final transaction summary
-    print(f"\n{colors.bold('Transaction summary:')}\n")
+    print("\n" + colors.bold(_("Transaction summary:")) + "\n")
     from .. import display
 
     if explicit_pkgs:
-        print(f"  {colors.info(f'Requested ({len(explicit_pkgs)})')} - {format_size(explicit_size)}")
+        print("  " + colors.info(_("Requested ({count})").format(count=len(explicit_pkgs))) + " - " + format_size(explicit_size))
         pkg_names = [f"{a.name}-{a.evr}" for a in explicit_pkgs]
         display.print_package_list(pkg_names, indent=4)
 
     if dep_pkgs:
-        print(f"  {colors.dim(f'Dependencies ({len(dep_pkgs)})')} - {format_size(dep_size)}")
+        print("  " + colors.dim(_("Dependencies ({count})").format(count=len(dep_pkgs))) + " - " + format_size(dep_size))
         pkg_names = [f"{a.name}-{a.evr}" for a in dep_pkgs]
         display.print_package_list(pkg_names, indent=4)
 
     if rec_pkgs:
-        print(f"  {colors.success(f'Recommended ({len(rec_pkgs)})')} - {format_size(rec_size)}")
+        print("  " + colors.success(_("Recommended ({count})").format(count=len(rec_pkgs))) + " - " + format_size(rec_size))
         pkg_names = [f"{a.name}-{a.evr}" for a in rec_pkgs]
         display.print_package_list(pkg_names, indent=4)
 
     if sug_pkgs:
-        print(f"  {colors.warning(f'Suggested ({len(sug_pkgs)})')} - {format_size(sug_size)}")
+        print("  " + colors.warning(_("Suggested ({count})").format(count=len(sug_pkgs))) + " - " + format_size(sug_size))
         pkg_names = [f"{a.name}-{a.evr}" for a in sug_pkgs]
         display.print_package_list(pkg_names, indent=4)
 
     if remove_pkgs:
         remove_size = sum(a.size for a in remove_pkgs)
-        print(f"  {colors.error(f'Obsoleted ({len(remove_pkgs)})')} - {format_size(remove_size)}")
+        print("  " + colors.error(_("Obsoleted ({count})").format(count=len(remove_pkgs))) + " - " + format_size(remove_size))
         pkg_names = [f"{a.name}-{a.evr}" for a in remove_pkgs]
         display.print_package_list(pkg_names, indent=4)
 
     # Final confirmation
     if remove_pkgs:
-        print(f"\n{colors.bold(f'Total: {len(install_actions)} to install, {len(remove_pkgs)} to remove')} ({format_size(total_size)})")
+        print("\n" + colors.bold(_("Total: {install} to install, {remove} to remove").format(install=len(install_actions), remove=len(remove_pkgs))) + " (" + format_size(total_size) + ")")
     else:
-        print(f"\n{colors.bold(f'Total: {len(install_actions)} packages')} ({format_size(total_size)})")
+        print("\n" + colors.bold(ngettext("Total: {count} package", "Total: {count} packages", len(install_actions)).format(count=len(install_actions))) + " (" + format_size(total_size) + ")")
 
     if not args.auto:
         try:
-            answer = input("\nProceed with installation? [y/N] ")
-            if answer.lower() not in ('y', 'yes'):
-                print("Aborted")
+            answer = input(_("\nProceed with installation? [y/N] "))
+            if not confirm_yes(answer):
+                print(_("Aborted"))
                 return 1
         except EOFError:
-            print("\nAborted")
+            print(_("\nAborted"))
             return 1
 
     # Update result.actions with final list
@@ -797,7 +798,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     )
 
     if args.test:
-        print("\n(dry run - no changes made)")
+        print(_("\n(dry run - no changes made)"))
         return 0
 
     # Build download items (skip local RPMs - we already have them)
@@ -813,7 +814,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     peer_stats = {}
 
     if download_items:
-        print(colors.info("\nDownloading packages..."))
+        print(colors.info(_("\nDownloading packages...")))
         dl_opts = InstallOptions(
             use_peers=not getattr(args, 'no_peers', False),
             only_peers=getattr(args, 'only_peers', False),
@@ -848,7 +849,10 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         # Check for failures
         failed = [r for r in dl_results if not r.success]
         if failed:
-            print(colors.error(f"\n{len(failed)} download(s) failed:"))
+            print(colors.error("\n" + ngettext(
+                "{count} download failed:",
+                "{count} downloads failed:",
+                len(failed)).format(count=len(failed))))
             for r in failed[:5]:
                 print(f"  {colors.error(r.item.name)}: {r.error}")
             return 1
@@ -859,9 +863,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         from_upstream = peer_stats.get('from_upstream', 0)
         time_str = display.format_duration(download_elapsed)
         if from_peers > 0:
-            print(f"  {colors.success(f'{downloaded} downloaded')} ({from_peers} from peers, {from_upstream} from mirrors), {cache_str} from cache in {time_str}")
+            print("  " + colors.success(_("{count} downloaded").format(count=downloaded)) + " " + _("({peers} from peers, {upstream} from mirrors), {cached} from cache in {time}").format(peers=from_peers, upstream=from_upstream, cached=cache_str, time=time_str))
         else:
-            print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache in {time_str}")
+            print("  " + colors.success(_("{count} downloaded").format(count=downloaded)) + ", " + _("{cached} from cache in {time}").format(cached=cache_str, time=time_str))
 
         # Notify urpmd to invalidate cache index (so new downloads are visible to peers)
         if downloaded > 0:
@@ -870,7 +874,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Handle --download-only mode
     download_only = getattr(args, 'download_only', False)
     if download_only:
-        print(colors.success("\nPackages downloaded to cache. Use 'urpm install' to install them later."))
+        print(colors.success(_("\nPackages downloaded to cache. Use 'urpm install' to install them later.")))
         return 0
 
     # Collect RPM paths for installation (downloaded + local)
@@ -884,7 +888,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             print(colors.dim(f"    {Path(rp).name}"))
 
     if not rpm_paths:
-        print("No packages to install")
+        print(_("No packages to install"))
         return 0
 
     # Begin transaction for history
@@ -898,26 +902,29 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     def sigint_handler(signum, frame):
         if interrupted[0]:
             # Second Ctrl+C - force abort
-            print("\n\nForce abort!")
+            print(_("\n\nForce abort!"))
             ops.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
             interrupted[0] = True
-            print("\n\nInterrupt requested - finishing current package...")
-            print("Press Ctrl+C again to force abort (may leave system inconsistent)")
+            print(_("\n\nInterrupt requested - finishing current package..."))
+            print(_("Press Ctrl+C again to force abort (may leave system inconsistent)"))
 
     signal.signal(signal.SIGINT, sigint_handler)
 
-    print(colors.info(f"\nInstalling {len(rpm_paths)} packages..."))
+    print(colors.info("\n" + ngettext(
+        "Installing {count} package...",
+        "Installing {count} packages...",
+        len(rpm_paths)).format(count=len(rpm_paths))))
 
     # Check if another install is in progress
     # Use root path for lock file when installing to chroot
     install_root = getattr(args, 'root', None) or getattr(args, 'urpm_root', None)
     lock = InstallLock(root=install_root)
     if not lock.acquire(blocking=False):
-        print(colors.warning("  RPM database is locked by another process."))
-        print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+        print(colors.warning(_("  RPM database is locked by another process.")))
+        print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
 
         def wait_cb(pid):
             pass  # Just wait silently, message already shown
@@ -956,7 +963,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
 
         if not queue_result.success:
-            print(colors.error(f"\nInstallation failed:"))
+            print(colors.error("\n" + _("Installation failed:")))
             if queue_result.operations:
                 for err in queue_result.operations[0].errors[:3]:
                     print(f"  {colors.error(err)}")
@@ -966,15 +973,15 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             return 1
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Installation interrupted"))
+            print(colors.warning("\n  " + _("Installation interrupted")))
             ops.abort_transaction(transaction_id)
             return 130
 
         installed_count = queue_result.operations[0].count if queue_result.operations else len(rpm_paths)
         if remove_pkgs:
-            print(colors.success(f"  {installed_count} packages installed, {len(remove_pkgs)} removed"))
+            print(colors.success("  " + _("{installed} packages installed, {removed} removed").format(installed=installed_count, removed=len(remove_pkgs))))
         else:
-            print(colors.success(f"  {installed_count} packages installed"))
+            print(colors.success("  " + ngettext("{count} package installed", "{count} packages installed", installed_count).format(count=installed_count)))
 
         # Apply config policy for .rpmnew files
         if queue_result.operations:
@@ -1040,43 +1047,43 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
                 specs = list_specs_in_workdir()
                 if len(specs) > 1:
                     # Multiple specs found - ask user
-                    print(colors.info("Multiple .spec files found:"))
+                    print(colors.info(_("Multiple .spec files found:")))
                     for i, spec in enumerate(specs, 1):
                         print(f"  {i}. {spec.name}")
                     if getattr(args, 'auto', False):
-                        print(colors.error("Error: Multiple .spec files found. Specify which one to use."))
+                        print(colors.error(_("Error: Multiple .spec files found. Specify which one to use.")))
                         return 1
                     try:
-                        choice = input("Select spec file (number): ").strip()
+                        choice = input(_("Select spec file (number): ")).strip()
                         idx = int(choice) - 1
                         if 0 <= idx < len(specs):
                             builddeps = str(specs[idx])
                         else:
-                            print(colors.error("Invalid choice"))
+                            print(colors.error(_("Invalid choice")))
                             return 1
                     except (ValueError, KeyboardInterrupt):
-                        print("\nAborted.")
+                        print(_("\nAborted."))
                         return 1
                 else:
                     builddeps = 'AUTO'  # Let get_buildrequires handle it
 
             target = None if builddeps == 'AUTO' else builddeps
             reqs, source = get_buildrequires(target)
-            print(colors.info(f"Build dependencies from: {source}"))
-            print(f"  Found {len(reqs)} BuildRequires")
+            print(colors.info(_("Build dependencies from: {source}").format(source=source)))
+            print("  " + _("Found {count} BuildRequires").format(count=len(reqs)))
             # Convert to solver format and add to packages
             packages.extend(rpm_dep_to_solver_format(req) for req in reqs)
 
         except FileNotFoundError as e:
-            print(colors.error(f"Error: {e}"))
+            print(colors.error(_("Error: {error}").format(error=e)))
             return 1
         except ValueError as e:
-            print(colors.error(f"Error: {e}"))
+            print(colors.error(_("Error: {error}").format(error=e)))
             return 1
 
     if not packages:
-        print(colors.error("Error: No packages specified"))
-        print("Usage: urpm download [packages...] [--builddeps [spec]]")
+        print(colors.error(_("Error: No packages specified")))
+        print(_("Usage: urpm download [packages...] [--builddeps [spec]]"))
         return 1
 
     # Get target release/arch
@@ -1089,11 +1096,11 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     auto_mode = getattr(args, 'auto', False)
 
     # Show what we're downloading
-    print(colors.info(f"\nResolving packages for download..."))
+    print(colors.info("\n" + _("Resolving packages for download...")))
     if target_release:
-        print(f"  Target release: {target_release}")
-    print(f"  Target arch: {target_arch}")
-    print(f"  Packages: {', '.join(packages[:5])}" + (f" ... (+{len(packages)-5} more)" if len(packages) > 5 else ""))
+        print("  " + _("Target release: {release}").format(release=target_release))
+    print("  " + _("Target arch: {arch}").format(arch=target_arch))
+    print("  " + _("Packages: {packages}").format(packages=', '.join(packages[:5])) + (_(" ... (+{count} more)").format(count=len(packages)-5) if len(packages) > 5 else ""))
 
     # Create resolver with ignore_installed=True (resolves all deps)
     resolver = _create_resolver(
@@ -1134,11 +1141,11 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
             print(f"Insert {pkg['name']} {pkg.get('filesize',0)}")
 
         if not_found:
-            print(colors.error(f"Packages not found ({len(not_found)}):"))
+            print(colors.error(_("Packages not found ({count}):").format(count=len(not_found))))
             for p in not_found[:10]:
                 print(f"  {p}")
             if len(not_found) > 10:
-                print(f"  ... and {len(not_found) - 10} more")
+                print("  " + _("... and {count} more").format(count=len(not_found) - 10))
             return 1
 
         result = Resolution(success=True, actions=actions, problems=[])
@@ -1149,7 +1156,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
             return 1
 
     if not result.success:
-        print(colors.error("Resolution failed:"))
+        print(colors.error(_("Resolution failed:")))
         for p in result.problems:
             print(f"  {p}")
         return 1
@@ -1158,30 +1165,30 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     install_actions = [a for a in result.actions if a.action.name in ('INSTALL', 'UPGRADE', 'DOWNGRADE')]
 
     if not install_actions:
-        print(colors.success("Nothing to download - all packages already available."))
+        print(colors.success(_("Nothing to download - all packages already available.")))
         return 0
 
     # Calculate total size
     total_size = sum(a.size for a in install_actions if a.size)
 
     # Show summary
-    print(colors.info(f"\nPackages to download ({len(install_actions)}):"))
+    print(colors.info("\n" + _("Packages to download ({count}):").format(count=len(install_actions))))
     for action in install_actions[:20]:
         size_str = format_size(action.size) if action.size else "?"
         print(f"  {action.nevra} ({size_str})")
     if len(install_actions) > 20:
-        print(f"  ... and {len(install_actions) - 20} more")
-    print(f"\nTotal download size: {format_size(total_size)}")
+        print("  " + _("... and {count} more").format(count=len(install_actions) - 20))
+    print("\n" + _("Total download size: {size}").format(size=format_size(total_size)))
 
     # Confirm unless --auto
     if not auto_mode:
         try:
-            confirm = input("\nProceed with download? [Y/n] ").strip().lower()
-            if confirm and confirm not in ('y', 'yes', 'o', 'oui'):
-                print("Aborted.")
+            confirm = input(_("\nProceed with download? [Y/n] ")).strip().lower()
+            if confirm and not confirm_yes(confirm):
+                print(_("Aborted."))
                 return 0
         except KeyboardInterrupt:
-            print("\nAborted.")
+            print(_("\nAborted."))
             return 0
 
     # Build download items
@@ -1201,7 +1208,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
 
         media = media_cache[media_name]
         if not media:
-            print(f"  Warning: media '{media_name}' not found")
+            print("  " + _("Warning: media '{media}' not found").format(media=media_name))
             continue
 
         # Parse EVR
@@ -1236,14 +1243,14 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
                 size=action.size,
             ))
         else:
-            print(f"  Warning: no URL or servers for media '{media_name}'")
+            print("  " + _("Warning: no URL or servers for media '{media}'").format(media=media_name))
 
     if not download_items:
-        print(colors.error("No packages to download"))
+        print(colors.error(_("No packages to download")))
         return 1
 
     # Download packages
-    print(colors.info("\nDownloading packages..."))
+    print(colors.info(_("\nDownloading packages...")))
     use_peers = not getattr(args, 'no_peers', False)
     only_peers = getattr(args, 'only_peers', False)
     cache_dir = get_base_dir(urpm_root=getattr(args, 'urpm_root', None))
@@ -1273,7 +1280,10 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     # Check for failures
     failed = [r for r in dl_results if not r.success]
     if failed:
-        print(colors.error(f"\n{len(failed)} download(s) failed:"))
+        print(colors.error("\n" + ngettext(
+            "{count} download failed:",
+            "{count} downloads failed:",
+            len(failed)).format(count=len(failed))))
         for r in failed[:5]:
             print(f"  {colors.error(r.item.name)}: {r.error}")
         return 1
@@ -1283,16 +1293,16 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     from_upstream = peer_stats.get('from_upstream', 0)
     time_str = display.format_duration(download_elapsed)
 
-    print(f"\n{colors.success('Download complete')}:")
-    print(f"  {downloaded} downloaded, {cached} from cache in {time_str}")
+    print("\n" + colors.success(_("Download complete")) + ":")
+    print("  " + _("{downloaded} downloaded, {cached} from cache in {time}").format(downloaded=downloaded, cached=cached, time=time_str))
     if from_peers > 0:
-        print(f"  P2P: {from_peers} from peers, {from_upstream} from upstream")
+        print("  " + _("P2P: {peers} from peers, {upstream} from upstream").format(peers=from_peers, upstream=from_upstream))
 
     # Notify urpmd to invalidate cache index (so new downloads are visible to peers)
     if downloaded > 0:
         _notify_urpmd_cache_invalidate()
 
-    print(colors.success(f"\nPackages saved to cache. Use 'urpm install' to install them."))
+    print(colors.success("\n" + _("Packages saved to cache. Use 'urpm install' to install them.")))
     return 0
 
 

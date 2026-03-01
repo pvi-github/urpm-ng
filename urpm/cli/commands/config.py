@@ -4,6 +4,7 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -19,12 +20,12 @@ def cmd_config(args) -> int:
     """Handle config command - manage urpm configuration."""
 
     if not hasattr(args, 'config_cmd') or not args.config_cmd:
-        print("Usage: urpm config <blacklist|redlist|kernel-keep|version-mode> ...")
-        print("\nSubcommands:")
-        print("  blacklist     Manage blacklist (critical packages)")
-        print("  redlist       Manage redlist (packages requiring confirmation)")
-        print("  kernel-keep   Number of kernels to keep")
-        print("  version-mode  Choose between system version and cauldron")
+        print(_("Usage: urpm config <blacklist|redlist|kernel-keep|version-mode> ..."))
+        print(_("\nSubcommands:"))
+        print(_("  blacklist     Manage blacklist (critical packages)"))
+        print(_("  redlist       Manage redlist (packages requiring confirmation)"))
+        print(_("  kernel-keep   Number of kernels to keep"))
+        print(_("  version-mode  Choose between system version and cauldron"))
         return 1
 
     # Handle version-mode (uses database, not config file)
@@ -38,10 +39,10 @@ def cmd_config(args) -> int:
             if args.mode == 'auto':
                 # Remove preference
                 db.set_config('version-mode', None)
-                print("version-mode preference removed (auto-detection)")
+                print(_("version-mode preference removed (auto-detection)"))
             else:
                 db.set_config('version-mode', args.mode)
-                print(f"version-mode set to '{args.mode}'")
+                print(_("version-mode set to '{mode}'").format(mode=args.mode))
             return 0
         else:
             # Show current state
@@ -49,21 +50,21 @@ def cmd_config(args) -> int:
             system_version = get_system_version()
             accepted, needs_choice, info = get_accepted_versions(db, system_version)
 
-            print(f"\nSystem version: {system_version or 'unknown'}")
-            print(f"Configured preference: {current or 'auto (none set)'}")
+            print("\n" + _("System version: {version}").format(version=system_version or _('unknown')))
+            print(_("Configured preference: {pref}").format(pref=current or _('auto (none set)')))
 
             if info['cauldron_media']:
-                print(f"Cauldron media: {', '.join(info['cauldron_media'][:3])}" +
-                      (f" (+{len(info['cauldron_media'])-3} more)" if len(info['cauldron_media']) > 3 else ""))
+                extra = _(" (+{count} more)").format(count=len(info['cauldron_media'])-3) if len(info['cauldron_media']) > 3 else ""
+                print(_("Cauldron media: {media}").format(media=', '.join(info['cauldron_media'][:3])) + extra)
             if info['system_version_media']:
-                print(f"System version media: {', '.join(info['system_version_media'][:3])}" +
-                      (f" (+{len(info['system_version_media'])-3} more)" if len(info['system_version_media']) > 3 else ""))
+                extra = _(" (+{count} more)").format(count=len(info['system_version_media'])-3) if len(info['system_version_media']) > 3 else ""
+                print(_("System version media: {media}").format(media=', '.join(info['system_version_media'][:3])) + extra)
 
             if needs_choice:
-                print(f"\nConflict: Both {system_version} and cauldron media are enabled.")
-                print("Use 'urpm config version-mode <system|cauldron>' to choose.")
+                print("\n" + _("Conflict: Both {version} and cauldron media are enabled.").format(version=system_version))
+                print(_("Use 'urpm config version-mode <system|cauldron>' to choose."))
             elif accepted:
-                print(f"\nActive version filter: {', '.join(sorted(accepted))}")
+                print("\n" + _("Active version filter: {versions}").format(versions=', '.join(sorted(accepted))))
             print()
             return 0
 
@@ -73,15 +74,15 @@ def cmd_config(args) -> int:
     if args.config_cmd in ('kernel-keep', 'kk'):
         if hasattr(args, 'count') and args.count is not None:
             if args.count < 0:
-                print("Error: kernel-keep must be >= 0")
+                print(_("Error: kernel-keep must be >= 0"))
                 return 1
             config['kernel_keep'] = args.count
             if _write_config(config):
-                print(f"kernel-keep set to {args.count}")
+                print(_("kernel-keep set to {count}").format(count=args.count))
                 return 0
             return 1
         else:
-            print(f"kernel-keep = {config['kernel_keep']}")
+            print(_("kernel-keep = {count}").format(count=config['kernel_keep']))
             return 0
 
     # Handle blacklist
@@ -92,7 +93,7 @@ def cmd_config(args) -> int:
         list_name = 'redlist'
         builtin = _get_redlist()
     else:
-        print(f"Unknown config command: {args.config_cmd}")
+        print(_("Unknown config command: {command}").format(command=args.config_cmd))
         return 1
 
     action = getattr(args, f'{list_name}_cmd', None)
@@ -100,16 +101,16 @@ def cmd_config(args) -> int:
     if not action or action in ('list', 'ls'):
         # Show list
         user_list = config.get(list_name, set())
-        print(f"\n{list_name.title()} (built-in):")
+        print("\n" + _("{name} (built-in):").format(name=list_name.title()))
         for pkg in sorted(builtin):
             print(f"  {pkg}")
 
         if user_list:
-            print(f"\n{list_name.title()} (user-configured):")
+            print("\n" + _("{name} (user-configured):").format(name=list_name.title()))
             for pkg in sorted(user_list):
                 print(f"  {pkg}")
         else:
-            print(f"\nNo user-configured {list_name} entries")
+            print("\n" + _("No user-configured {name} entries").format(name=list_name))
 
         print()
         return 0
@@ -117,33 +118,33 @@ def cmd_config(args) -> int:
     elif action in ('add', 'a'):
         pkg = args.package
         if pkg in builtin:
-            print(f"{pkg} is already in the built-in {list_name}")
+            print(_("{pkg} is already in the built-in {name}").format(pkg=pkg, name=list_name))
             return 0
         if pkg in config[list_name]:
-            print(f"{pkg} is already in the user {list_name}")
+            print(_("{pkg} is already in the user {name}").format(pkg=pkg, name=list_name))
             return 0
         config[list_name].add(pkg)
         if _write_config(config):
-            print(f"Added {pkg} to {list_name}")
+            print(_("Added {pkg} to {name}").format(pkg=pkg, name=list_name))
             return 0
         return 1
 
     elif action in ('remove', 'rm'):
         pkg = args.package
         if pkg in builtin:
-            print(f"Error: {pkg} is in the built-in {list_name} and cannot be removed")
+            print(_("Error: {pkg} is in the built-in {name} and cannot be removed").format(pkg=pkg, name=list_name))
             return 1
         if pkg not in config[list_name]:
-            print(f"{pkg} is not in the user {list_name}")
+            print(_("{pkg} is not in the user {name}").format(pkg=pkg, name=list_name))
             return 1
         config[list_name].remove(pkg)
         if _write_config(config):
-            print(f"Removed {pkg} from {list_name}")
+            print(_("Removed {pkg} from {name}").format(pkg=pkg, name=list_name))
             return 0
         return 1
 
     else:
-        print(f"Usage: urpm config {list_name} <list|add|remove> [package]")
+        print(_("Usage: urpm config {name} <list|add|remove> [package]").format(name=list_name))
         return 1
 
 
@@ -153,11 +154,11 @@ def cmd_key(args) -> int:
     from ...core.install import check_root
 
     if not hasattr(args, 'key_cmd') or not args.key_cmd:
-        print("Usage: urpm key <list|import|remove> ...")
-        print("\nCommands:")
-        print("  list            List installed GPG keys")
-        print("  import <file>   Import GPG key from file or HTTPS URL")
-        print("  remove <keyid>  Remove GPG key")
+        print(_("Usage: urpm key <list|import|remove> ..."))
+        print(_("\nCommands:"))
+        print(_("  list            List installed GPG keys"))
+        print(_("  import <file>   Import GPG key from file or HTTPS URL"))
+        print(_("  remove <keyid>  Remove GPG key"))
         return 1
 
     # List keys
@@ -172,10 +173,10 @@ def cmd_key(args) -> int:
             keys.append((version, release, summary))
 
         if not keys:
-            print("No GPG keys installed")
+            print(_("No GPG keys installed"))
             return 0
 
-        print(f"\nInstalled GPG keys ({len(keys)}):\n")
+        print("\n" + _("Installed GPG keys ({count}):").format(count=len(keys)) + "\n")
         for version, release, summary in sorted(keys):
             print(f"  {version}-{release}")
             print(f"    {summary}")
@@ -185,11 +186,11 @@ def cmd_key(args) -> int:
     # Import key
     elif args.key_cmd in ('import', 'i', 'add'):
         if not check_root():
-            print("Error: importing keys requires root privileges")
+            print(_("Error: importing keys requires root privileges"))
             return 1
 
         if not hasattr(args, 'keyfile') or not args.keyfile:
-            print("Usage: urpm key import <keyfile|url>")
+            print(_("Usage: urpm key import <keyfile|url>"))
             return 1
 
         key_source = args.keyfile
@@ -200,7 +201,7 @@ def cmd_key(args) -> int:
             import urllib.request
             import urllib.error
 
-            print(f"Downloading key from {key_source}...")
+            print(_("Downloading key from {source}...").format(source=key_source))
             try:
                 with urllib.request.urlopen(key_source, timeout=30) as response:
                     key_data = response.read()
@@ -216,29 +217,29 @@ def cmd_key(args) -> int:
                         capture_output=True, text=True
                     )
                     if result.returncode == 0:
-                        print(f"Key imported from {key_source}")
+                        print(_("Key imported from {source}").format(source=key_source))
                         return 0
                     else:
-                        print(f"Failed to import key: {result.stderr}")
+                        print(_("Failed to import key: {error}").format(error=result.stderr))
                         return 1
                 finally:
                     os.unlink(tmp_path)
 
             except urllib.error.URLError as e:
-                print(f"Error: failed to download key: {e.reason}")
+                print(_("Error: failed to download key: {error}").format(error=e.reason))
                 return 1
             except Exception as e:
-                print(f"Error: {e}")
+                print(_("Error: {error}").format(error=e))
                 return 1
 
         elif key_source.startswith('http://'):
-            print("Error: HTTP URLs are not allowed for security reasons. Use HTTPS.")
+            print(_("Error: HTTP URLs are not allowed for security reasons. Use HTTPS."))
             return 1
 
         else:
             # Import from local file
             if not os.path.exists(key_source):
-                print(f"Error: file not found: {key_source}")
+                print(_("Error: file not found: {path}").format(path=key_source))
                 return 1
 
             result = subprocess.run(
@@ -246,17 +247,17 @@ def cmd_key(args) -> int:
                 capture_output=True, text=True
             )
             if result.returncode == 0:
-                print(f"Key imported from {key_source}")
+                print(_("Key imported from {source}").format(source=key_source))
                 return 0
             else:
-                print(f"Failed to import key: {result.stderr}")
+                print(_("Failed to import key: {error}").format(error=result.stderr))
                 return 1
 
     # Remove key
     elif args.key_cmd in ('remove', 'rm', 'del'):
         import rpm
         if not check_root():
-            print("Error: removing keys requires root privileges")
+            print(_("Error: removing keys requires root privileges"))
             return 1
 
         keyid = args.keyid.lower()
@@ -271,19 +272,19 @@ def cmd_key(args) -> int:
                 break
 
         if not found:
-            print(f"Key not found: {keyid}")
-            print("Use 'urpm key list' to see installed keys")
+            print(_("Key not found: {keyid}").format(keyid=keyid))
+            print(_("Use 'urpm key list' to see installed keys"))
             return 1
 
         # Confirm
-        print(f"Removing key: {found}")
+        print(_("Removing key: {key}").format(key=found))
         try:
-            response = input("Are you sure? [y/N] ")
-            if response.lower() not in ('y', 'yes'):
-                print("Aborted")
+            response = input(_("Are you sure? [y/N] "))
+            if not confirm_yes(response):
+                print(_("Aborted"))
                 return 0
         except (KeyboardInterrupt, EOFError):
-            print("\nAborted")
+            print(_("\nAborted"))
             return 0
 
         result = subprocess.run(
@@ -291,12 +292,12 @@ def cmd_key(args) -> int:
             capture_output=True, text=True
         )
         if result.returncode == 0:
-            print("Key removed")
+            print(_("Key removed"))
             return 0
         else:
-            print(f"Failed to remove key: {result.stderr}")
+            print(_("Failed to remove key: {error}").format(error=result.stderr))
             return 1
 
     else:
-        print(f"Unknown key command: {args.key_cmd}")
+        print(_("Unknown key command: {command}").format(command=args.key_cmd))
         return 1

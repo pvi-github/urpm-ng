@@ -3,6 +3,7 @@
 import sys
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -51,9 +52,9 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
     if not requires:
         pkg = db.get_package_smart(package)
         if not pkg:
-            print(f"Package '{package}' not found")
+            print(_("Package '{package}' not found").format(package=package))
             return 1
-        print(f"{package}: no dependencies")
+        print(_("{package}: no dependencies").format(package=package))
         return 0
 
     # Build dependency info with providers
@@ -103,7 +104,7 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
 
     if legacy:
         # --legacy: raw capabilities
-        print(f"Dependencies of {package} ({len(requires)}):")
+        print(_("Dependencies of {package} ({count}):").format(package=package, count=len(requires)))
         for cap in sorted(requires):
             print(f"  {cap}")
     elif show_tree:
@@ -129,7 +130,7 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
         def print_requires_tree(pkg: str, visited: set, prefix: str, depth: int):
             """Recursively print package requirements as a tree."""
             if depth > max_depth:
-                print(f"{prefix}└── {colors.dim('... (max depth)')}")
+                print(f"{prefix}└── {colors.dim('... ' + _('(max depth)'))}")
                 return
 
             pkg_requires = resolver.get_package_requires(pkg)
@@ -234,7 +235,7 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
                     all_deps.add(chosen)
                     to_process.append(chosen)
 
-        print(f"All dependencies of {package}: {len(all_deps)} packages\n")
+        print(_("All dependencies of {package}: {count} packages").format(package=package, count=len(all_deps)) + "\n")
         for prov in sorted(all_deps):
             print(f"  {prov}")
     else:
@@ -253,13 +254,13 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
         # Print single-provider deps
         if single_providers:
             unique_deps = sorted(set(single_providers))
-            print(f"Dependencies of {package}: {len(unique_deps)} packages\n")
+            print(_("Dependencies of {package}: {count} packages").format(package=package, count=len(unique_deps)) + "\n")
             for prov in unique_deps:
                 print(f"  {prov}")
 
         # Print alternatives
         if alternatives:
-            print(f"\nAlternatives ({len(alternatives)} capabilities with choices):\n")
+            print("\n" + _("Alternatives ({count} capabilities with choices):").format(count=len(alternatives)) + "\n")
             for cap, info in alternatives:
                 providers_str = ' | '.join(info['providers'][:5])
                 if len(info['providers']) > 5:
@@ -309,21 +310,21 @@ def _print_dep_tree_from_resolution(resolver, pkg_name: str, choices: dict,
     result, graph, aborted = _resolve_for_tree(resolver, pkg_name, choices, preferences)
 
     if aborted:
-        print("Aborted")
+        print(_("Aborted"))
         return
 
     if result is None:
-        print(f"{colors.error('Error:')} Failed to resolve {pkg_name}")
+        print(colors.error(_("Error:")) + " " + _("Failed to resolve {package}").format(package=pkg_name))
         return
 
     if not result.success:
-        print(f"{colors.error('Error:')} Resolution failed:")
+        print(colors.error(_("Error:")) + " " + _("Resolution failed:"))
         for prob in result.problems:
             print(f"  {prob}")
         return
 
     if not graph:
-        print(f"{pkg_name}: no dependencies to install")
+        print(_("{package}: no dependencies to install").format(package=pkg_name))
         return
 
     _print_dep_tree_from_graph(pkg_name, graph, choices)
@@ -342,7 +343,7 @@ def _print_dep_tree_from_graph(pkg_name: str, graph: dict, choices: dict,
     from .. import colors
 
     if not graph:
-        print(f"{pkg_name}: no dependencies to install")
+        print(_("{package}: no dependencies to install").format(package=pkg_name))
         return
 
     # Find which packages were alternatives (for coloring)
@@ -353,7 +354,7 @@ def _print_dep_tree_from_graph(pkg_name: str, graph: dict, choices: dict,
 
     def print_tree(pkg: str, visited: set, prefix: str, depth: int):
         if depth > max_depth:
-            print(f"{prefix}└── {colors.dim('... (max depth)')}")
+            print(f"{prefix}└── {colors.dim('... ' + _('(max depth)'))}")
             return
 
         deps = graph.get(pkg, [])
@@ -385,14 +386,14 @@ def _print_dep_tree_from_graph(pkg_name: str, graph: dict, choices: dict,
     print_tree(pkg_name, visited, "", 0)
 
     # Legend
-    print(f"\n{colors.dim('Legend:')} {colors.info('cyan')} = chosen alternative")
+    print("\n" + colors.dim(_("Legend:")) + " " + colors.info(_("cyan")) + " = " + _("chosen alternative"))
 
 
 def _print_dep_tree_packages(db: 'PackageDatabase', providers: list, find_provider, visited: set, prefix: str, max_depth: int, depth: int = 0):
     """Recursively print dependency tree (packages only)."""
     if depth > max_depth:
         if providers:
-            print(f"{prefix}└── ... ({len(providers)} packages, max depth reached)")
+            print(f"{prefix}└── ... " + _("({count} packages, max depth reached)").format(count=len(providers)))
         return
 
     for i, provider in enumerate(providers):
@@ -401,7 +402,7 @@ def _print_dep_tree_packages(db: 'PackageDatabase', providers: list, find_provid
         child_prefix = prefix + ("    " if is_last else "│   ")
 
         if provider in visited:
-            print(f"{prefix}{connector}{provider} (circular)")
+            print(f"{prefix}{connector}{provider} " + _("(circular)"))
             continue
 
         visited.add(provider)
@@ -433,7 +434,7 @@ def _print_dep_tree_legacy(db: 'PackageDatabase', by_provider: dict, find_provid
     """Recursively print dependency tree with capabilities detail."""
     if depth > max_depth:
         if by_provider:
-            print(f"{prefix}└── ... ({len(by_provider)} packages, max depth reached)")
+            print(f"{prefix}└── ... " + _("({count} packages, max depth reached)").format(count=len(by_provider)))
         return
 
     providers = sorted(by_provider.keys())
@@ -444,7 +445,7 @@ def _print_dep_tree_legacy(db: 'PackageDatabase', by_provider: dict, find_provid
         caps = by_provider[provider]
 
         if provider in visited:
-            print(f"{prefix}{connector}{provider} (circular)")
+            print(f"{prefix}{connector}{provider} " + _("(circular)"))
             continue
 
         visited.add(provider)
@@ -481,7 +482,7 @@ def _print_dep_tree_legacy(db: 'PackageDatabase', by_provider: dict, find_provid
             if len(caps) > 5:
                 more_last = not has_children
                 more_connector = "└── " if more_last else "├── "
-                print(f"{caps_prefix}{more_connector}... (+{len(caps) - 5} more)")
+                print(f"{caps_prefix}{more_connector}... " + _("+{count} more").format(count=len(caps) - 5))
 
         # Print sub-dependencies
         if sub_by_provider:
@@ -716,7 +717,7 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
     direct_rdeps = get_rdeps(pkg_name, initial_pkg)
 
     if not direct_rdeps:
-        print(f"No package depends on '{package}'")
+        print(_("No package depends on '{package}'").format(package=package))
         return 0
 
     show_all = getattr(args, 'all', False)
@@ -764,12 +765,12 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
                     all_rdeps.add(rdep)
                     to_process.append(rdep)
 
-        print(f"All packages that depend on {package}: {len(all_rdeps)}\n")
+        print(_("All packages that depend on {package}: {count}").format(package=package, count=len(all_rdeps)) + "\n")
         for rdep in sorted(all_rdeps):
             print(f"  {format_pkg(rdep)}")
     else:
         # Flat list of direct reverse dependencies
-        print(f"Packages that depend on {package}: {len(direct_rdeps)}\n")
+        print(_("Packages that depend on {package}: {count}").format(package=package, count=len(direct_rdeps)) + "\n")
         for rdep in direct_rdeps:
             print(f"  {format_pkg(rdep)}")
 
@@ -906,7 +907,7 @@ def _print_rdep_tree(rdeps: list, get_rdeps, installed_pkgs: set, unrequested_pk
 
     if depth > max_depth:
         if rdeps:
-            print(f"{prefix}╰◄─ ... ({len(rdeps)} packages, max depth reached)")
+            print(f"{prefix}╰◄─ ... " + _("({count} packages, max depth reached)").format(count=len(rdeps)))
         return
 
     for i, pkg_name in enumerate(rdeps):
@@ -916,7 +917,7 @@ def _print_rdep_tree(rdeps: list, get_rdeps, installed_pkgs: set, unrequested_pk
         child_prefix = prefix + ("    " if is_last else "│   ")
 
         if pkg_name in visited:
-            print(f"{prefix}{connector}{format_pkg(pkg_name)} (circular)")
+            print(f"{prefix}{connector}{format_pkg(pkg_name)} " + _("(circular)"))
             continue
 
         sub_rdeps = get_rdeps(pkg_name)
@@ -945,10 +946,10 @@ def cmd_recommends(args, db: 'PackageDatabase') -> int:
     recommends = resolver.get_package_recommends(pkg_name)
 
     if not recommends:
-        print(f"{package}: no recommends")
+        print(_("{package}: no recommends").format(package=package))
         return 0
 
-    print(f"Packages recommended by {package}: {len(recommends)}\n")
+    print(_("Packages recommended by {package}: {count}").format(package=package, count=len(recommends)) + "\n")
     for rec in sorted(recommends):
         # Get providers for this capability
         providers = resolver.get_providers(rec.split()[0], include_installed=True)
@@ -999,10 +1000,10 @@ def cmd_whatrecommends(args, db: 'PackageDatabase') -> int:
         pass
 
     if not results:
-        print(f"No package recommends '{package}'")
+        print(_("No package recommends '{package}'").format(package=package))
         return 0
 
-    print(f"Packages that recommend {package}: {len(results)}\n")
+    print(_("Packages that recommend {package}: {count}").format(package=package, count=len(results)) + "\n")
     for name in sorted(results):
         print(f"  {name}")
 
@@ -1020,10 +1021,10 @@ def cmd_suggests(args, db: 'PackageDatabase') -> int:
     suggests = resolver.get_package_suggests(pkg_name)
 
     if not suggests:
-        print(f"{package}: no suggests")
+        print(_("{package}: no suggests").format(package=package))
         return 0
 
-    print(f"Packages suggested by {package}: {len(suggests)}\n")
+    print(_("Packages suggested by {package}: {count}").format(package=package, count=len(suggests)) + "\n")
     for sug in sorted(suggests):
         # Get providers for this capability
         providers = resolver.get_providers(sug.split()[0], include_installed=True)
@@ -1074,10 +1075,10 @@ def cmd_whatsuggests(args, db: 'PackageDatabase') -> int:
         pass
 
     if not results:
-        print(f"No package suggests '{package}'")
+        print(_("No package suggests '{package}'").format(package=package))
         return 0
 
-    print(f"Packages that suggest {package}: {len(results)}\n")
+    print(_("Packages that suggest {package}: {count}").format(package=package, count=len(results)) + "\n")
     for name in sorted(results):
         print(f"  {name}")
 
@@ -1101,11 +1102,11 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
         for hdr in ts.dbMatch():
             installed_pkgs.add(hdr[rpm.RPMTAG_NAME])
     except ImportError:
-        print("rpm module not available")
+        print(_("rpm module not available"))
         return 1
 
     if pkg_name not in installed_pkgs:
-        print(f"Package '{pkg_name}' is not installed")
+        print(_("Package '{package}' is not installed").format(package=pkg_name))
         return 1
 
     # Get the list of auto-installed packages
@@ -1114,7 +1115,7 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
 
     # Check if manually installed
     if pkg_name.lower() not in unrequested:
-        print(f"{colors.bold(pkg_name)}: {colors.success('explicitly installed')}")
+        print(f"{colors.bold(pkg_name)}: {colors.success(_('explicitly installed'))}")
         return 0
 
     DEP_PRIORITY = {'R': 3, 'r': 2, 's': 1}
@@ -1123,19 +1124,19 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
     # Helper to format dependency type
     def format_dep_type(dep_type: str, short: bool = False) -> str:
         if dep_type == 'R':
-            return colors.success('R') if short else colors.success('required')
+            return colors.success(_('R')) if short else colors.success(_('required'))
         elif dep_type == 'r':
-            return colors.info('r') if short else colors.info('recommended')
+            return colors.info(_('r')) if short else colors.info(_('recommended'))
         else:
-            return colors.dim('s') if short else colors.dim('suggested')
+            return colors.dim(_('s')) if short else colors.dim(_('suggested'))
 
     # Get direct rdeps with their dependency types (R/r/s)
     direct_rdeps = _get_rdeps(pkg_name, db, 'Rrs', installed_only=True,
                               cache=rdeps_cache, installed_pkgs=installed_pkgs)
 
     if not direct_rdeps:
-        print(f"{colors.bold(pkg_name)}: {colors.warning('orphan')} (nothing requires it)")
-        print(f"\nThis package can be removed with: urpm autoremove --orphans")
+        print(f"{colors.bold(pkg_name)}: {colors.warning(_('orphan'))} " + _("(nothing requires it)"))
+        print("\n" + _("This package can be removed with: urpm autoremove --orphans"))
         return 0
 
     # For each direct rdep, find ALL paths to explicit packages using ONLY requires
@@ -1173,8 +1174,8 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
     orphan_branches = [k for k, v in results.items() if v is None]
 
     if not explicit_branches:
-        print(f"{colors.bold(pkg_name)}: {colors.warning('orphan')} (no explicit package requires it)")
-        print(f"\nThis package can be removed with: urpm autoremove --orphans")
+        print(f"{colors.bold(pkg_name)}: {colors.warning(_('orphan'))} " + _("(no explicit package requires it)"))
+        print("\n" + _("This package can be removed with: urpm autoremove --orphans"))
         return 0
 
     # Group by explicit package
@@ -1192,10 +1193,10 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
     for entries in by_explicit.values():
         # Use shortest path and its dep_type
         entries.sort(key=lambda x: len(x[1]))
-        _, _, dep_type = entries[0]
+        _pkg, _path, dep_type = entries[0]
         dep_type_counts[dep_type] += 1
 
-    print(f"{colors.bold(pkg_name)}: installed as dependency")
+    print(f"{colors.bold(pkg_name)}: " + _("installed as dependency"))
 
     # Summary line
     summary_parts = []
@@ -1205,13 +1206,13 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
         summary_parts.append(f"{colors.info(str(dep_type_counts['r']))} recommended")
     if dep_type_counts['s']:
         summary_parts.append(f"{colors.dim(str(dep_type_counts['s']))} suggested")
-    print(f"\nBy {', '.join(summary_parts)} explicit package(s):\n")
+    print("\n" + _("By {packages} explicit package(s):").format(packages=', '.join(summary_parts)) + "\n")
 
     # Sort explicit packages by: requires first, then recommends, then suggests
     def sort_key(pkg):
         entries = by_explicit[pkg]
         entries.sort(key=lambda x: len(x[1]))
-        _, _, dep_type = entries[0]
+        _pkg, _path, dep_type = entries[0]
         return (-DEP_PRIORITY[dep_type], pkg)
 
     for explicit_pkg in sorted(by_explicit.keys(), key=sort_key):
@@ -1229,15 +1230,15 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
             # Indirect - show chain (path goes from direct_rdep to explicit)
             # Reverse to show from explicit perspective: explicit <- ... <- direct
             chain = " ← ".join(reversed(path[:-1]))
-            print(f"  [{dep_marker}] {colors.success(explicit_pkg)} (via {colors.dim(chain)})")
+            print(f"  [{dep_marker}] {colors.success(explicit_pkg)} " + _("(via {chain})").format(chain=colors.dim(chain)))
 
     # Show disconnected chains (rdeps that don't lead to any explicit package)
     if orphan_branches:
-        print(f"\n{colors.dim('Also required by (no explicit package in chain):')}")
+        print("\n" + colors.dim(_("Also required by (no explicit package in chain):")))
         for branch in sorted(orphan_branches)[:5]:
             dep_type = direct_rdeps.get(branch, 'R')
             print(f"  [{format_dep_type(dep_type, short=True)}] {colors.dim(branch)}")
         if len(orphan_branches) > 5:
-            print(f"  {colors.dim(f'... and {len(orphan_branches) - 5} more')}")
+            print("  " + colors.dim("... " + _("and {count} more").format(count=len(orphan_branches) - 5)))
 
     return 0

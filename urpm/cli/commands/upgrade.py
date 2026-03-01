@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -37,9 +38,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     # Check for previous background install errors
     prev_error = check_background_error()
     if prev_error:
-        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning(_("Warning: Previous background operation had an error:")))
         print(colors.warning(f"  {prev_error}"))
-        print(colors.dim("  (This message will not appear again)"))
+        print(colors.dim(_("  (This message will not appear again)")))
         clear_background_error()
 
     # Debug: save previous state and clear debug files at start
@@ -76,20 +77,20 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         if is_local_rpm(pkg):
             path = Path(pkg)
             if not path.exists():
-                print(colors.error(f"Error: file not found: {pkg}"))
+                print(colors.error(_("Error: file not found: {pkg}").format(pkg=pkg)))
                 return 1
             # Read RPM header
             info = read_rpm_header(path)
             if not info:
-                print(colors.error(f"Error: cannot read RPM file: {pkg}"))
+                print(colors.error(_("Error: cannot read RPM file: {pkg}").format(pkg=pkg)))
                 return 1
             # Verify signature
             if verify_sigs:
                 valid, error = verify_rpm_signature(path)
                 if not valid:
-                    print(colors.error(f"Error: signature verification failed for {pkg}"))
+                    print(colors.error(_("Error: signature verification failed for {pkg}").format(pkg=pkg)))
                     print(colors.error(f"  {error}"))
-                    print(colors.dim("  Use --nosignature to skip verification (not recommended)"))
+                    print(colors.dim(_("  Use --nosignature to skip verification (not recommended)")))
                     return 1
             local_rpm_paths.append(str(path.resolve()))
             local_rpm_infos.append(info)
@@ -98,13 +99,13 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
     # If we have local RPMs, show what we're upgrading
     if local_rpm_infos:
-        print(f"Local RPM files ({len(local_rpm_infos)}):")
+        print(_("Local RPM files ({count}):").format(count=len(local_rpm_infos)))
         for info in local_rpm_infos:
             print(f"  {info['nevra']}")
 
     # Check root
     if not check_root():
-        print(colors.error("Error: upgrade requires root privileges"))
+        print(colors.error(_("Error: upgrade requires root privileges")))
         return 1
 
     # Resolve upgrades
@@ -121,16 +122,16 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             package_names.append(info['name'])
 
     if upgrade_all:
-        print("Resolving system upgrade...")
+        print(_("Resolving system upgrade..."))
         result = resolver.resolve_upgrade()
     else:
-        print(f"Resolving upgrade for: {', '.join(package_names)}")
+        print(_("Resolving upgrade for: {packages}").format(packages=', '.join(package_names)))
         # Build set of local package names for special handling
         local_pkg_names = {info['name'] for info in local_rpm_infos}
         result = resolver.resolve_upgrade(package_names, local_packages=local_pkg_names)
 
     if not result.success:
-        print(colors.error("Resolution failed:"))
+        print(colors.error(_("Resolution failed:")))
         for prob in result.problems:
             print(f"  {colors.error(prob)}")
         return 1
@@ -143,17 +144,17 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         held_count += len(resolver._held_obsolete_warnings)
 
     if held_count > 0:
-        print(colors.warning(f"\nHeld packages ({held_count}) skipped:"))
+        print(colors.warning("\n" + _("Held packages ({count}) skipped:").format(count=held_count)))
         if hasattr(resolver, '_held_upgrade_warnings') and resolver._held_upgrade_warnings:
             for held_pkg in resolver._held_upgrade_warnings:
-                print(f"  {colors.warning(held_pkg)} (upgrade skipped)")
+                print("  " + colors.warning(held_pkg) + " " + _("(upgrade skipped)"))
         if hasattr(resolver, '_held_obsolete_warnings') and resolver._held_obsolete_warnings:
             for held_pkg, obsoleting_pkg in resolver._held_obsolete_warnings:
-                print(f"  {colors.warning(held_pkg)} (would be obsoleted by {obsoleting_pkg})")
-        print(f"\n  Use '{colors.dim('urpm unhold <package>')}' to allow changes.")
+                print("  " + colors.warning(held_pkg) + " " + _("(would be obsoleted by {pkg})").format(pkg=obsoleting_pkg))
+        print("\n  " + _("Use '{cmd}' to allow changes.").format(cmd=colors.dim('urpm unhold <package>')))
 
     if not result.actions:
-        print(colors.success("All packages are up to date."))
+        print(colors.success(_("All packages are up to date.")))
         return 0
 
     # Categorize actions
@@ -172,44 +173,44 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
     # Show packages by category
     from .. import colors, display
-    print(f"\n{colors.bold('Transaction summary:')}")
+    print("\n" + colors.bold(_("Transaction summary:")))
     if upgrades:
-        print(f"\n  {colors.info(f'Upgrade ({len(upgrades)}):')}")
+        print("\n  " + colors.info(_("Upgrade ({count}):").format(count=len(upgrades))))
         pkg_names = [a.nevra for a in sorted(upgrades, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.info)
     if installs:
-        print(f"\n  {colors.success(f'Install ({len(installs)}) - new dependencies:')}")
+        print("\n  " + colors.success(_("Install ({count}) - new dependencies:").format(count=len(installs))))
         pkg_names = [a.nevra for a in sorted(installs, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.success)
     if removes:
-        print(f"\n  {colors.error(f'Remove ({len(removes)}) - obsoleted:')}")
+        print("\n  " + colors.error(_("Remove ({count}) - obsoleted:").format(count=len(removes))))
         pkg_names = [a.nevra for a in sorted(removes, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.error)
     if downgrades:
-        print(f"\n  {colors.warning(f'Downgrade ({len(downgrades)}):')}")
+        print("\n  " + colors.warning(_("Downgrade ({count}):").format(count=len(downgrades))))
         pkg_names = [a.nevra for a in sorted(downgrades, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.warning)
     if orphans:
-        print(f"\n  {colors.error(f'Remove ({len(orphans)}) - orphaned dependencies:')}")
+        print("\n  " + colors.error(_("Remove ({count}) - orphaned dependencies:").format(count=len(orphans))))
         pkg_names = [a.nevra for a in sorted(orphans, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.error)
 
     if result.install_size > 0:
-        print(f"\nDownload size: {format_size(result.install_size)}")
+        print("\n" + _("Download size: {size}").format(size=format_size(result.install_size)))
 
     # Confirmation
     if not getattr(args, 'auto', False):
         try:
-            response = input("\nProceed with upgrade? [y/N] ")
-            if response.lower() not in ('y', 'yes'):
-                print("Aborted.")
+            response = input(_("\nProceed with upgrade? [y/N] "))
+            if not confirm_yes(response):
+                print(_("Aborted."))
                 return 0
         except (KeyboardInterrupt, EOFError):
-            print("\nAborted.")
+            print(_("\nAborted."))
             return 130
 
     if getattr(args, 'test', False):
-        print("\n(dry run - no changes made)")
+        print(_("\n(dry run - no changes made)"))
         return 0
 
     # Build download items and download
@@ -222,7 +223,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     downloaded = 0
 
     if download_items:
-        print(f"\nDownloading {len(download_items)} packages...")
+        print("\n" + ngettext(
+            "Downloading {count} package...",
+            "Downloading {count} packages...",
+            len(download_items)).format(count=len(download_items)))
         dl_opts = InstallOptions(
             use_peers=not getattr(args, 'no_peers', False),
             only_peers=getattr(args, 'only_peers', False),
@@ -255,7 +259,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         # Check failures
         failed = [r for r in dl_results if not r.success]
         if failed:
-            print(colors.error(f"\n{len(failed)} download(s) failed:"))
+            print(colors.error("\n" + ngettext(
+                "{count} download failed:",
+                "{count} downloads failed:",
+                len(failed)).format(count=len(failed))))
             for r in failed[:5]:
                 print(f"  {colors.error(r.item.name)}: {r.error}")
             return 1
@@ -266,9 +273,14 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         from_upstream = peer_stats.get('from_upstream', 0)
         time_str = display.format_duration(download_elapsed)
         if from_peers > 0:
-            print(f"  {colors.success(f'{downloaded} downloaded')} ({from_peers} from peers, {from_upstream} from mirrors), {cache_str} from cache in {time_str}")
+            print("  " + _("{downloaded} ({from_peers} from peers, {from_upstream} from mirrors), {cached} from cache in {time}").format(
+                downloaded=colors.success(_("{count} downloaded").format(count=downloaded)),
+                from_peers=from_peers, from_upstream=from_upstream,
+                cached=cache_str, time=time_str))
         else:
-            print(f"  {colors.success(f'{downloaded} downloaded')}, {cache_str} from cache in {time_str}")
+            print("  " + _("{downloaded}, {cached} from cache in {time}").format(
+                downloaded=colors.success(_("{count} downloaded").format(count=downloaded)),
+                cached=cache_str, time=time_str))
 
         if downloaded > 0:
             PackageOperations.notify_urpmd_cache_invalidate()
@@ -306,13 +318,13 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
     def sigint_handler(signum, frame):
         if interrupted[0]:
-            print("\n\nForce abort!")
+            print(_("\n\nForce abort!"))
             ops.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
             interrupted[0] = True
-            print("\n\nInterrupt requested - finishing current package...")
+            print(_("\n\nInterrupt requested - finishing current package..."))
 
     signal.signal(signal.SIGINT, sigint_handler)
 
@@ -337,8 +349,8 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         # Check if another install is in progress
         lock = InstallLock()
         if not lock.acquire(blocking=False):
-            print(colors.warning("  RPM database is locked by another process."))
-            print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+            print(colors.warning(_("  RPM database is locked by another process.")))
+            print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
             lock.acquire(blocking=True)
         lock.release()  # Release - child will acquire its own lock
 
@@ -350,7 +362,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             if current_phase[0] != op_id:
                 current_phase[0] = op_id
                 if op_id == "upgrade":
-                    print(f"\nUpgrading {total} packages...")
+                    print("\n" + ngettext(
+                        "Upgrading {count} package...",
+                        "Upgrading {count} packages...",
+                        total).format(count=total))
                 last_shown[0] = None
             if last_shown[0] != name:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
@@ -368,7 +383,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         print(f"\r\033[K", end='')
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Operation interrupted"))
+            print(colors.warning("\n  " + _("Operation interrupted")))
             ops.abort_transaction(transaction_id)
             return 130
 
@@ -390,13 +405,16 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                         _apply_config_policy(op_result.rpmnew_files, upgrade_opts.config_policy)
                 else:
                     upgrade_success = False
-                    print(colors.error(f"\nUpgrade failed:"))
+                    print(colors.error("\n" + _("Upgrade failed:")))
                     for err in op_result.errors[:3]:
                         print(f"  {colors.error(err)}")
 
         # Orphan cleanup runs in background - just display status
         if orphan_names:
-            print(colors.dim(f"  {len(orphan_names)} orphaned packages being removed in background..."))
+            print(colors.dim("  " + ngettext(
+                "{count} orphaned package being removed in background...",
+                "{count} orphaned packages being removed in background...",
+                len(orphan_names)).format(count=len(orphan_names))))
             resolver.unmark_packages(orphan_names)
 
         if not upgrade_success:

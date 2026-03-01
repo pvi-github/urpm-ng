@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext, confirm_yes
+from ..helpers.package import extract_pkg_name as _extract_pkg_name
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -47,7 +49,7 @@ def _cmd_search_unavailable(args, db: 'PackageDatabase') -> int:
             })
 
     if not unavailable:
-        print(colors.success("All installed packages are available in configured media"))
+        print(colors.success(_("All installed packages are available in configured media")))
         return 0
 
     # Sort by name
@@ -63,7 +65,7 @@ def _cmd_search_unavailable(args, db: 'PackageDatabase') -> int:
             unavailable = [p for p in unavailable if args.pattern.lower() in p['name'].lower()]
 
         if not unavailable:
-            print(colors.warning(f"No unavailable packages match '{args.pattern}'"))
+            print(colors.warning(_("No unavailable packages match '{pattern}'").format(pattern=args.pattern)))
             return 1
 
     # Display results
@@ -73,7 +75,10 @@ def _cmd_search_unavailable(args, db: 'PackageDatabase') -> int:
         release_arch = colors.dim(f"{pkg['release']}.{pkg['arch']}")
         print(f"{name}-{version}-{release_arch}")
 
-    print(colors.dim(f"\n{len(unavailable)} unavailable package(s)"))
+    print(colors.dim("\n" + ngettext(
+        "{count} unavailable package",
+        "{count} unavailable packages",
+        len(unavailable)).format(count=len(unavailable))))
     return 0
 
 
@@ -89,15 +94,15 @@ def cmd_search(args, db: 'PackageDatabase') -> int:
 
     # Regular search requires a pattern
     if not args.pattern:
-        print(colors.error("Error: search pattern required"))
-        print(colors.dim("  Use --unavailable to list packages not in any media"))
+        print(colors.error(_("Error: search pattern required")))
+        print(colors.dim(_("  Use --unavailable to list packages not in any media")))
         return 1
 
     ops = PackageOperations(db)
     results = ops.search_packages(args.pattern, search_provides=True)
 
     if not results:
-        print(colors.warning(f"No packages found for '{args.pattern}'"))
+        print(colors.warning(_("No packages found for '{pattern}'").format(pattern=args.pattern)))
         return 1
 
     # ANSI codes without reset for proper nesting
@@ -186,7 +191,10 @@ def cmd_search(args, db: 'PackageDatabase') -> int:
         else:
             print(f"{nevra_display}  {summary}")
 
-    print(colors.dim(f"\n{len(results)} package(s) found"))
+    print(colors.dim("\n" + ngettext(
+        "{count} package found",
+        "{count} packages found",
+        len(results)).format(count=len(results))))
     return 0
 
 
@@ -199,52 +207,52 @@ def cmd_show(args, db: 'PackageDatabase') -> int:
     pkg = ops.get_package_info(args.package)
 
     if not pkg:
-        print(colors.error(f"Package '{args.package}' not found"))
+        print(colors.error(_("Package '{package}' not found").format(package=args.package)))
         return 1
 
-    print(f"\n{colors.bold('Name:')}         {colors.info(pkg['name'])}")
-    print(f"{colors.bold('Version:')}      {pkg['version']}-{pkg['release']}")
-    print(f"{colors.bold('Architecture:')} {pkg['arch']}")
-    print(f"{colors.bold('Size:')}         {pkg['size'] / 1024 / 1024:.1f} MB")
+    print(f"\n{colors.bold(_('Name:'))}         {colors.info(pkg['name'])}")
+    print(f"{colors.bold(_('Version:'))}      {pkg['version']}-{pkg['release']}")
+    print(f"{colors.bold(_('Architecture:'))} {pkg['arch']}")
+    print(f"{colors.bold(_('Size:'))}         {pkg['size'] / 1024 / 1024:.1f} MB")
 
     if pkg.get('group_name'):
-        print(f"{colors.bold('Group:')}        {pkg['group_name']}")
+        print(f"{colors.bold(_('Group:'))}        {pkg['group_name']}")
     if pkg.get('summary'):
-        print(f"{colors.bold('Summary:')}      {pkg['summary']}")
+        print(f"{colors.bold(_('Summary:'))}      {pkg['summary']}")
 
     if pkg.get('requires'):
         req_count = len(pkg['requires'])
-        print(f"\n{colors.bold(f'Requires ({req_count}):')} ")
+        print("\n" + colors.bold(_("Requires ({count}):").format(count=req_count)) + " ")
         from .. import display
         display.print_package_list(pkg['requires'], max_lines=10, color_func=colors.dim)
 
     if pkg.get('recommends'):
         rec_count = len(pkg['recommends'])
-        print(f"\n{colors.bold(f'Recommends ({rec_count}):')} ")
+        print("\n" + colors.bold(_("Recommends ({count}):").format(count=rec_count)) + " ")
         from .. import display
         display.print_package_list(pkg['recommends'], max_lines=10, color_func=colors.dim)
 
     if pkg.get('suggests'):
         sug_count = len(pkg['suggests'])
-        print(f"\n{colors.bold(f'Suggests ({sug_count}):')} ")
+        print("\n" + colors.bold(_("Suggests ({count}):").format(count=sug_count)) + " ")
         from .. import display
         display.print_package_list(pkg['suggests'], max_lines=10, color_func=colors.dim)
 
     if pkg.get('provides'):
         prov_count = len(pkg['provides'])
-        print(f"\n{colors.bold(f'Provides ({prov_count}):')} ")
+        print("\n" + colors.bold(_("Provides ({count}):").format(count=prov_count)) + " ")
         from .. import display
         display.print_package_list(pkg['provides'], max_lines=5, color_func=colors.dim)
 
     if pkg.get('conflicts'):
         conf_count = len(pkg['conflicts'])
-        print(f"\n{colors.bold(f'Conflicts ({conf_count}):')} ")
+        print("\n" + colors.bold(_("Conflicts ({count}):").format(count=conf_count)) + " ")
         from .. import display
         display.print_package_list(pkg['conflicts'], max_lines=5, color_func=colors.dim)
 
     if pkg.get('obsoletes'):
         obs_count = len(pkg['obsoletes'])
-        print(f"\n{colors.bold(f'Obsoletes ({obs_count}):')} ")
+        print("\n" + colors.bold(_("Obsoletes ({count}):").format(count=obs_count)) + " ")
         from .. import display
         display.print_package_list(pkg['obsoletes'], max_lines=5, color_func=colors.dim)
 
@@ -284,9 +292,12 @@ def cmd_list(args, db: 'PackageDatabase') -> int:
             for name, version, release, arch in packages:
                 print(f"{name}-{version}-{release}.{arch}")
 
-            print(f"\n{len(packages)} packages installed")
+            print("\n" + ngettext(
+                "{count} package installed",
+                "{count} packages installed",
+                len(packages)).format(count=len(packages)))
         except ImportError:
-            print("Error: rpm module not available")
+            print(_("Error: rpm module not available"))
             return 1
 
     elif filter_type == 'available':
@@ -300,30 +311,36 @@ def cmd_list(args, db: 'PackageDatabase') -> int:
         for row in cursor:
             print(f"{row[0]}-{row[1]}-{row[2]}.{row[3]}")
             count += 1
-        print(f"\n{count} packages available")
+        print("\n" + ngettext(
+            "{count} package available",
+            "{count} packages available",
+            count).format(count=count))
 
     elif filter_type in ('updates', 'upgradable'):
         # List packages with available updates
         from ...core.operations import PackageOperations
 
         ops = PackageOperations(db)
-        print("Checking for updates...")
+        print(_("Checking for updates..."))
         success, upgrades, problems = ops.get_updates()
 
         if not success:
-            print("Error checking updates:")
+            print(_("Error checking updates:"))
             for p in problems:
                 print(f"  {p}")
             return 1
 
         if not upgrades:
-            print("All packages are up to date.")
+            print(_("All packages are up to date."))
             return 0
 
         for u in sorted(upgrades, key=lambda x: x.name.lower()):
             print(f"{u.nevra}")
 
-        print(f"\n{len(upgrades)} packages can be upgraded")
+        print("\n" + ngettext(
+            "{count} package can be upgraded",
+            "{count} packages can be upgraded",
+            len(upgrades)).format(count=len(upgrades)))
 
     elif filter_type == 'all':
         # List all packages (installed + available)
@@ -350,7 +367,7 @@ def cmd_list(args, db: 'PackageDatabase') -> int:
             print(f"{marker} {row[0]}-{row[1]}-{row[2]}.{row[3]}")
             count += 1
 
-        print(f"\n{count} packages ({len(installed)} installed)")
+        print("\n" + _("{count} packages ({installed} installed)").format(count=count, installed=len(installed)))
 
     return 0
 
@@ -405,10 +422,10 @@ def cmd_provides(args, db: 'PackageDatabase') -> int:
             found_name = pkg.get('nevra', pkg_name)
 
     if not provides:
-        print(f"Package '{package}' not found")
+        print(_("Package '{package}' not found").format(package=package))
         return 1
 
-    print(f"Package {found_name} provides ({len(provides)}):\n")
+    print(_("Package {name} provides ({count}):").format(name=found_name, count=len(provides)) + "\n")
     for prov in sorted(provides):
         print(f"  {prov}")
 
@@ -515,12 +532,12 @@ def cmd_whatprovides(args, db: 'PackageDatabase') -> int:
         pass
 
     if not results and not installed_matches:
-        print(f"No package provides '{capability}'")
+        print(_("No package provides '{capability}'").format(capability=capability))
         return 1
 
     # Show installed matches first
     if installed_matches:
-        print("Installed:")
+        print(_("Installed:"))
         for pkg in installed_matches:
             print(f"  {pkg['nevra']}")
 
@@ -530,7 +547,7 @@ def cmd_whatprovides(args, db: 'PackageDatabase') -> int:
 
     if available:
         if installed_matches:
-            print("\nAvailable:")
+            print(_("\nAvailable:"))
         for pkg in available:
             media = pkg.get('media_name', '')
             media_str = f" [{media}]" if media else ""
@@ -624,48 +641,48 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
 
             if not has_sync_files:
                 # Prompt user to enable files.xml sync
-                print(colors.info("La recherche dans les paquets disponibles nécessite le téléchargement"))
-                print(colors.info("des fichiers files.xml (~500 Mo, ~10-15 minutes la première fois)."))
+                print(colors.info(_("La recherche dans les paquets disponibles nécessite le téléchargement")))
+                print(colors.info(_("des fichiers files.xml (~500 Mo, ~10-15 minutes la première fois).")))
                 print()
 
                 try:
-                    response = input("Activer cette fonctionnalité ? [o/N] ").strip().lower()
+                    response = input(_("Activer cette fonctionnalité ? [o/N] ")).strip().lower()
                 except (EOFError, KeyboardInterrupt):
                     print()
                     return 1
 
-                if response in ('o', 'oui', 'y', 'yes'):
+                if confirm_yes(response):
                     # Enable sync_files on all enabled media
                     from ...core.install import check_root
                     if not check_root():
-                        print(colors.error("Erreur: droits root requis pour activer sync_files"))
-                        print("Essayez: sudo urpm media set --all --sync-files")
+                        print(colors.error(_("Erreur: droits root requis pour activer sync_files")))
+                        print(_("Essayez: sudo urpm media set --all --sync-files"))
                         return 1
 
                     db.set_all_media_sync_files(True, enabled_only=True)
                     enabled_count = len(db.get_media_with_sync_files())
-                    print(colors.success(f"sync_files activé sur {enabled_count} media"))
+                    print(colors.success(_("sync_files activé sur {count} media").format(count=enabled_count)))
                     print()
-                    print("Lancez maintenant: sudo urpm media update --files")
-                    print("(~10-15 minutes la première fois, puis quasi-instantané)")
+                    print(_("Lancez maintenant: sudo urpm media update --files"))
+                    print(_("(~10-15 minutes la première fois, puis quasi-instantané)"))
                     return 0
                 else:
-                    print(colors.dim("Fonctionnalité non activée."))
-                    print(colors.dim("Pour activer plus tard: sudo urpm media set --all --sync-files"))
+                    print(colors.dim(_("Fonctionnalité non activée.")))
+                    print(colors.dim(_("Pour activer plus tard: sudo urpm media set --all --sync-files")))
                     return 0
 
             elif search_available:
                 # sync_files is enabled but no data yet
-                print(colors.warning("sync_files est activé mais les données ne sont pas encore téléchargées."))
-                print("Lancez: sudo urpm media update --files")
+                print(colors.warning(_("sync_files est activé mais les données ne sont pas encore téléchargées.")))
+                print(_("Lancez: sudo urpm media update --files"))
                 return 1
             # else: silently skip available search if searching both
         else:
             # Check if FTS index needs rebuild (migration case)
             if db.is_fts_available() and not db.is_fts_index_current():
-                print(colors.warning("L'index de recherche rapide (FTS) doit être reconstruit."))
-                print(colors.dim("Lancez: sudo urpm media update --files"))
-                print(colors.dim("(La recherche sera plus lente en attendant)"))
+                print(colors.warning(_("L'index de recherche rapide (FTS) doit être reconstruit.")))
+                print(colors.dim(_("Lancez: sudo urpm media update --files")))
+                print(colors.dim(_("(La recherche sera plus lente en attendant)")))
                 print()
 
             # Search in database (uses FTS if available, falls back to B-tree)
@@ -684,11 +701,11 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
 
     # Display results
     if not installed_found and not available_found:
-        print(f"No package contains '{pattern}'")
+        print(_("No package contains '{pattern}'").format(pattern=pattern))
         if search_both or search_available:
             stats = db.get_files_stats()
             if stats['total_files'] == 0:
-                print(colors.info("Hint: run 'sudo urpm media update --files' to enable searching available packages"))
+                print(colors.info(_("Hint: run 'sudo urpm media update --files' to enable searching available packages")))
         return 1
 
     # Helper to highlight pattern in file path (green)
@@ -741,7 +758,7 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
             # Show "... N more" if truncated
             hidden = len(files) - len(files_to_show)
             if hidden > 0:
-                print(colors.dim(f"    ... ({hidden} more)"))
+                print(colors.dim("    ... " + _("({count} more)").format(count=hidden)))
                 total_hidden += hidden
 
         return total_shown, total_hidden
@@ -750,7 +767,7 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
     total_hidden = 0
 
     if installed_found:
-        print(colors.info("Installed:"))
+        print(colors.info(_("Installed:")))
         grouped = group_by_package(installed_found)
         shown, hidden = display_grouped(grouped, FILES_PER_PKG, show_media=False)
         total_shown += shown
@@ -764,7 +781,7 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
         if available_not_installed:
             if installed_found:
                 print()
-            print(colors.info("Available (not installed):"))
+            print(colors.info(_("Available (not installed):")))
             grouped = group_by_package(available_not_installed)
             shown, hidden = display_grouped(grouped, FILES_PER_PKG, show_media=True)
             total_shown += shown
@@ -772,7 +789,7 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
 
     # Summary if some files were hidden
     if total_hidden > 0:
-        print(f"\n{colors.dim(f'{total_hidden} files hidden (use --show-all to see all)')}")
+        print("\n" + colors.dim(_("{count} files hidden (use --show-all to see all)").format(count=total_hidden)))
 
     return 0
 

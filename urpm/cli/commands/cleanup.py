@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -31,9 +32,9 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
     # Check for previous background errors
     prev_error = check_background_error()
     if prev_error:
-        print(colors.warning(f"Warning: Previous background operation had an error:"))
+        print(colors.warning(_("Warning: Previous background operation had an error:")))
         print(colors.warning(f"  {prev_error}"))
-        print(colors.dim("  (This message will not appear again)"))
+        print(colors.dim(_("  (This message will not appear again)")))
         clear_background_error()
 
     # Determine which selectors are active
@@ -59,36 +60,45 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
     # --orphans: orphaned packages
     if do_orphans:
-        print("Searching for orphaned packages...")
+        print(_("Searching for orphaned packages..."))
         orphans = resolver.find_all_orphans()
         for o in orphans:
             packages_to_remove.append((o.name, o.nevra, o.size, 'orphan'))
         if orphans:
-            print(f"  Found {colors.warning(str(len(orphans)))} orphaned package(s)")
+            print("  " + ngettext(
+                "Found {count} orphaned package",
+                "Found {count} orphaned packages",
+                len(orphans)).format(count=colors.warning(str(len(orphans)))))
         else:
-            print(colors.success("  No orphaned packages found"))
+            print(colors.success(_("  No orphaned packages found")))
 
     # --kernels: old kernels
     if do_kernels:
-        print("Searching for old kernels...")
+        print(_("Searching for old kernels..."))
         old_kernels = _find_old_kernels(keep_count=2)
         for name, nevra, size in old_kernels:
             packages_to_remove.append((name, nevra, size, 'old-kernel'))
         if old_kernels:
-            print(f"  Found {colors.warning(str(len(old_kernels)))} old kernel package(s)")
+            print("  " + ngettext(
+                "Found {count} old kernel package",
+                "Found {count} old kernel packages",
+                len(old_kernels)).format(count=colors.warning(str(len(old_kernels)))))
         else:
-            print(colors.success("  No old kernels found"))
+            print(colors.success(_("  No old kernels found")))
 
     # --faildeps: orphan deps from interrupted transactions
     if do_faildeps:
-        print("Searching for failed dependencies...")
+        print(_("Searching for failed dependencies..."))
         faildeps, faildeps_trans_ids = _find_faildeps(db)
         for name, nevra in faildeps:
             packages_to_remove.append((name, nevra, 0, 'faildep'))
         if faildeps:
-            print(f"  Found {colors.warning(str(len(faildeps)))} failed dependency package(s)")
+            print("  " + ngettext(
+                "Found {count} failed dependency package",
+                "Found {count} failed dependency packages",
+                len(faildeps)).format(count=colors.warning(str(len(faildeps)))))
         else:
-            print(colors.success("  No failed dependencies found"))
+            print(colors.success(_("  No failed dependencies found")))
 
     # Remove duplicates (keep first occurrence)
     seen = set()
@@ -100,7 +110,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
     packages_to_remove = unique_packages
 
     if not packages_to_remove:
-        print(colors.success("\nNothing to remove."))
+        print(colors.success(_("\nNothing to remove.")))
         return 0
 
     # Apply blacklist and redlist protection
@@ -122,34 +132,37 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
     # Report blocked packages
     if blocked:
-        print(f"\n  {colors.error(f'BLOCKED ({len(blocked)})')} - critical system packages:")
-        for name, nevra, _, _ in blocked:
+        print("\n  " + colors.error(_("BLOCKED ({count})").format(count=len(blocked))) + " - " + _("critical system packages:"))
+        for name, nevra, _s, _r in blocked:
             print(f"    {colors.error(nevra)}")
-        print(colors.error("  These packages cannot be removed (system would be unusable)"))
+        print(colors.error(_("  These packages cannot be removed (system would be unusable)")))
 
     # Handle warned packages
     if warned and not getattr(args, 'auto', False):
-        print(f"\n  {colors.warning(f'WARNING ({len(warned)})')} - generally useful packages:")
-        for name, nevra, _, _ in warned:
+        print("\n  " + colors.warning(_("WARNING ({count})").format(count=len(warned))) + " - " + _("generally useful packages:"))
+        for name, nevra, _s, _r in warned:
             print(f"    {colors.warning(nevra)}")
         try:
-            response = input("\n  Remove these warned packages anyway? [y/N] ")
-            if response.lower() in ('y', 'yes'):
+            response = input(_("\n  Remove these warned packages anyway? [y/N] "))
+            if confirm_yes(response):
                 safe.extend(warned)
             else:
-                print("  Warned packages will be kept")
+                print(_("  Warned packages will be kept"))
         except (KeyboardInterrupt, EOFError):
-            print("\n  Warned packages will be kept")
+            print(_("\n  Warned packages will be kept"))
 
     packages_to_remove = safe
 
     if not packages_to_remove:
-        print(colors.success("\nNothing safe to remove."))
+        print(colors.success(_("\nNothing safe to remove.")))
         return 0
 
     # Display summary
-    total_size = sum(size for _, _, size, _ in packages_to_remove)
-    print(f"\n{colors.bold(f'The following {len(packages_to_remove)} package(s) will be removed:')}")
+    total_size = sum(size for _n, _v, size, _r in packages_to_remove)
+    print("\n" + colors.bold(ngettext(
+        "The following package will be removed:",
+        "The following {count} packages will be removed:",
+        len(packages_to_remove)).format(count=len(packages_to_remove))))
     from .. import display
 
     # Group by reason for display
@@ -160,32 +173,32 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         by_reason[reason].append(nevra)
 
     reason_labels = {
-        'orphan': 'Orphaned packages',
-        'old-kernel': 'Old kernels',
-        'faildep': 'Failed dependencies',
+        'orphan': _('Orphaned packages'),
+        'old-kernel': _('Old kernels'),
+        'faildep': _('Failed dependencies'),
     }
 
     for reason, nevras in by_reason.items():
         label = reason_labels.get(reason, reason)
-        print(f"\n  {colors.error(f'{label} ({len(nevras)}):')}")
+        print("\n  " + colors.error(_("{label} ({count}):").format(label=label, count=len(nevras))))
         display.print_package_list(sorted(nevras), indent=4, color_func=colors.error)
 
-    print(f"\nDisk space to free: {format_size(total_size)}")
+    print("\n" + _("Disk space to free: {size}").format(size=format_size(total_size)))
 
     # Confirmation
     if not getattr(args, 'auto', False):
         try:
-            response = input("\nRemove these packages? [y/N] ")
-            if response.lower() not in ('y', 'yes'):
-                print("Aborted.")
+            response = input(_("\nRemove these packages? [y/N] "))
+            if not confirm_yes(response):
+                print(_("Aborted."))
                 return 0
         except (KeyboardInterrupt, EOFError):
-            print("\nAborted.")
+            print(_("\nAborted."))
             return 130
 
     # Check root
     if not check_root():
-        print(colors.error("Error: autoremove requires root privileges"))
+        print(colors.error(_("Error: autoremove requires root privileges")))
         return 1
 
     # Build command line for history
@@ -212,25 +225,28 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
     def sigint_handler(signum, frame):
         if interrupted[0]:
-            print("\n\nForce abort!")
+            print(_("\n\nForce abort!"))
             db.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
             interrupted[0] = True
-            print("\n\nInterrupt requested - finishing current package...")
+            print(_("\n\nInterrupt requested - finishing current package..."))
 
     signal.signal(signal.SIGINT, sigint_handler)
 
     try:
-        print(f"\nRemoving {len(packages_to_remove)} packages...")
-        package_names = [name for name, _, _, _ in packages_to_remove]
+        print("\n" + ngettext(
+            "Removing {count} package...",
+            "Removing {count} packages...",
+            len(packages_to_remove)).format(count=len(packages_to_remove)))
+        package_names = [name for name, _v, _s, _r in packages_to_remove]
 
         # Check if another operation is in progress
         lock = InstallLock()
         if not lock.acquire(blocking=False):
-            print(colors.warning("  RPM database is locked by another process."))
-            print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+            print(colors.warning(_("  RPM database is locked by another process.")))
+            print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
             lock.acquire(blocking=True)
         lock.release()  # Release - child will acquire its own lock
 
@@ -256,7 +272,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         print(f"\r\033[K  [{len(package_names)}/{len(package_names)}] done")
 
         if not queue_result.success:
-            print(colors.error(f"\nRemoval failed:"))
+            print(colors.error("\n" + _("Removal failed:")))
             if queue_result.operations:
                 for err in queue_result.operations[0].errors[:3]:
                     print(f"  {colors.error(err)}")
@@ -266,12 +282,15 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
             return 1
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Autoremove interrupted"))
+            print(colors.warning("\n  " + _("Autoremove interrupted")))
             db.abort_transaction(transaction_id)
             return 130
 
         removed_count = queue_result.operations[0].count if queue_result.operations else len(package_names)
-        print(colors.success(f"  {removed_count} packages removed"))
+        print(colors.success("  " + ngettext(
+            "{count} package removed",
+            "{count} packages removed",
+            removed_count).format(count=removed_count)))
 
         # Mark faildeps transactions as cleaned
         if faildeps_trans_ids:
@@ -320,7 +339,7 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
             for hdr in ts.dbMatch():
                 installed.add(hdr[rpm.RPMTAG_NAME].lower())
         except ImportError:
-            print(colors.error("Error: rpm module not available"))
+            print(colors.error(_("Error: rpm module not available")))
             return 1
 
         for pkg in packages:
@@ -333,15 +352,15 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
                 marked.append(pkg)
 
         if not_installed:
-            print(colors.warning(f"Not installed: {', '.join(not_installed)}"))
+            print(colors.warning(_("Not installed: {packages}").format(packages=', '.join(not_installed))))
 
         if already_manual:
-            print(f"Already manual: {', '.join(already_manual)}")
+            print(_("Already manual: {packages}").format(packages=', '.join(already_manual)))
 
         if marked:
             resolver.mark_as_explicit(marked)
-            print(colors.success(f"Marked as manual: {', '.join(marked)}"))
-            print("These packages are now protected from autoremove.")
+            print(colors.success(_("Marked as manual: {packages}").format(packages=', '.join(marked))))
+            print(_("These packages are now protected from autoremove."))
 
         return 0 if marked or already_manual else 1
 
@@ -362,7 +381,7 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
             for hdr in ts.dbMatch():
                 installed.add(hdr[rpm.RPMTAG_NAME].lower())
         except ImportError:
-            print(colors.error("Error: rpm module not available"))
+            print(colors.error(_("Error: rpm module not available")))
             return 1
 
         for pkg in packages:
@@ -375,15 +394,15 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
                 marked.append(pkg)
 
         if not_installed:
-            print(colors.warning(f"Not installed: {', '.join(not_installed)}"))
+            print(colors.warning(_("Not installed: {packages}").format(packages=', '.join(not_installed))))
 
         if already_auto:
-            print(f"Already auto: {', '.join(already_auto)}")
+            print(_("Already auto: {packages}").format(packages=', '.join(already_auto)))
 
         if marked:
             resolver.mark_as_dependency(marked)
-            print(colors.success(f"Marked as auto: {', '.join(marked)}"))
-            print("These packages can now be autoremoved if no longer needed.")
+            print(colors.success(_("Marked as auto: {packages}").format(packages=', '.join(marked))))
+            print(_("These packages can now be autoremoved if no longer needed."))
 
         return 0 if marked or already_auto else 1
 
@@ -399,7 +418,7 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
                 name = hdr[rpm.RPMTAG_NAME]
                 installed[name.lower()] = name
         except ImportError:
-            print(colors.error("Error: rpm module not available"))
+            print(colors.error(_("Error: rpm module not available")))
             return 1
 
         packages = args.packages if args.packages else sorted(installed.keys())
@@ -410,21 +429,21 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
         for pkg in packages:
             pkg_lower = pkg.lower()
             if pkg_lower not in installed:
-                print(f"{pkg}: {colors.warning('not installed')}")
+                print(f"{pkg}: {colors.warning(_('not installed'))}")
             elif pkg_lower in unrequested:
-                print(f"{installed[pkg_lower]}: {colors.info('auto')}")
+                print(f"{installed[pkg_lower]}: {colors.info(_('auto'))}")
                 auto_count += 1
             else:
-                print(f"{installed[pkg_lower]}: {colors.success('manual')}")
+                print(f"{installed[pkg_lower]}: {colors.success(_('manual'))}")
                 manual_count += 1
 
         if not args.packages:
-            print(f"\nTotal: {manual_count} manual, {auto_count} auto")
+            print("\n" + _("Total: {manual} manual, {auto} auto").format(manual=manual_count, auto=auto_count))
 
         return 0
 
     else:
-        print("Usage: urpm mark <manual|auto|show> [packages...]")
+        print(_("Usage: urpm mark <manual|auto|show> [packages...]"))
         return 1
 
 
@@ -437,15 +456,15 @@ def cmd_hold(args, db: 'PackageDatabase') -> int:
     if args.list_holds or not args.packages:
         holds = db.list_holds()
         if not holds:
-            print("No packages are held.")
+            print(_("No packages are held."))
             return 0
 
-        print(f"Held packages ({len(holds)}):\n")
+        print(_("Held packages ({count}):").format(count=len(holds)) + "\n")
         for hold in holds:
             ts = datetime.fromtimestamp(hold['added_timestamp'])
             reason = f" - {hold['reason']}" if hold['reason'] else ""
             print(f"  {colors.warning(hold['package_name'])}{reason}")
-            print(f"    (held since {ts.strftime('%Y-%m-%d %H:%M')})")
+            print("    " + _("(held since {date})").format(date=ts.strftime('%Y-%m-%d %H:%M')))
         return 0
 
     # Hold packages
@@ -459,11 +478,11 @@ def cmd_hold(args, db: 'PackageDatabase') -> int:
             already_held.append(pkg)
 
     if already_held:
-        print(f"Already held: {', '.join(already_held)}")
+        print(_("Already held: {packages}").format(packages=', '.join(already_held)))
 
     if added:
-        print(colors.success(f"Held: {', '.join(added)}"))
-        print("These packages will be protected from upgrades and obsoletes replacement.")
+        print(colors.success(_("Held: {packages}").format(packages=', '.join(added))))
+        print(_("These packages will be protected from upgrades and obsoletes replacement."))
 
     return 0 if added or already_held else 1
 
@@ -482,11 +501,11 @@ def cmd_unhold(args, db: 'PackageDatabase') -> int:
             not_held.append(pkg)
 
     if not_held:
-        print(f"Not held: {', '.join(not_held)}")
+        print(_("Not held: {packages}").format(packages=', '.join(not_held)))
 
     if removed:
-        print(colors.success(f"Unheld: {', '.join(removed)}"))
-        print("These packages can now be upgraded and replaced by obsoletes.")
+        print(colors.success(_("Unheld: {packages}").format(packages=', '.join(removed))))
+        print(_("These packages can now be upgraded and replaced by obsoletes."))
 
     return 0 if removed else 1
 
@@ -504,7 +523,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
     interrupted = db.get_interrupted_transactions()
 
     if not interrupted:
-        print("No interrupted transactions found")
+        print(_("No interrupted transactions found"))
         return 0
 
     # Collect all orphan deps
@@ -517,7 +536,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
             interrupted_ids.append(trans['id'])
 
     if not all_orphans:
-        print("No orphan dependencies to clean")
+        print(_("No orphan dependencies to clean"))
         return 0
 
     # Remove duplicates while preserving order
@@ -529,23 +548,24 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
             unique_orphans.append(nevra)
     all_orphans = unique_orphans
 
-    print(f"\nFound {len(all_orphans)} orphan dependencies from {len(interrupted)} interrupted transaction(s):")
+    print("\n" + _("Found {count} orphan dependencies from {trans} interrupted transaction(s):").format(
+        count=len(all_orphans), trans=len(interrupted)))
     from .. import display
     display.print_package_list(all_orphans, max_lines=10)
 
     if not args.auto:
         try:
-            answer = input("\nRemove these packages? [y/N] ")
-            if answer.lower() not in ('y', 'yes'):
-                print("Aborted")
+            answer = input(_("\nRemove these packages? [y/N] "))
+            if not confirm_yes(answer):
+                print(_("Aborted"))
                 return 1
         except EOFError:
-            print("\nAborted")
+            print(_("\nAborted"))
             return 1
 
     # Check root
     if not check_root():
-        print("Error: cleandeps requires root privileges")
+        print(_("Error: cleandeps requires root privileges"))
         return 1
 
     # Record transaction
@@ -558,13 +578,13 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
 
     def sigint_handler(signum, frame):
         if interrupted_flag[0]:
-            print("\n\nForce abort!")
+            print(_("\n\nForce abort!"))
             db.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
             interrupted_flag[0] = True
-            print("\n\nInterrupt requested - finishing current package...")
+            print(_("\n\nInterrupt requested - finishing current package..."))
 
     signal.signal(signal.SIGINT, sigint_handler)
 
@@ -581,13 +601,16 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
         # Check if another operation is in progress
         lock = InstallLock()
         if not lock.acquire(blocking=False):
-            print(colors.warning("  RPM database is locked by another process."))
-            print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+            print(colors.warning(_("  RPM database is locked by another process.")))
+            print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
             lock.acquire(blocking=True)
         lock.release()  # Release - child will acquire its own lock
 
         # Erase packages
-        print(f"\nErasing {len(packages_to_erase)} orphan dependencies...")
+        print("\n" + ngettext(
+            "Erasing {count} orphan dependency...",
+            "Erasing {count} orphan dependencies...",
+            len(packages_to_erase)).format(count=len(packages_to_erase)))
 
         last_erase_shown = [None]
 
@@ -611,7 +634,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
         print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
 
         if not queue_result.success:
-            print(colors.error(f"\nErase failed:"))
+            print(colors.error("\n" + _("Erase failed:")))
             if queue_result.operations:
                 for err in queue_result.operations[0].errors[:5]:
                     print(f"  {colors.error(err)}")
@@ -622,12 +645,15 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
 
         if interrupted_flag[0]:
             erased_count = queue_result.operations[0].count if queue_result.operations else 0
-            print(colors.warning(f"\n  Erase interrupted after {erased_count} packages"))
+            print(colors.warning("\n  " + _("Erase interrupted after {count} packages").format(count=erased_count)))
             db.abort_transaction(transaction_id)
             return 130
 
         erased_count = queue_result.operations[0].count if queue_result.operations else len(packages_to_erase)
-        print(colors.success(f"  {erased_count} packages erased"))
+        print(colors.success("  " + ngettext(
+            "{count} package erased",
+            "{count} packages erased",
+            erased_count).format(count=erased_count)))
 
         # Mark interrupted transactions as cleaned
         for tid in interrupted_ids:

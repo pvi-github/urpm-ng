@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -17,25 +18,25 @@ def cmd_mirror_status(args, db: 'PackageDatabase') -> int:
     global_quota = db.get_mirror_config('global_quota_mb')
     rate_limit = db.get_mirror_config('rate_limit_enabled', '1')
 
-    print(colors.bold("\nMirror Status"))
+    print(colors.bold(_("\nMirror Status")))
     print("-" * 40)
-    print(f"Mirror mode:      {colors.success('enabled') if enabled else colors.dim('disabled')}")
+    print(_("Mirror mode:") + f"      {colors.success(_('enabled')) if enabled else colors.dim(_('disabled'))}")
     if disabled_versions:
-        print(f"Disabled versions: {', '.join(disabled_versions)}")
+        print(_("Disabled versions:") + f" {', '.join(disabled_versions)}")
     if global_quota:
-        print(f"Global quota:     {global_quota} MB")
-    print(f"Rate limiting:    {'on' if rate_limit == '1' else colors.warning('off')}")
+        print(_("Global quota:") + f"     {global_quota} MB")
+    print(_("Rate limiting:") + f"    {_('on') if rate_limit == '1' else colors.warning(_('off'))}")
 
     # Cache statistics
     cache_mgr = CacheManager(db)
     stats = cache_mgr.get_usage()
 
-    print(colors.bold("\nCache Statistics"))
+    print(colors.bold(_("\nCache Statistics")))
     print("-" * 40)
-    print(f"Total files:      {stats.get('total_files', 0)}")
-    print(f"Total size:       {format_size(stats.get('total_size', 0))}")
-    print(f"Referenced:       {stats.get('referenced_files', 0)} files ({format_size(stats.get('referenced_size', 0))})")
-    print(f"Unreferenced:     {stats.get('unreferenced_files', 0)} files ({format_size(stats.get('unreferenced_size', 0))})")
+    print(_("Total files:") + f"      {stats.get('total_files', 0)}")
+    print(_("Total size:") + f"       {format_size(stats.get('total_size', 0))}")
+    print(_("Referenced:") + "       " + _("{count} files ({size})").format(count=stats.get('referenced_files', 0), size=format_size(stats.get('referenced_size', 0))))
+    print(_("Unreferenced:") + "     " + _("{count} files ({size})").format(count=stats.get('unreferenced_files', 0), size=format_size(stats.get('unreferenced_size', 0))))
 
     if stats.get('quota_bytes'):
         pct = stats.get('quota_used_pct', 0)
@@ -44,23 +45,23 @@ def cmd_mirror_status(args, db: 'PackageDatabase') -> int:
             pct_str = colors.error(pct_str)
         elif pct > 75:
             pct_str = colors.warning(pct_str)
-        print(f"Quota used:       {pct_str}")
+        print(_("Quota used:") + f"       {pct_str}")
 
     # Per-media summary
-    print(colors.bold("\nMedia with mirror settings"))
+    print(colors.bold(_("\nMedia with mirror settings")))
     print("-" * 40)
     media_list = db.list_media()
     has_settings = False
     for m in media_list:
         if m.get('quota_mb') or m.get('replication_policy') != 'on_demand' or not m.get('shared', 1):
             has_settings = True
-            shared_str = colors.success('Y') if m.get('shared', 1) else colors.dim('N')
+            shared_str = colors.success(_('Y')) if m.get('shared', 1) else colors.dim(_('N'))
             policy = m.get('replication_policy', 'on_demand')
             quota = f"{m['quota_mb']}M" if m.get('quota_mb') else '-'
             print(f"  {m['name'][:30]:<30} shared={shared_str} repl={policy:<10} quota={quota}")
 
     if not has_settings:
-        print(colors.dim("  (all media using defaults)"))
+        print(colors.dim(_("  (all media using defaults)")))
 
     return 0
 
@@ -70,8 +71,8 @@ def cmd_mirror_enable(args, db: 'PackageDatabase') -> int:
     from .. import colors
 
     db.set_mirror_config('enabled', '1')
-    print(colors.success("Mirror mode enabled"))
-    print("This urpmd will now serve packages to peers on the network.")
+    print(colors.success(_("Mirror mode enabled")))
+    print(_("This urpmd will now serve packages to peers on the network."))
     return 0
 
 
@@ -80,8 +81,8 @@ def cmd_mirror_disable(args, db: 'PackageDatabase') -> int:
     from .. import colors
 
     db.set_mirror_config('enabled', '0')
-    print(colors.success("Mirror mode disabled"))
-    print("This urpmd will no longer serve packages to peers.")
+    print(colors.success(_("Mirror mode disabled")))
+    print(_("This urpmd will no longer serve packages to peers."))
     return 0
 
 
@@ -94,9 +95,9 @@ def cmd_mirror_quota(args, db: 'PackageDatabase') -> int:
         # Show current quota
         current = db.get_mirror_config('global_quota_mb')
         if current:
-            print(f"Global quota: {current} MB ({format_size(int(current) * 1024 * 1024)})")
+            print(_("Global quota: {quota} MB ({size})").format(quota=current, size=format_size(int(current) * 1024 * 1024)))
         else:
-            print("No global quota set")
+            print(_("No global quota set"))
         return 0
 
     # Parse and set quota
@@ -111,11 +112,11 @@ def cmd_mirror_quota(args, db: 'PackageDatabase') -> int:
         else:
             quota_mb = int(size_str)
     except ValueError:
-        print(colors.error(f"Invalid size format: {args.size}"))
+        print(colors.error(_("Invalid size format: {size}").format(size=args.size)))
         return 1
 
     db.set_mirror_config('global_quota_mb', str(quota_mb))
-    print(colors.success(f"Global quota set to {quota_mb} MB ({format_size(quota_mb * 1024 * 1024)})"))
+    print(colors.success(_("Global quota set to {quota} MB ({size})").format(quota=quota_mb, size=format_size(quota_mb * 1024 * 1024))))
     return 0
 
 
@@ -130,10 +131,10 @@ def cmd_mirror_disable_version(args, db: 'PackageDatabase') -> int:
     all_disabled = set(current) | set(new_versions)
     db.set_mirror_config('disabled_versions', ','.join(sorted(all_disabled)))
 
-    print(colors.success(f"Disabled mirroring for Mageia version(s): {', '.join(new_versions)}"))
+    print(colors.success(_("Disabled mirroring for Mageia version(s): {versions}").format(versions=', '.join(new_versions))))
     if current:
-        print(f"Previously disabled: {', '.join(current)}")
-    print(f"Now disabled: {', '.join(sorted(all_disabled))}")
+        print(_("Previously disabled: {versions}").format(versions=', '.join(current)))
+    print(_("Now disabled: {versions}").format(versions=', '.join(sorted(all_disabled))))
     return 0
 
 
@@ -150,12 +151,12 @@ def cmd_mirror_enable_version(args, db: 'PackageDatabase') -> int:
 
     enabled = [v for v in to_enable if v in current]
     if enabled:
-        print(colors.success(f"Re-enabled mirroring for Mageia version(s): {', '.join(enabled)}"))
+        print(colors.success(_("Re-enabled mirroring for Mageia version(s): {versions}").format(versions=', '.join(enabled))))
     else:
-        print(colors.warning(f"Version(s) {', '.join(to_enable)} were not disabled"))
+        print(colors.warning(_("Version(s) {versions} were not disabled").format(versions=', '.join(to_enable))))
 
     if still_disabled:
-        print(f"Still disabled: {', '.join(still_disabled)}")
+        print(_("Still disabled: {versions}").format(versions=', '.join(still_disabled)))
     return 0
 
 
@@ -168,22 +169,25 @@ def cmd_mirror_clean(args, db: 'PackageDatabase') -> int:
     dry_run = getattr(args, 'dry_run', False)
 
     if dry_run:
-        print(colors.info("Dry run mode - no files will be deleted\n"))
+        print(colors.info(_("Dry run mode - no files will be deleted\n")))
 
     result = cache_mgr.enforce_quotas(dry_run=dry_run)
 
     # Report results
-    print(colors.bold("Cleanup results:"))
-    print(f"  Unreferenced files: {result['unreferenced_deleted']} ({format_size(result['unreferenced_bytes'])})")
-    print(f"  Retention policy:   {result['retention_deleted']} ({format_size(result['retention_bytes'])})")
-    print(f"  Quota enforcement:  {result['quota_deleted']} ({format_size(result['quota_bytes'])})")
-    print(f"  {colors.bold('Total:')}            {result['total_deleted']} ({format_size(result['total_bytes'])})")
+    print(colors.bold(_("Cleanup results:")))
+    print("  " + _("Unreferenced files: {count} ({size})").format(count=result['unreferenced_deleted'], size=format_size(result['unreferenced_bytes'])))
+    print("  " + _("Retention policy:   {count} ({size})").format(count=result['retention_deleted'], size=format_size(result['retention_bytes'])))
+    print("  " + _("Quota enforcement:  {count} ({size})").format(count=result['quota_deleted'], size=format_size(result['quota_bytes'])))
+    print("  " + colors.bold(_("Total:")) + f"            {result['total_deleted']} ({format_size(result['total_bytes'])})")
 
     if result['errors']:
-        print(colors.warning(f"\n{len(result['errors'])} errors occurred"))
+        print(colors.warning("\n" + ngettext(
+            "{count} error occurred",
+            "{count} errors occurred",
+            len(result['errors'])).format(count=len(result['errors']))))
 
     if dry_run and result['total_deleted'] > 0:
-        print(colors.info("\nRun without --dry-run to actually delete files"))
+        print(colors.info(_("\nRun without --dry-run to actually delete files")))
 
     return 0
 
@@ -233,18 +237,18 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
 
     if not media_to_replicate:
         if args.media:
-            print(colors.error(f"Media '{args.media}' not found or doesn't have replication_policy='seed'"))
+            print(colors.error(_("Media '{media}' not found or doesn't have replication_policy='seed'").format(media=args.media)))
         else:
-            print(colors.warning("No media with replication_policy='seed'"))
-            print("Use: urpm media set <name> --replication=seed")
+            print(colors.warning(_("No media with replication_policy='seed'")))
+            print(_("Use: urpm media set <name> --replication=seed"))
         return 1
 
-    print(f"Media to sync: {len(media_to_replicate)}")
+    print(_("Media to sync: {count}").format(count=len(media_to_replicate)))
     for m in media_to_replicate:
         print(f"  - {m['name']}")
 
     # Compute seed set
-    print(colors.dim("\nComputing seed set..."))
+    print(colors.dim(_("\nComputing seed set...")))
 
     # Collect all sections from all media
     all_sections = set()
@@ -255,21 +259,21 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
                 sections = json.loads(seeds_json)
                 all_sections.update(sections)
             except json.JSONDecodeError:
-                print(colors.warning(f"Invalid replication_seeds JSON for {media['name']}"))
+                print(colors.warning(_("Invalid replication_seeds JSON for {media}").format(media=media['name'])))
         else:
             all_sections.update(DEFAULT_SEED_SECTIONS)
 
     # Parse rpmsrate
     if not DEFAULT_RPMSRATE_PATH.exists():
-        print(colors.error(f"rpmsrate-raw not found at {DEFAULT_RPMSRATE_PATH}"))
-        print("Install the meta-task package to enable seed-based replication")
+        print(colors.error(_("rpmsrate-raw not found at {path}").format(path=DEFAULT_RPMSRATE_PATH)))
+        print(_("Install the meta-task package to enable seed-based replication"))
         return 1
 
     try:
         parser = RpmsrateParser(DEFAULT_RPMSRATE_PATH)
         parser.parse()
     except Exception as e:
-        print(colors.error(f"Error parsing rpmsrate-raw: {e}"))
+        print(colors.error(_("Error parsing rpmsrate-raw: {error}").format(error=e)))
         return 1
 
     active_categories = [s for s in all_sections if s.startswith('CAT_')]
@@ -280,11 +284,11 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
         min_priority=4
     )
 
-    print(f"Seed packages from rpmsrate: {len(seed_packages)}")
+    print(_("Seed packages from rpmsrate: {count}").format(count=len(seed_packages)))
 
     # Expand locale patterns using database
     if locale_patterns:
-        print(f"Locale patterns to expand: {len(locale_patterns)}")
+        print(_("Locale patterns to expand: {count}").format(count=len(locale_patterns)))
         expanded = 0
         for pattern in locale_patterns:
             # Find all packages in DB matching this prefix
@@ -296,12 +300,12 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
                 if name not in seed_packages:
                     seed_packages.add(name)
                     expanded += 1
-        print(f"Expanded locale packages: +{expanded}")
+        print(_("Expanded locale packages: +{count}").format(count=expanded))
 
     # Expand with dependencies
     result = db.collect_dependencies(seed_packages)
     seed_names = result['packages']
-    print(f"With dependencies: {colors.count(len(seed_names))} packages")
+    print(_("With dependencies: {count} packages").format(count=colors.count(len(seed_names))))
 
     # Import RPM version comparison utilities
     from ...core.rpm import evr_key
@@ -334,7 +338,7 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
             for pkg_name, pkg in latest_by_name.items():
                 packages_by_name[pkg_name] = (media, pkg)  # Later media wins
 
-        print(f"Unique packages to mirror: {len(packages_by_name)} (--latest-only)")
+        print(_("Unique packages to mirror: {count} (--latest-only)").format(count=len(packages_by_name)))
 
         for pkg_name, (media, pkg) in packages_by_name.items():
             media_name = media['name']
@@ -376,26 +380,26 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
                     all_missing.append((media, pkg))
                     by_media[media_name][2] += 1
 
-        print(f"Total packages to mirror: {total_packages} (release + updates, latest versions)")
+        print(_("Total packages to mirror: {count} (release + updates, latest versions)").format(count=total_packages))
 
     # Show per-media breakdown
     for media_name in sorted(by_media.keys()):
         total, cached, missing = by_media[media_name]
-        print(f"  {media_name}: {total} packages ({cached} cached, {missing} to download)")
+        print("  " + _("{media}: {total} packages ({cached} cached, {missing} to download)").format(media=media_name, total=total, cached=cached, missing=missing))
 
     if not all_missing:
-        print(colors.success("\nAll seed packages are already cached!"))
+        print(colors.success(_("\nAll seed packages are already cached!")))
         return 0
 
     # Note: 'size' in database is installed size, not RPM file size
     # RPM files are typically ~3x smaller than installed size
-    installed_size = sum(p.get('size', 0) or 0 for _, p in all_missing)
+    installed_size = sum(p.get('size', 0) or 0 for _name, p in all_missing)
     estimated_download = installed_size / 3  # Rough estimate
-    print(f"\n{colors.bold('To download')}: {len(all_missing)} packages")
-    print(f"  Estimated download: ~{estimated_download / 1024 / 1024 / 1024:.1f} GB (installed: {installed_size / 1024 / 1024 / 1024:.1f} GB)")
+    print("\n" + colors.bold(_("To download")) + ": " + ngettext("{count} package", "{count} packages", len(all_missing)).format(count=len(all_missing)))
+    print("  " + _("Estimated download: ~{download} GB (installed: {installed} GB)").format(download=f"{estimated_download / 1024 / 1024 / 1024:.1f}", installed=f"{installed_size / 1024 / 1024 / 1024:.1f}"))
 
     # Build download items
-    print(colors.dim("\nPreparing downloads..."))
+    print(colors.dim(_("\nPreparing downloads...")))
 
     # Pre-compute servers per media
     media_info = {}  # media_id -> (servers, relative_path, is_official)
@@ -428,10 +432,10 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
         print(f"Insert 1 {pkg['name']} {pkg.get('filesize',0)}")
 
     if not download_items:
-        print(colors.warning("No items to download (no servers configured?)"))
+        print(colors.warning(_("No items to download (no servers configured?)")))
         return 1
 
-    print(f"Downloading {len(download_items)} packages...")
+    print(ngettext("Downloading {count} package...", "Downloading {count} packages...", len(download_items)).format(count=len(download_items)))
 
     # Use parallel downloader (same as urpm i/u)
     from ...core.config import get_base_dir
@@ -469,18 +473,18 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
 
     # Summary
     failed = [r for r in dl_results if not r.success]
-    print(f"\n{colors.bold('Done')}: {downloaded} downloaded, {cached} cached, {len(failed)} failed")
+    print("\n" + colors.bold(_("Done")) + ": " + _("{downloaded} downloaded, {cached} cached, {failed} failed").format(downloaded=downloaded, cached=cached, failed=len(failed)))
 
     # Notify urpmd to invalidate cache index (so new downloads are visible to peers)
     if downloaded > 0:
         _notify_urpmd_cache_invalidate()
 
     if failed:
-        print(colors.warning(f"\nFailed downloads:"))
+        print(colors.warning("\n" + _("Failed downloads:")))
         for r in failed[:10]:
             print(f"  {r.item.name}: {r.error}")
         if len(failed) > 10:
-            print(f"  ... and {len(failed) - 10} more")
+            print("  " + _("... and {count} more").format(count=len(failed) - 10))
 
     return 0 if not failed else 1
 
@@ -494,33 +498,33 @@ def cmd_mirror_ratelimit(args, db: 'PackageDatabase') -> int:
         enabled = db.get_mirror_config('rate_limit_enabled', '1')
         rate = db.get_mirror_config('rate_limit_requests_per_min', '60')
         if enabled == '0':
-            print(f"Rate limiting: {colors.warning('OFF')} (install party mode)")
+            print(_("Rate limiting:") + " " + colors.warning(_("OFF")) + " " + _("(install party mode)"))
         else:
-            print(f"Rate limiting: {colors.success('ON')} ({rate} requests/min)")
+            print(_("Rate limiting:") + " " + colors.success(_("ON")) + " " + _("({rate} requests/min)").format(rate=rate))
         return 0
 
     setting = args.setting.lower()
     if setting == 'off':
         db.set_mirror_config('rate_limit_enabled', '0')
-        print(colors.warning("Rate limiting disabled (install party mode)"))
+        print(colors.warning(_("Rate limiting disabled (install party mode)")))
     elif setting == 'on':
         db.set_mirror_config('rate_limit_enabled', '1')
         rate = db.get_mirror_config('rate_limit_requests_per_min', '60')
-        print(colors.success(f"Rate limiting enabled ({rate} requests/min)"))
+        print(colors.success(_("Rate limiting enabled ({rate} requests/min)").format(rate=rate)))
     elif '/min' in setting:
         # Parse N/min
         try:
             rate = int(setting.replace('/min', ''))
             db.set_mirror_config('rate_limit_enabled', '1')
             db.set_mirror_config('rate_limit_requests_per_min', str(rate))
-            print(colors.success(f"Rate limiting set to {rate} requests/min"))
+            print(colors.success(_("Rate limiting set to {rate} requests/min").format(rate=rate)))
         except ValueError:
-            print(colors.error(f"Invalid rate format: {args.setting}"))
-            print("Use: on, off, or N/min (e.g., 60/min)")
+            print(colors.error(_("Invalid rate format: {setting}").format(setting=args.setting)))
+            print(_("Use: on, off, or N/min (e.g., 60/min)"))
             return 1
     else:
-        print(colors.error(f"Invalid setting: {args.setting}"))
-        print("Use: on, off, or N/min (e.g., 60/min)")
+        print(colors.error(_("Invalid setting: {setting}").format(setting=args.setting)))
+        print(_("Use: on, off, or N/min (e.g., 60/min)"))
         return 1
 
     return 0

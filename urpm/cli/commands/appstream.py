@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -24,10 +25,10 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
             # Generate for specific media
             media = db.get_media(media_name)
             if not media:
-                print(colors.error(f"Media '{media_name}' not found"))
+                print(colors.error(_("Media '{media_name}' not found").format(media_name=media_name)))
                 return 1
 
-            print(f"Generating AppStream for {media_name}...")
+            print(_("Generating AppStream for {media_name}...").format(media_name=media_name))
             xml_str, count = appstream_mgr.generate_for_media(
                 media['id'], media_name
             )
@@ -37,12 +38,12 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(xml_str)
 
-            print(colors.ok(f"Generated {count} components -> {output_path}"))
+            print(colors.ok(_("Generated {count} components -> {path}").format(count=count, path=output_path)))
             return 0
 
         else:
             # Generate for all enabled media and merge
-            print("Generating AppStream for all enabled media...")
+            print(_("Generating AppStream for all enabled media..."))
 
             media_list = db.list_media()
             enabled_media = [m for m in media_list if m['enabled']]
@@ -58,17 +59,17 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
                 with open(output_path, 'w', encoding='utf-8') as f:
                     f.write(xml_str)
 
-                print(f"  {media['name']}: {count} components")
+                print("  " + _("{name}: {count} components").format(name=media['name'], count=count))
                 total += count
 
             # Merge all catalogs
-            print("\nMerging catalogs...")
+            print(_("\nMerging catalogs..."))
             total_merged, media_count = appstream_mgr.merge_all_catalogs()
-            print(colors.ok(f"Merged {total_merged} components from {media_count} media"))
-            print(f"Output: {appstream_mgr.catalog_path}")
+            print(colors.ok(_("Merged {total} components from {count} media").format(total=total_merged, count=media_count)))
+            print(_("Output: {path}").format(path=appstream_mgr.catalog_path))
 
-            print("\nTo refresh the AppStream cache, run:")
-            print("  sudo appstreamcli refresh-cache --force")
+            print(_("\nTo refresh the AppStream cache, run:"))
+            print(_("  sudo appstreamcli refresh-cache --force"))
             return 0
 
     elif args.appstream_command == 'status':
@@ -76,11 +77,11 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
         status_list = appstream_mgr.get_status()
 
         if not status_list:
-            print("No media configured")
+            print(_("No media configured"))
             return 0
 
         # Header
-        print(f"{'Media':<30} {'Source':<12} {'Components':>10} {'Last Updated':<20}")
+        print(f"{_('Media'):<30} {_('Source'):<12} {_('Components'):>10} {_('Last Updated'):<20}")
         print("-" * 75)
 
         for item in status_list:
@@ -113,40 +114,41 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
         generated = sum(1 for s in status_list if s['source'] == 'generated')
         missing = sum(1 for s in status_list if s['source'] == 'missing')
 
-        print(f"Total: {total} components | upstream: {upstream}, generated: {generated}, missing: {missing}")
+        print(_("Total: {total} components | upstream: {upstream}, generated: {generated}, missing: {missing}").format(
+            total=total, upstream=upstream, generated=generated, missing=missing))
 
         # Check merged catalog
         if appstream_mgr.catalog_path.exists():
             mtime = appstream_mgr.catalog_path.stat().st_mtime
             updated = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
-            print(f"\nMerged catalog: {appstream_mgr.catalog_path} (updated: {updated})")
+            print("\n" + _("Merged catalog: {path} (updated: {updated})").format(path=appstream_mgr.catalog_path, updated=updated))
         else:
-            print(f"\nMerged catalog: {colors.warning('not found')} (run 'urpm appstream merge')")
+            print("\n" + _("Merged catalog: {status} (run 'urpm appstream merge')").format(status=colors.warning(_("not found"))))
 
         return 0
 
     elif args.appstream_command == 'merge':
         # Merge per-media files into unified catalog
-        print("Merging AppStream catalogs...")
+        print(_("Merging AppStream catalogs..."))
 
         total, media_count = appstream_mgr.merge_all_catalogs(
             progress_callback=lambda msg: print(f"  {msg}")
         )
 
         if total == 0:
-            print(colors.warning("No components found. Run 'urpm media update' first."))
+            print(colors.warning(_("No components found. Run 'urpm media update' first.")))
             return 1
 
-        print(colors.ok(f"Merged {total} components from {media_count} media"))
-        print(f"Output: {appstream_mgr.catalog_path}")
+        print(colors.ok(_("Merged {total} components from {count} media").format(total=total, count=media_count)))
+        print(_("Output: {path}").format(path=appstream_mgr.catalog_path))
 
         # Refresh system cache if requested
         if getattr(args, 'refresh', False):
-            print("\nRefreshing system AppStream cache...")
+            print(_("\nRefreshing system AppStream cache..."))
             if appstream_mgr.refresh_system_cache():
-                print(colors.ok("Cache refreshed"))
+                print(colors.ok(_("Cache refreshed")))
             else:
-                print(colors.warning("Cache refresh failed (appstreamcli may not be installed)"))
+                print(colors.warning(_("Cache refresh failed (appstreamcli may not be installed)")))
 
         return 0
 
@@ -156,8 +158,8 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
         metainfo_file = metainfo_dir / 'org.mageia.mageia.metainfo.xml'
 
         if metainfo_file.exists() and not getattr(args, 'force', False):
-            print(f"OS metainfo file already exists: {metainfo_file}")
-            print("Use --force to overwrite")
+            print(_("OS metainfo file already exists: {path}").format(path=metainfo_file))
+            print(_("Use --force to overwrite"))
             return 1
 
         # Get system version
@@ -184,15 +186,15 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
             metainfo_dir.mkdir(parents=True, exist_ok=True)
             with open(metainfo_file, 'w', encoding='utf-8') as f:
                 f.write(metainfo_content)
-            print(colors.ok(f"OS metainfo file created: {metainfo_file}"))
+            print(colors.ok(_("OS metainfo file created: {path}").format(path=metainfo_file)))
             return 0
         except PermissionError:
-            print(colors.error(f"Permission denied. Run with sudo."))
+            print(colors.error(_("Permission denied. Run with sudo.")))
             return 1
         except Exception as e:
-            print(colors.error(f"Failed to create metainfo: {e}"))
+            print(colors.error(_("Failed to create metainfo: {error}").format(error=e)))
             return 1
 
     else:
-        print(f"Unknown appstream command: {args.appstream_command}")
+        print(_("Unknown appstream command: {command}").format(command=args.appstream_command))
         return 1

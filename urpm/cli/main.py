@@ -245,13 +245,22 @@ def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='urpm',
         description=_('Modern package manager for Mageia Linux'),
-        epilog=_('Use "urpm <command> --help" for command-specific help.')
+        epilog=_('Use "urpm <command> --help" for command-specific help.'),
+        add_help=False
+    )
+
+    parser.add_argument(
+        '-h', '--help',
+        action='help',
+        default=argparse.SUPPRESS,
+        help=_('Show this help message and exit')
     )
 
     parser.add_argument(
         '--version', '-V',
         action='version',
-        version=f'urpm {__version__}'
+        version=f'urpm {__version__}',
+        help=_("Show program's version number and exit")
     )
 
     parser.add_argument(

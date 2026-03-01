@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -44,14 +45,14 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
         has_content = discovered_peers or stats or blacklisted
 
         if not has_content:
-            print("No peers discovered and no download history.")
-            print("Make sure urpmd is running for peer discovery.")
+            print(_("No peers discovered and no download history."))
+            print(_("Make sure urpmd is running for peer discovery."))
             return 0
 
         # Show discovered peers from daemon
         if discovered_peers:
-            print(colors.bold("Discovered peers on LAN:\n"))
-            print(f"{'Peer':<30} {'Media':>8} {'Last seen':<20} {'Status'}")
+            print(colors.bold(_("Discovered peers on LAN:\n")))
+            print(f"{_('Peer'):<30} {_('Media'):>8} {_('Last seen'):<20} {_('Status')}")
             print("-" * 70)
             for p in discovered_peers:
                 peer_id = f"{p['host']}:{p['port']}"
@@ -61,21 +62,21 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
                 # Check status
                 if (p['host'], p['port']) in blacklisted_hosts or \
                    (p['host'], None) in blacklisted_hosts:
-                    status = colors.error("BLACKLISTED")
+                    status = colors.error(_("BLACKLISTED"))
                 elif p.get('alive', True):
-                    status = colors.ok("online")
+                    status = colors.ok(_("online"))
                 else:
-                    status = colors.warning("offline")
+                    status = colors.warning(_("offline"))
 
                 print(f"{peer_id:<30} {media_count:>8} {last_seen:<20} {status}")
             print()
         else:
-            print(colors.warning("No peers discovered on LAN (is urpmd running?)\n"))
+            print(colors.warning(_("No peers discovered on LAN (is urpmd running?)\n")))
 
         # Show download statistics
         if stats:
-            print(colors.bold("Download history:\n"))
-            print(f"{'Peer':<30} {'Downloads':>10} {'Size':>12} {'Last download':<20}")
+            print(colors.bold(_("Download history:\n")))
+            print(f"{_('Peer'):<30} {_('Downloads'):>10} {_('Size'):>12} {_('Last download'):<20}")
             print("-" * 75)
             for s in stats:
                 peer_id = f"{s['peer_host']}:{s['peer_port']}"
@@ -85,9 +86,9 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
             print()
 
         if blacklisted:
-            print(colors.bold("Blacklisted peers:\n"))
+            print(colors.bold(_("Blacklisted peers:\n")))
             for b in blacklisted:
-                port_str = f":{b['peer_port']}" if b['peer_port'] else " (all ports)"
+                port_str = f":{b['peer_port']}" if b['peer_port'] else " " + _("(all ports)")
                 bl_time = datetime.fromtimestamp(b['blacklist_time']).strftime('%Y-%m-%d %H:%M')
                 reason = f" - {b['reason']}" if b['reason'] else ""
                 print(f"  {b['peer_host']}{port_str} (since {bl_time}){reason}")
@@ -100,13 +101,13 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
 
         if not downloads:
             if args.host:
-                print(f"No downloads recorded from peer: {args.host}")
+                print(_("No downloads recorded from peer: {host}").format(host=args.host))
             else:
-                print("No peer downloads recorded yet.")
+                print(_("No peer downloads recorded yet."))
             return 0
 
-        print(colors.bold(f"Packages downloaded from peers (last {args.limit}):\n"))
-        print(f"{'Filename':<50} {'Peer':<25} {'Date':<20}")
+        print(colors.bold(_("Packages downloaded from peers (last {limit}):").format(limit=args.limit) + "\n"))
+        print(f"{_('Filename'):<50} {_('Peer'):<25} {_('Date'):<20}")
         print("-" * 95)
         for d in downloads:
             peer_id = f"{d['peer_host']}:{d['peer_port']}"
@@ -127,13 +128,13 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
 
         # Check if already blacklisted
         if db.is_peer_blacklisted(host, port):
-            print(f"Peer {host} is already blacklisted.")
+            print(_("Peer {host} is already blacklisted.").format(host=host))
             return 0
 
         db.blacklist_peer(host, port, reason)
-        port_str = f":{port}" if port else " (all ports)"
-        print(f"Blacklisted peer: {host}{port_str}")
-        print("Note: use 'urpm peer clean <host>' to remove RPMs downloaded from this peer.")
+        port_str = f":{port}" if port else " " + _("(all ports)")
+        print(_("Blacklisted peer: {host}{port_str}").format(host=host, port_str=port_str))
+        print(_("Note: use 'urpm peer clean <host>' to remove RPMs downloaded from this peer."))
         return 0
 
     # peer unblacklist - remove from blacklist
@@ -142,12 +143,12 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
         port = getattr(args, 'port', None)
 
         if not db.is_peer_blacklisted(host, port):
-            print(f"Peer {host} is not blacklisted.")
+            print(_("Peer {host} is not blacklisted.").format(host=host))
             return 0
 
         db.unblacklist_peer(host, port)
         port_str = f":{port}" if port else ""
-        print(f"Removed {host}{port_str} from blacklist.")
+        print(_("Removed {host}{port_str} from blacklist.").format(host=host, port_str=port_str))
         return 0
 
     # peer clean - delete files from a peer
@@ -157,7 +158,7 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
         # Get files from this peer
         files = db.get_files_from_peer(host)
         if not files:
-            print(f"No files recorded from peer: {host}")
+            print(_("No files recorded from peer: {host}").format(host=host))
             return 0
 
         # Count existing files
@@ -167,28 +168,31 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
             if p.exists():
                 existing.append(p)
 
-        print(f"Found {len(files)} records from peer {host}")
-        print(f"  {len(existing)} files still exist on disk")
+        print(_("Found {count} records from peer {host}").format(count=len(files), host=host))
+        print("  " + _("{count} files still exist on disk").format(count=len(existing)))
 
         if not existing:
             # Just clean up records
             count = db.delete_peer_downloads(host)
-            print(f"Removed {count} download records.")
+            print(_("Removed {count} download records.").format(count=count))
             return 0
 
         # Confirm deletion
         if not args.yes:
-            print(f"\nFiles to delete:")
+            print("\n" + _("Files to delete:"))
             show_all = getattr(args, 'show_all', False)
             display.print_package_list([str(p) for p in existing], max_lines=10, show_all=show_all)
 
             try:
-                response = input(f"\nDelete {len(existing)} files? [y/N] ")
-                if response.lower() not in ('y', 'yes'):
-                    print("Aborted")
+                response = input("\n" + ngettext(
+                    "Delete {count} file? [y/N] ",
+                    "Delete {count} files? [y/N] ",
+                    len(existing)).format(count=len(existing)))
+                if not confirm_yes(response):
+                    print(_("Aborted"))
                     return 0
             except (KeyboardInterrupt, EOFError):
-                print("\nAborted")
+                print(_("\nAborted"))
                 return 0
 
         # Delete files
@@ -199,16 +203,16 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
                 p.unlink()
                 deleted += 1
             except OSError as e:
-                print(f"  Error deleting {p}: {e}")
+                print("  " + _("Error deleting {path}: {error}").format(path=p, error=e))
                 errors += 1
 
         # Clean up records
         count = db.delete_peer_downloads(host)
 
-        print(f"Deleted {deleted} files ({errors} errors)")
-        print(f"Removed {count} download records.")
+        print(_("Deleted {deleted} files ({errors} errors)").format(deleted=deleted, errors=errors))
+        print(_("Removed {count} download records.").format(count=count))
         return 0 if errors == 0 else 1
 
     else:
-        print(f"Unknown peer command: {args.peer_command}")
+        print(_("Unknown peer command: {command}").format(command=args.peer_command))
         return 1

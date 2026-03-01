@@ -1,5 +1,5 @@
 %define name urpm-ng
-%define version 0.4.0
+%define version 0.5.0
 %define release 1
 
 Name:           %{name}
@@ -23,6 +23,7 @@ BuildRequires:  python3-solv
 BuildRequires:  python3-rpm
 BuildRequires:  python3-zstandard
 BuildRequires:  meson
+BuildRequires:  gettext-devel
 
 # C build requirements for PackageKit backend
 BuildRequires:  gcc
@@ -200,6 +201,12 @@ cd pk-backend-urpm
 %meson_build
 cd ..
 
+# Compile translations
+for lang in fr de es pt nl; do
+    mkdir -p po/locale/$lang/LC_MESSAGES
+    msgfmt -o po/locale/$lang/LC_MESSAGES/urpm.mo po/$lang.po
+done
+
 # ============================================================================
 # Install
 # ============================================================================
@@ -247,6 +254,12 @@ install -m644 doc/*.md %{buildroot}%{_docdir}/%{name}/
 
 # Install bash completion
 install -Dm644 completion/urpm.bash %{buildroot}%{_sysconfdir}/bash_completion.d/urpm
+
+# Install locale files
+for lang in fr de es pt nl; do
+    install -Dm644 po/locale/$lang/LC_MESSAGES/urpm.mo \
+        %{buildroot}%{_datadir}/locale/$lang/LC_MESSAGES/urpm.mo
+done
 
 # Install man pages (English)
 install -Dm644 man/en/man1/urpm.1 %{buildroot}%{_mandir}/man1/urpm.1
@@ -397,6 +410,8 @@ fi
 %dir %{_datadir}/urpm
 %dir %{_datadir}/urpm/profiles
 %{_datadir}/urpm/profiles/*.yaml
+# Locale files
+%{_datadir}/locale/*/LC_MESSAGES/urpm.mo
 
 # ============================================================================
 # Files for urpm-ng-daemon

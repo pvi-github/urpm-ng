@@ -20,7 +20,7 @@ tarball: version
 	# Main tarball (Python package)
 	$(TAR) czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
 		--transform "s,^,$(NAME)-$(VERSION)/," \
-		urpm pyproject.toml README.md QUICKSTART.md CHANGELOG.md LICENSE doc completion man data VERSION
+		urpm pyproject.toml README.md QUICKSTART.md CHANGELOG.md LICENSE doc completion man data VERSION po
 	# PackageKit backend tarball
 	$(TAR) czf rpmbuild/SOURCES/pk-backend-urpm.tar.gz \
 		--transform "s,^pk-backend-urpm/,pk-backend-urpm/," \
@@ -56,7 +56,7 @@ MSGMERGE = /usr/bin/msgmerge
 MSGFMT = /usr/bin/msgfmt
 PO_DIR = po
 DOMAIN = urpm
-LINGUAS = fr de es pt
+LINGUAS = fr de es pt nl
 
 pot:
 	$(XGETTEXT) --language=Python --keyword=_ --keyword=N_ \

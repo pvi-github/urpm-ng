@@ -1,6 +1,7 @@
 """Package removal command."""
 
 from typing import TYPE_CHECKING
+from ...i18n import _, ngettext, confirm_yes
 
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
@@ -33,9 +34,9 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
     # Check for previous background errors
     prev_error = check_background_error()
     if prev_error:
-        print(colors.warning(f"Warning: Previous background operation had an error:"))
-        print(colors.warning(f"  {prev_error}"))
-        print(colors.dim("  (This message will not appear again)"))
+        print(colors.warning(_("Warning: Previous background operation had an error:")))
+        print(colors.warning("  {error}").format(error=prev_error))
+        print(colors.dim(_("  (This message will not appear again)")))
         clear_background_error()
 
     # If --auto-orphans without packages, delegate to cmd_autoremove (urpme compat)
@@ -46,8 +47,8 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
 
     # Must have packages if not --auto-orphans
     if not args.packages:
-        print(colors.error("Error: no packages specified"))
-        print(colors.dim("  Use --auto-orphans to remove orphan dependencies"))
+        print(colors.error(_("Error: no packages specified")))
+        print(colors.dim(_("  Use --auto-orphans to remove orphan dependencies")))
         return 1
 
     # Debug: save previous state and clear debug files at start
@@ -56,7 +57,7 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
 
     # Check root
     if not check_root():
-        print(colors.error("Error: erase requires root privileges"))
+        print(colors.error(_("Error: erase requires root privileges")))
         return 1
 
     # Set up solver debug if requested
@@ -69,13 +70,13 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
     result = resolver.resolve_remove(args.packages, clean_deps=False)
 
     if not result.success:
-        print(colors.error("Resolution failed:"))
+        print(colors.error(_("Resolution failed:")))
         for prob in result.problems:
             print(f"  {colors.error(prob)}")
         return 1
 
     if not result.actions:
-        print(colors.info("Nothing to erase."))
+        print(colors.info(_("Nothing to erase.")))
         return 0
 
     # Separate explicit requests from reverse dependencies
@@ -114,16 +115,19 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
     total_size = result.remove_size
 
     # Show what will be erased (without orphans first)
-    print(f"\n{colors.bold(f'The following {len(all_actions)} package(s) will be erased:')}")
+    print("\n{msg}".format(msg=colors.bold(ngettext(
+        "The following package will be erased:",
+        "The following {count} packages will be erased:",
+        len(all_actions)).format(count=len(all_actions)))))
     from .. import display
 
     if explicit:
-        print(f"\n  {colors.info(f'Requested ({len(explicit)}):')}")
+        print("\n  {msg}".format(msg=colors.info(_("Requested ({count}):").format(count=len(explicit)))))
         pkg_names = [a.nevra for a in explicit]
         display.print_package_list(pkg_names, indent=4, color_func=colors.error)
 
     if deps:
-        print(f"\n  {colors.warning(f'Reverse dependencies ({len(deps)}):')}")
+        print("\n  {msg}".format(msg=colors.warning(_("Reverse dependencies ({count}):").format(count=len(deps)))))
         pkg_names = [a.nevra for a in deps]
         display.print_package_list(pkg_names, indent=4, color_func=colors.warning)
 
@@ -136,23 +140,26 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         if auto_include_orphans:
             # Include orphans automatically
             include_orphans = True
-            print(f"\n  {colors.warning(f'Orphaned dependencies ({len(orphans)}):')}")
+            print("\n  {msg}".format(msg=colors.warning(_("Orphaned dependencies ({count}):").format(count=len(orphans)))))
             pkg_names = [a.nevra for a in orphans]
             display.print_package_list(pkg_names, indent=4, color_func=colors.warning)
         else:
             # Ask user about orphans
-            print(f"\n  {colors.dim(f'Orphaned dependencies that could be removed ({len(orphans)}):')}")
+            print("\n  {msg}".format(msg=colors.dim(_("Orphaned dependencies that could be removed ({count}):").format(count=len(orphans)))))
             pkg_names = [a.nevra for a in orphans]
             display.print_package_list(pkg_names, indent=4, color_func=colors.dim)
             try:
-                response = input(f"\n  Also remove these {len(orphans)} orphaned packages? [y/N] ")
-                include_orphans = response.lower() in ('y', 'yes')
+                response = input("\n  " + ngettext(
+                    "Also remove this orphaned package? [y/N] ",
+                    "Also remove these {count} orphaned packages? [y/N] ",
+                    len(orphans)).format(count=len(orphans)))
+                include_orphans = confirm_yes(response)
                 if include_orphans:
-                    print(colors.success("  Orphans will be removed"))
+                    print(colors.success(_("  Orphans will be removed")))
                 else:
-                    print(colors.dim("  Orphans will be kept"))
+                    print(colors.dim(_("  Orphans will be kept")))
             except (KeyboardInterrupt, EOFError):
-                print("\n  Orphans will be kept")
+                print("\n  " + _("Orphans will be kept"))
                 include_orphans = False
 
     # Add orphans to the removal if confirmed
@@ -162,21 +169,21 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             total_size += o.size
 
     if total_size > 0:
-        print(f"\nDisk space freed: {colors.success(format_size(total_size))}")
+        print("\n" + _("Disk space freed: {size}").format(size=colors.success(format_size(total_size))))
 
     # Confirmation
     if not args.auto:
         try:
-            response = input("\nProceed with removal? [y/N] ")
-            if response.lower() not in ('y', 'yes'):
-                print("Aborted.")
+            response = input("\n" + _("Proceed with removal? [y/N] "))
+            if not confirm_yes(response):
+                print(_("Aborted."))
                 return 0
         except (KeyboardInterrupt, EOFError):
-            print("\nAborted.")
+            print("\n" + _("Aborted."))
             return 130
 
     if args.test:
-        print("\n(dry run - no changes made)")
+        print("\n" + _("(dry run - no changes made)"))
         return 0
 
     # Set correct reasons on actions for transaction history
@@ -198,26 +205,29 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
 
     def sigint_handler(signum, frame):
         if interrupted[0]:
-            print("\n\nForce abort!")
+            print("\n\n" + _("Force abort!"))
             ops.abort_transaction(transaction_id)
             signal.signal(signal.SIGINT, original_handler)
             raise KeyboardInterrupt
         else:
             interrupted[0] = True
-            print("\n\nInterrupt requested - finishing current package...")
-            print("Press Ctrl+C again to force abort (may leave system inconsistent)")
+            print("\n\n" + _("Interrupt requested - finishing current package..."))
+            print(_("Press Ctrl+C again to force abort (may leave system inconsistent)"))
 
     signal.signal(signal.SIGINT, sigint_handler)
 
     # Erase packages (all from resolution, including reverse deps and orphans)
-    print(colors.info(f"\nErasing {len(all_actions)} packages..."))
+    print(colors.info("\n" + ngettext(
+        "Erasing {count} package...",
+        "Erasing {count} packages...",
+        len(all_actions)).format(count=len(all_actions))))
     packages_to_erase = [action.name for action in all_actions]
 
     # Check if another operation is in progress
     lock = InstallLock()
     if not lock.acquire(blocking=False):
-        print(colors.warning("  RPM database is locked by another process."))
-        print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+        print(colors.warning(_("  RPM database is locked by another process.")))
+        print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
         lock.acquire(blocking=True)
     lock.release()  # Release - child will acquire its own lock
 
@@ -244,27 +254,30 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         )
 
         # Print done
-        print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
+        print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] " + _("done"))
 
         if not queue_result.success:
-            print(colors.error(f"\nErase failed:"))
+            print(colors.error("\n" + _("Erase failed:")))
             if queue_result.operations:
                 for err in queue_result.operations[0].errors[:3]:
                     print(f"  {colors.error(err)}")
             elif queue_result.overall_error:
                 print(f"  {colors.error(queue_result.overall_error)}")
             if not erase_opts.force:
-                print(colors.dim("  Use --force to ignore dependency problems"))
+                print(colors.dim(_("  Use --force to ignore dependency problems")))
             ops.abort_transaction(transaction_id)
             return 1
 
         if interrupted[0]:
-            print(colors.warning(f"\n  Erase interrupted"))
+            print(colors.warning("\n  " + _("Erase interrupted")))
             ops.abort_transaction(transaction_id)
             return 130
 
         erased_count = queue_result.operations[0].count if queue_result.operations else len(packages_to_erase)
-        print(colors.success(f"  {erased_count} packages erased"))
+        print(colors.success("  " + ngettext(
+            "{count} package erased",
+            "{count} packages erased",
+            erased_count).format(count=erased_count)))
         ops.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility

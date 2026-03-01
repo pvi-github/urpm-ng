@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -31,14 +32,14 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
     media_list = db.list_media()
 
     if not media_list:
-        print("No media configured")
+        print(_("No media configured"))
         return 0
 
     # Filter to enabled only unless --all
     if not show_all:
         media_list = [m for m in media_list if m['enabled']]
         if not media_list:
-            print("No enabled media (use --all to see disabled)")
+            print(_("No enabled media (use --all to see disabled)"))
             return 0
 
     # Find max lengths for alignment (on raw text, before coloring)
@@ -50,13 +51,13 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
         servers = db.get_servers_for_media(m['id'], enabled_only=False)
 
         # Status: [x] or [ ]
-        status = colors.success("[x]") if m['enabled'] else colors.dim("[ ]")
+        status = colors.success(_("[x]")) if m['enabled'] else colors.dim(_("[ ]"))
 
         # Update flag: U or space
-        update_flag = colors.info("U") if m['update_media'] else " "
+        update_flag = colors.info(_("U")) if m['update_media'] else " "
 
         # Files sync flag: F or space
-        files_flag = colors.info("F") if m.get('sync_files') else " "
+        files_flag = colors.info(_("F")) if m.get('sync_files') else " "
 
         # Name - pad first, then apply color
         name_raw = m['name']
@@ -83,7 +84,7 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
                     server_strs.append(colors.dim(display))
             servers_display = " ".join(server_strs)
         else:
-            servers_display = colors.warning("(no server)")
+            servers_display = colors.warning(_("(no server)"))
 
         print(f"  {status} {update_flag}{files_flag} {name}  {rel_path}  {servers_display}")
 
@@ -124,12 +125,12 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     if not mirrorlist_url:
         if version:
             mirrorlist_url = f"https://mirrors.mageia.org/api/mageia.{version}.{arch}.list"
-            print(f"Using mirrorlist: {mirrorlist_url}")
+            print(_("Using mirrorlist: {url}").format(url=mirrorlist_url))
         else:
-            print(colors.error("Either --mirrorlist or --release is required"))
-            print(colors.dim("Examples:"))
-            print(colors.dim("  urpm init --release 10"))
-            print(colors.dim("  urpm init --mirrorlist 'https://mirrors.mageia.org/api/mageia.10.x86_64.list'"))
+            print(colors.error(_("Either --mirrorlist or --release is required")))
+            print(colors.dim(_("Examples:")))
+            print(colors.dim(_("  urpm init --release 10")))
+            print(colors.dim(_("  urpm init --mirrorlist 'https://mirrors.mageia.org/api/mageia.10.x86_64.list'")))
             return 1
     elif not version or not arch:
         # Try to extract version and arch from mirrorlist URL if not provided
@@ -153,19 +154,19 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             pass
 
     if not version:
-        print(colors.error("Cannot determine Mageia version"))
-        print(colors.dim("Use --release to specify (e.g., --release 10 or --release cauldron)"))
+        print(colors.error(_("Cannot determine Mageia version")))
+        print(colors.dim(_("Use --release to specify (e.g., --release 10 or --release cauldron)")))
         return 1
 
     urpm_root = getattr(args, 'urpm_root', None)
     if urpm_root:
-        print(f"Initializing urpm in {urpm_root}/var/lib/urpm/")
+        print(_("Initializing urpm in {path}").format(path=f"{urpm_root}/var/lib/urpm/"))
         import subprocess
         import os
         import stat
 
         # Prepare chroot filesystem structure
-        print("Preparing chroot filesystem...")
+        print(_("Preparing chroot filesystem..."))
         root_path = Path(urpm_root)
 
         # Create essential directories
@@ -237,12 +238,12 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             return False
 
         if no_mount:
-            print("  Skipping mount operations (container mode)")
+            print(_("  Skipping mount operations (container mode)"))
         elif not is_dev_mounted(chroot_dev):
             if is_nodev_filesystem(root_path):
-                print("  Filesystem has nodev - bind mounting /dev from host...")
+                print(_("  Filesystem has nodev - bind mounting /dev from host..."))
             else:
-                print("  Bind mounting /dev from host...")
+                print(_("  Bind mounting /dev from host..."))
 
             result = subprocess.run(
                 ['mount', '--bind', '/dev', str(chroot_dev)],
@@ -250,11 +251,11 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             )
             if result.returncode == 0:
                 dev_mounted = True
-                print(colors.dim(f"  (unmount with: umount {chroot_dev})"))
+                print(colors.dim(_("  (unmount with: umount {path})").format(path=chroot_dev)))
             else:
-                print(colors.warning(f"  Failed to mount /dev: {result.stderr.strip()}"))
+                print(colors.warning(_("  Failed to mount /dev: {error}").format(error=result.stderr.strip())))
                 # Fall back to creating device nodes if mount failed
-                print("  Falling back to creating device nodes...")
+                print(_("  Falling back to creating device nodes..."))
                 old_umask = os.umask(0)
                 try:
                     dev_nodes = [
@@ -275,7 +276,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 finally:
                     os.umask(old_umask)
         else:
-            print("  /dev already mounted")
+            print(_("  /dev already mounted"))
             dev_mounted = True
 
         # Create /dev/fd symlink (only if not using bind mount and not container mode)
@@ -312,17 +313,17 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 return False
 
             if not is_proc_mounted(chroot_proc):
-                print("  Mounting /proc...")
+                print(_("  Mounting /proc..."))
                 result = subprocess.run(
                     ['mount', '-t', 'proc', 'proc', str(chroot_proc)],
                     capture_output=True, text=True
                 )
                 if result.returncode == 0:
-                    print(colors.dim(f"  (unmount with: umount {chroot_proc})"))
+                    print(colors.dim(_("  (unmount with: umount {path})").format(path=chroot_proc)))
                 else:
-                    print(colors.warning(f"  Failed to mount /proc: {result.stderr.strip()}"))
+                    print(colors.warning(_("  Failed to mount /proc: {error}").format(error=result.stderr.strip())))
             else:
-                print("  /proc already mounted")
+                print(_("  /proc already mounted"))
 
             # Create /etc/mtab symlink to /proc/mounts
             mtab_link = root_path / 'etc/mtab'
@@ -376,17 +377,17 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
 
         # Initialize empty rpmdb in the chroot
         rpmdb_dir = root_path / "var/lib/rpm"
-        print(f"Initializing rpmdb...")
+        print(_("Initializing rpmdb..."))
         result = subprocess.run(
             ['rpm', '--root', urpm_root, '--initdb'],
             capture_output=True, text=True
         )
         if result.returncode != 0:
-            print(colors.error(f"Failed to initialize rpmdb: {result.stderr}"))
+            print(colors.error(_("Failed to initialize rpmdb: {error}").format(error=result.stderr)))
             return 1
 
         # Import Mageia GPG key into the chroot
-        print(f"Importing Mageia GPG key...")
+        print(_("Importing Mageia GPG key..."))
         # Try to copy host's Mageia key to chroot
         key_paths = [
             '/etc/pki/rpm-gpg/RPM-GPG-KEY-Mageia',
@@ -400,31 +401,31 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                     capture_output=True, text=True
                 )
                 if result.returncode == 0:
-                    print(f"  Imported key from {key_path}")
+                    print(_("  Imported key from {path}").format(path=key_path))
                     key_imported = True
                     break
         if not key_imported:
-            print(colors.warning("  Could not import GPG key (use --nosignature if needed)"))
+            print(colors.warning(_("  Could not import GPG key (use --nosignature if needed)")))
     else:
-        print(f"Initializing urpm for Mageia {version} ({arch})")
+        print(_("Initializing urpm for Mageia {version} ({arch})").format(version=version, arch=arch))
 
     # Check if media already exist
     existing_media = db.list_media()
     if existing_media:
-        print(colors.warning(f"Warning: {len(existing_media)} media already configured"))
+        print(colors.warning(_("Warning: {count} media already configured").format(count=len(existing_media))))
         auto = getattr(args, 'auto', False)
         if not auto:
             try:
-                response = input("Continue and add more? [y/N] ")
-                if response.lower() not in ('y', 'yes'):
-                    print("Aborted")
+                response = input(_("Continue and add more? [y/N] "))
+                if not confirm_yes(response):
+                    print(_("Aborted"))
                     return 1
             except (KeyboardInterrupt, EOFError):
-                print("\nAborted")
+                print(_("\nAborted"))
                 return 1
 
     # Fetch mirrorlist
-    print(f"Fetching mirrorlist...", end=' ', flush=True)
+    print(_("Fetching mirrorlist..."), end=' ', flush=True)
 
     try:
         req = Request(mirrorlist_url, headers={'User-Agent': 'urpm/0.1'})
@@ -432,12 +433,12 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             content = response.read().decode('utf-8').strip()
             lines = [line.strip() for line in content.split('\n') if line.strip()]
     except (URLError, HTTPError) as e:
-        print(colors.error(f"failed: {e}"))
+        print(colors.error(_("failed: {error}").format(error=e)))
         return 1
 
     if not lines:
-        print(colors.warning("empty"))
-        print(colors.dim("The mirrorlist may not be available yet for this version."))
+        print(colors.warning(_("empty")))
+        print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
         return 1
 
     # Parse mirrorlist format: key=value,key=value,...,url=https://...
@@ -450,10 +451,10 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 mirror_urls.append(field[4:])  # Remove 'url=' prefix
                 break
 
-    print(f"{len(mirror_urls)} mirrors")
+    print(ngettext("{count} mirror", "{count} mirrors", len(mirror_urls)).format(count=len(mirror_urls)))
 
     if not mirror_urls:
-        print(colors.warning("No URLs found in mirrorlist"))
+        print(colors.warning(_("No URLs found in mirrorlist")))
         return 1
 
     # Parse mirror URLs to extract base paths
@@ -479,11 +480,11 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         })
 
     if not candidates:
-        print(colors.error("No valid HTTP/HTTPS mirrors found"))
+        print(colors.error(_("No valid HTTP/HTTPS mirrors found")))
         return 1
 
     # Test latency to find best mirrors
-    print(f"Testing latency to {len(candidates)} mirrors...", end=' ', flush=True)
+    print(_("Testing latency to {count} mirrors...").format(count=len(candidates)), end=' ', flush=True)
 
     def test_latency(candidate):
         test_url = candidate['full_url']
@@ -504,22 +505,22 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             if latency is not None:
                 results.append((candidate, latency))
 
-    print(f"{len(results)} reachable")
+    print(_("{count} reachable").format(count=len(results)))
 
     if not results:
-        print(colors.error("No reachable mirrors found"))
+        print(colors.error(_("No reachable mirrors found")))
         return 1
 
     # Sort by latency and take best 3
     results.sort(key=lambda x: x[1])
     best_mirrors = results[:3]
 
-    print(f"\nBest mirrors:")
+    print(_("\nBest mirrors:"))
     for candidate, latency in best_mirrors:
-        print(f"  {candidate['host']} ({latency:.0f}ms)")
+        print(_("  {host} ({latency:.0f}ms)").format(host=candidate['host'], latency=latency))
 
     # Add servers
-    print(f"\nAdding servers...")
+    print(_("\nAdding servers..."))
     servers_added = []
 
     for candidate, latency in best_mirrors:
@@ -530,7 +531,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             candidate['base_path']
         )
         if existing:
-            print(f"  {candidate['host']}: already exists")
+            print(_("  {host}: already exists").format(host=candidate['host']))
             servers_added.append(existing)
             continue
 
@@ -551,7 +552,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                     enabled=True,
                     priority=50
                 )
-                print(f"  {server_name} (id={server_id})")
+                print(_("  {name} (id={id})").format(name=server_name, id=server_id))
                 servers_added.append({'id': server_id, 'name': server_name})
                 break
             except Exception as e:
@@ -559,15 +560,15 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                     counter += 1
                     server_name = f"{base_name}-{counter}"
                 else:
-                    print(colors.error(f"  Failed to add {candidate['host']}: {e}"))
+                    print(colors.error(_("  Failed to add {host}: {error}").format(host=candidate['host'], error=e)))
                     break
 
     if not servers_added:
-        print(colors.error("No servers could be added"))
+        print(colors.error(_("No servers could be added")))
         return 1
 
     # Add standard media
-    print(f"\nAdding standard media for Mageia {version} ({arch})...")
+    print(_("\nAdding standard media for Mageia {version} ({arch})...").format(version=version, arch=arch))
     media_added = []
 
     for media_class, media_type in STANDARD_MEDIA_TYPES:
@@ -579,7 +580,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         # Check if media already exists
         existing = db.get_media_by_version_arch_shortname(version, arch, short_name)
         if existing:
-            print(f"  {name}: already exists")
+            print(_("  {name}: already exists").format(name=name))
             media_added.append(existing)
             continue
 
@@ -597,45 +598,45 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 priority=50,
                 url=None
             )
-            print(f"  {name} (id={media_id})")
+            print(_("  {name} (id={id})").format(name=name, id=media_id))
             media_added.append({'id': media_id, 'name': name, 'short_name': short_name})
         except Exception as e:
-            print(colors.error(f"  Failed to add {name}: {e}"))
+            print(colors.error(_("  Failed to add {name}: {error}").format(name=name, error=e)))
 
     if not media_added:
-        print(colors.error("No media could be added"))
+        print(colors.error(_("No media could be added")))
         return 1
 
     # Link servers to media
-    print(f"\nLinking servers to media...")
+    print(_("\nLinking servers to media..."))
     for server in servers_added:
         for media in media_added:
             if not db.server_media_link_exists(server['id'], media['id']):
                 db.link_server_media(server['id'], media['id'])
 
-    print(colors.success(f"\nInitialized with {len(servers_added)} server(s) and {len(media_added)} media"))
+    print(colors.success(_("\nInitialized with {servers} server(s) and {media} media").format(servers=len(servers_added), media=len(media_added))))
 
     # Sync media unless --no-sync
     if not getattr(args, 'no_sync', False):
-        print(f"\nSyncing media metadata...")
+        print(_("\nSyncing media metadata..."))
         # Trigger sync for all media
         for media in media_added:
             media_name = media.get('name', '')
             short_name = media.get('short_name', media_name)
-            print(f"  Syncing {short_name}...", end=' ', flush=True)
+            print(_("  Syncing {name}...").format(name=short_name), end=' ', flush=True)
             try:
                 from ...core.sync import sync_media
                 result = sync_media(db, media_name, urpm_root=urpm_root)
                 if result.success:
-                    print(f"{result.packages_count} packages")
+                    print(ngettext("{count} package", "{count} packages", result.packages_count).format(count=result.packages_count))
                 else:
-                    print(colors.warning(f"failed: {result.error or 'unknown'}"))
+                    print(colors.warning(_("failed: {error}").format(error=result.error or 'unknown')))
             except Exception as e:
-                print(colors.warning(f"failed: {e}"))
+                print(colors.warning(_("failed: {error}").format(error=e)))
 
-    print(colors.success("\nDone! You can now install packages."))
+    print(colors.success(_("\nDone! You can now install packages.")))
     if urpm_root:
-        print(colors.dim(f"Example: urpm --urpm-root {urpm_root} --root {urpm_root} install basesystem-minimal"))
+        print(colors.dim(_("Example: urpm --urpm-root {root} --root {root} install basesystem-minimal").format(root=urpm_root)))
 
     return 0
 
@@ -667,7 +668,7 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
 
         parsed = parse_custom_media_url(url)
         if not parsed:
-            print(colors.error(f"Error: could not parse URL: {url}"))
+            print(colors.error(_("Error: could not parse URL: {url}").format(url=url)))
             return 1
 
         parsed['name'] = name
@@ -690,19 +691,19 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
         if not parsed:
             # Fallback: try legacy mode if --name is provided
             if hasattr(args, 'name') and args.name:
-                print(colors.dim("URL not recognized as official Mageia, using legacy mode"))
+                print(colors.dim(_("URL not recognized as official Mageia, using legacy mode")))
                 media_id = db.add_media_legacy(
                     name=args.name,
                     url=url,
                     enabled=not getattr(args, 'disabled', False),
                     update=getattr(args, 'update', False)
                 )
-                print(f"Added media '{args.name}' (id={media_id}) [legacy mode]")
+                print(_("Added media '{name}' (id={id}) [legacy mode]").format(name=args.name, id=media_id))
                 return 0
             else:
-                print(colors.error("Error: URL not recognized as official Mageia media"))
-                print("For official media, URL must contain: .../version/arch/media/class/type/")
-                print("For custom media, use: urpm media add --custom <name> <short_name> <url>")
+                print(colors.error(_("Error: URL not recognized as official Mageia media")))
+                print(_("For official media, URL must contain: .../version/arch/media/class/type/"))
+                print(_("For custom media, use: urpm media add --custom <name> <short_name> <url>"))
                 return 1
 
     # Extract parsed values
@@ -719,7 +720,7 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     # Check --allow-unsigned is only used with custom media
     allow_unsigned = getattr(args, 'allow_unsigned', False)
     if allow_unsigned and is_official:
-        print(colors.error("Error: --allow-unsigned can only be used with custom media"))
+        print(colors.error(_("Error: --allow-unsigned can only be used with custom media")))
         return 1
 
     # GPG key import (optional, only with --import-key)
@@ -727,54 +728,54 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     import_key = getattr(args, 'import_key', False)
 
     if import_key and protocol != 'file':
-        print(f"Fetching GPG key from {url}/media_info/pubkey...")
+        print(_("Fetching GPG key from {url}/media_info/pubkey...").format(url=url))
         try:
             key_data = _fetch_media_pubkey(url)
         except Exception as e:
-            print(colors.error(f"Error: could not fetch pubkey: {e}"))
+            print(colors.error(_("Error: could not fetch pubkey: {error}").format(error=e)))
             return 1
 
         if not key_data:
-            print(colors.error("Error: no pubkey found at media"))
+            print(colors.error(_("Error: no pubkey found at media")))
             return 1
 
         key_info = _get_gpg_key_info(key_data)
         if not key_info:
-            print(colors.error("Error: could not parse pubkey"))
+            print(colors.error(_("Error: could not parse pubkey")))
             return 1
 
         keyid = key_info['keyid']
-        print(f"  Key ID:      {key_info.get('keyid_long', keyid)}")
+        print(_("  Key ID:      {keyid}").format(keyid=key_info.get('keyid_long', keyid)))
         if key_info.get('fingerprint'):
             fp = key_info['fingerprint']
             fp_formatted = ' '.join([fp[i:i+4] for i in range(0, len(fp), 4)])
-            print(f"  Fingerprint: {fp_formatted}")
+            print(_("  Fingerprint: {fingerprint}").format(fingerprint=fp_formatted))
         if key_info.get('uid'):
-            print(f"  User ID:     {key_info['uid']}")
+            print(_("  User ID:     {uid}").format(uid=key_info['uid']))
 
         if _is_key_in_rpm_keyring(keyid):
-            print(colors.success(f"  Key {keyid} already in keyring"))
+            print(colors.success(_("  Key {keyid} already in keyring").format(keyid=keyid)))
         else:
             # Import the key
             auto = getattr(args, 'auto', False)
             if not auto:
                 try:
-                    response = input("\nImport this key? [y/N] ")
-                    if response.lower() not in ('y', 'yes'):
-                        print("Aborted")
+                    response = input(_("\nImport this key? [y/N] "))
+                    if not confirm_yes(response):
+                        print(_("Aborted"))
                         return 1
                 except (KeyboardInterrupt, EOFError):
-                    print("\nAborted")
+                    print(_("\nAborted"))
                     return 1
 
             if not check_root():
-                print(colors.error("Error: importing keys requires root privileges"))
+                print(colors.error(_("Error: importing keys requires root privileges")))
                 return 1
 
             if _import_gpg_key(key_data):
-                print(colors.success(f"  Key {keyid} imported"))
+                print(colors.success(_("  Key {keyid} imported").format(keyid=keyid)))
             else:
-                print(colors.error("  Failed to import key"))
+                print(colors.error(_("  Failed to import key")))
                 return 1
 
     # --- Server upsert ---
@@ -800,7 +801,7 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
                     priority=50
                 )
                 server_created = True
-                print(f"  Created server '{server_name}' (id={server_id})")
+                print(_("  Created server '{name}' (id={id})").format(name=server_name, id=server_id))
                 server = {'id': server_id, 'name': server_name}
                 break
             except Exception as e:
@@ -810,7 +811,7 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
                 else:
                     raise
     else:
-        print(f"  Using existing server '{server['name']}' (id={server['id']})")
+        print(_("  Using existing server '{name}' (id={id})").format(name=server['name'], id=server['id']))
 
     # --- Media upsert ---
     # Check if media already exists by version+arch+short_name
@@ -833,29 +834,29 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
             url=None  # No legacy URL needed with server/media model
         )
         media_created = True
-        print(f"  Created media '{name}' (id={media_id})")
+        print(_("  Created media '{name}' (id={id})").format(name=name, id=media_id))
         media = {'id': media_id, 'name': name}
     else:
-        print(f"  Using existing media '{media['name']}' (id={media['id']})")
+        print(_("  Using existing media '{name}' (id={id})").format(name=media['name'], id=media['id']))
         media_id = media['id']
 
     # --- Link server to media ---
     if not db.server_media_link_exists(server['id'], media['id']):
         db.link_server_media(server['id'], media['id'])
-        print(f"  Linked server '{server['name']}' -> media '{media['name']}'")
+        print(_("  Linked server '{server}' -> media '{media}'").format(server=server['name'], media=media['name']))
     else:
-        print(f"  Link already exists: server '{server['name']}' -> media '{media['name']}'")
+        print(_("  Link already exists: server '{server}' -> media '{media}'").format(server=server['name'], media=media['name']))
 
     # Summary
     print()
     if server_created and media_created:
-        print(colors.success(f"Added media '{name}' with new server"))
+        print(colors.success(_("Added media '{name}' with new server").format(name=name)))
     elif media_created:
-        print(colors.success(f"Added media '{name}' to existing server"))
+        print(colors.success(_("Added media '{name}' to existing server").format(name=name)))
     elif server_created:
-        print(colors.success(f"Added new server for existing media '{name}'"))
+        print(colors.success(_("Added new server for existing media '{name}'").format(name=name)))
     else:
-        print(colors.success(f"Linked existing server to existing media '{name}'"))
+        print(colors.success(_("Linked existing server to existing media '{name}'").format(name=name)))
 
     return 0
 
@@ -865,11 +866,11 @@ def cmd_media_remove(args, db: 'PackageDatabase') -> int:
     name = args.name
 
     if not db.get_media(name):
-        print(f"Media '{name}' not found")
+        print(_("Media '{name}' not found").format(name=name))
         return 1
 
     db.remove_media(name)
-    print(f"Removed media '{name}'")
+    print(_("Removed media '{name}'").format(name=name))
     return 0
 
 
@@ -878,11 +879,11 @@ def cmd_media_enable(args, db: 'PackageDatabase') -> int:
     name = args.name
 
     if not db.get_media(name):
-        print(f"Media '{name}' not found")
+        print(_("Media '{name}' not found").format(name=name))
         return 1
 
     db.enable_media(name, enabled=True)
-    print(f"Enabled media '{name}'")
+    print(_("Enabled media '{name}'").format(name=name))
     return 0
 
 
@@ -891,11 +892,11 @@ def cmd_media_disable(args, db: 'PackageDatabase') -> int:
     name = args.name
 
     if not db.get_media(name):
-        print(f"Media '{name}' not found")
+        print(_("Media '{name}' not found").format(name=name))
         return 1
 
     db.enable_media(name, enabled=False)
-    print(f"Disabled media '{name}'")
+    print(_("Disabled media '{name}'").format(name=name))
     return 0
 
 
@@ -908,8 +909,8 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
 
     # Check root privileges (media update writes to database)
     if not check_root():
-        print(colors.error("Error: root privileges required for media update"))
-        print("Try: sudo urpm media update")
+        print(colors.error(_("Error: root privileges required for media update")))
+        print(_("Try: sudo urpm media update"))
         return 1
 
     sync_files = getattr(args, 'files', False)
@@ -927,10 +928,10 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
         # Update specific media
         media = db.get_media(args.name)
         if not media:
-            print(colors.error(f"Media '{args.name}' not found"))
+            print(colors.error(_("Media '{name}' not found").format(name=args.name)))
             return 1
 
-        print(f"Updating {args.name}...")
+        print(_("Updating {name}...").format(name=args.name))
 
         def single_progress(stage, current, total):
             progress(args.name, stage, current, total)
@@ -941,29 +942,29 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
         print()  # newline after progress
 
         if result.success:
-            print(colors.success(f"  {result.packages_count} packages"))
+            print(colors.success(ngettext("  {count} package", "  {count} packages", result.packages_count).format(count=result.packages_count)))
 
             # Sync files.xml if requested
             if sync_files:
-                print(f"  Downloading files.xml for {args.name}...")
+                print(_("  Downloading files.xml for {name}...").format(name=args.name))
                 files_result = sync_files_xml(db, args.name, single_progress, force=True)
                 print()  # newline after progress
                 if files_result.success:
                     if files_result.skipped:
-                        print(colors.info(f"  files.xml: up-to-date ({files_result.file_count} files)"))
+                        print(colors.info(_("  files.xml: up-to-date ({count} files)").format(count=files_result.file_count)))
                     else:
-                        print(colors.success(f"  files.xml: {files_result.file_count} files from {files_result.pkg_count} packages"))
+                        print(colors.success(_("  files.xml: {count} files from {pkg_count} packages").format(count=files_result.file_count, pkg_count=files_result.pkg_count)))
                 else:
-                    print(f"  {colors.warning('Warning')}: files.xml: {files_result.error}")
+                    print("  " + colors.warning(_("Warning")) + ": files.xml: " + str(files_result.error))
 
             return 0
         else:
-            print(f"  {colors.error('Error')}: {result.error}")
+            print("  " + colors.error(_("Error")) + ": " + str(result.error))
             return 1
     else:
         # Update all media in parallel
         import time
-        print("Updating all media (parallel)...")
+        print(_("Updating all media (parallel)..."))
 
         # Helper to format elapsed time
         def format_elapsed(seconds):
@@ -1007,7 +1008,7 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
         # Clear progress lines
         if num_lines > 0:
             print(f"\033[{num_lines}F", end='', flush=True)
-            for _ in range(num_lines):
+            for _i in range(num_lines):
                 print("\033[K", end='')
                 print("\033[1B", end='')
             print(f"\033[{num_lines}F", end='', flush=True)
@@ -1019,27 +1020,27 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
             if result.success:
                 count = result.packages_count
                 count_str = colors.success(str(count)) if count > 0 else str(count)
-                print(f"  {colors.info(name)}: {count_str} packages")
+                print("  " + colors.info(name) + ": " + count_str + " " + ngettext("package", "packages", count))
                 total_packages += count
             else:
-                print(f"  {colors.error(name)}: ERROR - {result.error}")
+                print("  " + colors.error(name) + ": " + _("ERROR - {error}").format(error=result.error))
                 errors += 1
 
         if errors:
-            print(f"\n{colors.info('Total')}: {colors.success(str(total_packages))} packages from {len(results)} media in {format_elapsed(sync_elapsed)} ({colors.error(str(errors))} errors)")
+            print("\n" + colors.info(_("Total")) + ": " + colors.success(str(total_packages)) + " " + _("packages from {count} media in {elapsed} ({errors} errors)").format(count=len(results), elapsed=format_elapsed(sync_elapsed), errors=colors.error(str(errors))))
         else:
-            print(f"\n{colors.info('Total')}: {colors.success(str(total_packages))} packages from {len(results)} media in {format_elapsed(sync_elapsed)}")
+            print("\n" + colors.info(_("Total")) + ": " + colors.success(str(total_packages)) + " " + _("packages from {count} media in {elapsed}").format(count=len(results), elapsed=format_elapsed(sync_elapsed)))
 
         # Sync files.xml if requested
         if sync_files:
-            print(f"\nSyncing files.xml...")
+            print(_("\nSyncing files.xml..."))
 
             # Track status for each media (same pattern as synthesis sync)
             # Filter by version/arch like sync_all_files_xml does
             from ...core.config import get_accepted_versions
             import platform
 
-            accepted_versions, _, _ = get_accepted_versions(db)
+            accepted_versions, _ignored, _ignored2 = get_accepted_versions(db)
             arch = platform.machine()
 
             files_status = {}
@@ -1087,9 +1088,9 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
                     elif stage == 'indexing':
                         status = "creating indexes..."
                     elif stage == 'done':
-                        status = colors.success("done")
+                        status = colors.success(_("done"))
                     elif stage == 'error':
-                        status = colors.error("error")
+                        status = colors.error(_("error"))
                     else:
                         status = stage
 
@@ -1119,7 +1120,7 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
             # Clear progress lines
             if files_num_lines > 0:
                 print(f"\033[{files_num_lines}F", end='', flush=True)
-                for _ in range(files_num_lines):
+                for _i in range(files_num_lines):
                     print("\033[K", end='')
                     print("\033[1B", end='')
                 print(f"\033[{files_num_lines}F", end='', flush=True)
@@ -1128,21 +1129,21 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
             for name, result in files_results:
                 if result.success:
                     if result.skipped:
-                        print(f"  {name}: up-to-date")
+                        print(f"  {name}: " + _("up-to-date"))
                     else:
                         count_str = colors.success(f"{result.file_count:,}") if result.file_count > 0 else "0"
-                        print(f"  {name}: {count_str} files")
+                        print(f"  {name}: " + count_str + " " + ngettext("file", "files", result.file_count))
                 else:
-                    print(f"  {colors.error(name)}: ERROR - {result.error}")
+                    print("  " + colors.error(name) + ": " + _("ERROR - {error}").format(error=result.error))
 
             # Final summary
-            total_files = sum(r.file_count for _, r in files_results if r.success)
-            files_errors = sum(1 for _, r in files_results if not r.success)
+            total_files = sum(r.file_count for _name, r in files_results if r.success)
+            files_errors = sum(1 for _name, r in files_results if not r.success)
 
             if files_errors > 0:
-                print(f"\n{colors.info('Total files')}: {colors.success(f'{total_files:,}')} in {format_elapsed(files_elapsed)} ({colors.error(str(files_errors))} errors)")
+                print("\n" + colors.info(_("Total files")) + ": " + colors.success(f'{total_files:,}') + " " + _("in {elapsed} ({errors} errors)").format(elapsed=format_elapsed(files_elapsed), errors=colors.error(str(files_errors))))
             else:
-                print(f"\n{colors.info('Total files')}: {colors.success(f'{total_files:,}')} in {format_elapsed(files_elapsed)}")
+                print("\n" + colors.info(_("Total files")) + ": " + colors.success(f'{total_files:,}') + " " + _("in {elapsed}").format(elapsed=format_elapsed(files_elapsed)))
 
         return 1 if errors else 0
 
@@ -1358,17 +1359,17 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
     filepath = args.file
 
     if not os.path.exists(filepath):
-        print(colors.error(f"File not found: {filepath}"))
+        print(colors.error(_("File not found: {path}").format(path=filepath)))
         return 1
 
     try:
         media_list = parse_urpmi_cfg(filepath)
     except Exception as e:
-        print(colors.error(f"Failed to parse {filepath}: {e}"))
+        print(colors.error(_("Failed to parse {path}: {error}").format(path=filepath, error=e)))
         return 1
 
     if not media_list:
-        print(colors.warning("No media found in file"))
+        print(colors.warning(_("No media found in file")))
         return 0
 
     # Separate mirrorlist-based media from direct URL media
@@ -1393,16 +1394,16 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
             to_add.append(media)
 
     # Show summary
-    print(f"\n{colors.bold('Import from:')} {filepath}")
-    print(f"  Found: {len(media_list)} media ({len(direct_media)} with URL, {len(mirrorlist_media)} mirrorlist-based)")
+    print("\n" + colors.bold(_("Import from:")) + " " + filepath)
+    print("  " + _("Found: {total} media ({direct} with URL, {mirrorlist} mirrorlist-based)").format(total=len(media_list), direct=len(direct_media), mirrorlist=len(mirrorlist_media)))
 
     if mirrorlist_media:
-        print(f"\n  {colors.warning('Skipped (mirrorlist-based):')} {len(mirrorlist_media)}")
-        print(colors.dim("    These use $MIRRORLIST and require autoconfig."))
-        print(colors.dim("    Run: urpm media autoconfig -r <version>"))
+        print("\n  " + colors.warning(_("Skipped (mirrorlist-based):")) + " " + str(len(mirrorlist_media)))
+        print(colors.dim(_("    These use $MIRRORLIST and require autoconfig.")))
+        print(colors.dim(_("    Run: urpm media autoconfig -r <version>")))
 
     if to_add:
-        print(f"\n  {colors.success('To add:')} {len(to_add)}")
+        print("\n  " + colors.success(_("To add:")) + " " + str(len(to_add)))
         for m in to_add:
             status = ""
             if not m['enabled']:
@@ -1412,28 +1413,28 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
             print(f"    {m['name']}{status}")
 
     if to_replace:
-        print(f"\n  {colors.warning('To replace:')} {len(to_replace)}")
+        print("\n  " + colors.warning(_("To replace:")) + " " + str(len(to_replace)))
         for m in to_replace:
             print(f"    {m['name']}")
 
     if to_skip:
-        print(f"\n  {colors.info('Skipped (already exist):')} {len(to_skip)}")
+        print("\n  " + colors.info(_("Skipped (already exist):")) + " " + str(len(to_skip)))
         for m in to_skip:
             print(f"    {m['name']}")
 
     if not to_add and not to_replace:
-        print(colors.info("\nNothing to import"))
+        print(colors.info(_("\nNothing to import")))
         return 0
 
     # Confirmation
     if not args.auto:
         try:
-            response = input(f"\nImport {len(to_add) + len(to_replace)} media? [y/N] ")
-            if response.lower() not in ('y', 'yes'):
-                print("Aborted.")
+            response = input("\n" + _("Import {count} media? [y/N] ").format(count=len(to_add) + len(to_replace)))
+            if not confirm_yes(response):
+                print(_("Aborted."))
                 return 0
         except (KeyboardInterrupt, EOFError):
-            print("\nAborted.")
+            print(_("\nAborted."))
             return 130
 
     # Import media
@@ -1448,24 +1449,24 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
             db.remove_media(orig_name)
             _import_single_media(db, media, colors)
             replaced += 1
-            print(f"  {colors.warning('Replaced:')} {media['name']}")
+            print("  " + colors.warning(_("Replaced:")) + " " + media['name'])
         except Exception as e:
-            print(f"  {colors.error('Error:')} {media['name']}: {e}")
+            print("  " + colors.error(_("Error:")) + " " + media['name'] + ": " + str(e))
             errors += 1
 
     for media in to_add:
         try:
             _import_single_media(db, media, colors)
             added += 1
-            print(f"  {colors.success('Added:')} {media['name']}")
+            print("  " + colors.success(_("Added:")) + " " + media['name'])
         except Exception as e:
-            print(f"  {colors.error('Error:')} {media['name']}: {e}")
+            print("  " + colors.error(_("Error:")) + " " + media['name'] + ": " + str(e))
             errors += 1
 
-    print(f"\n{colors.bold('Summary:')} {added} added, {replaced} replaced, {errors} errors")
+    print("\n" + colors.bold(_("Summary:")) + " " + _("{added} added, {replaced} replaced, {errors} errors").format(added=added, replaced=replaced, errors=errors))
 
     if added + replaced > 0:
-        print(colors.info("\nRun 'urpm media update' to fetch package lists"))
+        print(colors.info(_("\nRun 'urpm media update' to fetch package lists")))
 
     return 1 if errors else 0
 
@@ -1482,22 +1483,22 @@ def cmd_media_set(args, db: 'PackageDatabase') -> int:
     if use_all:
         # --all only works with --sync-files / --no-sync-files for now
         if sync_files is None:
-            print(colors.error("--all requires --sync-files or --no-sync-files"))
+            print(colors.error(_("--all requires --sync-files or --no-sync-files")))
             return 1
 
         count = db.set_all_media_sync_files(sync_files, enabled_only=True)
         status = "enabled" if sync_files else "disabled"
-        print(colors.success(f"sync_files {status} on {count} media"))
+        print(colors.success(_("sync_files {status} on {count} media").format(status=status, count=count)))
         return 0
 
     # Normal mode: require media name
     if not args.name:
-        print(colors.error("Media name required (or use --all with --sync-files)"))
+        print(colors.error(_("Media name required (or use --all with --sync-files)")))
         return 1
 
     media = db.get_media(args.name)
     if not media:
-        print(colors.error(f"Media '{args.name}' not found"))
+        print(colors.error(_("Media '{name}' not found").format(name=args.name)))
         return 1
 
     changes = []
@@ -1515,8 +1516,8 @@ def cmd_media_set(args, db: 'PackageDatabase') -> int:
             replication_policy = args.replication
             changes.append(f"replication: {replication_policy}")
         else:
-            print(colors.error(f"Invalid replication policy: {args.replication}"))
-            print("Valid values: none, on_demand, seed")
+            print(colors.error(_("Invalid replication policy: {policy}").format(policy=args.replication)))
+            print(_("Valid values: none, on_demand, seed"))
             return 1
 
     if hasattr(args, 'seeds') and args.seeds:
@@ -1539,7 +1540,7 @@ def cmd_media_set(args, db: 'PackageDatabase') -> int:
                 quota_mb = int(size_str)
             changes.append(f"quota: {quota_mb} MB")
         except ValueError:
-            print(colors.error(f"Invalid size format: {args.quota}"))
+            print(colors.error(_("Invalid size format: {size}").format(size=args.quota)))
             return 1
 
     retention_days = args.retention
@@ -1557,8 +1558,8 @@ def cmd_media_set(args, db: 'PackageDatabase') -> int:
         changes.append(f"sync_files: {'yes' if sync_files else 'no'}")
 
     if not changes:
-        print(colors.warning("No changes specified"))
-        print("Use --shared, --replication, --seeds, --quota, --retention, --priority, --sync-files, or --no-sync-files")
+        print(colors.warning(_("No changes specified")))
+        print(_("Use --shared, --replication, --seeds, --quota, --retention, --priority, --sync-files, or --no-sync-files"))
         return 1
 
     # Apply mirror settings
@@ -1585,7 +1586,7 @@ def cmd_media_set(args, db: 'PackageDatabase') -> int:
     if sync_files is not None:
         db.set_media_sync_files(args.name, sync_files)
 
-    print(colors.success(f"Updated '{args.name}':"))
+    print(colors.success(_("Updated '{name}':").format(name=args.name)))
     for change in changes:
         print(f"  - {change}")
 
@@ -1601,13 +1602,13 @@ def cmd_media_seed_info(args, db: 'PackageDatabase') -> int:
 
     media = db.get_media(args.name)
     if not media:
-        print(colors.error(f"Media '{args.name}' not found"))
+        print(colors.error(_("Media '{name}' not found").format(name=args.name)))
         return 1
 
     policy = media.get('replication_policy', 'on_demand')
     if policy != 'seed':
-        print(colors.warning(f"Media '{args.name}' has replication_policy='{policy}', not 'seed'"))
-        print("Use: urpm media set <name> --replication=seed --seeds=INSTALL,CAT_PLASMA5,...")
+        print(colors.warning(_("Media '{name}' has replication_policy='{policy}', not 'seed'").format(name=args.name, policy=policy)))
+        print(_("Use: urpm media set <name> --replication=seed --seeds=INSTALL,CAT_PLASMA5,..."))
         return 1
 
     # Default sections (same as DVD content)
@@ -1639,18 +1640,18 @@ def cmd_media_seed_info(args, db: 'PackageDatabase') -> int:
         try:
             sections = json.loads(seeds_json)
         except json.JSONDecodeError:
-            print(colors.error("Invalid replication_seeds JSON in database"))
+            print(colors.error(_("Invalid replication_seeds JSON in database")))
             return 1
     else:
         sections = DEFAULT_SEED_SECTIONS
 
-    print(f"Media: {colors.bold(args.name)}")
-    print(f"Sections: {', '.join(sections)}")
+    print(_("Media: {name}").format(name=colors.bold(args.name)))
+    print(_("Sections: {sections}").format(sections=', '.join(sections)))
 
     # Check rpmsrate-raw
     if not DEFAULT_RPMSRATE_PATH.exists():
-        print(colors.warning(f"\nrpmsrate-raw not found at {DEFAULT_RPMSRATE_PATH}"))
-        print("Install the meta-task package to enable seed-based replication")
+        print(colors.warning(_("\nrpmsrate-raw not found at {path}").format(path=DEFAULT_RPMSRATE_PATH)))
+        print(_("Install the meta-task package to enable seed-based replication"))
         return 1
 
     # Parse rpmsrate
@@ -1658,7 +1659,7 @@ def cmd_media_seed_info(args, db: 'PackageDatabase') -> int:
         parser = RpmsrateParser(DEFAULT_RPMSRATE_PATH)
         parser.parse()
     except Exception as e:
-        print(colors.error(f"Error parsing rpmsrate-raw: {e}"))
+        print(colors.error(_("Error parsing rpmsrate-raw: {error}").format(error=e)))
         return 1
 
     # Get active categories
@@ -1672,25 +1673,25 @@ def cmd_media_seed_info(args, db: 'PackageDatabase') -> int:
         min_priority=4
     )
 
-    print(f"\nPackages from rpmsrate: {colors.count(len(seed_packages))}")
+    print("\n" + _("Packages from rpmsrate: {count}").format(count=colors.count(len(seed_packages))))
 
     # Count how many are in this media
     all_packages = db.get_packages_for_media(media['id'])
     media_pkg_names = {p['name'] for p in all_packages}
     matching = seed_packages & media_pkg_names
 
-    print(f"Matching in this media: {colors.count(len(matching))}")
+    print(_("Matching in this media: {count}").format(count=colors.count(len(matching))))
 
     # Note: 'size' is installed size, not RPM download size (typically ~3x smaller)
     seed_size = sum(p.get('size', 0) or 0 for p in all_packages if p['name'] in seed_packages)
-    print(f"Installed size (seeds only): {colors.bold(f'{seed_size / 1024 / 1024 / 1024:.1f}')} GB")
+    print(_("Installed size (seeds only): {size} GB").format(size=colors.bold(f'{seed_size / 1024 / 1024 / 1024:.1f}')))
 
     # Collect dependencies (not resolve - we want all packages for replication, conflicts OK)
     missing_seeds = seed_packages - media_pkg_names
     if missing_seeds:
-        print(colors.dim(f"  ({len(missing_seeds)} seeds not in media: {', '.join(sorted(missing_seeds)[:5])}...)"))
+        print(colors.dim("  (" + _("{count} seeds not in media: {names}...").format(count=len(missing_seeds), names=', '.join(sorted(missing_seeds)[:5])) + ")"))
 
-    print(colors.dim("\nCollecting dependencies..."))
+    print(colors.dim(_("\nCollecting dependencies...")))
     try:
         # Use collect_dependencies which ignores conflicts (for DVD/mirror replication)
         result = db.collect_dependencies(seed_packages)
@@ -1699,25 +1700,25 @@ def cmd_media_seed_info(args, db: 'PackageDatabase') -> int:
         not_found = result['not_found']
         total_size = result['total_size']
 
-        print(f"With dependencies: {colors.count(len(full_set))} packages")
+        print(_("With dependencies: {count} packages").format(count=colors.count(len(full_set))))
         est_download = total_size / 3
-        print(f"Estimated download: ~{colors.bold(f'{est_download / 1024 / 1024 / 1024:.1f}')} GB (installed: {total_size / 1024 / 1024 / 1024:.1f} GB)")
+        print(_("Estimated download: ~{download} GB (installed: {installed:.1f} GB)").format(download=colors.bold(f'{est_download / 1024 / 1024 / 1024:.1f}'), installed=total_size / 1024 / 1024 / 1024))
 
         # Show breakdown
         deps_only = full_set - seed_packages
-        print(f"  - Seeds: {len(seed_packages & full_set)}, Dependencies: {len(deps_only)}")
+        print(_("  - Seeds: {seeds}, Dependencies: {deps}").format(seeds=len(seed_packages & full_set), deps=len(deps_only)))
 
         if not_found:
-            print(colors.dim(f"  - Not found: {len(not_found)} ({', '.join(sorted(not_found)[:5])}...)"))
+            print(colors.dim("  - " + _("Not found: {count} ({names}...)").format(count=len(not_found), names=', '.join(sorted(not_found)[:5]))))
 
     except Exception as e:
-        print(colors.warning(f"Dependency collection failed: {e}"))
+        print(colors.warning(_("Dependency collection failed: {error}").format(error=e)))
         import traceback
         traceback.print_exc()
 
     # Show some examples
     if matching:
-        print(f"\nExample seed packages: {', '.join(sorted(matching)[:10])}...")
+        print("\n" + _("Example seed packages: {packages}...").format(packages=', '.join(sorted(matching)[:10])))
 
     return 0
 
@@ -1732,7 +1733,7 @@ def cmd_media_link(args, db: 'PackageDatabase') -> int:
     # Find media
     media = db.get_media(args.name)
     if not media:
-        print(colors.error(f"Media '{args.name}' not found"))
+        print(colors.error(_("Media '{name}' not found").format(name=args.name)))
         return 1
 
     media_id = media['id']
@@ -1781,7 +1782,7 @@ def cmd_media_link(args, db: 'PackageDatabase') -> int:
     for change in args.changes:
         if change == '+all':
             # Link all servers that have the media
-            print(f"Checking {len(all_servers)} servers...", flush=True)
+            print(_("Checking {count} servers...").format(count=len(all_servers)), flush=True)
             for server in all_servers:
                 try_add_server(server)
 
@@ -1824,11 +1825,11 @@ def cmd_media_link(args, db: 'PackageDatabase') -> int:
 
     # Report results
     if added:
-        print(colors.success(f"Added: {', '.join(added)}"))
+        print(colors.success(_("Added: {names}").format(names=', '.join(added))))
     if removed:
-        print(f"Removed: {', '.join(removed)}")
+        print(_("Removed: {names}").format(names=', '.join(removed)))
     if skipped:
-        print(colors.warning(f"Skipped (media not available): {', '.join(skipped)}"))
+        print(colors.warning(_("Skipped (media not available): {names}").format(names=', '.join(skipped))))
     if errors:
         for err in errors:
             print(colors.error(err))
@@ -1837,12 +1838,12 @@ def cmd_media_link(args, db: 'PackageDatabase') -> int:
     # Show current servers
     servers = db.get_servers_for_media(media_id, enabled_only=False)
     if servers:
-        print(f"\nServers for '{args.name}':")
+        print("\n" + _("Servers for '{name}':").format(name=args.name))
         for s in servers:
-            status = colors.success("[x]") if s['enabled'] else colors.dim("[ ]")
+            status = colors.success(_("[x]")) if s['enabled'] else colors.dim(_("[ ]"))
             print(f"  {status} {s['name']} (priority: {s['priority']})")
     else:
-        print(colors.dim(f"\nNo servers linked to '{args.name}'"))
+        print(colors.dim("\n" + _("No servers linked to '{name}'").format(name=args.name)))
 
     return 0
 
@@ -1865,7 +1866,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     no_nonfree = getattr(args, 'no_nonfree', False)
     no_tainted = getattr(args, 'no_tainted', False)
 
-    print(f"Auto-configuring media for Mageia {release} ({arch})")
+    print(_("Auto-configuring media for Mageia {release} ({arch})").format(release=release, arch=arch))
 
     # Define media types to add
     # Format: (type, repo, name_suffix)
@@ -1887,7 +1888,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     # Fetch mirrorlist to get a good server
     # Format: key=value,key=value,...,url=<url>
     mirrorlist_url = f"https://mirrors.mageia.org/api/mageia.{release}.{arch}.list"
-    print(f"Fetching mirrorlist from {mirrorlist_url}...", end=' ', flush=True)
+    print(_("Fetching mirrorlist from {url}...").format(url=mirrorlist_url), end=' ', flush=True)
 
     try:
         req = Request(mirrorlist_url)
@@ -1896,11 +1897,11 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
             content = response.read().decode('utf-8').strip()
             lines = [line.strip() for line in content.split('\n') if line.strip()]
     except (URLError, HTTPError) as e:
-        print(colors.error(f"failed: {e}"))
+        print(colors.error(_("failed: {error}").format(error=e)))
         return 1
 
     if not lines:
-        print(colors.warning("empty mirrorlist"))
+        print(colors.warning(_("empty mirrorlist")))
         return 1
 
     # Parse mirrorlist format: continent=XX,zone=XX,...,url=<url>
@@ -1915,10 +1916,10 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
                 mirror_urls.append(url)
 
     if not mirror_urls:
-        print(colors.warning("no http/https mirrors found"))
+        print(colors.warning(_("no http/https mirrors found")))
         return 1
 
-    print(f"{len(mirror_urls)} http(s) mirrors")
+    print(ngettext("{count} http(s) mirror", "{count} http(s) mirrors", len(mirror_urls)).format(count=len(mirror_urls)))
 
     # Test a few mirrors to find a fast one
     print("Testing mirror latency...", end=' ', flush=True)
@@ -1952,13 +1953,13 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
                 latencies.append(result)
 
     if not latencies:
-        print(colors.warning("all mirrors unreachable"))
+        print(colors.warning(_("all mirrors unreachable")))
         return 1
 
     # Sort by latency and pick top 3
     latencies.sort(key=lambda x: x[0])
     best_mirrors = latencies[:3]
-    print(f"best: {best_mirrors[0][0]*1000:.0f}ms")
+    print(_("best: {latency:.0f}ms").format(latency=best_mirrors[0][0]*1000))
 
     # Extract base URL from mirror URL
     # Mirror URL format: https://mirror.example.com/path/distrib/<release>/<arch>
@@ -1996,10 +1997,10 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
                 host=parsed.hostname,
                 base_path=parsed.path
             )
-            print(f"  Added server: {server_name}")
+            print(_("  Added server: {name}").format(name=server_name))
             server_to_use = db.get_server(server_name)
         else:
-            print(f"  Would add server: {server_name} ({base_url})")
+            print(_("  Would add server: {name} ({url})").format(name=server_name, url=base_url))
 
     # Add each media type
     for media_type, repo, name_suffix in media_types:
@@ -2010,7 +2011,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
             media_name = f"mga{release}-{arch}-{media_type}-{repo}"
 
         if media_name in existing_names:
-            print(f"  Skipping {media_name} (already exists)")
+            print(_("  Skipping {name} (already exists)").format(name=media_name))
             skipped += 1
             continue
 
@@ -2018,7 +2019,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
         relative_path = f"{release}/{arch}/media/{media_type}/{repo}"
 
         if dry_run:
-            print(f"  Would add media: {media_name} -> {relative_path}")
+            print(_("  Would add media: {name} -> {path}").format(name=media_name, path=relative_path))
         else:
             # Add the media
             is_update = (repo == 'updates')
@@ -2031,7 +2032,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
                 is_official=True,
                 update_media=is_update
             )
-            print(f"  Added media: {media_name}")
+            print(_("  Added media: {name}").format(name=media_name))
 
             # Link media to all enabled servers
             media = db.get_media(media_name)
@@ -2044,11 +2045,11 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     # Summary
     print()
     if dry_run:
-        print(colors.warning(f"Dry run: would add {added} media, {skipped} already exist"))
+        print(colors.warning(_("Dry run: would add {added} media, {skipped} already exist").format(added=added, skipped=skipped)))
     else:
-        print(colors.success(f"Added {added} media, {skipped} already existed"))
+        print(colors.success(_("Added {added} media, {skipped} already existed").format(added=added, skipped=skipped)))
         if added > 0:
-            print(colors.dim("Run 'urpm media update' to sync metadata"))
+            print(colors.dim(_("Run 'urpm media update' to sync metadata")))
 
     return 0
 

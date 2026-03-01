@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -75,7 +76,7 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
             # Check if transaction exists
             trans = db.get_transaction(tid)
             if not trans:
-                print(colors.error(f"Transaction #{tid} not found"))
+                print(colors.error(_("Transaction #{tid} not found").format(tid=tid)))
                 continue
 
             # Clear undone_by references to this transaction FIRST
@@ -85,46 +86,49 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
             # Delete from history
             db.conn.execute("DELETE FROM history WHERE id = ?", (tid,))
             deleted += 1
-            print(f"Deleted transaction #{tid}")
+            print(_("Deleted transaction #{tid}").format(tid=tid))
 
         db.conn.commit()
-        print(colors.success(f"\n{deleted} transaction(s) deleted"))
+        print(colors.success("\n" + ngettext(
+            "{count} transaction deleted",
+            "{count} transactions deleted",
+            deleted).format(count=deleted)))
         return 0
 
     # Show details of specific transaction
     if args.detail:
         trans = db.get_transaction(args.detail)
         if not trans:
-            print(colors.error(f"Transaction #{args.detail} not found"))
+            print(colors.error(_("Transaction #{tid} not found").format(tid=args.detail)))
             return 1
 
         dt = datetime.fromtimestamp(trans['timestamp'])
         trans_id = trans['id']
-        print(f"\n{colors.bold(f'Transaction #{trans_id}')} - {dt.strftime('%Y-%m-%d %H:%M')}")
-        print(f"  {colors.bold('Action:')} {_color_action(trans['action'])}")
-        print(f"  {colors.bold('Status:')} {_color_status(trans['status'])}")
+        print("\n" + colors.bold(_("Transaction #{tid}").format(tid=trans_id)) + " - " + dt.strftime('%Y-%m-%d %H:%M'))
+        print("  " + colors.bold(_("Action:")) + " " + _color_action(trans['action']))
+        print("  " + colors.bold(_("Status:")) + " " + _color_status(trans['status']))
         if trans['command']:
-            print(f"  {colors.bold('Command:')} {trans['command']}")
+            print("  " + colors.bold(_("Command:")) + " " + trans['command'])
         if trans['undone_by']:
-            print(f"  {colors.bold('Undone by:')} #{trans['undone_by']}")
+            print("  " + colors.bold(_("Undone by:")) + " #" + str(trans['undone_by']))
 
         if trans['explicit']:
             exp_count = len(trans['explicit'])
-            print(f"\n  {colors.bold(f'Explicit ({exp_count}):')} ")
+            print("\n  " + colors.bold(_("Explicit ({count}):").format(count=exp_count)) + " ")
             for p in trans['explicit']:
                 action = p['action']
                 print(f"    {_color_action(f'{action:10}')} {p['pkg_nevra']}")
 
         if trans['dependencies']:
             dep_count = len(trans['dependencies'])
-            print(f"\n  {colors.bold(f'Dependencies ({dep_count}):')} ")
+            print("\n  " + colors.bold(_("Dependencies ({count}):").format(count=dep_count)) + " ")
             show_all = getattr(args, 'show_all', False)
             deps_to_show = trans['dependencies'] if show_all else trans['dependencies'][:20]
             for p in deps_to_show:
                 action = p['action']
                 print(f"    {_color_action(f'{action:10}')} {colors.dim(p['pkg_nevra'])}")
             if dep_count > 20 and not show_all:
-                print(colors.dim(f"    ... and {dep_count - 20} more"))
+                print(colors.dim("    " + _("... and {count} more").format(count=dep_count - 20)))
 
         print()
         return 0
@@ -139,10 +143,10 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
     history = db.list_history(limit=args.count, action_filter=action_filter)
 
     if not history:
-        print(colors.info("No transaction history"))
+        print(colors.info(_("No transaction history")))
         return 0
 
-    print(f"\n{colors.bold('  ID')} | {colors.bold('Date      ')} | {colors.bold('Action  ')} | {colors.bold('Status     ')} | {colors.bold('Packages')}")
+    print(f"\n{colors.bold('  ' + _('ID'))} | {colors.bold(_('Date') + '      ')} | {colors.bold(_('Action') + '  ')} | {colors.bold(_('Status') + '     ')} | {colors.bold(_('Packages'))}")
     print("-" * 70)
 
     for h in history:
@@ -160,7 +164,7 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
         if h['pkg_count'] > 1 and explicit:
             dep_count = h['pkg_count'] - len(explicit.split(','))
             if dep_count > 0:
-                pkg_info += colors.dim(f" (+{dep_count} deps)")
+                pkg_info += colors.dim(" " + _("(+{count} deps)").format(count=dep_count))
 
         action = h['action']
         print(f"{h['id']:>4} | {date_str:10} | {_color_action(f'{action:8}')} | {_color_status(f'{status:11}')} | {pkg_info}")
@@ -181,7 +185,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
 
     # Check root
     if not check_root():
-        print(colors.error("Error: undo requires root privileges"))
+        print(colors.error(_("Error: undo requires root privileges")))
         return 1
 
     # Determine which transaction to undo
@@ -195,22 +199,22 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                 target_id = h['id']
                 break
         if target_id is None:
-            print(colors.warning("No undoable transaction found in history"))
+            print(colors.warning(_("No undoable transaction found in history")))
             return 1
     else:
         target_id = args.transaction_id
 
     trans = db.get_transaction(target_id)
     if not trans:
-        print(colors.error(f"Transaction #{target_id} not found"))
+        print(colors.error(_("Transaction #{tid} not found").format(tid=target_id)))
         return 1
 
     if trans['status'] != 'complete':
-        print(colors.error(f"Transaction #{target_id} is not complete (status: {trans['status']})"))
+        print(colors.error(_("Transaction #{tid} is not complete (status: {status})").format(tid=target_id, status=trans['status'])))
         return 1
 
     if trans['undone_by']:
-        print(colors.warning(f"Transaction #{target_id} was already undone by #{trans['undone_by']}"))
+        print(colors.warning(_("Transaction #{tid} was already undone by #{undone_by}").format(tid=target_id, undone_by=trans['undone_by'])))
         return 1
 
     # Build reverse actions for THIS transaction only
@@ -237,30 +241,30 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                 to_install.append(previous)
 
     # Show summary
-    print(f"\n{colors.bold(f'Undo transaction #{target_id}')} ({colors.warning(trans['action'])})")
+    print("\n" + colors.bold(_("Undo transaction #{tid}").format(tid=target_id)) + " (" + colors.warning(trans['action']) + ")")
 
     if to_remove:
-        print(f"\n{colors.warning(f'Packages to remove ({len(to_remove)}):')}")
+        print("\n" + colors.warning(_("Packages to remove ({count}):").format(count=len(to_remove))))
         for name in sorted(to_remove):
             print(f"  {colors.pkg_remove('-')} {name}")
 
     if to_install:
-        print(f"\n{colors.success(f'Packages to reinstall ({len(to_install)}):')}")
+        print("\n" + colors.success(_("Packages to reinstall ({count}):").format(count=len(to_install))))
         for nevra in sorted(to_install):
             print(f"  {colors.pkg_install('+')} {nevra}")
 
     if not to_remove and not to_install:
-        print(colors.info("Nothing to undo"))
+        print(colors.info(_("Nothing to undo")))
         return 0
 
     if not args.auto:
         try:
-            answer = input("\nProceed? [y/N] ")
-            if answer.lower() not in ('y', 'yes'):
-                print("Aborted")
+            answer = input(_("\nProceed? [y/N] "))
+            if not confirm_yes(answer):
+                print(_("Aborted"))
                 return 1
         except EOFError:
-            print("\nAborted")
+            print(_("\nAborted"))
             return 1
 
     # Handle Ctrl+C
@@ -268,7 +272,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
     def handle_sigint(sig, frame):
         nonlocal interrupted
         interrupted = True
-        print("\nInterrupted! Finishing current operation...")
+        print(_("\nInterrupted! Finishing current operation..."))
 
     old_handler = signal.signal(signal.SIGINT, handle_sigint)
 
@@ -281,12 +285,15 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
             # Check if another operation is in progress
             lock = InstallLock()
             if not lock.acquire(blocking=False):
-                print(colors.warning("  RPM database is locked by another process."))
-                print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+                print(colors.warning(_("  RPM database is locked by another process.")))
+                print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
                 lock.acquire(blocking=True)
             lock.release()  # Release - child will acquire its own lock
 
-            print(colors.info(f"\nRemoving {len(to_remove)} package(s)..."))
+            print(colors.info("\n" + ngettext(
+                "Removing {count} package...",
+                "Removing {count} packages...",
+                len(to_remove)).format(count=len(to_remove))))
 
             last_erase_shown = [None]
 
@@ -308,7 +315,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
             print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] done")
 
             if not queue_result.success:
-                print(colors.error("\nErase failed:"))
+                print(colors.error(_("\nErase failed:")))
                 if queue_result.operations:
                     for err in queue_result.operations[0].errors[:10]:
                         print(f"  {colors.error(err)}")
@@ -320,7 +327,10 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
             if interrupted:
                 erased_count = queue_result.operations[0].count if queue_result.operations else 0
                 db.abort_transaction(undo_trans_id)
-                print(colors.warning(f"\nUndo interrupted after {erased_count} packages"))
+                print(colors.warning("\n" + ngettext(
+                    "Undo interrupted after {count} package",
+                    "Undo interrupted after {count} packages",
+                    erased_count).format(count=erased_count)))
                 return 130
 
             # Record removed packages
@@ -328,11 +338,17 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                 db.record_package(undo_trans_id, name, name, 'remove', 'explicit')
 
             erased_count = queue_result.operations[0].count if queue_result.operations else len(to_remove)
-            print(colors.success(f"  {erased_count} packages removed"))
+            print(colors.success("  " + ngettext(
+                "{count} package removed",
+                "{count} packages removed",
+                erased_count).format(count=erased_count)))
 
         # Then reinstall packages that were removed
         if to_install and not interrupted:
-            print(colors.info(f"\nReinstalling {len(to_install)} package(s)..."))
+            print(colors.info("\n" + ngettext(
+                "Reinstalling {count} package...",
+                "Reinstalling {count} packages...",
+                len(to_install)).format(count=len(to_install))))
 
             download_items = []
             not_found = []
@@ -366,7 +382,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                         release = parts[2]
                         evr = f"{version}-{release}"
                     else:
-                        print(f"  {colors.warning('Warning:')} cannot parse NEVRA: {nevra}")
+                        print("  " + colors.warning(_("Warning:")) + " " + _("cannot parse NEVRA: {nevra}").format(nevra=nevra))
                         not_found.append(nevra)
                         continue
 
@@ -379,7 +395,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                         pkg = db.find_package_by_nevra(name, evr_no_epoch, arch)
 
                 if not pkg:
-                    print(f"  {colors.warning('Warning:')} {nevra} not found in repositories")
+                    print("  " + colors.warning(_("Warning:")) + " " + _("{nevra} not found in repositories").format(nevra=nevra))
                     not_found.append(nevra)
                     continue
 
@@ -390,7 +406,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                 media = media_cache[media_id]
 
                 if not media:
-                    print(f"  {colors.warning('Warning:')} media not found for {nevra}")
+                    print("  " + colors.warning(_("Warning:")) + " " + _("media not found for {nevra}").format(nevra=nevra))
                     not_found.append(nevra)
                     continue
 
@@ -430,7 +446,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                         size=pkg.get('filesize', 0)
                     ))
                 else:
-                    print(f"  {colors.warning('Warning:')} no URL or servers for {nevra}")
+                    print("  " + colors.warning(_("Warning:")) + " " + _("no URL or servers for {nevra}").format(nevra=nevra))
                     not_found.append(nevra)
 
             # Download packages
@@ -446,7 +462,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                     pct = int(bytes_done * 100 / bytes_total) if bytes_total else 0
                     print(f"\r\033[K  Downloading [{pkg_num}/{pkg_total}] {name} {pct}%", end='', flush=True)
 
-                dl_results, downloaded, cached, _ = downloader.download_all(download_items, progress)
+                dl_results, downloaded, cached, _unused = downloader.download_all(download_items, progress)
                 print(f"\r\033[K  {downloaded} downloaded, {cached} from cache")
 
                 # Collect successful downloads
@@ -454,16 +470,19 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                     if result.success and result.path:
                         rpm_paths.append(result.path)
                     else:
-                        print(f"  {colors.error('Failed:')} {result.name}: {result.error}")
+                        print("  " + colors.error(_("Failed:")) + " " + f"{result.name}: {result.error}")
 
             # Install downloaded packages
             if rpm_paths and not interrupted:
-                print(colors.info(f"  Installing {len(rpm_paths)} package(s)..."))
+                print(colors.info("  " + ngettext(
+                    "Installing {count} package...",
+                    "Installing {count} packages...",
+                    len(rpm_paths)).format(count=len(rpm_paths))))
 
                 # Check lock
                 lock = InstallLock()
                 if not lock.acquire(blocking=False):
-                    print(colors.dim("  Waiting for RPM lock..."))
+                    print(colors.dim(_("  Waiting for RPM lock...")))
                     lock.acquire(blocking=True)
                 lock.release()
 
@@ -483,7 +502,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                 print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
 
                 if not install_result.success:
-                    print(colors.error("  Reinstall failed:"))
+                    print(colors.error(_("  Reinstall failed:")))
                     if install_result.operations:
                         for err in install_result.operations[0].errors[:5]:
                             print(f"    {colors.error(err)}")
@@ -495,14 +514,17 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                             name = nevra.rsplit('.', 1)[0].rsplit('-', 2)[0] if '.' in nevra else nevra.rsplit('-', 2)[0]
                             db.record_package(undo_trans_id, name, nevra, 'install', 'explicit')
                     installed_count = install_result.operations[0].count if install_result.operations else len(rpm_paths)
-                    print(colors.success(f"  {installed_count} packages reinstalled"))
+                    print(colors.success("  " + ngettext(
+                        "{count} package reinstalled",
+                        "{count} packages reinstalled",
+                        installed_count).format(count=installed_count)))
 
             elif not_found and not rpm_paths:
-                print(colors.warning(f"  Could not reinstall: packages not found in repositories"))
+                print(colors.warning("  " + _("Could not reinstall: packages not found in repositories")))
 
         if interrupted:
             db.abort_transaction(undo_trans_id)
-            print(colors.warning("\nUndo interrupted"))
+            print(colors.warning(_("\nUndo interrupted")))
             return 130
 
         # Mark original transaction as undone
@@ -516,12 +538,12 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
             resolver = Resolver(db, arch=arch)
             resolver.unmark_packages(to_remove)
 
-        print(colors.success(f"\nUndo complete (transaction #{undo_trans_id})"))
+        print(colors.success("\n" + _("Undo complete (transaction #{tid})").format(tid=undo_trans_id)))
         return 0
 
     except Exception as e:
         db.abort_transaction(undo_trans_id)
-        print(colors.error(f"\nUndo failed: {e}"))
+        print(colors.error("\n" + _("Undo failed: {error}").format(error=e)))
         return 1
 
     finally:
@@ -546,7 +568,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
 
     # Check root
     if not check_root():
-        print(colors.error("Error: rollback requires root privileges"))
+        print(colors.error(_("Error: rollback requires root privileges")))
         return 1
 
     rollback_args = args.args if hasattr(args, 'args') else []
@@ -564,7 +586,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
         # "rollback to ..."
         mode = 'to'
         if len(rollback_args) < 2:
-            print("Usage: rollback to <transaction_id|date>")
+            print(_("Usage: rollback to <transaction_id|date>"))
             return 1
         target_str = ' '.join(rollback_args[1:])
         # Try as transaction ID first
@@ -575,26 +597,26 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             try:
                 target_timestamp = _parse_date(target_str)
             except ValueError as e:
-                print(colors.error(f"Error: {e}"))
-                print("Usage: rollback to <transaction_id|date>")
-                print("Date formats: DD/MM/YYYY, DD/MM/YYYY HH:MM, YYYY-MM-DD")
+                print(colors.error(_("Error: {error}").format(error=e)))
+                print(_("Usage: rollback to <transaction_id|date>"))
+                print(_("Date formats: DD/MM/YYYY, DD/MM/YYYY HH:MM, YYYY-MM-DD"))
                 return 1
     else:
         # "rollback N"
         try:
             count = int(rollback_args[0])
             if count < 1:
-                print(colors.error("Count must be at least 1"))
+                print(colors.error(_("Count must be at least 1")))
                 return 1
         except ValueError:
-            print(colors.error(f"Invalid argument: {rollback_args[0]}"))
-            print("Usage: rollback [N] | rollback to <id|date>")
+            print(colors.error(_("Invalid argument: {argument}").format(argument=rollback_args[0])))
+            print(_("Usage: rollback [N] | rollback to <id|date>"))
             return 1
 
     # Get history
     history = db.list_history(limit=200)
     if not history:
-        print(colors.warning("No transactions in history"))
+        print(colors.warning(_("No transactions in history")))
         return 1
 
     # Determine which transactions to undo
@@ -602,7 +624,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
         # Undo the last N transactions
         to_undo = [h for h in history if h['status'] == 'complete'][:count]
         if not to_undo:
-            print(colors.info("No completed transactions to rollback"))
+            print(colors.info(_("No completed transactions to rollback")))
             return 0
         target_desc = f"last {count} transaction(s)"
     else:
@@ -612,7 +634,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             to_undo = [h for h in history
                        if h['id'] > target_id and h['status'] == 'complete']
             if not to_undo:
-                print(colors.info(f"Already at or before transaction #{target_id}"))
+                print(colors.info(_("Already at or before transaction #{tid}").format(tid=target_id)))
                 return 0
             target_desc = f"state after transaction #{target_id}"
         else:
@@ -621,7 +643,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
                        if h['timestamp'] > target_timestamp and h['status'] == 'complete']
             if not to_undo:
                 date_str = datetime.fromtimestamp(target_timestamp).strftime('%d/%m/%Y %H:%M')
-                print(colors.info(f"No transactions after {date_str}"))
+                print(colors.info(_("No transactions after {date}").format(date=date_str)))
                 return 0
             target_desc = f"state at {datetime.fromtimestamp(target_timestamp).strftime('%d/%m/%Y %H:%M')}"
 
@@ -664,8 +686,11 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
                         to_remove.append(name)
 
     # Show summary
-    print(f"\n{colors.bold(f'Rollback to {target_desc}')}")
-    print(f"  {colors.info(f'Undoing {len(to_undo)} transaction(s):')}\n")
+    print("\n" + colors.bold(_("Rollback to {target}").format(target=target_desc)))
+    print("  " + colors.info(ngettext(
+        "Undoing {count} transaction:",
+        "Undoing {count} transactions:",
+        len(to_undo)).format(count=len(to_undo))) + "\n")
 
     for h in to_undo:
         date_str = datetime.fromtimestamp(h['timestamp']).strftime('%d/%m/%Y %H:%M')
@@ -674,27 +699,27 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
         print(f"    #{h['id']} {date_str} {action_color} - {h['explicit_pkgs'] or '(deps)'}")
 
     if to_remove:
-        print(f"\n{colors.warning(f'Packages to remove ({len(to_remove)}):')}")
+        print("\n" + colors.warning(_("Packages to remove ({count}):").format(count=len(to_remove))))
         for name in sorted(to_remove):
             print(f"  {colors.pkg_remove('-')} {name}")
 
     if to_install:
-        print(f"\n{colors.success(f'Packages to reinstall ({len(to_install)}):')}")
+        print("\n" + colors.success(_("Packages to reinstall ({count}):").format(count=len(to_install))))
         for nevra in sorted(to_install):
             print(f"  {colors.pkg_install('+')} {nevra}")
 
     if not to_remove and not to_install:
-        print(colors.info("\nNothing to do"))
+        print(colors.info(_("\nNothing to do")))
         return 0
 
     if not args.auto:
         try:
-            answer = input("\nProceed? [y/N] ")
-            if answer.lower() not in ('y', 'yes'):
-                print("Aborted")
+            answer = input(_("\nProceed? [y/N] "))
+            if not confirm_yes(answer):
+                print(_("Aborted"))
                 return 1
         except EOFError:
-            print("\nAborted")
+            print(_("\nAborted"))
             return 1
 
     # Handle Ctrl+C
@@ -702,7 +727,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
     def handle_sigint(sig, frame):
         nonlocal interrupted
         interrupted = True
-        print("\nInterrupted! Finishing current operation...")
+        print(_("\nInterrupted! Finishing current operation..."))
 
     old_handler = signal.signal(signal.SIGINT, handle_sigint)
 
@@ -715,12 +740,15 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             # Check if another operation is in progress
             lock = InstallLock()
             if not lock.acquire(blocking=False):
-                print(colors.warning("  RPM database is locked by another process."))
-                print(colors.dim("  Waiting for lock... (Ctrl+C to cancel)"))
+                print(colors.warning(_("  RPM database is locked by another process.")))
+                print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
                 lock.acquire(blocking=True)
             lock.release()  # Release - child will acquire its own lock
 
-            print(colors.info(f"\nRemoving {len(to_remove)} package(s)..."))
+            print(colors.info("\n" + ngettext(
+                "Removing {count} package...",
+                "Removing {count} packages...",
+                len(to_remove)).format(count=len(to_remove))))
 
             last_erase_shown = [None]
 
@@ -742,7 +770,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] done")
 
             if not queue_result.success:
-                print(colors.error("\nErase failed:"))
+                print(colors.error(_("\nErase failed:")))
                 if queue_result.operations:
                     for err in queue_result.operations[0].errors[:10]:
                         print(f"  {colors.error(err)}")
@@ -754,7 +782,10 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             if interrupted:
                 erased_count = queue_result.operations[0].count if queue_result.operations else 0
                 db.abort_transaction(trans_id)
-                print(colors.warning(f"\nRollback interrupted after {erased_count} packages"))
+                print(colors.warning("\n" + ngettext(
+                    "Rollback interrupted after {count} package",
+                    "Rollback interrupted after {count} packages",
+                    erased_count).format(count=erased_count)))
                 return 130
 
             # Record removed packages
@@ -762,20 +793,26 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
                 db.record_package(trans_id, name, name, 'remove', 'explicit')
 
             erased_count = queue_result.operations[0].count if queue_result.operations else len(to_remove)
-            print(colors.success(f"  {erased_count} packages removed"))
+            print(colors.success("  " + ngettext(
+                "{count} package removed",
+                "{count} packages removed",
+                erased_count).format(count=erased_count)))
 
         # Then reinstall packages that were removed
         if to_install and not interrupted:
-            print(colors.info(f"\nReinstalling {len(to_install)} package(s)..."))
+            print(colors.info("\n" + ngettext(
+                "Reinstalling {count} package...",
+                "Reinstalling {count} packages...",
+                len(to_install)).format(count=len(to_install))))
             for nevra in to_install:
                 if interrupted:
                     break
-                print(f"  {colors.warning('Note:')} {nevra} needs to be downloaded/installed")
+                print("  " + colors.warning(_("Note:")) + " " + _("{nevra} needs to be downloaded/installed").format(nevra=nevra))
                 # TODO: integrate with resolver/downloader for proper reinstall
 
         if interrupted:
             db.abort_transaction(trans_id)
-            print(colors.warning("\nRollback interrupted"))
+            print(colors.warning(_("\nRollback interrupted")))
             return 130
 
         # Mark all undone transactions
@@ -790,12 +827,12 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             resolver = Resolver(db, arch=arch)
             resolver.unmark_packages(to_remove)
 
-        print(colors.success(f"\nRollback complete (transaction #{trans_id})"))
+        print(colors.success("\n" + _("Rollback complete (transaction #{tid})").format(tid=trans_id)))
         return 0
 
     except Exception as e:
         db.abort_transaction(trans_id)
-        print(colors.error(f"\nRollback failed: {e}"))
+        print(colors.error("\n" + _("Rollback failed: {error}").format(error=e)))
         return 1
 
     finally:

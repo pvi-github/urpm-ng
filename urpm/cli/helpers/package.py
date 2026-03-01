@@ -4,6 +4,8 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
+from ...i18n import confirm_yes
+
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -153,7 +155,7 @@ def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, in
                 return []
             try:
                 answer = input(f"\nInstall anyway? [y/N] ").strip()
-                if answer.lower() not in ('y', 'yes'):
+                if not confirm_yes(answer):
                     return []
             except (EOFError, KeyboardInterrupt):
                 return []
