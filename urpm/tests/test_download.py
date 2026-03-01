@@ -1,8 +1,8 @@
 import time
-from urpm.cli.display import DownloadProgressDisplay, format_size
-from urpm.core.download import DownloadProgress, Downloader, DownloadItem, DownloadResult
-import pytest
-from pathlib import Path
+
+from urpm.cli.display import DownloadProgressDisplay
+from urpm.core.download import DownloadProgress
+
 
 def test_download_progress_samples_and_speed():
     # Test 1: Create DownloadProgress instance
@@ -100,6 +100,7 @@ def test_download_progress_samples_and_speed():
     print(f"Rapid sample speed: {rapid_speed:.2f} bytes/sec")
     print()
 
+
 def test_download_progress_display():
     # Initialisation du display
     display = DownloadProgressDisplay(num_workers=4, bar_width=20, name_width=20)
@@ -134,10 +135,10 @@ def test_download_progress_display():
         (3, progress3)
     ]
     result = display.render(2, 4, 2700000, 10000000, slots_status, global_speed=180000.5)
-    assert("[2/4] 27% 175.8KB/s" in result)
-    assert("neovim-data" in result)
-    assert("blablabla" in result)
-    assert("prout" in result)
+    assert "[2/4] 27% 175.8KB/s" in result
+    assert "neovim-data" in result
+    assert "blablabla" in result
+    assert "prout" in result
     print(result)
 
     # Test 3: Affichage avec des noms longs (troncature)
@@ -146,8 +147,8 @@ def test_download_progress_display():
     progress4 = MockProgress(long_name, 500000, 1000000, 50000.0)
     slots_status = [(0, progress4)]
     result = display.render(1, 1, 500000, 1000000, slots_status)
-    assert("very-long-package-n…" in result)
-    assert("[██████████░░░░░░░░░░]" in result)
+    assert "very-long-package-n…" in result
+    assert "[██████████░░░░░░░░░░]" in result
 
     # Test 4: Affichage avec des vitesses différentes
     print("Test 4: Vitesses différentes")
@@ -155,8 +156,8 @@ def test_download_progress_display():
     slow_progress = MockProgress("slow-pkg", 10000, 1000000, 1000.0)
     slots_status = [(0, fast_progress), (2, slow_progress)]
     result = display.render(0, 2, 110000, 2000000, slots_status)
-    assert("97.7KB/976.6KB (fr2.rpmfind.net)" in result)
-    assert("9.8KB/976.6KB (fr2.rpmfind.net)" in result)
+    assert "97.7KB/976.6KB (fr2.rpmfind.net)" in result
+    assert "9.8KB/976.6KB (fr2.rpmfind.net)" in result
     print(result)
 
     # Test 5: Affichage avec des tailles différentes
@@ -166,6 +167,7 @@ def test_download_progress_display():
     slots_status = [(0, small_progress), (1, large_progress)]
     result = display.render(0, 2, 50500000, 200000000, slots_status)
     print(result)
+
 
 if __name__ == "__main__":
     test_download_progress_display()
