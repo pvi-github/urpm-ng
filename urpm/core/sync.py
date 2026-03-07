@@ -387,16 +387,27 @@ def sync_media(db: PackageDatabase, media_name: str,
 
     media_id = media['id']
 
-    # Get server and URL (v8 schema or legacy fallback)
-    server, media_url = get_effective_media_url(db, media)
-
-    if not media_url:
+    # Build an ordered list of (server_dict, media_url) candidates to try.
+    # get_servers_for_media() already orders by priority DESC, bandwidth_kbps DESC
+    # so we try the fastest/most reliable servers first.
+    # Falls back to a single legacy URL entry if no servers are linked.
+    linked_servers = db.get_servers_for_media(media_id, enabled_only=True)
+    if linked_servers:
+        server_candidates = [
+            (s, build_media_url(s, media)) for s in linked_servers
+        ]
+    elif media.get('url'):
+        server_candidates = [(None, media['url'])]
+    else:
         return SyncResult(success=False, error=f"No server available for '{media_name}'")
 
-    # Check if update needed
+    # Check if update needed using the best available server.
+    # On failure check_media_update_needed already returns (True, None),
+    # meaning we'll proceed with the download — acceptable behaviour.
+    first_server, first_url = server_candidates[0]
     if not force:
         needs_update, new_md5 = check_media_update_needed(
-            db, media_id, media_url, server=server, media=media
+            db, media_id, first_url, server=first_server, media=media
         )
         if not needs_update:
             if progress_callback:
@@ -407,15 +418,8 @@ def sync_media(db: PackageDatabase, media_name: str,
     with tempfile.TemporaryDirectory(prefix='urpm_sync_') as tmpdir:
         tmpdir = Path(tmpdir)
 
-        # Download synthesis
         if progress_callback:
             progress_callback("downloading synthesis", 0, 0)
-
-        # Build synthesis URL (v8 or legacy)
-        if server:
-            synthesis_url = build_synthesis_url_v8(server, media)
-        else:
-            synthesis_url = build_synthesis_url(media_url)
 
         synthesis_path = tmpdir / "synthesis.hdlist.cz"
 
@@ -423,16 +427,52 @@ def sync_media(db: PackageDatabase, media_name: str,
             if progress_callback:
                 progress_callback("downloading synthesis", current, total)
 
-        # Download using appropriate method (http/https or file://)
-        if server:
-            result = download_from_server(synthesis_url, synthesis_path, server, dl_progress)
-        else:
-            result = download_file(synthesis_url, synthesis_path, dl_progress)
+        # Try servers in order until one succeeds (failover).
+        # We update server stats on each attempt so slow/broken servers
+        # are gradually deprioritised for future syncs.
+        server = None
+        media_url = None
+        result = None
+        all_errors = []
 
-        if not result.success:
+        for candidate, candidate_url in server_candidates:
+            synthesis_url = (
+                build_synthesis_url_v8(candidate, media) if candidate
+                else build_synthesis_url(candidate_url)
+            )
+            t_start = time.time()
+            attempt = (
+                download_from_server(synthesis_url, synthesis_path, candidate, dl_progress)
+                if candidate
+                else download_file(synthesis_url, synthesis_path, dl_progress)
+            )
+            elapsed = time.time() - t_start
+
+            if candidate and candidate.get('id'):
+                sid = candidate['id']
+                if attempt.success and elapsed >= 0.5 and attempt.size:
+                    kbps = int(attempt.size / elapsed / 1024)
+                    db.update_server_stats(sid, success=True, bandwidth_kbps=kbps)
+                elif attempt.success:
+                    db.update_server_stats(sid, success=True)
+                else:
+                    db.update_server_stats(sid, success=False)
+
+            if attempt.success:
+                server = candidate
+                media_url = candidate_url
+                result = attempt
+                break
+
+            name = candidate['name'] if candidate else candidate_url
+            all_errors.append(f"{name}: {attempt.error}")
+            logger.warning(f"Sync failed on {name}: {attempt.error}")
+
+        if result is None or not result.success:
             return SyncResult(
                 success=False,
-                error=f"Failed to download synthesis: {result.error}"
+                error=f"Failed to download synthesis (tried {len(server_candidates)} server(s)): "
+                      + "; ".join(all_errors[-3:])
             )
 
         synthesis_downloaded = True
