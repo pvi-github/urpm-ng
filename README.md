@@ -444,6 +444,7 @@ urpm server disable <name>    # Disable a server
 urpm server priority <name> <n>  # Set server priority (higher = preferred)
 urpm server test [name]       # Test connectivity and detect IP mode
 urpm server ip-mode <name> <mode>  # Set IP mode (auto/ipv4/ipv6/dual)
+urpm server stats [name]      # Show performance statistics for a server
 ```
 
 ### Server list
@@ -462,6 +463,36 @@ Each server has an IP mode to handle IPv4/IPv6 connectivity:
 - `dual` - Both work, prefer IPv4 (recommended for dual-stack servers)
 
 IP mode is auto-detected when adding a server. Use `server test` to re-detect or `server ip-mode` to set manually.
+
+### Bandwidth tracking and automatic failover
+
+urpm tracks download performance for each server automatically. After each download
+or metadata sync, the measured speed is recorded using an EWMA (Exponentially
+Weighted Moving Average, α=0.3), giving inertia so a single slow transfer doesn't
+unfairly penalise a good server.
+
+Servers are tried in order of `priority DESC, bandwidth_kbps DESC`: if a server
+fails during a download or metadata sync, the next best server is tried automatically
+without user intervention. Within a session, per-server speed estimates are also
+kept in memory so the ordering adapts in real time without waiting for the next run.
+
+`urpm server autoconfig` measures latency to all mirror candidates and persists
+the results, so server ordering is meaningful from the very first download.
+
+Use `urpm server stats [name]` to inspect the collected metrics:
+
+```
+$ urpm server stats mirror1
+mirror1  https://mirror.example.com/mageia/
+  Status        : enabled
+  Priority      : 50
+  IP mode       : dual
+  Bandwidth     : 12 400 KB/s
+  Latency       : 18 ms
+  Success rate  : 98% (245/250)
+  Last check    : 3m ago
+  Media         : Core Release, Core Updates, Nonfree Release
+```
 
 ## Peer Management
 
