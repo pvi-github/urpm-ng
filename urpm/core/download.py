@@ -653,6 +653,13 @@ class Downloader:
         self.target_arch = target_arch
         self._peer_client: Optional[PeerClient] = None
 
+        # In-session server performance tracking (server_id → measured KB/s).
+        # Accumulated across downloads in a single urpm invocation so that a
+        # slow server identified early is deprioritised for subsequent packages,
+        # without waiting for the next session.
+        self._session_server_kbps: Dict[int, float] = {}
+        self._session_stats_lock = threading.Lock()
+
     def get_cache_path(self, item: DownloadItem) -> Path:
         """Get cache path for a download item.
 
@@ -859,10 +866,22 @@ class Downloader:
                     error="No servers configured for this media"
                 )
 
-            # Rotate servers based on worker_slot for load balancing
-            # With 4 workers and 2 servers: workers 0,2 start with server 0,
-            # workers 1,3 start with server 1
+            # Blend static DB order with in-session measurements: servers with a
+            # known session speed are sorted fastest-first within each priority
+            # tier, so a slow server identified earlier in this run is pushed back.
             if len(servers) > 1:
+                with self._session_stats_lock:
+                    session_kbps = dict(self._session_server_kbps)
+                if session_kbps:
+                    servers = sorted(
+                        servers,
+                        key=lambda s: (
+                            -s.get('priority', 50),
+                            -session_kbps.get(s['id'], s.get('bandwidth_kbps') or 0),
+                        )
+                    )
+                # Load-balance across workers by rotating the sorted list so
+                # consecutive workers don't all hammer the same server.
                 start_idx = worker_slot % len(servers)
                 servers = servers[start_idx:] + servers[:start_idx]
 
@@ -870,29 +889,57 @@ class Downloader:
             for server in servers:
                 url = self._build_package_url(server, item.relative_path, item.filename)
                 ip_mode = server.get('ip_mode', 'auto')
+                server_id = server.get('id')
                 logger.debug(f"Trying server {server['name']} (ip_mode={ip_mode}): {url}")
 
-                # Notify about source before starting
                 if start_callback:
                     start_callback(server['name'])
 
                 # Try this server with retries
                 for attempt in range(max_retries):
+                    t_start = time.time()
                     success, error = self._download_from_url(
                         url, cache_path, progress_callback, timeout, ip_mode=ip_mode
                     )
+                    elapsed = time.time() - t_start
+
                     if success:
                         # Verify the downloaded file is actually an RPM
                         is_rpm, rpm_error = is_valid_rpm(cache_path)
                         if not is_rpm:
-                            # Delete corrupt file and treat as failure
                             logger.warning(f"Downloaded file is not a valid RPM: {rpm_error}")
                             try:
                                 cache_path.unlink()
                             except OSError:
                                 pass
                             all_errors.append(f"{server['name']}: {rpm_error}")
+                            if server_id and self.db:
+                                self.db.update_server_stats(server_id, success=False)
                             break  # Try next server
+
+                        # Compute bandwidth from file size and wall-clock time.
+                        # Only record if elapsed >= 0.5s to avoid noise from
+                        # tiny/cached files where timing is not meaningful.
+                        if server_id and elapsed >= 0.5:
+                            try:
+                                file_size = cache_path.stat().st_size
+                                kbps = int(file_size / elapsed / 1024)
+                            except OSError:
+                                kbps = None
+
+                            if kbps and kbps > 0:
+                                with self._session_stats_lock:
+                                    prev = self._session_server_kbps.get(server_id)
+                                    self._session_server_kbps[server_id] = (
+                                        kbps if prev is None
+                                        else int(0.3 * kbps + 0.7 * prev)
+                                    )
+                                if self.db:
+                                    self.db.update_server_stats(
+                                        server_id, bandwidth_kbps=kbps, success=True
+                                    )
+                        elif server_id and self.db:
+                            self.db.update_server_stats(server_id, success=True)
 
                         logger.info(f"Downloaded {item.filename} from {server['name']}")
                         self._register_cache_file(item, cache_path)
@@ -902,22 +949,27 @@ class Downloader:
                             path=cache_path
                         )
 
-                    # Check if we should retry on this server
+                    # Download failed on this attempt
+                    all_errors.append(f"{server['name']}: {error}")
                     if error and error.startswith("HTTP"):
-                        # HTTP error - try next server immediately
-                        all_errors.append(f"{server['name']}: {error}")
+                        # Hard HTTP error — no point retrying this server
+                        if server_id and self.db:
+                            self.db.update_server_stats(server_id, success=False)
                         break
                     else:
-                        # Transient error - retry with backoff
-                        all_errors.append(f"{server['name']}: {error}")
+                        # Transient error — retry with backoff
                         if attempt < max_retries - 1:
                             time.sleep(1 * (attempt + 1))
+                else:
+                    # Exhausted retries on this server
+                    if server_id and self.db:
+                        self.db.update_server_stats(server_id, success=False)
 
             # All servers failed
             return DownloadResult(
                 item=item,
                 success=False,
-                error=f"All servers failed: {'; '.join(all_errors[-3:])}"  # Last 3 errors
+                error=f"All servers failed: {'; '.join(all_errors[-3:])}"
             )
 
         # Legacy schema: single URL with retries

@@ -148,9 +148,73 @@ class ServerMixin:
         )
         self.conn.commit()
 
+    def update_server_stats(self, server_id: int, *,
+                             bandwidth_kbps: int = None,
+                             success: bool = None,
+                             latency_ms: int = None):
+        """Update server performance statistics using exponential moving average.
+
+        Uses EWMA (α=0.3): new_avg = 0.3 × measurement + 0.7 × current_avg.
+        This gives inertia — a single slow download won't trash a good server,
+        and a single fast download won't rescue a bad one. Sustained performance
+        changes are reflected after several downloads.
+
+        Args:
+            server_id: Server ID to update
+            bandwidth_kbps: Measured download speed in KB/s (None = no update)
+            success: True if download succeeded, False if failed (None = no update)
+            latency_ms: Measured round-trip latency in ms (None = no update)
+        """
+        # EWMA weight for the new measurement vs accumulated history.
+        # Using SQL CASE expressions keeps the read-modify-write fully inside
+        # SQLite, making it atomic — no separate SELECT needed, no race condition
+        # when multiple download workers update the same server concurrently.
+        ALPHA = 0.3
+
+        conn = self._get_connection()
+        now = int(time.time())
+
+        set_parts = ["last_check = ?"]
+        params: list = [now]
+
+        if bandwidth_kbps is not None and bandwidth_kbps > 0:
+            set_parts.append(
+                "bandwidth_kbps = CASE "
+                "WHEN bandwidth_kbps IS NULL THEN ? "
+                f"ELSE CAST({ALPHA} * ? + {1 - ALPHA} * bandwidth_kbps AS INTEGER) "
+                "END"
+            )
+            # Same value used for both the NULL branch and the EWMA branch.
+            params += [bandwidth_kbps, bandwidth_kbps]
+
+        if latency_ms is not None and latency_ms > 0:
+            set_parts.append(
+                "latency_ms = CASE "
+                "WHEN latency_ms IS NULL THEN ? "
+                f"ELSE CAST({ALPHA} * ? + {1 - ALPHA} * latency_ms AS INTEGER) "
+                "END"
+            )
+            params += [latency_ms, latency_ms]
+
+        if success is True:
+            set_parts.append("success_count = COALESCE(success_count, 0) + 1")
+        elif success is False:
+            set_parts.append("failure_count = COALESCE(failure_count, 0) + 1")
+
+        params.append(server_id)
+        conn.execute(
+            f"UPDATE server SET {', '.join(set_parts)} WHERE id = ?",
+            params
+        )
+        conn.commit()
+
     def get_servers_for_media(self, media_id: int, enabled_only: bool = True,
                                limit: int = None) -> List[Dict]:
-        """Get all servers that can serve a media, ordered by priority. Thread-safe.
+        """Get all servers that can serve a media, ordered by preference. Thread-safe.
+
+        Ordering: manual priority first (user intent), then measured bandwidth
+        as tiebreaker (higher = faster). Servers with no measurement yet are
+        treated as 0 KB/s within their priority tier until data is collected.
 
         Args:
             media_id: Media ID
@@ -158,7 +222,7 @@ class ServerMixin:
             limit: Maximum number of servers to return
 
         Returns:
-            List of server dicts, ordered by priority (descending)
+            List of server dicts, best server first
         """
         conn = self._get_connection()
         query = """
@@ -168,7 +232,7 @@ class ServerMixin:
         """
         if enabled_only:
             query += " AND s.enabled = 1"
-        query += " ORDER BY s.priority DESC, s.name"
+        query += " ORDER BY s.priority DESC, COALESCE(s.bandwidth_kbps, 0) DESC, s.name"
         if limit:
             query += f" LIMIT {limit}"
 

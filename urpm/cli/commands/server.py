@@ -487,6 +487,9 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
             server_id = db.add_server(
                 shortname, candidate['scheme'], candidate['host'], candidate['base_path']
             )
+            # Persist the latency measured during autoconfig so it immediately
+            # influences server ordering on the first real download.
+            db.update_server_stats(server_id, latency_ms=int(latency))
             print(colors.success("  " + _("Added: {name} ({latency}ms)").format(name=shortname, latency=f"{latency:.0f}")))
             existing_names.add(shortname)
             added_servers.append((server_id, shortname))
