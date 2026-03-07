@@ -265,10 +265,29 @@ Active un serveur.
 Desactive un serveur.
 .TP
 .B priority \fInom\fR \fIN\fR
-Definit la priorite (plus bas = prefere).
+Definit la priorite du serveur (nombre plus eleve = prefere, defaut 50).
+.TP
+.B test \fR[\fInom\fR]
+Teste la connectivite d'un serveur (ou de tous les serveurs actifs) et
+detecte automatiquement le meilleur mode IP (auto/ipv4/ipv6/dual).
+.TP
+.B ip-mode \fInom\fR \fImode\fR
+Force la version IP utilisee pour ce serveur.
+Modes valides : \fBauto\fR (systeme), \fBipv4\fR, \fBipv6\fR, \fBdual\fR
+(les deux fonctionnent, IPv4 prefere).
+.TP
+.B stats \fInom\fR
+Affiche les statistiques de performance mesurees pour un serveur : vitesse de
+telechargement (moyenne EWMA des telechargements passes), latence, compteurs
+succes/echec et date du dernier controle.
+Les statistiques sont mises a jour automatiquement apres chaque telechargement
+et chaque synchronisation de metadonnees.
 .TP
 .B autoconfig
-Configure automatiquement les serveurs en testant les miroirs.
+Decouvre et ajoute automatiquement les serveurs les plus rapides depuis la
+mirrorlist Mageia. Teste la latence de tous les candidats et conserve les N
+meilleurs. La latence mesuree est sauvegardee pour que le tri des serveurs
+soit pertinent des le premier telechargement.
 .RE
 .SS P2P et cache
 .TP

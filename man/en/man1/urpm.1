@@ -264,10 +264,26 @@ Enable a server.
 Disable a server.
 .TP
 .B priority \fIname\fR \fIN\fR
-Set server priority (lower = preferred).
+Set server priority (higher number = preferred, default 50).
+.TP
+.B test \fR[\fIname\fR]
+Test connectivity to a server (or all enabled servers) and auto-detect the best
+IP mode (auto/ipv4/ipv6/dual).
+.TP
+.B ip-mode \fIname\fR \fImode\fR
+Force the IP version used when connecting to a server.
+Valid modes: \fBauto\fR (system default), \fBipv4\fR, \fBipv6\fR, \fBdual\fR
+(both work, prefer IPv4).
+.TP
+.B stats \fIname\fR
+Show measured performance statistics for a server: download speed (EWMA of
+past downloads), latency, success/failure counts, and last check time.
+Statistics are updated automatically after each download and metadata sync.
 .TP
 .B autoconfig
-Auto-configure servers by testing mirrors.
+Auto-discover and add the fastest servers from the Mageia mirrorlist.
+Tests latency to all candidates and keeps the N best.
+Saves measured latency so server ordering is meaningful from the first download.
 .RE
 .SS P2P and Cache
 .TP

@@ -6060,3 +6060,79 @@ msgstr "Fallo al crear metainfo: {error}"
 #, python-brace-format
 msgid "Unknown appstream command: {command}"
 msgstr "Comando appstream desconocido: {command}"
+
+#: urpm/cli/commands/server.py
+msgid "Show measured performance statistics for a server"
+msgstr "Mostrar estadísticas de rendimiento medidas de un servidor"
+
+#: urpm/cli/commands/server.py
+msgid "no data"
+msgstr "sin datos"
+
+#: urpm/cli/commands/server.py
+msgid "never"
+msgstr "nunca"
+
+#: urpm/cli/commands/server.py
+#, python-brace-format
+msgid "{n}s ago"
+msgstr "hace {n}s"
+
+#: urpm/cli/commands/server.py
+#, python-brace-format
+msgid "{n}m ago"
+msgstr "hace {n}min"
+
+#: urpm/cli/commands/server.py
+#, python-brace-format
+msgid "{n}h ago"
+msgstr "hace {n}h"
+
+#: urpm/cli/commands/server.py
+#, python-brace-format
+msgid "{n}d ago"
+msgstr "hace {n}d"
+
+#: urpm/cli/commands/server.py
+msgid "URL"
+msgstr "URL"
+
+#: urpm/cli/commands/server.py
+msgid "Status"
+msgstr "Estado"
+
+#: urpm/cli/commands/server.py
+msgid "Priority"
+msgstr "Prioridad"
+
+#: urpm/cli/commands/server.py
+msgid "IP mode"
+msgstr "Modo IP"
+
+#: urpm/cli/commands/server.py
+msgid "Bandwidth"
+msgstr "Ancho de banda"
+
+#: urpm/cli/commands/server.py
+msgid "Latency"
+msgstr "Latencia"
+
+#: urpm/cli/commands/server.py
+msgid "Success rate"
+msgstr "Tasa de éxito"
+
+#: urpm/cli/commands/server.py
+msgid "Last check"
+msgstr "Última comprobación"
+
+#: urpm/cli/commands/server.py
+msgid "Media"
+msgstr "Repositorios"
+
+#: urpm/cli/commands/server.py
+msgid "No linked media"
+msgstr "Sin repositorios vinculados"
+
+#: urpm/cli/commands/server.py
+msgid "failed"
+msgstr "fallidos"
