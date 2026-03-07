@@ -972,8 +972,7 @@ queue._child_process_standalone()
                         real_problems.append(p)
                     else:
                         # Log but don't treat as error
-                        print(f"[_execute_install] NOTE: {msg} (ignored for upgrade)", file=sys.stderr)
-                        sys.stderr.flush()
+                        _log_background(f"NOTE: {msg} (ignored for upgrade)")
                 if not real_problems:
                     # All problems were benign "already installed"
                     _log_background(f"Upgrade completed: {total} packages (some already at target version)")
@@ -993,24 +992,24 @@ queue._child_process_standalone()
                     return True, total, [], new_rpmnew_files
                 problems = real_problems
 
-            print(f"[_execute_install] PROBLEMS: {problems}", file=sys.stderr)
-            sys.stderr.flush()
             _log_background(f"Transaction failed: {problems}")
             errors = [str(p) for p in problems]
 
             # If parent was already released (optimistic), alert on stderr
             if parent_released_early[0]:
-                import sys
-                print("\n" + "=" * 60, file=sys.stderr)
-                print("⚠️  ALERTE URPM: Échec d'installation détecté!", file=sys.stderr)
-                print("=" * 60, file=sys.stderr)
-                for err in errors:
-                    print(f"  ✗ {err}", file=sys.stderr)
-                print("\nLes paquets concernés n'ont PAS été installés.", file=sys.stderr)
-                print("Relancez l'installation après vérification.", file=sys.stderr)
-                print("=" * 60 + "\n", file=sys.stderr)
-                sys.stderr.flush()
                 _log_background("ALERT: Installation failed after parent was released!")
+                try:
+                    print("\n" + "=" * 60, file=sys.stderr)
+                    print("⚠️  ALERTE URPM: Échec d'installation détecté!", file=sys.stderr)
+                    print("=" * 60, file=sys.stderr)
+                    for err in errors:
+                        print(f"  ✗ {err}", file=sys.stderr)
+                    print("\nLes paquets concernés n'ont PAS été installés.", file=sys.stderr)
+                    print("Relancez l'installation après vérification.", file=sys.stderr)
+                    print("=" * 60 + "\n", file=sys.stderr)
+                    sys.stderr.flush()
+                except OSError:
+                    pass  # stderr unavailable (pipe closed, terminal disconnected)
                 # Return success=True because parent already got op_done
                 # The alert on stderr is the notification
                 return True, current[0], [], new_rpmnew_files
