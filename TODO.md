@@ -17,6 +17,11 @@
 - [x] Profils YAML pour mkimage (`build`, `ci`, `minimal`)
 - [x] Output workspace correct (`RPMS/x86_64/`, `SRPMS/`, `SPECS/log.<Name>`)
 - [ ] SSL `update-ca-trust` à intégrer dans mkimage (pas en post-build)
+- [ ] Diagnostiquer et corriger les erreurs lors de `urpm mkimage` / `urpm build` :
+  - Erreurs "groupe manquant dans /etc/group" ou "utilisateur manquant dans /etc/passwd"
+  - Cause probable : mauvais ordre d'installation des RPMs, ou RPM manquant (ex. setup, shadow-utils)
+  - La bonne solution peut être : corriger l'ordre d'install, ajouter des RPMs au profil, ou les deux
+  - Ne pas masquer les erreurs : les comprendre et les corriger à la racine
 
 ### Import urpmi.cfg
 - [x] Parser configs avec `mirrorlist: $MIRRORLIST`
@@ -39,6 +44,8 @@
 ### Documentation
 - [ ] Revue complète : cohérence code/docs (chemins, options, comportements)
 - [ ] Guide de migration urpmi → urpm (EN, FR)
+- [ ] Mettre à jour README.md (fonctionnalités implémentées depuis la dernière rédaction)
+- [ ] Mettre à jour les pages man (EN/FR) pour les nouvelles commandes et options
 
 ### Download options
 - [ ] Option `--download-only` sur upgrade
@@ -53,9 +60,18 @@
 
 ## Phase 2 : Fonctionnalités avancées
 
-### Internationalisation
-- [ ] gettext
-- [ ] Fichiers .po/.mo (fr, en, puis autres langues)
+### Internationalisation CLI
+- [ ] Audit des chaînes non wrappées dans `urpm/cli/` — certaines strings échappent encore à `_()`
+- [ ] Compléter les fichiers `.po` existants (fr, de, es, nl, pt) avec les chaînes manquantes
+- [ ] Infrastructure i18n pour rpmdrake-ng (rien n'existe côté GUI pour l'instant)
+- [ ] Wrapper les chaînes de rpmdrake-ng avec gettext une fois l'infrastructure en place
+
+### Système de debug
+- [ ] Généraliser `--debug` au-delà de `--debug solver` : définir des domaines cohérents
+  - Domaines envisagés : `solver`, `download`, `db`, `peer`, `daemon`, `appstream`, `build`
+  - Syntaxe cible : `--debug solver,download` ou `--debug all`
+- [ ] Uniformiser l'activation du debug dans tous les modules
+- [ ] S'assurer que chaque domaine a des logs utiles et pas trop verbeux
 
 ### system-upgrade
 - [ ] Updates préliminaires
@@ -73,6 +89,23 @@
 
 ## Phase 3 : GUI & outils graphiques
 
+### PackageKit / GNOME Software
+- [ ] Investiguer pourquoi les mises à jour déclenchées depuis GNOME Software ne terminent pas
+  - Vérifier les logs D-Bus (`journalctl -u packagekit` + `journalctl -u urpm-dbus`)
+  - Identifier si c'est un timeout, un deadlock, ou un signal manquant côté backend
+  - Corriger le bug à la racine dans `urpm/dbus/` ou le backend PackageKit
+- [ ] Tests de non-régression : install, remove, upgrade depuis Discover et GNOME Software
+
+### AppStream
+- [ ] Enrichir l'AppStream de secours généré quand le miroir ne fournit pas d'`appstream.xml.lzma` :
+  - Ajouter la licence (`project_license`) depuis les métadonnées RPM
+  - Ajouter la description longue si disponible
+  - Ajouter les catégories depuis les tags RPM Group
+  - Ajouter l'URL du projet si présente dans les métadonnées RPM
+- [ ] Faire gérer les paquets non graphiques (libs, outils CLI) par Discover et GNOME Software
+  - Investiguer les filtres AppStream qui les excluent actuellement
+  - Trouver le bon type de composant AppStream (`console-application`, `addon`, etc.)
+
 ### mgaonline-ng
 - [ ] Applet systray
 - [ ] Notification updates
@@ -83,6 +116,46 @@
 - [ ] Cohérence avec `urpm seed`
 
 ### rpmdrake-ng
+
+#### Refonte UX — priorité haute (retours utilisateurs)
+
+Le premier jet est fonctionnel mais l'UX est jugée trop proche d'un gestionnaire de paquets Debian
+(liste brute, colonnée) alors que la cible doit être à la hauteur de Discover ou GNOME Software.
+Les utilisateurs comparent défavorablement à GNOME Software sur d'autres distros.
+
+**Présentation générale**
+- [ ] Icônes de paquets (depuis AppStream ou icône générique selon catégorie)
+- [ ] Vue vignette optionnelle (en plus de la vue liste)
+- [ ] Filtrer les descriptions parasites : ne pas afficher `gpg(bla bla bla)` comme description
+- [ ] Panneau détail enrichi : description longue, screenshots AppStream, URL projet, licence
+
+**Couleurs et lisibilité**
+- [ ] Ajouter une légende visible des codes couleur (qu'est-ce qui correspond à quoi)
+- [ ] Revoir la palette : deux nuances de bleu trop proches, difficiles à distinguer
+- [ ] Cohérence globale des couleurs dans tous les états de l'UI
+
+**Catégories**
+- [ ] Revoir l'arbre de catégories : trop granulaire et mal regroupé
+  - Fusionner : Sounds → Audio, Videos → Multimédia
+  - S'inspirer des catégories du CCM Mageia et/ou du rpmdrake original (arbre plus compact)
+  - Regarder la source de catégories utilisée par le rpmdrake original
+  - Masquer ou regrouper devel/debug : l'utilisateur moyen ne sait pas à quoi ça sert
+- [ ] Clarifier visuellement que "État" (installé/disponible/etc.) est lié à la liste en dessous
+
+**Filtres**
+- [ ] Réorganiser les filtres : actuellement éparpillés (au-dessus de l'arbre, en dessous...)
+- [ ] Regrouper les filtres de façon logique et cohérente dans un seul panneau
+
+**i18n**
+- [ ] Infrastructure gettext pour rpmdrake-ng (rien n'existe côté GUI)
+- [ ] Wrapper toutes les chaînes UI avec `_()`
+
+**Tour / onboarding**
+- [ ] Implémenter un tour guidé pour découvrir l'interface sans documentation
+  - Qt Wizard ou système d'overlay avec tooltips contextuels
+  - Accessible depuis un bouton "?" ou au premier lancement
+
+**Fonctionnalités manquantes**
 - [ ] IHM complète (voir [doc/SPEC-RPMDRAKE-NG.md](doc/SPEC-RPMDRAKE-NG.md))
 - [ ] Recherche multicritères
 - [ ] Gestion médias/peers/config
@@ -122,9 +195,11 @@
 - [ ] Fix: reset `_last_net_sample` après batch de downloads
 
 ### Download stats & priorités serveurs
-- [ ] Afficher stats par serveur/peer à la fin
-- [ ] Tracker les performances des serveurs sur la durée
-- [ ] Prioriser dynamiquement les serveurs les plus rapides
+- [ ] Afficher stats par serveur/peer à la fin du téléchargement
+- [ ] Persister le débit constaté par serveur (en base ou fichier léger) entre les sessions
+- [ ] Trier dynamiquement les serveurs par débit mesuré lors des downloads suivants
+- [ ] Déprioriser automatiquement les serveurs lents ou instables (seuil configurable)
+- [ ] Réinitialiser les stats si le serveur redevient rapide (fenêtre glissante)
 
 ### Explications upgrade/remove
 - [ ] Expliquer POURQUOI un paquet est supprimé
