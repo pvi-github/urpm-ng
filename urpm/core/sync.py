@@ -728,44 +728,40 @@ def sync_files_xml(
     cache_media_info = cache_dir / "media_info"
     cache_media_info.mkdir(parents=True, exist_ok=True)
 
-    # Get server URLs for this media
+    # get_servers_for_media() returns servers ordered by priority DESC, bandwidth_kbps DESC
+    # — no manual sort needed, and the order improves over time as stats accumulate.
     servers = db.get_servers_for_media(media_id, enabled_only=True)
     if not servers:
         return FilesXmlResult(success=False, error="No servers configured for this media")
 
-    # Sort by priority
-    servers.sort(key=lambda s: s.get('priority', 50))
-
-    # Try to download from servers
     files_xml_downloaded = False
     files_xml_path = None
     files_xml_md5 = None
+    all_errors = []
 
     for server in servers:
-        if progress_callback:
-            progress_callback("checking server", 0, 0)
-
         base_url = build_media_url(server, media)
         files_xml_url = f"{base_url}/{FILES_XML_PATH}"
+        server_id = server.get('id')
+        ip_mode = server.get('ip_mode', 'auto')
 
-        # Check MD5SUM first if available (to skip unchanged files)
+        # Check MD5SUM first so we can skip unchanged files (optional, failure is fine).
         md5sum_url = f"{base_url}/{MD5SUM_PATH}"
         current_md5 = None
-
         try:
-            req = urllib.request.Request(md5sum_url)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                md5_content = resp.read().decode('utf-8', errors='ignore')
-                # Parse MD5SUM to find files.xml.lzma entry
-                for line in md5_content.strip().split('\n'):
+            md5_tmp = cache_media_info / "MD5SUM.tmp"
+            md5_result = download_from_server(md5sum_url, md5_tmp, server, timeout=30)
+            if md5_result.success:
+                for line in md5_tmp.read_text(errors='ignore').strip().split('\n'):
                     parts = line.split()
                     if len(parts) >= 2 and 'files.xml.lzma' in parts[1]:
                         current_md5 = parts[0]
                         break
-        except:
+                md5_tmp.unlink(missing_ok=True)
+        except Exception:
             pass  # MD5SUM check is optional
 
-        # Check if we already have this version
+        # Skip download if we already have this exact version.
         if current_md5 and not force:
             state = db.get_files_xml_state(media_id)
             if state and state.get('files_md5') == current_md5:
@@ -776,36 +772,40 @@ def sync_files_xml(
                     skipped=True
                 )
 
-        # Download files.xml.lzma
         if progress_callback:
             progress_callback("downloading files.xml", 0, 0)
 
-        try:
-            req = urllib.request.Request(files_xml_url)
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                # Save to cache
-                files_xml_path = cache_media_info / "files.xml.lzma"
-                with open(files_xml_path, 'wb') as f:
-                    f.write(resp.read())
+        dest = cache_media_info / "files.xml.lzma"
+        t_start = time.time()
+        result = download_from_server(files_xml_url, dest, server, timeout=120)
+        elapsed = time.time() - t_start
 
-                # Calculate MD5 if not known
-                if not current_md5:
-                    with open(files_xml_path, 'rb') as f:
-                        current_md5 = hashlib.md5(f.read()).hexdigest()
+        if result.success:
+            if not current_md5:
+                with open(dest, 'rb') as f:
+                    current_md5 = hashlib.md5(f.read()).hexdigest()
 
-                files_xml_md5 = current_md5
-                files_xml_downloaded = True
-                break
+            if server_id:
+                kbps = int(result.size / elapsed / 1024) if elapsed >= 0.5 and result.size else None
+                db.update_server_stats(server_id, success=True,
+                                       **({"bandwidth_kbps": kbps} if kbps else {}))
 
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                continue  # Try next server
-            return FilesXmlResult(success=False, error=f"HTTP error: {e.code}")
-        except Exception as e:
-            continue  # Try next server
+            files_xml_path = dest
+            files_xml_md5 = current_md5
+            files_xml_downloaded = True
+            break
+        else:
+            if server_id:
+                db.update_server_stats(server_id, success=False)
+            all_errors.append(f"{server['name']}: {result.error}")
+            logger.warning(f"files.xml download failed on {server['name']}: {result.error}")
 
     if not files_xml_downloaded:
-        return FilesXmlResult(success=False, error="files.xml.lzma not found on any server")
+        return FilesXmlResult(
+            success=False,
+            error=f"files.xml.lzma not available (tried {len(servers)} server(s)): "
+                  + "; ".join(all_errors[-3:])
+        )
 
     # Get file size for progress estimation
     compressed_size = files_xml_path.stat().st_size

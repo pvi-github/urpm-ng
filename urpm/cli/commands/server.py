@@ -317,6 +317,81 @@ def cmd_server_ipmode(args, db: 'PackageDatabase') -> int:
     return 0
 
 
+def cmd_server_stats(args, db: 'PackageDatabase') -> int:
+    """Handle server stats command — show measured performance statistics."""
+    import time
+    from .. import colors
+
+    server = db.get_server(args.name)
+    if not server:
+        print(colors.error(_("Server not found: {name}").format(name=args.name)))
+        return 1
+
+    def fmt_bandwidth(kbps):
+        """Format KB/s as a human-readable speed string."""
+        if kbps is None:
+            return colors.dim(_("no data"))
+        if kbps >= 10240:   # >= 10 MB/s
+            return colors.success(f"{kbps / 1024:.1f} MB/s")
+        if kbps >= 1024:
+            return colors.info(f"{kbps / 1024:.1f} MB/s")
+        return colors.warning(f"{kbps} KB/s")
+
+    def fmt_latency(ms):
+        if ms is None:
+            return colors.dim(_("no data"))
+        if ms < 50:
+            return colors.success(f"{ms} ms")
+        if ms < 150:
+            return colors.info(f"{ms} ms")
+        return colors.warning(f"{ms} ms")
+
+    def fmt_age(ts):
+        if not ts:
+            return colors.dim(_("never"))
+        elapsed = int(time.time()) - ts
+        if elapsed < 60:
+            return _("{n}s ago").format(n=elapsed)
+        if elapsed < 3600:
+            return _("{n}m ago").format(n=elapsed // 60)
+        if elapsed < 86400:
+            return _("{n}h ago").format(n=elapsed // 3600)
+        return _("{n}d ago").format(n=elapsed // 86400)
+
+    success = server.get('success_count') or 0
+    failure = server.get('failure_count') or 0
+    total = success + failure
+    if total > 0:
+        rate = success / total * 100
+        rate_str = (colors.success if rate >= 90 else colors.warning if rate >= 70 else colors.error)(
+            f"{rate:.0f}%"
+        )
+    else:
+        rate_str = colors.dim(_("no data"))
+
+    media_list = db.get_media_for_server(server['id'])
+
+    print(f"\n{colors.bold(server['name'])}")
+    print(f"  {'URL':<14} {server['protocol']}://{server['host']}{server.get('base_path','')}")
+    print(f"  {'Status':<14} {'enabled' if server['enabled'] else colors.dim('disabled')}")
+    print(f"  {'Priority':<14} {server['priority']}")
+    print(f"  {'IP mode':<14} {server.get('ip_mode', 'auto')}")
+    print()
+    print(f"  {'Bandwidth':<14} {fmt_bandwidth(server.get('bandwidth_kbps'))}")
+    print(f"  {'Latency':<14} {fmt_latency(server.get('latency_ms'))}")
+    print(f"  {'Success rate':<14} {rate_str}  ({success} ok / {failure} failed)")
+    print(f"  {'Last check':<14} {fmt_age(server.get('last_check'))}")
+    print()
+    if media_list:
+        print(f"  {_('Media')} ({len(media_list)}):")
+        for m in media_list:
+            print(f"    {colors.dim('-')} {m['name']}")
+    else:
+        print(f"  {colors.dim(_('No linked media'))}")
+    print()
+    return 0
+
+
 def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     """Handle server autoconfig command - auto-discover servers from Mageia mirrorlist."""
     from .. import colors

@@ -90,7 +90,7 @@ from .commands.history import cmd_history, cmd_undo, cmd_rollback
 from .commands.server import (
     cmd_server_list, cmd_server_add, cmd_server_remove,
     cmd_server_enable, cmd_server_disable, cmd_server_priority,
-    cmd_server_test, cmd_server_ipmode, cmd_server_autoconfig,
+    cmd_server_test, cmd_server_ipmode, cmd_server_autoconfig, cmd_server_stats,
 )
 from .commands.mirror import (
     cmd_mirror_status, cmd_mirror_enable, cmd_mirror_disable,
@@ -1588,6 +1588,12 @@ Examples:
     )
 
     # server autoconfig
+    server_stats = server_subparsers.add_parser(
+        'stats',
+        help=_('Show measured performance statistics for a server')
+    )
+    server_stats.add_argument('name', help=_('Server name'))
+
     server_autoconfig = server_subparsers.add_parser(
         'autoconfig', aliases=['auto'],
         help=_('Auto-discover and add servers from Mageia mirrorlist')
@@ -2166,6 +2172,8 @@ def main(argv=None) -> int:
                 return cmd_server_ipmode(args, db)
             elif args.server_command in ('autoconfig', 'auto'):
                 return cmd_server_autoconfig(args, db)
+            elif args.server_command == 'stats':
+                return cmd_server_stats(args, db)
             else:
                 return cmd_not_implemented(args, db)
 
