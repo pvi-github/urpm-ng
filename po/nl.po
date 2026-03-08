@@ -6197,3 +6197,11 @@ msgstr "Probeer te starten met sudo"
 #, python-brace-format
 msgid "Error writing config: {error}"
 msgstr "Fout bij schrijven configuratie: {error}"
+
+#: urpm/cli/commands/upgrade.py
+msgid "Proceed with download? [y/N] "
+msgstr "Doorgaan met downloaden? [j/N] "
+
+#: urpm/cli/commands/upgrade.py
+msgid "Packages downloaded to cache. Use 'urpm upgrade' to install them later."
+msgstr "Pakketten gedownload naar cache. Gebruik 'urpm upgrade' om ze later te installeren."

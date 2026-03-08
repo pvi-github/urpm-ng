@@ -103,8 +103,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         for info in local_rpm_infos:
             print(f"  {info['nevra']}")
 
-    # Check root
-    if not check_root():
+    download_only = getattr(args, 'download_only', False)
+
+    # Check root (not required for --download-only)
+    if not download_only and not check_root():
         print(colors.error(_("Error: upgrade requires root privileges")))
         return 1
 
@@ -201,7 +203,11 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     # Confirmation
     if not getattr(args, 'auto', False):
         try:
-            response = input(_("\nProceed with upgrade? [y/N] "))
+            if download_only:
+                prompt = _("\nProceed with download? [y/N] ")
+            else:
+                prompt = _("\nProceed with upgrade? [y/N] ")
+            response = input(prompt)
             if not confirm_yes(response):
                 print(_("Aborted."))
                 return 0
@@ -284,6 +290,11 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
         if downloaded > 0:
             PackageOperations.notify_urpmd_cache_invalidate()
+
+    # --download-only: stop here, do not install
+    if download_only:
+        print(colors.success(_("\nPackages downloaded to cache. Use 'urpm upgrade' to install them later.")))
+        return 0
 
     rpm_paths = [r.path for r in dl_results if r.success and r.path]
     rpm_paths.extend(local_action_paths)

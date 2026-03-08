@@ -1051,6 +1051,11 @@ Examples:
         help=_('No confirmation')
     )
     upgrade_parser.add_argument(
+        '--download-only',
+        action='store_true',
+        help=_('Download packages to cache but do not install them')
+    )
+    upgrade_parser.add_argument(
         '--noerase-orphans',
         action='store_true',
         help=_('Keep orphaned dependencies (do not remove them)')

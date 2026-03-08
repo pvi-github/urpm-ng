@@ -6180,3 +6180,11 @@ msgstr "Tente executar com sudo"
 #, python-brace-format
 msgid "Error writing config: {error}"
 msgstr "Erro ao escrever a configuração: {error}"
+
+#: urpm/cli/commands/upgrade.py
+msgid "Proceed with download? [y/N] "
+msgstr "Prosseguir com a transferência? [s/N] "
+
+#: urpm/cli/commands/upgrade.py
+msgid "Packages downloaded to cache. Use 'urpm upgrade' to install them later."
+msgstr "Pacotes transferidos para a cache. Use 'urpm upgrade' para os instalar mais tarde."

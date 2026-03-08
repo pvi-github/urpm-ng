@@ -48,7 +48,7 @@
 - [ ] Mettre à jour les pages man (EN/FR) pour les nouvelles commandes et options
 
 ### Download options
-- [ ] Option `--download-only` sur upgrade
+- [x] Option `--download-only` sur upgrade
 - [ ] Option `--destdir <path>` pour spécifier répertoire destination
 
 ### Alternatives (OR deps)
@@ -67,11 +67,15 @@
 - [ ] Wrapper les chaînes de rpmdrake-ng avec gettext une fois l'infrastructure en place
 
 ### Système de debug
-- [ ] Généraliser `--debug` au-delà de `--debug solver` : définir des domaines cohérents
-  - Domaines envisagés : `solver`, `download`, `db`, `peer`, `daemon`, `appstream`, `build`
-  - Syntaxe cible : `--debug solver,download` ou `--debug all`
-- [ ] Uniformiser l'activation du debug dans tous les modules
-- [ ] S'assurer que chaque domaine a des logs utiles et pas trop verbeux
+- [ ] Généraliser `--debug` avec domaines et niveaux de verbosité
+  - Syntaxe cible : `--debug solver=3,download=5,db=1` ou `--debug all=2`
+  - Niveaux : 0 = muet, 1 = erreurs, 2 = warnings, 3 = info (défaut si =N absent), 4 = verbose, 5 = ultra-verbeux
+  - Domaines : `solver`, `download`, `db`, `peer`, `daemon`, `appstream`, `build`
+  - `--debug solver` seul → niveau 3 implicite
+  - `--debug all` → tous les domaines au niveau 3
+  - API interne : `debug_log(domain, level, msg)` — ne loggue que si level ≤ niveau configuré pour ce domaine
+- [ ] Uniformiser l'activation du debug dans tous les modules (remplacer les DEBUG_* bool par l'API centralisée)
+- [ ] S'assurer que chaque domaine a des logs utiles à chaque niveau
 
 ### system-upgrade
 - [ ] Updates préliminaires

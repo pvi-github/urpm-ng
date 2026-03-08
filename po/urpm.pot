@@ -5783,3 +5783,11 @@ msgstr ""
 #, python-brace-format
 msgid "Error writing config: {error}"
 msgstr ""
+
+#: urpm/cli/commands/upgrade.py
+msgid "Proceed with download? [y/N] "
+msgstr ""
+
+#: urpm/cli/commands/upgrade.py
+msgid "Packages downloaded to cache. Use 'urpm upgrade' to install them later."
+msgstr ""
