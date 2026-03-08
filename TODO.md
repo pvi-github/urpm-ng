@@ -196,7 +196,7 @@ Les utilisateurs comparent défavorablement à GNOME Software sur d'autres distr
 ## Améliorations continues
 
 ### Idle detection
-- [ ] Fix: reset `_last_net_sample` après batch de downloads
+- [x] Fix: reset `_last_net_sample` après batch de downloads
 
 ### Download stats & priorités serveurs
 - [x] Persister le débit constaté par serveur (SQLite, EWMA α=0.3) entre les sessions
