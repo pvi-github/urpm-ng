@@ -2119,7 +2119,7 @@ msgstr "Fout: bijwerken vereist root-rechten"
 
 #: urpm/cli/commands/upgrade.py:125
 msgid "Resolving system upgrade..."
-msgstr "Oplossen van systeemupdate..."
+msgstr "Systeemupgrade berekenen..."
 
 #: urpm/cli/commands/upgrade.py:128
 #, python-brace-format
