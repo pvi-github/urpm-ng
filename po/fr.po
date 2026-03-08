@@ -6167,3 +6167,82 @@ msgstr "Aucun média lié"
 #: urpm/cli/commands/server.py
 msgid "failed"
 msgstr "échecs"
+
+#: urpm/cli/helpers/alternatives.py urpm/cli/helpers/package.py
+msgid "Downloading"
+msgstr "Téléchargement"
+
+#: urpm/cli/commands/history.py
+#, python-brace-format
+msgid "{downloaded} downloaded, {cached} from cache"
+msgstr "{downloaded} téléchargés, {cached} depuis le cache"
+
+#: urpm/cli/commands/media.py
+msgid "Testing mirror latency..."
+msgstr "Test de latence des miroirs..."
+
+#: urpm/cli/helpers/alternatives.py
+msgid "provided by:"
+msgstr "fourni par :"
+
+#: urpm/cli/helpers/alternatives.py
+msgid "Choice?"
+msgstr "Choix ?"
+
+#: urpm/cli/helpers/alternatives.py
+msgid "multiple versions available:"
+msgstr "plusieurs versions disponibles :"
+
+#: urpm/cli/helpers/alternatives.py
+msgid "Multiple versions in preferences:"
+msgstr "Plusieurs versions dans les préférences :"
+
+#: urpm/cli/helpers/alternatives.py
+msgid "required by"
+msgstr "requis par"
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Warning: '{pkg}' is only provided by {provider}"
+msgstr "Avertissement : « {pkg} » n'est fourni que par {provider}"
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "but you have {installed} installed."
+msgstr "mais vous avez {installed} d'installé."
+
+#: urpm/cli/helpers/package.py
+msgid "This will likely cause conflicts!"
+msgstr "Cela risque de provoquer des conflits !"
+
+#: urpm/cli/helpers/package.py
+msgid "Aborting (use explicit package name to force)"
+msgstr "Abandon (utilisez le nom exact du paquet pour forcer)"
+
+#: urpm/cli/helpers/package.py
+msgid "Install anyway? [y/N] "
+msgstr "Installer quand même ? [o/N] "
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Multiple providers for '{pkg}':"
+msgstr "Plusieurs fournisseurs pour « {pkg} » :"
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Multiple installed families provide '{pkg}':"
+msgstr "Plusieurs familles installées fournissent « {pkg} » :"
+
+#: urpm/cli/helpers/kernel.py
+#, python-brace-format
+msgid "Error: Permission denied writing to {path}"
+msgstr "Erreur : permission refusée pour écrire dans {path}"
+
+#: urpm/cli/helpers/kernel.py
+msgid "Try running with sudo"
+msgstr "Essayez d'exécuter avec sudo"
+
+#: urpm/cli/helpers/kernel.py
+#, python-brace-format
+msgid "Error writing config: {error}"
+msgstr "Erreur lors de l'écriture de la configuration : {error}"

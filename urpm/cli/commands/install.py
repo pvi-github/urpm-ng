@@ -960,7 +960,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         )
 
         # Print done
-        print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
+        print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done"))
 
         if not queue_result.success:
             print(colors.error("\n" + _("Installation failed:")))

@@ -1922,7 +1922,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     print(ngettext("{count} http(s) mirror", "{count} http(s) mirrors", len(mirror_urls)).format(count=len(mirror_urls)))
 
     # Test a few mirrors to find a fast one
-    print("Testing mirror latency...", end=' ', flush=True)
+    print(_("Testing mirror latency..."), end=' ', flush=True)
 
     def test_mirror(url):
         """Test mirror latency by fetching a small file."""

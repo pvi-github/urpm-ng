@@ -4,7 +4,7 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
-from ...i18n import confirm_yes
+from ...i18n import _, confirm_yes
 
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
@@ -147,14 +147,14 @@ def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, in
         # Check if this family conflicts with installed families
         if installed_families and family_name not in installed_families:
             installed_str = ', '.join(sorted(installed_families))
-            print(f"\nWarning: '{pkg_name}' is only provided by {provider_name}")
-            print(f"         but you have {installed_str} installed.")
-            print(f"         This will likely cause conflicts!")
+            print("\n" + _("Warning: '{pkg}' is only provided by {provider}").format(pkg=pkg_name, provider=provider_name))
+            print("         " + _("but you have {installed} installed.").format(installed=installed_str))
+            print("         " + _("This will likely cause conflicts!"))
             if auto:
-                print("Aborting (use explicit package name to force)")
+                print(_("Aborting (use explicit package name to force)"))
                 return []
             try:
-                answer = input(f"\nInstall anyway? [y/N] ").strip()
+                answer = input("\n" + _("Install anyway? [y/N] ")).strip()
                 if not confirm_yes(answer):
                     return []
             except (EOFError, KeyboardInterrupt):
@@ -169,13 +169,13 @@ def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, in
             # Use newest version
             return [families[sorted_families[0]][0]['name']]
         # Interactive: ask user
-        print(f"\nMultiple providers for '{pkg_name}':")
+        print("\n" + _("Multiple providers for '{pkg}':").format(pkg=pkg_name))
         for i, fam in enumerate(sorted_families, 1):
             print(f"  {i}) {families[fam][0]['name']}")
-        print(f"  {len(sorted_families) + 1}) All")
+        print(f"  {len(sorted_families) + 1}) {_('All')}")
 
         try:
-            choice = input(f"\nChoice [1]: ").strip() or "1"
+            choice = input("\n" + _("Choice [1]: ")).strip() or "1"
             if choice == str(len(sorted_families) + 1):
                 return [families[f][0]['name'] for f in sorted_families]
             idx = int(choice) - 1
@@ -201,13 +201,13 @@ def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, in
 
     # Interactive: ask user
     sorted_families = sorted(matching_families.keys(), reverse=True)
-    print(f"\nMultiple installed families provide '{pkg_name}':")
+    print("\n" + _("Multiple installed families provide '{pkg}':").format(pkg=pkg_name))
     for i, fam in enumerate(sorted_families, 1):
         print(f"  {i}) {matching_families[fam][0]['name']}")
-    print(f"  {len(sorted_families) + 1}) All")
+    print(f"  {len(sorted_families) + 1}) {_('All')}")
 
     try:
-        choice = input(f"\nChoice [1]: ").strip() or "1"
+        choice = input("\n" + _("Choice [1]: ")).strip() or "1"
         if choice == str(len(sorted_families) + 1):
             return [matching_families[f][0]['name'] for f in sorted_families]
         idx = int(choice) - 1

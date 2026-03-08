@@ -195,9 +195,12 @@ Les utilisateurs comparent défavorablement à GNOME Software sur d'autres distr
 - [ ] Fix: reset `_last_net_sample` après batch de downloads
 
 ### Download stats & priorités serveurs
-- [ ] Afficher stats par serveur/peer à la fin du téléchargement
-- [ ] Persister le débit constaté par serveur (en base ou fichier léger) entre les sessions
-- [ ] Trier dynamiquement les serveurs par débit mesuré lors des downloads suivants
+- [x] Persister le débit constaté par serveur (SQLite, EWMA α=0.3) entre les sessions
+- [x] Trier dynamiquement les serveurs par débit mesuré (priority DESC, bandwidth_kbps DESC)
+- [x] Adaptation in-session sans attendre la prochaine exécution (dict mémoire lock-protégé)
+- [x] Failover automatique sur download et sync metadata (boucle sur serveurs classés)
+- [x] `urpm server stats` : affichage débit, latence, taux de succès, dernière vérification
+- [ ] Afficher stats par serveur/peer à la fin du téléchargement (résumé post-install)
 - [ ] Déprioriser automatiquement les serveurs lents ou instables (seuil configurable)
 - [ ] Réinitialiser les stats si le serveur redevient rapide (fenêtre glissante)
 

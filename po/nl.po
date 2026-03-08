@@ -6118,3 +6118,82 @@ msgstr "Geen gekoppelde media"
 #: urpm/cli/commands/server.py
 msgid "failed"
 msgstr "mislukt"
+
+#: urpm/cli/helpers/alternatives.py urpm/cli/helpers/package.py
+msgid "Downloading"
+msgstr "Downloaden"
+
+#: urpm/cli/commands/history.py
+#, python-brace-format
+msgid "{downloaded} downloaded, {cached} from cache"
+msgstr "{downloaded} gedownload, {cached} uit cache"
+
+#: urpm/cli/commands/media.py
+msgid "Testing mirror latency..."
+msgstr "Mirrorlatentie testen..."
+
+#: urpm/cli/helpers/alternatives.py
+msgid "provided by:"
+msgstr "geleverd door:"
+
+#: urpm/cli/helpers/alternatives.py
+msgid "Choice?"
+msgstr "Keuze?"
+
+#: urpm/cli/helpers/alternatives.py
+msgid "multiple versions available:"
+msgstr "meerdere versies beschikbaar:"
+
+#: urpm/cli/helpers/alternatives.py
+msgid "Multiple versions in preferences:"
+msgstr "Meerdere versies in voorkeuren:"
+
+#: urpm/cli/helpers/alternatives.py
+msgid "required by"
+msgstr "vereist door"
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Warning: '{pkg}' is only provided by {provider}"
+msgstr "Waarschuwing: «{pkg}» wordt alleen geleverd door {provider}"
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "but you have {installed} installed."
+msgstr "maar u heeft {installed} geïnstalleerd."
+
+#: urpm/cli/helpers/package.py
+msgid "This will likely cause conflicts!"
+msgstr "Dit zal waarschijnlijk conflicten veroorzaken!"
+
+#: urpm/cli/helpers/package.py
+msgid "Aborting (use explicit package name to force)"
+msgstr "Afbreken (gebruik exacte pakketnaam om te forceren)"
+
+#: urpm/cli/helpers/package.py
+msgid "Install anyway? [y/N] "
+msgstr "Toch installeren? [j/N] "
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Multiple providers for '{pkg}':"
+msgstr "Meerdere aanbieders voor «{pkg}»:"
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Multiple installed families provide '{pkg}':"
+msgstr "Meerdere geïnstalleerde families leveren «{pkg}»:"
+
+#: urpm/cli/helpers/kernel.py
+#, python-brace-format
+msgid "Error: Permission denied writing to {path}"
+msgstr "Fout: schrijfrechten geweigerd voor {path}"
+
+#: urpm/cli/helpers/kernel.py
+msgid "Try running with sudo"
+msgstr "Probeer te starten met sudo"
+
+#: urpm/cli/helpers/kernel.py
+#, python-brace-format
+msgid "Error writing config: {error}"
+msgstr "Fout bij schrijven configuratie: {error}"

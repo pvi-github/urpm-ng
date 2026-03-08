@@ -269,7 +269,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
 
         # Print done
-        print(f"\r\033[K  [{len(package_names)}/{len(package_names)}] done")
+        print(f"\r\033[K  [{len(package_names)}/{len(package_names)}] " + _("done"))
 
         if not queue_result.success:
             print(colors.error("\n" + _("Removal failed:")))
@@ -631,7 +631,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
         queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
 
         # Print done
-        print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] done")
+        print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] " + _("done"))
 
         if not queue_result.success:
             print(colors.error("\n" + _("Erase failed:")))

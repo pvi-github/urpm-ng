@@ -312,7 +312,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
             queue_result = queue.execute(progress_callback=queue_progress)
 
             # Print done
-            print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] done")
+            print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] " + _("done"))
 
             if not queue_result.success:
                 print(colors.error(_("\nErase failed:")))
@@ -460,10 +460,10 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                 def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
                              item_bytes=None, item_total=None, slots_status=None):
                     pct = int(bytes_done * 100 / bytes_total) if bytes_total else 0
-                    print(f"\r\033[K  Downloading [{pkg_num}/{pkg_total}] {name} {pct}%", end='', flush=True)
+                    print(f"\r\033[K  {_('Downloading')} [{pkg_num}/{pkg_total}] {name} {pct}%", end='', flush=True)
 
                 dl_results, downloaded, cached, _unused = downloader.download_all(download_items, progress)
-                print(f"\r\033[K  {downloaded} downloaded, {cached} from cache")
+                print(f"\r\033[K  " + _("{downloaded} downloaded, {cached} from cache").format(downloaded=downloaded, cached=cached))
 
                 # Collect successful downloads
                 for result in dl_results:
@@ -499,7 +499,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                         last_install_shown[0] = name
 
                 install_result = install_queue.execute(progress_callback=install_progress)
-                print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] done")
+                print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done"))
 
                 if not install_result.success:
                     print(colors.error(_("  Reinstall failed:")))
@@ -767,7 +767,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             queue_result = queue.execute(progress_callback=queue_progress)
 
             # Print done
-            print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] done")
+            print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] " + _("done"))
 
             if not queue_result.success:
                 print(colors.error(_("\nErase failed:")))

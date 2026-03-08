@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from ...core.database import PackageDatabase
     from ...core.resolver import Resolver, Resolution
 
+from ...i18n import _
 from .resolver import _group_by_version
 
 # Debug flag for preferences matching
@@ -385,7 +386,7 @@ def _handle_bloc_choices(bloc_info: dict, preferences: 'PreferencesMatcher',
         # Determine what the blocs represent
         bloc_label = _get_bloc_label(bloc_defining)
 
-        print(f"\n{colors.warning(bloc_label)} - multiple versions available:")
+        print(f"\n{colors.warning(bloc_label)} - {_('multiple versions available:')}")
         for i, bloc_key in enumerate(bloc_keys, 1):
             # Count providers in this bloc
             provider_count = sum(len(providers) for providers in blocs[bloc_key].values())
@@ -393,7 +394,7 @@ def _handle_bloc_choices(bloc_info: dict, preferences: 'PreferencesMatcher',
 
         while True:
             try:
-                choice = input(f"\nChoice? [1-{len(bloc_keys)}] ")
+                choice = input("\n" + _("Choice?") + f" [1-{len(bloc_keys)}] ")
                 idx = int(choice) - 1
                 if 0 <= idx < len(bloc_keys):
                     chosen_bloc = bloc_keys[idx]
@@ -401,7 +402,7 @@ def _handle_bloc_choices(bloc_info: dict, preferences: 'PreferencesMatcher',
             except ValueError:
                 pass
             except (EOFError, KeyboardInterrupt):
-                print("\nAborted")
+                print("\n" + _("Aborted"))
                 return None  # Signal abort
         print()
 
@@ -485,22 +486,22 @@ def _ask_secondary_choice(capability: str, providers: list) -> str:
     """
     from .. import colors
 
-    print(f"  {colors.info(capability)} provided by:")
+    print(f"  {colors.info(capability)} " + _("provided by:"))
     for i, prov in enumerate(providers[:8], 1):
         print(f"    {i}. {prov}")
     if len(providers) > 8:
-        print(f"    ... and {len(providers) - 8} more")
+        print("    " + _("... and {count} more").format(count=len(providers) - 8))
 
     while True:
         try:
-            choice = input(f"  Choice? [1-{min(len(providers), 8)}] ")
+            choice = input("  " + _("Choice?") + f" [1-{min(len(providers), 8)}] ")
             idx = int(choice) - 1
             if 0 <= idx < len(providers):
                 return providers[idx]
         except ValueError:
             pass
         except (EOFError, KeyboardInterrupt):
-            print("\nAborted")
+            print("\n" + _("Aborted"))
             return None  # Signal abort
 
     return providers[0]
@@ -607,7 +608,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                     versionless = version_groups.pop(None, set())
                     if len(version_groups) > 1 and not auto_mode:
                         # Multiple versions detected, ask user
-                        print(f"\nMultiple versions in preferences:")
+                        print("\n" + _("Multiple versions in preferences:"))
                         sorted_versions = sorted(version_groups.keys())
                         for i, ver in enumerate(sorted_versions, 1):
                             pkgs = version_groups[ver]
@@ -615,7 +616,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
 
                         while True:
                             try:
-                                choice = input(f"Choice? [1-{len(sorted_versions)}] ")
+                                choice = input(_("Choice?") + f" [1-{len(sorted_versions)}] ")
                                 idx = int(choice) - 1
                                 if 0 <= idx < len(sorted_versions):
                                     chosen_version = sorted_versions[idx]
@@ -626,7 +627,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                                     preferences._find_compatible_providers(resolver.pool)
                                     break
                             except (ValueError, EOFError, KeyboardInterrupt):
-                                print("\nAborted")
+                                print("\n" + _("Aborted"))
                                 return None, True
 
                     preferences_applied = True
@@ -709,17 +710,17 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
 
                     # No preference matched, ask user
                     if alt.required_by:
-                        print(f"\n{alt.capability} (required by {alt.required_by}):")
+                        print(f"\n{alt.capability} ({_('required by')} {alt.required_by}):")
                     else:
                         print(f"\n{alt.capability}:")
                     for i, provider in enumerate(filtered[:8], 1):
                         print(f"  {i}. {provider}")
                     if len(filtered) > 8:
-                        print(f"  ... and {len(filtered) - 8} more")
+                        print("  " + _("... and {count} more").format(count=len(filtered) - 8))
 
                     while True:
                         try:
-                            choice = input(f"Choice? [1-{min(len(filtered), 8)}] ")
+                            choice = input(_("Choice?") + f" [1-{min(len(filtered), 8)}] ")
                             idx = int(choice) - 1
                             if 0 <= idx < len(filtered):
                                 chosen_pkg = filtered[idx]
@@ -729,7 +730,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                         except ValueError:
                             pass
                         except (EOFError, KeyboardInterrupt):
-                            print("\nAborted")
+                            print("\n" + _("Aborted"))
                             return result, True
                 # Re-resolve with new choices
                 continue

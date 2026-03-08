@@ -5704,3 +5704,82 @@ msgstr ""
 #, python-brace-format
 msgid "Unknown appstream command: {command}"
 msgstr ""
+
+#: urpm/cli/helpers/alternatives.py urpm/cli/helpers/package.py
+msgid "Downloading"
+msgstr ""
+
+#: urpm/cli/commands/history.py
+#, python-brace-format
+msgid "{downloaded} downloaded, {cached} from cache"
+msgstr ""
+
+#: urpm/cli/commands/media.py
+msgid "Testing mirror latency..."
+msgstr ""
+
+#: urpm/cli/helpers/alternatives.py
+msgid "provided by:"
+msgstr ""
+
+#: urpm/cli/helpers/alternatives.py
+msgid "Choice?"
+msgstr ""
+
+#: urpm/cli/helpers/alternatives.py
+msgid "multiple versions available:"
+msgstr ""
+
+#: urpm/cli/helpers/alternatives.py
+msgid "Multiple versions in preferences:"
+msgstr ""
+
+#: urpm/cli/helpers/alternatives.py
+msgid "required by"
+msgstr ""
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Warning: '{pkg}' is only provided by {provider}"
+msgstr ""
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "but you have {installed} installed."
+msgstr ""
+
+#: urpm/cli/helpers/package.py
+msgid "This will likely cause conflicts!"
+msgstr ""
+
+#: urpm/cli/helpers/package.py
+msgid "Aborting (use explicit package name to force)"
+msgstr ""
+
+#: urpm/cli/helpers/package.py
+msgid "Install anyway? [y/N] "
+msgstr ""
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Multiple providers for '{pkg}':"
+msgstr ""
+
+#: urpm/cli/helpers/package.py
+#, python-brace-format
+msgid "Multiple installed families provide '{pkg}':"
+msgstr ""
+
+#: urpm/cli/helpers/kernel.py
+#, python-brace-format
+msgid "Error: Permission denied writing to {path}"
+msgstr ""
+
+#: urpm/cli/helpers/kernel.py
+msgid "Try running with sudo"
+msgstr ""
+
+#: urpm/cli/helpers/kernel.py
+#, python-brace-format
+msgid "Error writing config: {error}"
+msgstr ""

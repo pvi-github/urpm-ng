@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
+from ...i18n import _
 from .package import extract_pkg_name
 
 
@@ -113,11 +114,11 @@ def write_config(config: dict) -> bool:
         CONFIG_FILE.write_text('\n'.join(lines) + '\n')
         return True
     except PermissionError:
-        print(f"Error: Permission denied writing to {CONFIG_FILE}")
-        print("Try running with sudo")
+        print(_("Error: Permission denied writing to {path}").format(path=CONFIG_FILE))
+        print(_("Try running with sudo"))
         return False
     except Exception as e:
-        print(f"Error writing config: {e}")
+        print(_("Error writing config: {error}").format(error=e))
         return False
 
 
