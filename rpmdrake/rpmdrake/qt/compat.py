@@ -49,11 +49,17 @@ __all__ = [
     "QFrame",
     "QToolButton",
     "QMenu",
+    "QTextBrowser",
+    "QStackedWidget",
     "QColor",
     "QBrush",
+    "QPalette",
+    "QPainter",
+    "QPen",
     "QFont",
     "QFontMetrics",
     "QTimer",
+    "QEvent",
 ]
 
 try:
@@ -69,6 +75,7 @@ try:
         QRect,
         QSize,
         QTimer,
+        QEvent,
     )
     from PySide6.QtWidgets import (
         QApplication,
@@ -100,6 +107,8 @@ try:
         QFrame,
         QToolButton,
         QMenu,
+        QTextBrowser,
+        QStackedWidget,
     )
     from PySide6.QtGui import (
         QKeySequence,
@@ -109,6 +118,9 @@ try:
         QKeyEvent,
         QColor,
         QBrush,
+        QPalette,
+        QPainter,
+        QPen,
         QFont,
         QFontMetrics,
     )
@@ -127,6 +139,7 @@ except ImportError:
         QRect,
         QSize,
         QTimer,
+        QEvent,
     )
     from PyQt6.QtWidgets import (
         QApplication,
@@ -158,6 +171,8 @@ except ImportError:
         QFrame,
         QToolButton,
         QMenu,
+        QTextBrowser,
+        QStackedWidget,
     )
     from PyQt6.QtGui import (
         QKeySequence,
@@ -167,6 +182,9 @@ except ImportError:
         QKeyEvent,
         QColor,
         QBrush,
+        QPalette,
+        QPainter,
+        QPen,
         QFont,
         QFontMetrics,
     )

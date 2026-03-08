@@ -97,21 +97,21 @@ class Controller:
         """Load initial package list based on filter state."""
         self._load_installed_cache()
 
-        # Check if there are upgrades available
-        if not self._upgradeable_packages:
-            # No upgrades - clear all state filters
-            self.filter_state.states.clear()
-            # Notify view to update filter checkboxes
-            if hasattr(self.view, 'on_filter_state_changed'):
-                self.view.on_filter_state_changed()
-        else:
+        # Sync filter state with what will actually be displayed so that the
+        # checkboxes in FilterZone reflect reality from the start.
+        if self._upgradeable_packages:
+            self.filter_state.states = {PackageState.UPGRADES, PackageState.INSTALLED}
             # Pre-select all upgradeable packages so user just clicks "Màj"
             for name_lower in self._upgradeable_packages:
-                # Find the actual package name (preserving case)
                 for p in self._installed_packages:
                     if p['name'].lower() == name_lower:
                         self.selection.add(p['name'])
                         break
+        else:
+            self.filter_state.states = {PackageState.INSTALLED}
+
+        if hasattr(self.view, 'on_filter_state_changed'):
+            self.view.on_filter_state_changed()
 
         self._refresh_packages()
 
@@ -317,43 +317,38 @@ class Controller:
     def _query_packages_sync(self) -> List[dict]:
         """Query packages synchronously (runs in thread).
 
-        Logic :
-        - Avec terme de recherche : chercher dans la BDD, filtrer par état
-        - Avec catégorie : charger les paquets de cette catégorie
-        - Sans terme ni catégorie : selon le filtre d'état actif
+        Logic:
+        - With a search term: search the DB, enrich, apply display filters.
+          State filters are intentionally skipped so all matching packages appear.
+        - With a category: load packages in that category, enrich, display-filter.
+        - Default (no term, no category): return all installed packages enriched
+          and display-filtered.  *State* filtering is omitted — the caller
+          (:meth:`_on_query_done`) will split the result into sections
+          (upgrades / installed) and call :meth:`~ViewInterface.on_sections_update`.
         """
         term = self.filter_state.search_term
-        states = self.filter_state.states
         category = self.filter_state.category
 
         if term:
-            # Recherche dans la BDD (nom + provides)
+            # Search: return everything that matches, regardless of install state.
             results = self._search_with_cache(term)
-        elif category:
-            # Catégorie sélectionnée : charger tous les paquets de cette catégorie
-            results = self._get_packages_by_category(category)
-        elif PackageState.UPGRADES in states:
-            # Mises à jour
-            results = self._get_upgrade_packages()
+            results = self._enrich_packages(results)
             results = self._apply_display_filters(results)
             return results
-        elif PackageState.AVAILABLE in states and PackageState.INSTALLED not in states:
-            # "Disponibles" seul sans recherche ni catégorie : trop de paquets
-            return []
-        else:
-            # Par défaut : paquets installés
-            results = [dict(p) for p in self._installed_packages]
 
-        # Enrichir avec statut d'installation
+        if category:
+            # Category view: show all packages in the category regardless of
+            # install state — the user browses to discover and install packages.
+            # Display filters (libs/devel/debug…) still apply.
+            results = self._get_packages_by_category(category)
+            results = self._enrich_packages(results)
+            results = self._apply_display_filters(results)
+            return results
+
+        # Default view: all installed packages — sections are built in _on_query_done.
+        results = [dict(p) for p in self._installed_packages]
         results = self._enrich_packages(results)
-
-        # Filtrer par état si des filtres sont actifs
-        if states:
-            results = self._apply_state_filters(results, states)
-
-        # Filtres d'affichage (libs, devel, etc.)
         results = self._apply_display_filters(results)
-
         return results
 
     def _get_packages_by_category(self, category: str) -> List[dict]:
@@ -385,7 +380,37 @@ class Controller:
         return results
 
     def _get_upgrade_packages(self) -> List[dict]:
-        """Get packages with available upgrades."""
+        """Get packages with available upgrades.
+
+        Shows the available (new) version/release so that display_version
+        can show 'installed → available' correctly.
+        """
+        # Build a map of available versions for upgradeable packages
+        available_versions = {}
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db.db_path)
+            cur = conn.cursor()
+            for name_lower in self._upgradeable_packages:
+                cur.execute('''
+                    SELECT p.version, p.release, p.summary
+                    FROM packages p
+                    JOIN media m ON p.media_id = m.id
+                    WHERE m.enabled = 1 AND LOWER(p.name) = ?
+                    ORDER BY p.version DESC, p.release DESC
+                    LIMIT 1
+                ''', (name_lower,))
+                row = cur.fetchone()
+                if row:
+                    available_versions[name_lower] = {
+                        'version': row[0],
+                        'release': row[1],
+                        'summary': row[2],
+                    }
+            conn.close()
+        except Exception:
+            pass
+
         results = []
         for name_lower in self._upgradeable_packages:
             for p in self._installed_packages:
@@ -394,6 +419,13 @@ class Controller:
                     pkg['installed'] = True
                     pkg['has_update'] = True
                     pkg['install_reason'] = 'explicit'  # Simplification
+                    # Use available version/release for display
+                    avail = available_versions.get(name_lower)
+                    if avail:
+                        pkg['version'] = avail['version']
+                        pkg['release'] = avail['release']
+                        if avail.get('summary'):
+                            pkg['summary'] = avail['summary']
                     results.append(pkg)
                     break
         return results
@@ -499,8 +531,9 @@ class Controller:
             if fs.show_tasks and not name.startswith('task-'):
                 continue
 
-            # Filter by category (prefix match for hierarchy)
-            if fs.category:
+            # Filter by category (prefix match) — skipped during text search
+            # because search spans all categories intentionally.
+            if fs.category and not fs.search_term:
                 if not group or not group.startswith(fs.category):
                     continue
 
@@ -543,16 +576,104 @@ class Controller:
         return filtered
 
     def _on_query_done(self, future: Future) -> None:
-        """Handle query completion."""
+        """Handle query completion.
+
+        In search or category mode, emits a flat package list via
+        :meth:`~ViewInterface.on_package_list_update`.
+
+        In the default (no search, no category) mode, builds a sectioned layout
+        with "Mises à jour" first, then "Installés", and calls
+        :meth:`~ViewInterface.on_sections_update`.
+        """
         try:
             results = future.result()
-            packages = self._convert_to_display_info(results)
-            self._packages = packages
-            self.view.on_package_list_update(packages)
+
+            if self.filter_state.search_term or self.filter_state.category:
+                # Flat list — search results or category view.
+                packages = self._convert_to_display_info(results)
+                self._packages = packages
+                self.view.on_package_list_update(packages)
+            else:
+                # Sectioned view — upgrades above installed.
+                sections = self._build_display_sections(results)
+                self._packages = [pkg for _t, pkgs in sections for pkg in pkgs]
+                self.view.on_sections_update(sections)
+
         except Exception as e:
             self.view.show_error("Erreur", f"Erreur lors de la recherche: {e}")
         finally:
             self.view.show_loading(False)
+
+    def _build_display_sections(
+        self,
+        installed_results: List[dict],
+    ) -> List[tuple]:
+        """Split installed packages into status-sorted display sections.
+
+        Sections in order (empty sections are omitted):
+
+        1. Mises à jour  — packages with a pending update (always unfiltered)
+        2. Installés     — explicitly installed packages
+        3. Dépendances   — packages installed as a dependency
+        4. Orphelins     — packages no longer needed by anything
+
+        Args:
+            installed_results: Enriched installed package dicts from
+                :meth:`_query_packages_sync` in default (all-categories) mode.
+
+        Returns:
+            List of ``(title, packages)`` tuples, empty sections excluded.
+        """
+        states = self.filter_state.states
+        upgradeable_names = self._upgradeable_packages   # set of lowercase names
+        sections: List[tuple] = []
+
+        # --- 1. Updates (display filters intentionally skipped) ---
+        if PackageState.UPGRADES in states:
+            upgrade_pkgs = self._get_upgrade_packages()
+            upgrade_display = self._convert_to_display_info(upgrade_pkgs)
+            if upgrade_display:
+                sections.append(
+                    (f"══ Mises à jour ({len(upgrade_display)}) ══", upgrade_display)
+                )
+
+        if PackageState.INSTALLED not in states:
+            return sections
+
+        # Packages not already shown in the updates section
+        non_upgrade = [
+            p for p in installed_results
+            if p['name'].lower() not in upgradeable_names
+        ]
+
+        # --- 2. Explicitly installed ---
+        explicit = [
+            p for p in non_upgrade
+            if p.get('install_reason') not in ('dependency', 'orphan')
+        ]
+        explicit_display = self._convert_to_display_info(explicit)
+        if explicit_display:
+            sections.append(
+                (f"══ Installés ({len(explicit_display)}) ══", explicit_display)
+            )
+
+        # --- 3. Dependencies ---
+        deps = [p for p in non_upgrade if p.get('install_reason') == 'dependency']
+        deps_display = self._convert_to_display_info(deps)
+        if deps_display:
+            sections.append(
+                (f"══ Dépendances ({len(deps_display)}) ══", deps_display)
+            )
+
+        # --- 4. Orphans ---
+        orphans = [p for p in non_upgrade if p.get('install_reason') == 'orphan']
+        orphans_display = self._convert_to_display_info(orphans)
+        if orphans_display:
+            sections.append(
+                (f"══ Orphelins ({len(orphans_display)}) ══", orphans_display)
+            )
+
+        return sections
 
     def _convert_to_display_info(self, packages: List[dict]) -> List[PackageDisplayInfo]:
         """Convert database results to display info."""
@@ -729,10 +850,10 @@ class Controller:
         self._update_selection_display()
 
     def _update_selection_display(self) -> None:
-        """Update package list with current selection state."""
+        """Update package selected state in-place and repaint without rebuilding."""
         for pkg in self._packages:
             pkg.selected = pkg.name in self.selection
-        self.view.on_package_list_update(self._packages)
+        self.view.refresh_package_states()
 
     # =========================================================================
     # Actions
@@ -985,6 +1106,182 @@ class Controller:
                     pass
 
         return summary
+
+    # =========================================================================
+    # Package Detail
+    # =========================================================================
+
+    def get_package_details(self, name: str) -> dict:
+        """Return full details for a single package (synchronous, read-only).
+
+        For installed packages, queries the live RPM database via ``rpm --qf``
+        to ensure fresh data after transactions.  For non-installed packages,
+        falls back to the synthesis SQLite database.
+
+        Args:
+            name: Package name (exact match, case-sensitive).
+
+        Returns:
+            Dict with keys: name, version, release, arch, epoch, summary,
+            description, url, license, group, size (bytes), packager,
+            buildtime (unix timestamp), installed (bool),
+            installed_version (str | None), install_reason (str | None),
+            has_update (bool), requires (list[str]), provides (list[str]),
+            files (list[str], up to 200).
+        """
+        import subprocess
+        import sqlite3
+
+        installed = name in self._installed_cache
+        has_update = name.lower() in self._upgradeable_packages
+        installed_version = self._installed_cache.get(name)
+
+        install_reason: str | None = None
+        if installed:
+            name_lower = name.lower()
+            if name_lower in self._orphan_packages:
+                install_reason = 'orphan'
+            elif name_lower in self._dependency_packages:
+                install_reason = 'dep'
+            else:
+                install_reason = 'explicit'
+
+        details: dict = {
+            'name': name,
+            'version': '', 'release': '', 'arch': '', 'epoch': 0,
+            'summary': '', 'description': '',
+            'url': '', 'license': '', 'group': '',
+            'size': 0, 'packager': '', 'buildtime': 0,
+            'installed': installed,
+            'installed_version': installed_version,
+            'install_reason': install_reason,
+            'has_update': has_update,
+            'requires': [], 'provides': [], 'files': [],
+        }
+
+        if installed:
+            # Query live RPM database.
+            # %{DESCRIPTION} contains embedded newlines and is queried in a
+            # separate call to avoid corrupting the tab-split of scalar fields.
+            fmt = (
+                '%{NAME}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\t%{EPOCH}\\t'
+                '%{SUMMARY}\\t%{URL}\\t%{LICENSE}\\t'
+                '%{GROUP}\\t%{SIZE}\\t%{PACKAGER}\\t%{BUILDTIME}\\n'
+            )
+            try:
+                result = subprocess.run(
+                    ['rpm', '-q', '--qf', fmt, name],
+                    capture_output=True, timeout=10
+                )
+                line = result.stdout.decode(errors='replace').split('\n')[0]
+                parts = line.split('\t')
+                if len(parts) >= 12:
+                    details.update({
+                        'version':   parts[1],
+                        'release':   parts[2],
+                        'arch':      parts[3],
+                        'epoch':     int(parts[4]) if parts[4] not in ('', '(none)') else 0,
+                        'summary':   parts[5],
+                        'url':       parts[6] if parts[6] != '(none)' else '',
+                        'license':   parts[7],
+                        'group':     parts[8],
+                        'size':      int(parts[9]) if parts[9].isdigit() else 0,
+                        'packager':  parts[10] if parts[10] != '(none)' else '',
+                        'buildtime': int(parts[11]) if parts[11].isdigit() else 0,
+                    })
+
+                # Description: separate call because %{DESCRIPTION} spans multiple
+                # lines and would break the tab-split of the main query above.
+                desc_result = subprocess.run(
+                    ['rpm', '-q', '--qf', '%{DESCRIPTION}', name],
+                    capture_output=True, timeout=10
+                )
+                details['description'] = desc_result.stdout.decode(errors='replace').strip()
+
+                # Requires
+                req_result = subprocess.run(
+                    ['rpm', '-q', '--requires', name],
+                    capture_output=True, timeout=10
+                )
+                details['requires'] = [
+                    l.strip() for l in req_result.stdout.decode(errors='replace').splitlines()
+                    if l.strip()
+                ]
+
+                # Provides
+                prov_result = subprocess.run(
+                    ['rpm', '-q', '--provides', name],
+                    capture_output=True, timeout=10
+                )
+                details['provides'] = [
+                    l.strip() for l in prov_result.stdout.decode(errors='replace').splitlines()
+                    if l.strip()
+                ]
+
+                # Files (limit to 200)
+                files_result = subprocess.run(
+                    ['rpm', '-ql', name],
+                    capture_output=True, timeout=10
+                )
+                details['files'] = [
+                    l.strip() for l in files_result.stdout.decode(errors='replace').splitlines()
+                    if l.strip()
+                ][:200]
+
+            except Exception:
+                pass
+
+        else:
+            # Query synthesis SQLite database
+            try:
+                conn = sqlite3.connect(self.db.db_path)
+                cur = conn.cursor()
+                cur.execute(
+                    '''
+                    SELECT p.version, p.release, p.arch, p.epoch, p.summary,
+                           p.description, p.url, p.license, p.group_name, p.size
+                    FROM packages p
+                    JOIN media m ON p.media_id = m.id
+                    WHERE m.enabled = 1 AND p.name = ?
+                    ORDER BY p.version DESC
+                    LIMIT 1
+                    ''',
+                    (name,)
+                )
+                row = cur.fetchone()
+                if row:
+                    details.update({
+                        'version':     row[0] or '',
+                        'release':     row[1] or '',
+                        'arch':        row[2] or '',
+                        'epoch':       row[3] or 0,
+                        'summary':     row[4] or '',
+                        'description': row[5] or '',
+                        'url':         row[6] or '',
+                        'license':     row[7] or '',
+                        'group':       row[8] or '',
+                        'size':        row[9] or 0,
+                    })
+
+                # Requires / Provides from packages_requires / packages_provides if available
+                for table, key in (
+                    ('packages_requires', 'requires'),
+                    ('packages_provides', 'provides'),
+                ):
+                    try:
+                        cur.execute(
+                            f'SELECT dep FROM {table} WHERE package_name = ? LIMIT 200',
+                            (name,)
+                        )
+                        details[key] = [r[0] for r in cur.fetchall()]
+                    except sqlite3.OperationalError:
+                        pass  # Table may not exist in all DB versions
+
+                conn.close()
+            except Exception:
+                pass
+
+        return details
 
     # =========================================================================
     # Cleanup

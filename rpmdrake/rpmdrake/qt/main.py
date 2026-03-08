@@ -17,15 +17,19 @@ from .compat import (
     QShortcut,
     QFont,
     QFrame,
+    QStackedWidget,
 )
 
 from urpm.core.database import PackageDatabase
 
 from ..common.controller import Controller, ControllerConfig
+from .palette import button_stylesheet
 from .view import QtView
 from .widgets.search_bar import SearchBar
-from .widgets.package_list import PackageList
-from .widgets.filter_panel import FilterPanel
+from .widgets.package_list import PackageList, PackageTableModel
+from .widgets.filter_zone import FilterZone
+from .widgets.category_panel import CategoryPanel
+from .widgets.detail_panel import PackageDetailPanel
 from .widgets.download_progress import CollapsibleProgressWidget, SlotInfo
 
 __all__ = ["MainWindow", "main"]
@@ -34,236 +38,222 @@ __all__ = ["MainWindow", "main"]
 class MainWindow(QMainWindow):
     """Main window for rpmdrake-ng.
 
-    Layout:
-    ┌─────────────────────────────────────────────────────────────────┐
-    │ ┌───────────────────────┐  ┌──────────┬──────────┬─────┬───┐   │
-    │ │ 🔍 Rechercher...      │  │ Installer│ Supprimer│ Màj │ ⬆ │   │
-    │ └───────────────────────┘  └──────────┴──────────┴─────┴───┘   │
-    │  ┌──────────────────────────────────────────┐│┌──────────────┐  │
-    │  │                                          │││              │  │
-    │  │           ZONE PRINCIPALE                │▐│   FILTRES    │  │
-    │  │           (liste paquets)                │▐│              │  │
-    │  │                                          │││              │  │
-    │  └──────────────────────────────────────────┘│└──────────────┘  │
-    │ ┌─────────────────────────────────────────────────────────────┐ │
-    │ │ Status bar                                                  │ │
-    │ └─────────────────────────────────────────────────────────────┘ │
-    └─────────────────────────────────────────────────────────────────┘
+    Layout::
+
+        ┌──[🔍 Rechercher...][⊟][≡]────────────────────────────────────┐
+        │ [FilterZone — caché par défaut]                               │
+        ├────────────────────────────────────┬──────────────────────────┤
+        │ PackageList (stretch)              │ QStackedWidget           │
+        │   ══ Mises à jour (N) ══           │   page 0: CategoryPanel  │
+        │   firefox  124→125  mga10  x86  ⬆ │   page 1: DetailPanel    │
+        │   ══ Installés (N) ══              │                          │
+        │   vim       9.1     mga10  x86  Ⓘ │                          │
+        ├────────────────────────────────────┴──────────────────────────┤
+        │ [CollapsibleProgressWidget]                                   │
+        │ [📥 Installer][🗑 Supprimer][⬆ Mettre à jour (N)][🔄] N pkgs│
+        └───────────────────────────────────────────────────────────────┘
     """
 
     MIN_FONT_SIZE = 8
     MAX_FONT_SIZE = 24
-    DEFAULT_FONT_SIZE = 10
+    DEFAULT_FONT_SIZE = 11
 
     def __init__(self, db: Optional[PackageDatabase] = None):
         super().__init__()
 
         self.setWindowTitle("rpmdrake-ng")
-        self.resize(1024, 768)
+        self.resize(1100, 768)
 
-        # Font size for zoom
         self._font_size = self.DEFAULT_FONT_SIZE
         self._apply_font_size()
 
-        # Initialize database
         self.db = db or PackageDatabase()
 
-        # Create view and controller
         self.qt_view = QtView(self)
         self.controller = Controller(self.db, self.qt_view)
 
-        # Build UI
         self._create_widgets()
         self._create_layout()
         self._create_shortcuts()
         self._connect_signals()
 
-        # Connect cancel button to controller
+        # Connect progress cancel
         self.progress_widget.cancel_requested.connect(self.controller.cancel_transaction)
 
-        # Apply initial row height for package list
-        self.package_list.update_row_height(self._font_size)
+        # Apply initial font size now that all widgets exist
+        self._apply_font_size()
 
-        # Load initial data
+        # Load packages and categories
         self.controller.load_initial()
+        self.category_panel.populate_categories()
 
-        # Update button states after pre-selection of upgrades
-        has_selection = len(self.controller.selection) > 0
-        self.btn_install.setEnabled(has_selection)
-        self.btn_remove.setEnabled(has_selection)
-        self.btn_upgrade.setEnabled(has_selection)
+        self._update_upgrade_button()
 
-        # Populate categories after groups are loaded
-        self.filter_panel.populate_categories()
+    # ------------------------------------------------------------------
+    # Widget creation
+    # ------------------------------------------------------------------
 
     def _create_widgets(self) -> None:
-        """Create UI widgets."""
-        # Top bar
+        """Instantiate all UI widgets."""
+        # --- Top bar ---
         self.search_bar = SearchBar()
 
-        # Action buttons with modern styling
+        self.btn_filter_toggle = QPushButton("⊟")
+        self.btn_filter_toggle.setToolTip("Afficher/masquer les filtres")
+        self.btn_filter_toggle.setFixedWidth(32)
+        self.btn_filter_toggle.setCheckable(True)
+        self.btn_filter_toggle.setStyleSheet(
+            "QPushButton { border: 1px solid palette(mid); border-radius: 4px; padding: 4px; }"
+            "QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); }"
+        )
+
+        self.btn_cat_toggle = QPushButton("≡")
+        self.btn_cat_toggle.setToolTip("Afficher/masquer les catégories")
+        self.btn_cat_toggle.setFixedWidth(32)
+        self.btn_cat_toggle.setCheckable(True)
+        self.btn_cat_toggle.setChecked(True)    # Categories visible by default
+        self.btn_cat_toggle.setStyleSheet(
+            "QPushButton { border: 1px solid palette(mid); border-radius: 4px; padding: 4px; }"
+            "QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); }"
+        )
+
+        # --- Filter zone (collapsible, hidden by default) ---
+        self.filter_zone = FilterZone(self.controller)
+        self.filter_zone.hide()
+
+        # --- Package list ---
+        self.package_list = PackageList()
+
+        # --- Right panel: QStackedWidget ---
+        self.right_stack = QStackedWidget()
+        self.right_stack.setMinimumWidth(280)
+
+        self.category_panel = CategoryPanel(self.controller)
+        self.detail_panel = PackageDetailPanel()
+
+        self.right_stack.addWidget(self.category_panel)   # page 0
+        self.right_stack.addWidget(self.detail_panel)     # page 1
+
+        # --- Progress widget ---
+        self.progress_widget = CollapsibleProgressWidget(num_slots=4)
+
+        # --- Action buttons ---
         self.btn_install = QPushButton("📥 Installer")
-        self.btn_install.setStyleSheet("""
-            QPushButton {
-                background-color: #4caf50;
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #45a049; }
-            QPushButton:pressed { background-color: #3d8b40; }
-            QPushButton:disabled { background-color: #a5d6a7; }
-        """)
+        self.btn_install.setEnabled(False)
+        self.btn_install.setStyleSheet(
+            button_stylesheet("#4caf50", "#45a049", "#3d8b40", disabled="#9e9e9e")
+        )
 
         self.btn_remove = QPushButton("🗑 Supprimer")
-        self.btn_remove.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #da190b; }
-            QPushButton:pressed { background-color: #c1170a; }
-            QPushButton:disabled { background-color: #ef9a9a; }
-        """)
+        self.btn_remove.setEnabled(False)
+        self.btn_remove.setStyleSheet(
+            button_stylesheet("#f44336", "#da190b", "#c1170a", disabled="#9e9e9e")
+        )
 
-        # Upgrade button
-        self.btn_upgrade = QPushButton("⬆ Màj")
-        self.btn_upgrade.setStyleSheet("""
-            QPushButton {
-                background-color: #2196f3;
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #1976d2; }
-            QPushButton:pressed { background-color: #1565c0; }
-            QPushButton:disabled { background-color: #90caf9; }
-        """)
+        self.btn_upgrade = QPushButton("⬆ Mettre à jour")
+        self.btn_upgrade.setEnabled(False)
+        self.btn_upgrade.setStyleSheet(
+            button_stylesheet("#9e9e9e", "#757575", "#616161", disabled="#bdbdbd")
+        )
 
         self.btn_refresh = QPushButton("🔄")
         self.btn_refresh.setToolTip("Rafraîchir la liste")
         self.btn_refresh.setFixedWidth(40)
-        self.btn_refresh.setStyleSheet("""
-            QPushButton {
-                background-color: #607d8b;
-                color: white;
-                font-weight: bold;
-                padding: 6px 8px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #546e7a; }
-            QPushButton:pressed { background-color: #455a64; }
-        """)
+        self.btn_refresh.setStyleSheet(
+            button_stylesheet("#607d8b", "#546e7a", "#455a64")
+        )
 
-        # Main area
-        self.package_list = PackageList()
+        # --- Status / count label ---
+        self.lbl_count = QLabel("")
+        self.lbl_count.setStyleSheet("color: palette(mid);")
 
-        # Filter panel
-        self.filter_panel = FilterPanel(self.controller)
-        self.filter_panel.setMinimumWidth(200)
-        self.filter_panel.setMaximumWidth(300)
-
-        # Custom bottom bar (replaces QStatusBar for expandable progress)
-        self.bottom_bar = QWidget()
-        bottom_layout = QVBoxLayout(self.bottom_bar)
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(0)
-
-        # Progress widget (collapsible)
-        self.progress_widget = CollapsibleProgressWidget(num_slots=4)
-        bottom_layout.addWidget(self.progress_widget)
-
-        # Status line
+        # --- Status frame (when progress widget is hidden) ---
         self.status_frame = QFrame()
         self.status_frame.setFrameStyle(QFrame.Shape.StyledPanel)
         status_layout = QHBoxLayout(self.status_frame)
         status_layout.setContentsMargins(8, 4, 8, 4)
         self.status_label = QLabel("Prêt")
         status_layout.addWidget(self.status_label)
-        bottom_layout.addWidget(self.status_frame)
 
     def _create_layout(self) -> None:
-        """Create layout."""
-        # Central widget
+        """Assemble the layout."""
         central = QWidget()
         self.setCentralWidget(central)
 
-        # Main layout
         main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(8)
+        main_layout.setSpacing(6)
 
-        # Top bar
+        # Top bar: search + filter toggle + cat toggle
         top_bar = QHBoxLayout()
         top_bar.addWidget(self.search_bar, stretch=1)
-        top_bar.addSpacing(16)
-        top_bar.addWidget(self.btn_install)
-        top_bar.addWidget(self.btn_remove)
-        top_bar.addWidget(self.btn_upgrade)
-        top_bar.addSpacing(8)
-        top_bar.addWidget(self.btn_refresh)
-
+        top_bar.addSpacing(4)
+        top_bar.addWidget(self.btn_filter_toggle)
+        top_bar.addWidget(self.btn_cat_toggle)
         main_layout.addLayout(top_bar)
 
-        # Splitter for package list and filters
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.package_list)
-        splitter.addWidget(self.filter_panel)
-        splitter.setStretchFactor(0, 1)  # Package list stretches
-        splitter.setStretchFactor(1, 0)  # Filter panel fixed
-        splitter.setSizes([700, 250])
+        # Filter zone (collapsible, below search bar)
+        main_layout.addWidget(self.filter_zone)
 
-        main_layout.addWidget(splitter, stretch=1)
+        # Content splitter
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.addWidget(self.package_list)
+        self._splitter.addWidget(self.right_stack)
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 0)
+        self._splitter.setSizes([660, 300])
+        main_layout.addWidget(self._splitter, stretch=1)
 
-        # Bottom bar (progress + status)
-        main_layout.addWidget(self.bottom_bar)
+        # Independent preferred widths for each right-panel page.
+        # Updated on splitterMoved; restored on page switch.
+        self._cat_panel_width    = 300
+        self._detail_panel_width = 400
+
+        # Progress widget (shown during transactions)
+        main_layout.addWidget(self.progress_widget)
+
+        # Status frame
+        main_layout.addWidget(self.status_frame)
+
+        # Action bar
+        action_bar = QHBoxLayout()
+        action_bar.addWidget(self.btn_install)
+        action_bar.addWidget(self.btn_remove)
+        action_bar.addWidget(self.btn_upgrade)
+        action_bar.addStretch()
+        action_bar.addWidget(self.lbl_count)
+        action_bar.addSpacing(8)
+        action_bar.addWidget(self.btn_refresh)
+        main_layout.addLayout(action_bar)
 
     def _create_shortcuts(self) -> None:
-        """Create keyboard shortcuts."""
-        # Ctrl+F: Focus search
-        shortcut_search = QShortcut(QKeySequence("Ctrl+F"), self)
-        shortcut_search.activated.connect(self.search_bar.focus_search)
-
-        # Ctrl+A: Select all
-        shortcut_select_all = QShortcut(QKeySequence("Ctrl+A"), self)
-        shortcut_select_all.activated.connect(self.controller.select_all)
-
-        # Escape: Clear selection
-        shortcut_escape = QShortcut(QKeySequence("Escape"), self)
-        shortcut_escape.activated.connect(self.controller.clear_selection)
-
-        # Zoom: Ctrl+Plus / Ctrl+Minus / Ctrl+0
-        shortcut_zoom_in = QShortcut(QKeySequence("Ctrl++"), self)
-        shortcut_zoom_in.activated.connect(self.zoom_in)
-        shortcut_zoom_in2 = QShortcut(QKeySequence("Ctrl+="), self)  # For keyboards without numpad
-        shortcut_zoom_in2.activated.connect(self.zoom_in)
-
-        shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
-        shortcut_zoom_out.activated.connect(self.zoom_out)
-
-        shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
-        shortcut_zoom_reset.activated.connect(self.zoom_reset)
-
-        # F5: Refresh
-        shortcut_refresh = QShortcut(QKeySequence("F5"), self)
-        shortcut_refresh.activated.connect(self._on_refresh)
+        """Register keyboard shortcuts."""
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(
+            self.search_bar.focus_search
+        )
+        QShortcut(QKeySequence("Ctrl+A"), self).activated.connect(
+            self.controller.select_all
+        )
+        QShortcut(QKeySequence("Escape"), self).activated.connect(
+            self._on_clear_selection
+        )
+        QShortcut(QKeySequence("Ctrl++"), self).activated.connect(self.zoom_in)
+        QShortcut(QKeySequence("Ctrl+="), self).activated.connect(self.zoom_in)
+        QShortcut(QKeySequence("Ctrl+-"), self).activated.connect(self.zoom_out)
+        QShortcut(QKeySequence("Ctrl+0"), self).activated.connect(self.zoom_reset)
+        QShortcut(QKeySequence("F5"), self).activated.connect(self._on_refresh)
 
     def _connect_signals(self) -> None:
-        """Connect widget signals to controller."""
-        # Search
+        """Wire widget signals to controller and slots."""
         self.search_bar.search_changed.connect(self.controller.set_search_term)
 
-        # Package list
-        self.package_list.selection_changed.connect(self._on_selection_changed)
+        # Checkbox-column selection change
+        self.package_list.selection_changed.connect(self._on_checkbox_changed)
+
+        # Row selection → detail panel (keyboard and mouse)
+        self.package_list.selectionModel().currentChanged.connect(
+            self._on_current_row_changed
+        )
         self.package_list.package_activated.connect(self._on_package_activated)
 
         # Action buttons
@@ -272,113 +262,216 @@ class MainWindow(QMainWindow):
         self.btn_upgrade.clicked.connect(self.controller.upgrade_selection)
         self.btn_refresh.clicked.connect(self._on_refresh)
 
-    def _on_selection_changed(self, name: str, selected: bool) -> None:
-        """Handle package selection change."""
+        # Toggle buttons
+        self.btn_filter_toggle.toggled.connect(self._on_filter_toggle)
+        self.btn_cat_toggle.toggled.connect(self._on_cat_toggle)
+
+        # Detail panel "← Catégories" button
+        self.detail_panel.back_clicked.connect(self._show_category_panel)
+
+        # Forward Ctrl+wheel from description text to app zoom
+        self.detail_panel.zoom_requested.connect(
+            lambda direction: self.zoom_in() if direction > 0 else self.zoom_out()
+        )
+
+        # Track splitter moves to remember each panel's preferred width
+        self._splitter.splitterMoved.connect(self._on_splitter_moved)
+
+    # ------------------------------------------------------------------
+    # Slots
+    # ------------------------------------------------------------------
+
+    def _on_checkbox_changed(self, name: str, selected: bool) -> None:
+        """Handle checkbox selection change for a package."""
         if selected:
             self.controller.select_package(name)
         else:
             self.controller.unselect_package(name)
+        self._update_button_states()
+        self._update_upgrade_button()
 
-        # Update button states
-        has_selection = len(self.controller.selection) > 0
-        self.btn_install.setEnabled(has_selection)
-        self.btn_remove.setEnabled(has_selection)
-        self.btn_upgrade.setEnabled(has_selection)
+    def _on_current_row_changed(self, current, previous) -> None:
+        """Load and display details for the newly selected row."""
+        if not current.isValid():
+            return
+        # Checkbox clicks change currentIndex to COL_CHECKBOX — ignore them
+        # so that ticking a checkbox doesn't unexpectedly open the detail panel.
+        if current.column() == PackageTableModel.COL_CHECKBOX:
+            return
+        pkg = self.package_list._model.get_package(current.row())
+        if pkg is None:
+            return  # Section header row — skip
+        details = self.controller.get_package_details(pkg.name)
+        self.detail_panel.show_package(details)
+        self._show_detail_panel()
 
     def _on_package_activated(self, name: str) -> None:
-        """Handle package double-click."""
-        # TODO: Show package details
-        self.status_label.setText(f"Paquet: {name}")
+        """Handle double-click: ensure detail panel is visible."""
+        self._show_detail_panel()
+
+    def _show_detail_panel(self) -> None:
+        """Switch right stack to the detail panel, restoring its preferred width."""
+        self.right_stack.setCurrentIndex(1)
+        sizes = self._splitter.sizes()
+        total = sizes[0] + sizes[1]
+        self._splitter.setSizes([total - self._detail_panel_width, self._detail_panel_width])
+
+    def _show_category_panel(self) -> None:
+        """Switch right stack to the category panel, restoring its preferred width."""
+        self.right_stack.setCurrentIndex(0)
+        sizes = self._splitter.sizes()
+        total = sizes[0] + sizes[1]
+        self._splitter.setSizes([total - self._cat_panel_width, self._cat_panel_width])
+
+    def _on_splitter_moved(self, pos: int, index: int) -> None:
+        """Remember the current right-panel width for the active page."""
+        width = self._splitter.sizes()[1]
+        if self.right_stack.currentIndex() == 1:
+            self._detail_panel_width = width
+        else:
+            self._cat_panel_width = width
+
+    def _on_filter_toggle(self, checked: bool) -> None:
+        self.filter_zone.setVisible(checked)
+
+    def _on_cat_toggle(self, checked: bool) -> None:
+        if not checked:
+            self.right_stack.setVisible(False)
+        else:
+            self.right_stack.setVisible(True)
+            self._show_category_panel()
+
+    def _on_clear_selection(self) -> None:
+        """Clear all checkbox selections and refresh action buttons."""
+        self.controller.clear_selection()
+        self._update_button_states()
 
     def _on_refresh(self) -> None:
-        """Handle refresh button click."""
+        """Refresh package list."""
         self.set_loading(True)
         self.status_label.setText("Rafraîchissement...")
-        # Use processEvents to show the loading state before blocking
         QApplication.processEvents()
         self.controller.refresh_after_transaction()
-        self.filter_panel.populate_categories()
+        self.category_panel.populate_categories()
         self.set_loading(False)
         self.show_status_message("Liste rafraîchie", 2000)
 
+    # ------------------------------------------------------------------
+    # UI state helpers
+    # ------------------------------------------------------------------
+
+    def _update_button_states(self) -> None:
+        """Enable/disable action buttons based on the state of selected packages."""
+        can_install = False
+        can_remove  = False
+        can_upgrade = False
+        n_upgrades  = 0
+
+        model = self.package_list._model
+        for row in range(model.rowCount()):
+            pkg = model.get_package(row)
+            if pkg is None or not pkg.selected:
+                continue
+            if pkg.has_update:
+                can_upgrade = True
+                can_remove  = True   # an update implies the package is installed
+                n_upgrades += 1
+            elif pkg.installed:
+                can_remove = True
+            else:
+                can_install = True
+
+        self.btn_install.setEnabled(can_install)
+        self.btn_remove.setEnabled(can_remove)
+
+        if can_upgrade:
+            self.btn_upgrade.setText(f"⬆ Mettre à jour ({n_upgrades})")
+            self.btn_upgrade.setEnabled(True)
+            self.btn_upgrade.setStyleSheet(
+                button_stylesheet("#fb8c00", "#ef6c00", "#e65100", disabled="#9e9e9e")
+            )
+        else:
+            self.btn_upgrade.setText("⬆ Mettre à jour")
+            self.btn_upgrade.setEnabled(False)
+            self.btn_upgrade.setStyleSheet(
+                button_stylesheet("#9e9e9e", "#757575", "#616161", disabled="#bdbdbd")
+            )
+
+    def _update_upgrade_button(self) -> None:
+        """Kept for compatibility — delegates to _update_button_states."""
+        self._update_button_states()
+
     def set_loading(self, loading: bool) -> None:
         """Show or hide loading indicator."""
-        if loading:
-            self.status_label.setText("Chargement...")
-        else:
-            self.status_label.setText("Prêt")
+        self.status_label.setText("Chargement..." if loading else "Prêt")
 
     def show_status_message(self, message: str, timeout: int = 0) -> None:
-        """Show a message in the status bar.
-
-        Args:
-            message: Message to show.
-            timeout: Auto-clear after this many ms (0 = permanent).
-        """
+        """Display a status message, optionally auto-clearing after *timeout* ms."""
         self.status_label.setText(message)
         if timeout > 0:
             from .compat import QTimer
             QTimer.singleShot(timeout, lambda: self.status_label.setText("Prêt"))
 
-    def _apply_font_size(self) -> None:
-        """Apply font size to entire application."""
-        # Use stylesheet for global font - propagates to all widgets
-        QApplication.instance().setStyleSheet(f"* {{ font-size: {self._font_size}pt; }}")
+    # ------------------------------------------------------------------
+    # Zoom
+    # ------------------------------------------------------------------
 
-        # Update package list row height for 2-line descriptions
+    def _apply_font_size(self) -> None:
+        font = QApplication.instance().font()
+        font.setPointSize(self._font_size)
+        QApplication.instance().setFont(font)
         if hasattr(self, 'package_list'):
             self.package_list.update_row_height(self._font_size)
+        if hasattr(self, 'detail_panel'):
+            self.detail_panel.update_font_size(self._font_size)
 
     def zoom_in(self) -> None:
-        """Increase font size."""
         if self._font_size < self.MAX_FONT_SIZE:
             self._font_size += 1
             self._apply_font_size()
-            self.show_status_message(f"Zoom: {self._font_size} pt", 2000)
+            self.show_status_message(f"Zoom : {self._font_size} pt", 2000)
 
     def zoom_out(self) -> None:
-        """Decrease font size."""
         if self._font_size > self.MIN_FONT_SIZE:
             self._font_size -= 1
             self._apply_font_size()
-            self.show_status_message(f"Zoom: {self._font_size} pt", 2000)
+            self.show_status_message(f"Zoom : {self._font_size} pt", 2000)
 
     def zoom_reset(self) -> None:
-        """Reset font size to default."""
         self._font_size = self.DEFAULT_FONT_SIZE
         self._apply_font_size()
-        self.show_status_message(f"Zoom: {self._font_size} pt (défaut)", 2000)
+        self.show_status_message(f"Zoom : {self._font_size} pt (défaut)", 2000)
 
     def wheelEvent(self, event) -> None:
-        """Handle mouse wheel with Ctrl for zoom."""
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            delta = event.angleDelta().y()
-            if delta > 0:
+            if event.angleDelta().y() > 0:
                 self.zoom_in()
-            elif delta < 0:
+            else:
                 self.zoom_out()
             event.accept()
         else:
             super().wheelEvent(event)
 
     def closeEvent(self, event) -> None:
-        """Handle window close."""
         self.controller.shutdown()
         super().closeEvent(event)
 
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
 def main() -> int:
-    """Main entry point for rpmdrake-ng Qt frontend.
+    """Entry point for rpmdrake-ng Qt frontend.
 
     Returns:
-        Exit code.
+        Application exit code.
     """
     app = QApplication(sys.argv)
     app.setApplicationName("rpmdrake-ng")
     app.setApplicationDisplayName("rpmdrake-ng")
     app.setOrganizationName("Mageia")
 
-    # Initialize translations (after QApplication, before widgets)
     from rpmdrake.i18n import init_qt_translation
     init_qt_translation(app)
 

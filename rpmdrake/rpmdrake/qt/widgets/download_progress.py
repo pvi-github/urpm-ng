@@ -8,6 +8,7 @@ from ..compat import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
     QFrame, Qt, QPushButton, Signal
 )
+from ..palette import PHASE_COLORS
 
 
 class ProgressPhase(Enum):
@@ -17,15 +18,6 @@ class ProgressPhase(Enum):
     INSTALL = "install"
     ERASE = "erase"
     RPMDB_SYNC = "rpmdb_sync"
-
-
-# Colors for each phase
-PHASE_COLORS = {
-    ProgressPhase.DOWNLOAD: "#2196f3",      # Blue
-    ProgressPhase.INSTALL: "#e67c00",        # Orange
-    ProgressPhase.ERASE: "#f44336",          # Red
-    ProgressPhase.RPMDB_SYNC: "#757575",     # Gray
-}
 
 
 @dataclass
@@ -72,7 +64,7 @@ class DownloadSlotWidget(QFrame):
                 background: #f0f0f0;
             }}
             QProgressBar::chunk {{
-                background: {PHASE_COLORS[ProgressPhase.DOWNLOAD]};
+                background: {PHASE_COLORS["download"]};
             }}
         """)
         layout.addWidget(self.progress_bar)
@@ -204,7 +196,6 @@ class CollapsibleProgressWidget(QWidget):
         self.info_label.setStyleSheet("color: #666; font-family: monospace;")
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self.info_label, stretch=1)
-        header_layout.addWidget(self.info_label, stretch=1)
 
         # Cancel button
         self.cancel_btn = QPushButton("Annuler")
@@ -267,7 +258,7 @@ class CollapsibleProgressWidget(QWidget):
 
     def _update_phase_style(self):
         """Update styling based on current phase."""
-        color = PHASE_COLORS.get(self._phase, "#2196f3")
+        color = PHASE_COLORS.get(self._phase.value, "#2196f3")
 
         self.main_progress.setStyleSheet(f"""
             QProgressBar {{

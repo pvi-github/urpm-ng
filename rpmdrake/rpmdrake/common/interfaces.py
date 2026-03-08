@@ -23,12 +23,40 @@ class ViewInterface(ABC):
 
     @abstractmethod
     def on_package_list_update(self, packages: List['PackageDisplayInfo']) -> None:
-        """Update the package list display.
+        """Update the package list display (flat list — used for search/category).
 
         Args:
             packages: List of packages to display.
         """
         pass
+
+    def on_sections_update(
+        self,
+        sections: List[tuple],  # list[tuple[str, list[PackageDisplayInfo]]]
+    ) -> None:
+        """Update the package list with a sectioned layout.
+
+        Called instead of :meth:`on_package_list_update` when the controller
+        is in its default (non-search, non-category) mode.  Each section is a
+        ``(title, packages)`` tuple where *title* is the section header text
+        (e.g. ``"══ Mises à jour (3) ══"``) and *packages* is the list of
+        :class:`~rpmdrake.common.models.PackageDisplayInfo` for that section.
+
+        Non-abstract — default implementation falls back to a flat list so
+        that test views without a sectioned package widget are unaffected.
+
+        Args:
+            sections: Ordered list of ``(title, packages)`` tuples.
+        """
+        flat = [pkg for _title, pkgs in sections for pkg in pkgs]
+        self.on_package_list_update(flat)
+
+    def refresh_package_states(self) -> None:
+        """Repaint the package list to reflect in-place selection/state changes.
+
+        Called after selection changes that modify ``PackageDisplayInfo.selected``
+        directly, without rebuilding the list structure.  Default: no-op.
+        """
 
     @abstractmethod
     def show_loading(self, loading: bool) -> None:
@@ -219,6 +247,19 @@ class ViewInterface(ABC):
             True if user confirmed, False otherwise.
         """
         return True  # Default: no confirmation (for non-interactive use)
+
+    def show_package_details(self, details: dict) -> None:
+        """Display detailed information about a package.
+
+        Called when the user selects a row in the package list.
+        Non-abstract — default is a no-op so test views don't need to
+        implement it.
+
+        Args:
+            details: Dict as returned by
+                :meth:`~rpmdrake.common.controller.Controller.get_package_details`.
+        """
+        pass
 
     def show_alternative_choice(
         self,

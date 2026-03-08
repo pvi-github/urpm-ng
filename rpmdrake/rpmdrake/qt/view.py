@@ -10,6 +10,7 @@ from .compat import (
 )
 
 from ..common.models import PackageDisplayInfo
+from .palette import DIALOG_COLORS
 
 if TYPE_CHECKING:
     from .main import MainWindow
@@ -27,6 +28,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
     # Signals for thread-safe updates
     _update_packages = Signal(list)
+    _update_sections = Signal(list)
     _show_loading = Signal(bool)
     _show_progress = Signal(str, str, int, int, float)
     _show_download_progress = Signal(int, int, int, int, list)  # pkg_cur, pkg_tot, bytes, bytes_tot, slots
@@ -40,6 +42,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
     _show_error = Signal(str, str)
     _show_confirm = Signal(str, str, dict)
     _filter_changed = Signal()
+    _show_package_details = Signal(dict)
 
     def __init__(self, window: 'MainWindow'):
         super().__init__()
@@ -47,6 +50,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
         # Connect signals to slots
         self._update_packages.connect(self._do_update_packages)
+        self._update_sections.connect(self._do_update_sections)
         self._show_loading.connect(self._do_show_loading)
         self._show_progress.connect(self._do_show_progress)
         self._show_download_progress.connect(self._do_show_download_progress)
@@ -60,14 +64,23 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         self._show_error.connect(self._do_show_error)
         self._show_confirm.connect(self._do_show_confirm)
         self._filter_changed.connect(self._do_filter_changed)
+        self._show_package_details.connect(self._do_show_package_details)
 
     # =========================================================================
     # ViewInterface implementation (called from any thread)
     # =========================================================================
 
     def on_package_list_update(self, packages: List[PackageDisplayInfo]) -> None:
-        """Update the package list display."""
+        """Update the package list display (flat list — search/category mode)."""
         self._update_packages.emit(packages)
+
+    def on_sections_update(self, sections: list) -> None:
+        """Update the package list display with sectioned layout."""
+        self._update_sections.emit(sections)
+
+    def refresh_package_states(self) -> None:
+        """Repaint the package list without rebuilding the list structure."""
+        self.window.package_list.viewport().update()
 
     def show_loading(self, loading: bool) -> None:
         """Show or hide loading indicator."""
@@ -109,6 +122,10 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
     def on_filter_state_changed(self) -> None:
         """Update filter panel when state changes programmatically."""
         self._filter_changed.emit()
+
+    def show_package_details(self, details: dict) -> None:
+        """Display package details in the right panel."""
+        self._show_package_details.emit(details)
 
     def start_transaction(self, action: str = "install") -> None:
         """Signal start of a transaction (show progress widget).
@@ -444,8 +461,13 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
     @Slot(list)
     def _do_update_packages(self, packages: List[PackageDisplayInfo]) -> None:
-        """Update package list on main thread."""
+        """Update package list on main thread (flat list — search/category mode)."""
         self.window.package_list.set_packages(packages)
+
+    @Slot(list)
+    def _do_update_sections(self, sections: list) -> None:
+        """Update package list with sectioned layout on main thread."""
+        self.window.package_list.set_sections(sections)
 
     @Slot(bool)
     def _do_show_loading(self, loading: bool) -> None:
@@ -565,7 +587,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
             msg_type: One of 'info', 'error', 'warning'.
         """
         icons = {'info': 'ℹ️', 'error': '❌', 'warning': '⚠️'}
-        colors = {'info': '#2196f3', 'error': '#c62828', 'warning': '#f57c00'}
+        colors = DIALOG_COLORS
 
         icon = icons.get(msg_type, 'ℹ️')
         color = colors.get(msg_type, '#2196f3')
@@ -636,5 +658,13 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
     @Slot()
     def _do_filter_changed(self) -> None:
-        """Update filter panel on main thread."""
-        self.window.filter_panel._update_from_state()
+        """Update filter zone on main thread."""
+        if hasattr(self.window, 'filter_zone'):
+            self.window.filter_zone._update_from_state()
+
+    @Slot(dict)
+    def _do_show_package_details(self, details: dict) -> None:
+        """Show package details in the right panel on main thread."""
+        if hasattr(self.window, 'detail_panel') and hasattr(self.window, 'right_stack'):
+            self.window.detail_panel.show_package(details)
+            self.window.right_stack.setCurrentIndex(1)

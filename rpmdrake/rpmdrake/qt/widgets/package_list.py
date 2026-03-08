@@ -1,6 +1,7 @@
 """Package list widget for rpmdrake-ng."""
 
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import List, Optional, Union
 
 from ..compat import (
     Qt,
@@ -15,62 +16,136 @@ from ..compat import (
     QAbstractTableModel,
     QModelIndex,
     QRect,
+    QSize,
     QMouseEvent,
     QColor,
     QBrush,
+    QPalette,
+    QPainter,
+    QPen,
     QFont,
     QFontMetrics,
 )
 
 from ...common.models import PackageDisplayInfo, InstallReason
+from ..palette import get_state_colors
 
-__all__ = ["PackageList", "PackageTableModel"]
+__all__ = ["PackageList", "PackageTableModel", "SectionHeader"]
 
+
+# ---------------------------------------------------------------------------
+# Module-level color constants
+# ---------------------------------------------------------------------------
+
+# Section header background/foreground
+_SECTION_BG = QColor("#546e7a")
+_SECTION_FG = QColor("#ffffff")
+
+# Active row = navigation cursor / current row (no checkbox)
+_ACTIVE_BG_LIGHT = QColor("#e3f2fd")   # Blue 50
+_ACTIVE_FG_LIGHT = QColor("#000000")
+_ACTIVE_BG_DARK  = QColor("#0d47a1")   # Blue 900
+_ACTIVE_FG_DARK  = QColor("#ffffff")
+
+# Selected row = checkbox checked
+_SEL_BG_LIGHT = QColor("#bbdefb")      # Blue 100
+_SEL_FG_LIGHT = QColor("#000000")
+_SEL_BG_DARK  = QColor("#1565c0")      # Blue 800
+_SEL_FG_DARK  = QColor("#ffffff")
+
+
+# ---------------------------------------------------------------------------
+# Section header row
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SectionHeader:
+    """Visual section separator row in the package table.
+
+    Not selectable, not interactive — purely decorative/informational.
+    Example title: "══ Mises à jour (3) ══"
+    """
+    title: str
+
+
+# Type alias for model rows
+_Row = Union[PackageDisplayInfo, SectionHeader]
+
+
+def _pkg_state_key(pkg: PackageDisplayInfo) -> str:
+    """Return the state key string for a package.
+
+    Used by both :class:`PackageTableModel` and :class:`StateBadgeDelegate`
+    to ensure consistent state determination across model and view.
+    """
+    if pkg.has_conflict:
+        return 'conflict'
+    if pkg.has_update:
+        return 'update'
+    if pkg.installed:
+        if pkg.install_reason == InstallReason.DEPENDENCY:
+            return 'dep'
+        if pkg.install_reason == InstallReason.ORPHAN:
+            return 'orphan'
+        return 'installed'
+    return 'available'
+
+
+# ---------------------------------------------------------------------------
+# Table model
+# ---------------------------------------------------------------------------
 
 class PackageTableModel(QAbstractTableModel):
-    """Table model for package list.
+    """Table model for the package list.
 
-    Supports virtual scrolling by only storing data, not widgets.
+    Rows are either :class:`PackageDisplayInfo` (normal package rows) or
+    :class:`SectionHeader` (non-interactive separators).
+
+    Columns
+    -------
+    COL_PACKAGE  — name (bold) + summary below, custom delegate
+    COL_VERSION  — version only (with upgrade arrow when update available)
+    COL_RELEASE  — release tag
+    COL_ARCH     — architecture
+    COL_STATE    — circled-letter state icon, coloured
+    COL_CHECKBOX — selection checkbox (rightmost)
     """
 
-    COLUMNS = ['', '#', 'État', 'Nom', 'Version', 'Description']
-    COL_CHECKBOX = 0
-    COL_NUMBER = 1
-    COL_STATE = 2
-    COL_NAME = 3
-    COL_VERSION = 4
-    COL_SUMMARY = 5
+    COLUMNS = ['Paquets', 'Version', 'Rév.', 'Arch', 'État', '']
 
-    # State indicators (circled letters - good font support)
+    COL_PACKAGE  = 0
+    COL_VERSION  = 1
+    COL_RELEASE  = 2
+    COL_ARCH     = 3
+    COL_STATE    = 4
+    COL_CHECKBOX = 5
+
+    # Circled-letter state icons
     STATE_ICONS = {
-        'installed': 'Ⓘ',    # U+24BE Circled I - Installed explicitly
-        'dep': 'Ⓓ',          # U+24B9 Circled D - Dependency
-        'orphan': 'Ⓞ',       # U+24C4 Circled O - Orphan
-        'update': 'Ⓤ',       # U+24CA Circled U - Update available
-        'available': '',     # Not installed
-        'conflict': '✗',     # Conflict
+        'installed': 'Ⓘ',
+        'dep':       'Ⓓ',
+        'orphan':    'Ⓞ',
+        'update':    '↑',   # simple upward arrow — unambiguous
+        'available': '',
+        'conflict':  '⚠',  # warning triangle — clearer than ✗
     }
 
-    # Row colors based on state
-    STATE_COLORS = {
-        'installed': QColor('#2196f3'),   # Bright blue for explicitly installed
-        'dep': QColor('#0d47a1'),         # Dark blue for dependencies
-        'orphan': QColor('#9966cc'),      # Soft purple for orphans
-        'update': QColor('#8b6914'),      # Muted amber/brown for updates (easy on eyes)
-        'available': None,                # Default color
-        'conflict': QColor('#cc4444'),    # Soft red for conflicts
-    }
+    # Section header colors — defined at module level, referenced here for clarity
+    _SECTION_BG = _SECTION_BG
+    _SECTION_FG = _SECTION_FG
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._packages: List[PackageDisplayInfo] = []
-        self._sort_column = self.COL_NAME
-        self._sort_order = Qt.SortOrder.AscendingOrder
+        self._rows: List[_Row] = []
+
+    # -----------------------------------------------------------------------
+    # QAbstractTableModel interface
+    # -----------------------------------------------------------------------
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid():
             return 0
-        return len(self._packages)
+        return len(self._rows)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid():
@@ -84,22 +159,39 @@ class PackageTableModel(QAbstractTableModel):
         row = index.row()
         col = index.column()
 
-        if row < 0 or row >= len(self._packages):
+        if row < 0 or row >= len(self._rows):
             return None
 
-        pkg = self._packages[row]
+        item = self._rows[row]
+
+        # --- Section header rows ---
+        if isinstance(item, SectionHeader):
+            if role == Qt.ItemDataRole.DisplayRole and col == self.COL_PACKAGE:
+                return item.title
+            if role == Qt.ItemDataRole.BackgroundRole:
+                return QBrush(self._SECTION_BG)
+            if role == Qt.ItemDataRole.ForegroundRole:
+                return QBrush(self._SECTION_FG)
+            if role == Qt.ItemDataRole.FontRole:
+                font = QFont()
+                font.setBold(True)
+                return font
+            return None
+
+        # --- Normal package rows ---
+        pkg: PackageDisplayInfo = item
 
         if role == Qt.ItemDataRole.DisplayRole:
-            if col == self.COL_NUMBER:
-                return str(pkg.row_number)
-            elif col == self.COL_STATE:
-                return self._get_state_icon(pkg)
-            elif col == self.COL_NAME:
-                return pkg.name
+            if col == self.COL_PACKAGE:
+                return pkg.name          # PackageDelegate draws name + summary
             elif col == self.COL_VERSION:
-                return pkg.display_version
-            elif col == self.COL_SUMMARY:
-                return pkg.summary
+                return self._version_display(pkg)
+            elif col == self.COL_RELEASE:
+                return pkg.release
+            elif col == self.COL_ARCH:
+                return pkg.arch
+            elif col == self.COL_STATE:
+                return self._state_icon(pkg)
             return None
 
         elif role == Qt.ItemDataRole.CheckStateRole:
@@ -108,81 +200,133 @@ class PackageTableModel(QAbstractTableModel):
             return None
 
         elif role == Qt.ItemDataRole.ForegroundRole:
-            # Row color based on package state
-            color = self._get_state_color(pkg)
-            if color:
-                return QBrush(color)
-            return None
-
-        elif role == Qt.ItemDataRole.FontRole:
-            # Bold for explicitly installed packages (not updates)
-            if pkg.installed and not pkg.has_update:
-                if pkg.install_reason != InstallReason.DEPENDENCY and pkg.install_reason != InstallReason.ORPHAN:
-                    font = QFont()
-                    font.setBold(True)
-                    return font
+            # Colour only the state badge column — other columns keep default text colour.
+            if col == self.COL_STATE:
+                color = self._state_color(pkg)
+                return QBrush(color) if color else None
             return None
 
         elif role == Qt.ItemDataRole.ToolTipRole:
-            if col == self.COL_NAME:
+            if col == self.COL_PACKAGE:
                 return pkg.nevra
             elif col == self.COL_STATE:
-                return self._get_state_tooltip(pkg)
-            elif col == self.COL_VERSION:
-                if pkg.has_update:
-                    return f"Mise à jour disponible: {pkg.installed_version} → {pkg.version}-{pkg.release}"
+                return self._state_tooltip(pkg)
+            elif col == self.COL_VERSION and pkg.has_update:
+                return f"Mise à jour : {pkg.installed_version} → {pkg.version}-{pkg.release}"
             return None
 
         elif role == Qt.ItemDataRole.UserRole:
-            # Return the package object
             return pkg
 
         return None
 
-    def _get_state_icon(self, pkg: PackageDisplayInfo) -> str:
-        """Get state icon for package."""
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+
+        item = self._rows[index.row()] if 0 <= index.row() < len(self._rows) else None
+
+        if isinstance(item, SectionHeader):
+            # Section headers are visible but not interactive
+            return Qt.ItemFlag.ItemIsEnabled
+
+        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if index.column() == self.COL_CHECKBOX:
+            flags |= Qt.ItemFlag.ItemIsUserCheckable
+        return flags
+
+    def setData(self, index: QModelIndex, value, role: int = Qt.ItemDataRole.EditRole) -> bool:
+        if not index.isValid():
+            return False
+
+        if role == Qt.ItemDataRole.CheckStateRole and index.column() == self.COL_CHECKBOX:
+            row = index.row()
+            item = self._rows[row] if 0 <= row < len(self._rows) else None
+            if isinstance(item, PackageDisplayInfo):
+                # Accept both Qt.CheckState enum and raw int (PySide6 compatibility)
+                value_int = getattr(value, 'value', value)
+                item.selected = (value_int == 2)  # 2 == Qt.CheckState.Checked
+                self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
+                return True
+
+        return False
+
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            if 0 <= section < len(self.COLUMNS):
+                return self.COLUMNS[section]
+        return None
+
+    # -----------------------------------------------------------------------
+    # Data management
+    # -----------------------------------------------------------------------
+
+    def set_sections(
+        self,
+        sections: List[tuple],
+    ) -> None:
+        """Populate the table from a list of named sections.
+
+        Args:
+            sections: List of ``(title, packages)`` tuples where *title* is
+                the section header text and *packages* is a list of
+                :class:`PackageDisplayInfo`.  An empty title skips the header.
+                Example::
+
+                    [
+                        ("══ Mises à jour (3) ══", [...]),
+                        ("══ Installés (1247) ══", [...]),
+                    ]
+        """
+        self.beginResetModel()
+        self._rows = []
+        for title, packages in sections:
+            if title:
+                self._rows.append(SectionHeader(title))
+            self._rows.extend(packages)
+        self.endResetModel()
+
+    def get_package(self, row: int) -> Optional[PackageDisplayInfo]:
+        """Return the package at *row*, or None for section headers / OOB."""
+        item = self._rows[row] if 0 <= row < len(self._rows) else None
+        return item if isinstance(item, PackageDisplayInfo) else None
+
+    def get_package_by_name(self, name: str) -> Optional[PackageDisplayInfo]:
+        """Return the first package whose name matches, or None."""
+        for item in self._rows:
+            if isinstance(item, PackageDisplayInfo) and item.name == name:
+                return item
+        return None
+
+    # -----------------------------------------------------------------------
+    # Display helpers
+    # -----------------------------------------------------------------------
+
+    def _version_display(self, pkg: PackageDisplayInfo) -> str:
+        """Version cell text — shows the available (new) version.
+
+        The installed→available arrow is shown in the tooltip to keep the
+        column compact.
+        """
+        return pkg.version
+
+    def _state_icon(self, pkg: PackageDisplayInfo) -> str:
+        """Single-char state icon for COL_STATE (used for accessibility/fallback)."""
+        return self.STATE_ICONS.get(_pkg_state_key(pkg), '')
+
+    def _state_color(self, pkg: PackageDisplayInfo) -> Optional[QColor]:
+        """State color for COL_STATE — adapts to the active light/dark theme."""
+        return get_state_colors().get(_pkg_state_key(pkg))
+
+    def _state_tooltip(self, pkg: PackageDisplayInfo) -> str:
+        """Tooltip text for COL_STATE."""
         if pkg.has_conflict:
-            return self.STATE_ICONS['conflict']
-
-        # Determine base icon based on install state
-        if pkg.installed:
-            if pkg.install_reason == InstallReason.DEPENDENCY:
-                base_icon = self.STATE_ICONS['dep']
-            elif pkg.install_reason == InstallReason.ORPHAN:
-                base_icon = self.STATE_ICONS['orphan']
-            else:
-                base_icon = self.STATE_ICONS['installed']
-        else:
-            base_icon = self.STATE_ICONS['available']
-
-        # Add update icon if update available
-        if pkg.has_update:
-            return base_icon + self.STATE_ICONS['update']
-
-        return base_icon
-
-    def _get_state_color(self, pkg: PackageDisplayInfo) -> QColor:
-        """Get row color based on package state."""
-        if pkg.has_conflict:
-            return self.STATE_COLORS['conflict']
-
-        # Update takes priority for color
-        if pkg.has_update:
-            return self.STATE_COLORS['update']
-
-        if pkg.installed:
-            if pkg.install_reason == InstallReason.DEPENDENCY:
-                return self.STATE_COLORS['dep']
-            elif pkg.install_reason == InstallReason.ORPHAN:
-                return self.STATE_COLORS['orphan']
-            return self.STATE_COLORS['installed']
-
-        return self.STATE_COLORS['available']
-
-    def _get_state_tooltip(self, pkg: PackageDisplayInfo) -> str:
-        """Get state tooltip for package."""
-        if pkg.has_conflict:
-            return f"En conflit avec: {pkg.conflict_with or 'autre paquet'}"
+            return f"En conflit avec : {pkg.conflict_with or 'autre paquet'}"
         if pkg.has_update:
             return "Mise à jour disponible"
         if pkg.installed:
@@ -193,252 +337,466 @@ class PackageTableModel(QAbstractTableModel):
             return "Installé explicitement"
         return "Non installé"
 
-    def setData(self, index: QModelIndex, value, role: int = Qt.ItemDataRole.EditRole) -> bool:
-        if not index.isValid():
-            return False
 
-        if role == Qt.ItemDataRole.CheckStateRole and index.column() == self.COL_CHECKBOX:
-            row = index.row()
-            if 0 <= row < len(self._packages):
-                # Handle both enum and int for compatibility with PySide6 6.4.x
-                value_int = getattr(value, 'value', value) if hasattr(value, 'value') else value
-                self._packages[row].selected = (value_int == 2)  # 2 = Checked
-                self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
-                return True
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Background drawing helpers
+# ---------------------------------------------------------------------------
 
+def _is_dark() -> bool:
+    """Return True when the application is running in dark mode."""
+    return QApplication.palette().color(QPalette.ColorRole.Window).lightness() < 128
+
+
+def _active_colors() -> tuple:
+    """(bg, fg) for the active/current row (navigation cursor, no checkbox)."""
+    return (_ACTIVE_BG_DARK, _ACTIVE_FG_DARK) if _is_dark() \
+        else (_ACTIVE_BG_LIGHT, _ACTIVE_FG_LIGHT)
+
+
+def _sel_colors() -> tuple:
+    """(bg, fg) for a checkbox-selected row."""
+    return (_SEL_BG_DARK, _SEL_FG_DARK) if _is_dark() \
+        else (_SEL_BG_LIGHT, _SEL_FG_LIGHT)
+
+
+def _is_row_selected(option, index) -> bool:
+    """Return True if this row is currently highlighted in the view.
+
+    Reads PackageList.highlighted_row which is updated synchronously on
+    currentChanged — reliable across all repaints, including those triggered
+    by splitter resizes during event processing.
+    """
+    if option.widget is None:
         return False
+    row = getattr(option.widget, 'highlighted_row', -1)
+    return row >= 0 and row == index.row()
 
-    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
-        if not index.isValid():
-            return Qt.ItemFlag.NoItemFlags
 
-        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+def _draw_background(painter, option, index):
+    """Fill the cell background and return the foreground QColor to use.
 
-        if index.column() == self.COL_CHECKBOX:
-            flags |= Qt.ItemFlag.ItemIsUserCheckable
+    Returns None when the default palette text colour should be used.
+    Draws entirely with painter.fillRect — no reliance on PE_PanelItemViewItem
+    or Qt style machinery, which behaves inconsistently across themes/bindings.
 
-        return flags
+    Priority (highest first):
+    - Section header row      → blue-grey background, white text
+    - Checkbox-selected row   → medium blue background  (_SEL_BG_*)
+    - Active/current row      → light blue background   (_ACTIVE_BG_*)
+    - Normal row              → no fill, default text colour
+    """
+    pkg = index.data(Qt.ItemDataRole.UserRole)
+    if not isinstance(pkg, PackageDisplayInfo):
+        painter.fillRect(option.rect, _SECTION_BG)
+        return _SECTION_FG
 
-    def headerData(
-        self,
-        section: int,
-        orientation: Qt.Orientation,
-        role: int = Qt.ItemDataRole.DisplayRole
-    ):
-        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            if 0 <= section < len(self.COLUMNS):
-                return self.COLUMNS[section]
-        return None
+    if pkg.selected:
+        bg, fg = _sel_colors()
+        painter.fillRect(option.rect, bg)
+        return fg
 
-    def set_packages(self, packages: List[PackageDisplayInfo]) -> None:
-        """Set the package list.
+    if _is_row_selected(option, index):
+        bg, fg = _active_colors()
+        painter.fillRect(option.rect, bg)
+        return fg
 
-        Args:
-            packages: List of packages to display.
-        """
-        self.beginResetModel()
-        self._packages = packages
-        self.endResetModel()
+    return None   # default text colour
 
-    def get_package(self, row: int) -> Optional[PackageDisplayInfo]:
-        """Get package at row.
 
-        Args:
-            row: Row index.
+# ---------------------------------------------------------------------------
+# Delegates
+# ---------------------------------------------------------------------------
 
-        Returns:
-            Package or None if invalid row.
-        """
-        if 0 <= row < len(self._packages):
-            return self._packages[row]
-        return None
+class PackageDelegate(QStyledItemDelegate):
+    """Delegate for COL_PACKAGE: draws package name (bold) + summary below.
 
-    def get_package_by_name(self, name: str) -> Optional[PackageDisplayInfo]:
-        """Get package by name.
+    The row height is set externally via QHeaderView.setDefaultSectionSize()
+    to accommodate two lines.
+    """
 
-        Args:
-            name: Package name.
-
-        Returns:
-            Package or None if not found.
-        """
-        for pkg in self._packages:
-            if pkg.name == name:
-                return pkg
-        return None
-
-    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
-        """Sort packages by column."""
-        self._sort_column = column
-        self._sort_order = order
-
-        if not self._packages:
+    def paint(self, painter, option, index):
+        pkg = index.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(pkg, PackageDisplayInfo):
+            # Fall back for section headers — drawn via BackgroundRole/FontRole
+            super().paint(painter, option, index)
             return
 
-        reverse = (order == Qt.SortOrder.DescendingOrder)
+        self.initStyleOption(option, index)
 
-        def sort_key(pkg: PackageDisplayInfo):
-            if column == self.COL_NAME:
-                return pkg.name.lower()
-            elif column == self.COL_VERSION:
-                return pkg.version
-            elif column == self.COL_SUMMARY:
-                return pkg.summary.lower() if pkg.summary else ''
-            elif column == self.COL_STATE:
-                # Sort by state priority: updates, explicit, deps, orphans, available
-                if pkg.has_update:
-                    priority = 0
-                elif pkg.installed:
-                    if pkg.install_reason == InstallReason.ORPHAN:
-                        priority = 3
-                    elif pkg.install_reason == InstallReason.DEPENDENCY:
-                        priority = 2
-                    else:
-                        priority = 1  # Explicit
-                else:
-                    priority = 4  # Available
-                return (priority, pkg.name.lower())
-            elif column == self.COL_NUMBER:
-                return pkg.row_number
-            return pkg.name.lower()
+        painter.save()
 
-        self.beginResetModel()
-        self._packages.sort(key=sort_key, reverse=reverse)
-        self.endResetModel()
+        fg = _draw_background(painter, option, index)
+
+        rect = option.rect
+        padding = 3
+        x = rect.x() + padding
+        w = rect.width() - 2 * padding
+
+        # --- Line 1: package name (bold) ---
+        name_font = QFont(option.font)
+        name_font.setBold(True)
+        painter.setFont(name_font)
+        painter.setPen(fg if fg is not None else option.palette.text().color())
+
+        name_metrics = QFontMetrics(name_font)
+        name_h = name_metrics.height()
+        name_y = rect.y() + padding
+
+        painter.drawText(
+            x, name_y, w, name_h,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            pkg.name,
+        )
+
+        # --- Line 2: summary (normal, dimmed) ---
+        summary = pkg.summary
+        if summary:
+            summary_font = QFont(option.font)
+            painter.setFont(summary_font)
+
+            if fg is not None:
+                painter.setPen(fg)
+            else:
+                painter.setPen(option.palette.placeholderText().color())
+
+            summary_metrics = QFontMetrics(summary_font)
+            summary_h = summary_metrics.height()
+            summary_y = name_y + name_h + 2
+
+            elided = summary_metrics.elidedText(
+                summary, Qt.TextElideMode.ElideRight, w
+            )
+            painter.drawText(
+                x, summary_y, w, summary_h,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                elided,
+            )
+
+        painter.restore()
+
+
+class StateBadgeDelegate(QStyledItemDelegate):
+    """Delegate for COL_STATE: draws a filled rounded badge with a letter.
+
+    Each package state is represented by a color-filled rounded square with
+    a single white bold letter centered inside:
+
+    - Installé     → green  ``I``
+    - Dépendance   → blue-gray ``D``
+    - Orphelin     → violet ``O``
+    - Mise à jour  → orange ``U``
+    - Conflit      → red    ``C``
+    - Disponible   → *(no badge)*
+
+    Colors come from :func:`~rpmdrake.qt.palette.get_state_colors` so they
+    automatically switch between light and dark theme.
+    """
+
+    _LETTERS: dict[str, str] = {
+        'installed': 'I',
+        'dep':       'D',
+        'orphan':    'O',
+        'update':    'U',
+        'conflict':  'C',
+        'available': '',
+    }
+
+    def paint(self, painter, option, index):
+        pkg = index.data(Qt.ItemDataRole.UserRole)
+        self.initStyleOption(option, index)
+        _draw_background(painter, option, index)   # return value unused (badge always white)
+
+        if not isinstance(pkg, PackageDisplayInfo):
+            # Section header: background already drawn, nothing more to do.
+            return
+
+        state_key = _pkg_state_key(pkg)
+        letter = self._LETTERS.get(state_key, '')
+        color = get_state_colors().get(state_key)
+
+        if not letter or not color:
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Badge: centred in the cell with a small top/bottom margin
+        margin = 3
+        side = min(option.rect.height() - 2 * margin, 22)
+        cx = option.rect.center().x()
+        cy = option.rect.center().y()
+        badge_rect = QRect(cx - side // 2, cy - side // 2, side, side)
+
+        # Filled rounded rectangle in the state color
+        painter.setBrush(QBrush(color))
+        painter.setPen(QPen(Qt.PenStyle.NoPen))
+        painter.drawRoundedRect(badge_rect, 4, 4)
+
+        # White bold letter centered inside the badge
+        font = QFont(option.font)
+        font.setBold(True)
+        font.setPixelSize(max(side - 7, 8))
+        painter.setFont(font)
+        painter.setPen(QColor('white'))
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, letter)
+
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        base = super().sizeHint(option, index)
+        return QSize(30, base.height())
+
+
+class TextCellDelegate(QStyledItemDelegate):
+    """Default delegate for text-only columns (Version, Rév., Arch).
+
+    Draws our custom selection background then the cell text — bypasses
+    PE_PanelItemViewItem so the system selection color never overwrites ours.
+    """
+
+    def paint(self, painter, option, index):
+        self.initStyleOption(option, index)
+        painter.save()
+        fg = _draw_background(painter, option, index)
+
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        if text:
+            painter.setFont(option.font)
+            painter.setPen(fg if fg is not None else option.palette.text().color())
+            painter.drawText(
+                option.rect.adjusted(4, 0, -4, 0),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                text,
+            )
+
+        painter.restore()
 
 
 class CheckboxDelegate(QStyledItemDelegate):
-    """Delegate for rendering checkboxes in the first column."""
+    """Delegate for COL_CHECKBOX: draws a centred checkbox."""
 
     def paint(self, painter, option, index):
-        if index.column() == PackageTableModel.COL_CHECKBOX:
-            # Draw checkbox - handle both enum and int for PySide6 compatibility
-            current = index.data(Qt.ItemDataRole.CheckStateRole)
-            checked = (current == Qt.CheckState.Checked or
-                       getattr(current, 'value', current) == 2 or
-                       current == 2)
+        self.initStyleOption(option, index)
+        _draw_background(painter, option, index)   # return value unused
 
-            checkbox_option = QStyleOptionButton()
-            checkbox_option.state = QStyle.StateFlag.State_Enabled
-            if checked:
-                checkbox_option.state |= QStyle.StateFlag.State_On
-            else:
-                checkbox_option.state |= QStyle.StateFlag.State_Off
+        # Skip checkboxes on section header rows (no UserRole data)
+        if index.data(Qt.ItemDataRole.UserRole) is None:
+            return
 
-            # Center the checkbox
-            checkbox_rect = QApplication.style().subElementRect(
-                QStyle.SubElement.SE_CheckBoxIndicator, checkbox_option
-            )
-            x = option.rect.x() + (option.rect.width() - checkbox_rect.width()) // 2
-            y = option.rect.y() + (option.rect.height() - checkbox_rect.height()) // 2
-            checkbox_option.rect = QRect(x, y, checkbox_rect.width(), checkbox_rect.height())
+        current = index.data(Qt.ItemDataRole.CheckStateRole)
+        checked = (
+            current == Qt.CheckState.Checked
+            or getattr(current, 'value', current) == 2
+            or current == 2
+        )
 
-            QApplication.style().drawControl(
-                QStyle.ControlElement.CE_CheckBox, checkbox_option, painter
-            )
-        else:
-            super().paint(painter, option, index)
+        checkbox_option = QStyleOptionButton()
+        checkbox_option.state = QStyle.StateFlag.State_Enabled
+        checkbox_option.state |= (
+            QStyle.StateFlag.State_On if checked else QStyle.StateFlag.State_Off
+        )
+
+        # Centre the checkbox indicator in the cell
+        indicator_rect = QApplication.style().subElementRect(
+            QStyle.SubElement.SE_CheckBoxIndicator, checkbox_option
+        )
+        x = option.rect.x() + (option.rect.width() - indicator_rect.width()) // 2
+        y = option.rect.y() + (option.rect.height() - indicator_rect.height()) // 2
+        checkbox_option.rect = QRect(x, y, indicator_rect.width(), indicator_rect.height())
+
+        QApplication.style().drawControl(
+            QStyle.ControlElement.CE_CheckBox, checkbox_option, painter
+        )
 
     def editorEvent(self, event, model, option, index):
-        if index.column() == PackageTableModel.COL_CHECKBOX:
-            # Mouse click only - keyboard handled by PackageList.keyPressEvent
-            event_type_val = getattr(event.type(), 'value', event.type())
-            # MouseButtonRelease = 3 in Qt
-            if event_type_val == 3:
-                current = index.data(Qt.ItemDataRole.CheckStateRole)
-                # Handle both enum and int returns for compatibility
-                is_checked = (current == Qt.CheckState.Checked or
-                              getattr(current, 'value', current) == 2 or
-                              current == 2)
-                new_value = Qt.CheckState.Unchecked if is_checked else Qt.CheckState.Checked
-                model.setData(index, new_value, Qt.ItemDataRole.CheckStateRole)
-                return True
+        # Skip section header rows
+        if index.data(Qt.ItemDataRole.UserRole) is None:
+            return False
+
+        event_type = getattr(event.type(), 'value', event.type())
+        if event_type == 3:  # MouseButtonRelease
+            current = index.data(Qt.ItemDataRole.CheckStateRole)
+            is_checked = (
+                current == Qt.CheckState.Checked
+                or getattr(current, 'value', current) == 2
+                or current == 2
+            )
+            new_value = Qt.CheckState.Unchecked if is_checked else Qt.CheckState.Checked
+            model.setData(index, new_value, Qt.ItemDataRole.CheckStateRole)
+            return True
         return super().editorEvent(event, model, option, index)
 
 
-class PackageList(QTableView):
-    """Table view for package list.
+# ---------------------------------------------------------------------------
+# View
+# ---------------------------------------------------------------------------
 
-    Features:
+class PackageList(QTableView):
+    """Table view for the package list.
+
+    Features
+    --------
+    - Section header rows (non-interactive visual separators)
+    - Custom two-line delegate for the package name column
+    - Checkbox column at the rightmost position
     - Virtual scrolling for performance
-    - Checkbox selection
-    - Row number column for command reference
-    - Sortable columns
     """
 
-    selection_changed = Signal(str, bool)  # package_name, selected
-    package_activated = Signal(str)  # package_name (double-click)
+    selection_changed = Signal(str, bool)   # package_name, selected
+    package_activated = Signal(str)         # package_name (double-click)
+
+    # Row index of the currently highlighted row, -1 if none.
+    # Updated on currentChanged and stored here so delegates can read it
+    # during repaint without relying on currentIndex() which may be stale
+    # when a second repaint is triggered during event processing.
+    highlighted_row: int = -1
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Create model
         self._model = PackageTableModel(self)
         self.setModel(self._model)
 
-        # Set delegate for checkboxes
-        self.setItemDelegate(CheckboxDelegate(self))
+        # Column delegates
+        self.setItemDelegateForColumn(
+            PackageTableModel.COL_PACKAGE, PackageDelegate(self)
+        )
+        text_delegate = TextCellDelegate(self)
+        self.setItemDelegateForColumn(PackageTableModel.COL_VERSION, text_delegate)
+        self.setItemDelegateForColumn(PackageTableModel.COL_RELEASE, text_delegate)
+        self.setItemDelegateForColumn(PackageTableModel.COL_ARCH, text_delegate)
+        self.setItemDelegateForColumn(
+            PackageTableModel.COL_STATE, StateBadgeDelegate(self)
+        )
+        self.setItemDelegateForColumn(
+            PackageTableModel.COL_CHECKBOX, CheckboxDelegate(self)
+        )
 
-        # Configure view
+        # View settings
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.setAlternatingRowColors(True)
-        self.setSortingEnabled(True)
+        self.setAlternatingRowColors(False)   # Section BG colours replace alternating
+        self.setSortingEnabled(False)          # Sections impose a logical order
         self.setShowGrid(False)
-        self.setWordWrap(True)  # Enable word wrap for descriptions
+        self.setWordWrap(False)
 
-        # Virtual scrolling
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(40)  # Initial row height for 2 lines
+        self.verticalHeader().setDefaultSectionSize(40)
 
         # Column sizing
         header = self.horizontalHeader()
-        header.setSectionResizeMode(PackageTableModel.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(PackageTableModel.COL_NUMBER, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(PackageTableModel.COL_STATE, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(PackageTableModel.COL_NAME, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(PackageTableModel.COL_VERSION, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(PackageTableModel.COL_SUMMARY, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(
+            PackageTableModel.COL_PACKAGE, QHeaderView.ResizeMode.Stretch
+        )
+        header.setSectionResizeMode(
+            PackageTableModel.COL_VERSION, QHeaderView.ResizeMode.Interactive
+        )
+        header.setSectionResizeMode(
+            PackageTableModel.COL_RELEASE, QHeaderView.ResizeMode.Interactive
+        )
+        header.setSectionResizeMode(
+            PackageTableModel.COL_ARCH, QHeaderView.ResizeMode.Fixed
+        )
+        header.setSectionResizeMode(
+            PackageTableModel.COL_STATE, QHeaderView.ResizeMode.Fixed
+        )
+        header.setSectionResizeMode(
+            PackageTableModel.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed
+        )
+        header.setStretchLastSection(False)
 
-        # Column widths are set dynamically in update_row_height() based on font size
-
-        # Connect signals
+        # Signals
         self.doubleClicked.connect(self._on_double_click)
         self._model.dataChanged.connect(self._on_data_changed)
+        self.selectionModel().currentChanged.connect(self._on_current_changed)
+
+    # -----------------------------------------------------------------------
+    # Public API
+    # -----------------------------------------------------------------------
+
+    def set_sections(
+        self,
+        sections: List[tuple],
+    ) -> None:
+        """Populate the list from named sections.
+
+        Args:
+            sections: List of ``(title, packages)`` tuples — see
+                :meth:`PackageTableModel.set_sections`.
+        """
+        self._model.set_sections(sections)
+
+    def set_packages(self, packages: List[PackageDisplayInfo]) -> None:
+        """Compatibility wrapper: display a flat package list as one unnamed section.
+
+        Use :meth:`set_sections` when the full sectioned layout is available.
+
+        Args:
+            packages: Flat list of packages to display.
+        """
+        self._model.set_sections([("", packages)])
+
+    def update_row_height(self, font_size: int) -> None:
+        """Adjust row height and column widths for the given font size.
+
+        Args:
+            font_size: Current application font size in points.
+        """
+        font = QFont()
+        font.setPointSize(font_size)
+        metrics = QFontMetrics(font)
+
+        line_h = metrics.height()
+        row_h = line_h * 2 + 10   # Two lines + padding
+
+        self.verticalHeader().setDefaultSectionSize(row_h)
+
+        char_w = metrics.horizontalAdvance("M")
+        self.setColumnWidth(PackageTableModel.COL_VERSION,  char_w * 14)
+        self.setColumnWidth(PackageTableModel.COL_RELEASE,  char_w * 8)
+        self.setColumnWidth(PackageTableModel.COL_ARCH,     char_w * 6)
+        self.setColumnWidth(PackageTableModel.COL_STATE,    char_w * 3 + 8)
+        self.setColumnWidth(PackageTableModel.COL_CHECKBOX, char_w * 2 + 10)
+
+    # -----------------------------------------------------------------------
+    # Key events
+    # -----------------------------------------------------------------------
 
     def keyPressEvent(self, event) -> None:
-        """Handle key press events."""
-        # Space toggles checkbox for current row
-        # Key_Space = 32 in Qt, check both enum and int for compatibility
+        """Space toggles the checkbox for the current row."""
         key = event.key()
-        is_space = (key == 32 or key == Qt.Key.Key_Space or
-                    (hasattr(key, 'value') and key.value == 32))
+        is_space = (
+            key == 32
+            or key == Qt.Key.Key_Space
+            or (hasattr(key, 'value') and key.value == 32)
+        )
         if is_space:
             index = self.currentIndex()
             if index.isValid():
-                # Get checkbox index for this row
-                checkbox_index = self._model.index(index.row(), PackageTableModel.COL_CHECKBOX)
-                current = checkbox_index.data(Qt.ItemDataRole.CheckStateRole)
-                # Handle both enum and int returns for compatibility
-                is_checked = (current == Qt.CheckState.Checked or
-                              (hasattr(current, 'value') and current.value == 2) or
-                              current == 2)
+                checkbox_idx = self._model.index(index.row(), PackageTableModel.COL_CHECKBOX)
+                current = checkbox_idx.data(Qt.ItemDataRole.CheckStateRole)
+                is_checked = (
+                    current == Qt.CheckState.Checked
+                    or getattr(current, 'value', current) == 2
+                    or current == 2
+                )
                 new_value = Qt.CheckState.Unchecked if is_checked else Qt.CheckState.Checked
-                self._model.setData(checkbox_index, new_value, Qt.ItemDataRole.CheckStateRole)
+                self._model.setData(checkbox_idx, new_value, Qt.ItemDataRole.CheckStateRole)
                 return
         super().keyPressEvent(event)
 
-    def set_packages(self, packages: List[PackageDisplayInfo]) -> None:
-        """Set the package list.
+    # -----------------------------------------------------------------------
+    # Private helpers
+    # -----------------------------------------------------------------------
 
-        Args:
-            packages: List of packages to display.
-        """
-        self._model.set_packages(packages)
+    def _on_current_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
+        """Cache the highlighted row index so delegates can read it during repaint."""
+        self.highlighted_row = current.row() if current.isValid() else -1
+        self.viewport().update()
 
     def _on_double_click(self, index: QModelIndex) -> None:
-        """Handle double-click on a row."""
         pkg = self._model.get_package(index.row())
         if pkg:
             self.package_activated.emit(pkg.name)
@@ -447,42 +805,11 @@ class PackageList(QTableView):
         self,
         top_left: QModelIndex,
         bottom_right: QModelIndex,
-        roles: List[int]
+        roles: List[int],
     ) -> None:
-        """Handle data change (checkbox toggle)."""
-        if Qt.ItemDataRole.CheckStateRole in roles:
-            for row in range(top_left.row(), bottom_right.row() + 1):
-                pkg = self._model.get_package(row)
-                if pkg:
-                    self.selection_changed.emit(pkg.name, pkg.selected)
-
-    def update_row_height(self, font_size: int) -> None:
-        """Update row height and column widths based on font size.
-
-        Args:
-            font_size: Current font size in points.
-        """
-        # Create a font with the given size to calculate metrics
-        font = QFont()
-        font.setPointSize(font_size)
-        metrics = QFontMetrics(font)
-
-        # Height for 2 lines + padding
-        line_height = metrics.height()
-        row_height = (line_height * 2) + 8  # 2 lines + 8px padding
-
-        self.verticalHeader().setDefaultSectionSize(row_height)
-
-        # Update column widths based on font metrics
-        char_width = metrics.horizontalAdvance("M")  # Use 'M' as reference
-
-        # Checkbox: ~2 chars
-        self.setColumnWidth(PackageTableModel.COL_CHECKBOX, char_width * 2 + 10)
-        # Number: ~4 chars for "9999"
-        self.setColumnWidth(PackageTableModel.COL_NUMBER, char_width * 4 + 10)
-        # State: ~3 chars for "🅘🅤" (circled letters are wide)
-        self.setColumnWidth(PackageTableModel.COL_STATE, char_width * 4 + 10)
-        # Name: ~20 chars
-        self.setColumnWidth(PackageTableModel.COL_NAME, char_width * 20)
-        # Version: ~15 chars
-        self.setColumnWidth(PackageTableModel.COL_VERSION, char_width * 15)
+        # Avoid the enum-vs-int comparison pitfall in PySide6: our model only
+        # calls setData for checkboxes, so any dataChanged means a checkbox changed.
+        for row in range(top_left.row(), bottom_right.row() + 1):
+            pkg = self._model.get_package(row)
+            if pkg:
+                self.selection_changed.emit(pkg.name, pkg.selected)
