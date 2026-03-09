@@ -25,8 +25,12 @@ if TYPE_CHECKING:
 __all__ = ["CategoryPanel"]
 
 
-# Mapping of RPM group prefix → display label + unicode icon.
-# Based on common Mageia/Mandriva RPM group naming conventions.
+# Mapping of top-level RPM Group prefix → unicode icon.
+#
+# These entries are derived from the actual Mageia RPM group taxonomy,
+# obtained by running: rpm -qa --qf '%{group}\n' | sort -u
+# The hierarchy uses '/' as a separator (e.g. "Networking/WWW").
+# Only the first path component (before the first '/') is used here.
 _GROUP_ICONS: dict[str, str] = {
     'Accessibility':      '♿',
     'Archiving':          '📦',
@@ -34,15 +38,14 @@ _GROUP_ICONS: dict[str, str] = {
     'Databases':          '🗄',
     'Development':        '⚙',
     'Documentation':      '📖',
-    'Education':          '🎓',
     'Editors':            '📝',
     'Emulators':          '🎮',
     'File tools':         '📁',
     'Games':              '🎲',
+    'Geography':          '🗺',
     'Graphical desktop':  '🖥',
     'Graphics':           '🎨',
     'Monitoring':         '📊',
-    'Multimedia':         '🎬',
     'Networking':         '🌐',
     'Office':             '💼',
     'Publishing':         '📰',
@@ -95,42 +98,55 @@ class CategoryPanel(QWidget):
     def populate_categories(self) -> None:
         """Rebuild the category tree from the controller's package database.
 
+        Uses the RPM ``Group`` tag hierarchy directly (separator: ``/``),
+        exactly as the legacy rpmdrake did.  The first path component becomes
+        a top-level tree item; the remainder (if any) becomes a child item.
+
+        Counts shown next to each item reflect the number of packages in
+        that group, not the number of sub-categories.
+
         Call after :meth:`~rpmdrake.common.controller.Controller.load_initial`
         to ensure group metadata has been loaded.
         """
         self._tree.clear()
         groups = self.controller.get_available_groups()
+        counts = self.controller.get_group_package_counts()
 
-        # Build a two-level hierarchy from "Main/Sub" strings.
+        # Build a two-level hierarchy from "Main/Sub" RPM group strings.
+        # Keys are top-level prefixes; values are (sub_label, full_path) pairs.
         tree_data: dict[str, list[tuple[str, str]]] = {}
         for group in groups:
-            if '/' in group:
-                main, sub = group.split('/', 1)
-            else:
-                main, sub = group, None  # type: ignore[assignment]
-
+            main, _, _ = group.partition('/')
             if main not in tree_data:
                 tree_data[main] = []
-            if sub:
-                tree_data[main].append((sub, group))
+            if '/' in group:
+                tree_data[main].append((group.split('/', 1)[1], group))
+
+        # Pre-compute top-level package counts (sum of all sub-groups).
+        top_counts: dict[str, int] = {}
+        for group, count in counts.items():
+            main = group.split('/')[0]
+            top_counts[main] = top_counts.get(main, 0) + count
+
+        total = sum(counts.values())
 
         # "All categories" top item
-        all_item = QTreeWidgetItem(["◉ Toutes les catégories"])
+        all_item = QTreeWidgetItem([f"◉ Toutes les catégories ({total})"])
         all_item.setData(0, Qt.ItemDataRole.UserRole, None)
         self._tree.addTopLevelItem(all_item)
 
         for main_cat in sorted(tree_data.keys()):
             icon = _GROUP_ICONS.get(main_cat, '📂')
-            subs = tree_data[main_cat]
-            label = (
-                f"{icon} {main_cat} ({len(subs)})" if subs
-                else f"{icon} {main_cat}"
-            )
-            main_item = QTreeWidgetItem([label])
+            n = top_counts.get(main_cat, 0)
+            count_str = f" ({n})" if n else ""
+            main_item = QTreeWidgetItem([f"{icon} {main_cat}{count_str}"])
             main_item.setData(0, Qt.ItemDataRole.UserRole, main_cat)
             self._tree.addTopLevelItem(main_item)
-            for sub_name, full_path in sorted(subs):
-                sub_item = QTreeWidgetItem([sub_name])
+
+            for sub_label, full_path in sorted(tree_data[main_cat]):
+                sub_n = counts.get(full_path, 0)
+                sub_count_str = f" ({sub_n})" if sub_n else ""
+                sub_item = QTreeWidgetItem([f"{sub_label}{sub_count_str}"])
                 sub_item.setData(0, Qt.ItemDataRole.UserRole, full_path)
                 main_item.addChild(sub_item)
 

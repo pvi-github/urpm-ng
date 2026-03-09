@@ -75,6 +75,7 @@ class Controller:
         self._orphan_packages: Set[str] = set()  # Orphan packages (deps no longer needed)
         self._upgradeable_packages: Set[str] = set()  # Packages with available updates
         self._available_groups: List[str] = []  # Available package groups/categories
+        self._group_package_counts: Dict[str, int] = {}  # group_name -> package count
 
         # Async search
         self._search_executor = ThreadPoolExecutor(max_workers=1)
@@ -140,8 +141,9 @@ class Controller:
             self._orphan_packages = self._load_orphan_packages()
             # Load upgradeable packages list
             self._upgradeable_packages = self._load_upgradeable_packages()
-            # Load available groups
-            self._available_groups = self._load_available_groups()
+            # Load available groups and per-group package counts
+            self._available_groups, self._group_package_counts = \
+                self._load_available_groups()
         except Exception as e:
             self.view.show_error("Erreur", f"Impossible de charger les paquets installés: {e}")
 
@@ -285,27 +287,48 @@ class Controller:
 
         return upgradeable
 
-    def _load_available_groups(self) -> List[str]:
-        """Load list of available package groups from database."""
+    def _load_available_groups(self) -> tuple[List[str], Dict[str, int]]:
+        """Load package groups and per-group counts from the database.
+
+        Returns:
+            Tuple of (sorted group names, {group_name: package_count}).
+        """
         import sqlite3
-        groups = []
+        groups: List[str] = []
+        counts: Dict[str, int] = {}
         try:
             conn = sqlite3.connect(self.db.db_path)
             cur = conn.cursor()
             cur.execute('''
-                SELECT DISTINCT group_name FROM packages
+                SELECT group_name, COUNT(*) FROM packages
                 WHERE group_name IS NOT NULL AND group_name != ''
+                GROUP BY group_name
                 ORDER BY group_name
             ''')
-            groups = [row[0] for row in cur.fetchall()]
+            for group_name, count in cur.fetchall():
+                groups.append(group_name)
+                counts[group_name] = count
             conn.close()
         except Exception:
             pass
-        return groups
+        return groups, counts
 
     def get_available_groups(self) -> List[str]:
-        """Return list of available package groups."""
+        """Return sorted list of available RPM group names."""
         return self._available_groups
+
+    def get_group_package_counts(self) -> Dict[str, int]:
+        """Return package counts per exact RPM group name.
+
+        Keys are full group paths as stored in the database
+        (e.g. ``"Networking/WWW"``, ``"System/Configuration/Packaging"``).
+        Aggregate counts for a top-level prefix can be computed by summing
+        the counts for all entries whose key starts with that prefix.
+
+        Returns:
+            Dict mapping ``group_name`` to the number of packages in that group.
+        """
+        return self._group_package_counts
 
     def _refresh_packages(self) -> None:
         """Refresh package list based on current filters."""
