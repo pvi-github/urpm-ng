@@ -861,9 +861,48 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             held_packages = self.db.get_held_packages_set()
             held_upgrade_warnings = []
             updates_found = 0
+
+            # Pre-compute which installed packages will be replaced via Obsoletes.
+            # An available package X (not yet installed) declaring "Obsoletes: Y"
+            # means X replaces Y — we must NOT also queue an upgrade job for Y,
+            # otherwise the solver receives two conflicting INSTALL requests and
+            # tries to co-install them, triggering file conflicts.
+            installed_names = {pkg.name for pkg in self.pool.installed.solvables}
+            will_be_obsoleted: set[str] = set()
+            for repo in self.pool.repos:
+                if repo == self.pool.installed:
+                    continue
+                for s in repo.solvables:
+                    if s.name in installed_names:
+                        continue  # The obsoleting package is itself installed — skip
+                    obs_ids = s.lookup_idarray(solv.SOLVABLE_OBSOLETES)
+                    if not obs_ids:
+                        continue
+                    for obs_id in obs_ids:
+                        for provider in self.pool.whatprovides(obs_id):
+                            if provider.repo == self.pool.installed and s.name != provider.name:
+                                will_be_obsoleted.add(provider.name)
+            if will_be_obsoleted:
+                debug.log(
+                    f"Packages replaced via Obsoletes (upgrade job skipped): "
+                    f"{sorted(will_be_obsoleted)}"
+                )
+
             for installed_pkg in self.pool.installed.solvables:
                 is_watched = debug.is_watched(installed_pkg.name)
                 is_held = installed_pkg.name in held_packages
+
+                # Skip packages that will be replaced by an Obsoletes transition.
+                # The obsoletes loop below will add the SOLVER_INSTALL job for
+                # the replacement package; adding an upgrade job here too would
+                # give the solver two conflicting INSTALL requests for packages
+                # that share files, causing a file-conflict error.
+                if installed_pkg.name in will_be_obsoleted:
+                    debug.log(
+                        f"SKIP UPGRADE: {installed_pkg.name} will be replaced via Obsoletes",
+                        indent=1,
+                    )
+                    continue
 
                 # Find the best available version of this package
                 # For UPGRADES, prefer same architecture as installed package
@@ -941,8 +980,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
             already_warned = set(held_upgrade_warnings)  # Avoid duplicate warnings
             seen_obsoletes = set()  # Track what we've already processed
-            # Build set of installed package names for fast lookup
-            installed_names = {pkg.name for pkg in self.pool.installed.solvables}
+            # installed_names is already computed above (pre-scan for will_be_obsoleted)
 
             for repo in self.pool.repos:
                 if repo == self.pool.installed:
