@@ -360,11 +360,14 @@ class Controller:
             return results
 
         if category:
-            # Category view: show all packages in the category regardless of
-            # install state — the user browses to discover and install packages.
+            # Category view: show packages matching the active state filters.
+            # Available (not-installed) packages are included by default because
+            # set_category_filter() adds PackageState.AVAILABLE to the states
+            # when entering a category, enabling discovery of new packages.
             # Display filters (libs/devel/debug…) still apply.
             results = self._get_packages_by_category(category)
             results = self._enrich_packages(results)
+            results = self._apply_state_filters(results, self.filter_state.states)
             results = self._apply_display_filters(results)
             return results
 
@@ -816,10 +819,19 @@ class Controller:
     def set_category_filter(self, category: Optional[str]) -> None:
         """Set category filter.
 
+        When entering a category, :attr:`PackageState.AVAILABLE` is
+        automatically added to the active states so that uninstalled packages
+        are visible for discovery.  The view is notified via
+        :meth:`~ViewInterface.on_filter_state_changed` so its checkboxes stay
+        in sync.
+
         Args:
-            category: Category prefix to filter by, or None for all.
+            category: Category prefix to filter by, or ``None`` for all.
         """
         self.filter_state.category = category
+        if category is not None:
+            self.filter_state.states.add(PackageState.AVAILABLE)
+            self.view.on_filter_state_changed()
         self._refresh_packages()
 
     def _invalidate_cache(self) -> None:
