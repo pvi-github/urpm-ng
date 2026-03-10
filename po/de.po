@@ -4442,10 +4442,6 @@ msgstr "Entdeckte Peers im LAN:\n"
 msgid "Peer"
 msgstr "Peer"
 
-#: urpm/cli/commands/peer.py:55 urpm/cli/commands/appstream.py:84
-msgid "Media"
-msgstr "Medien"
-
 #: urpm/cli/commands/peer.py:55
 msgid "Last seen"
 msgstr "Zuletzt gesehen"
@@ -6102,10 +6098,6 @@ msgid "URL"
 msgstr "URL"
 
 #: urpm/cli/commands/server.py
-msgid "Status"
-msgstr "Status"
-
-#: urpm/cli/commands/server.py
 msgid "Priority"
 msgstr "Priorität"
 
@@ -6177,7 +6169,7 @@ msgstr "benötigt von"
 #: urpm/cli/helpers/package.py
 #, python-brace-format
 msgid "Warning: '{pkg}' is only provided by {provider}"
-msgstr "Warnung: „{pkg}" wird nur von {provider} bereitgestellt"
+msgstr "Warnung: „{pkg}\" wird nur von {provider} bereitgestellt"
 
 #: urpm/cli/helpers/package.py
 #, python-brace-format
@@ -6199,12 +6191,12 @@ msgstr "Trotzdem installieren? [j/N] "
 #: urpm/cli/helpers/package.py
 #, python-brace-format
 msgid "Multiple providers for '{pkg}':"
-msgstr "Mehrere Anbieter für „{pkg}":"
+msgstr "Mehrere Anbieter für „{pkg}\":"
 
 #: urpm/cli/helpers/package.py
 #, python-brace-format
 msgid "Multiple installed families provide '{pkg}':"
-msgstr "Mehrere installierte Familien bieten „{pkg}" an:"
+msgstr "Mehrere installierte Familien bieten „{pkg}\" an:"
 
 #: urpm/cli/helpers/kernel.py
 #, python-brace-format

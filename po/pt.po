@@ -3871,10 +3871,6 @@ msgstr "Data"
 msgid "Action"
 msgstr "Ação"
 
-#: urpm/cli/commands/history.py:149 urpm/cli/commands/peer.py:55
-msgid "Status"
-msgstr "Estado"
-
 #: urpm/cli/commands/history.py:149
 msgid "Packages"
 msgstr "Pacotes"
@@ -6089,10 +6085,6 @@ msgstr "Taxa de sucesso"
 #: urpm/cli/commands/server.py
 msgid "Last check"
 msgstr "Última verificação"
-
-#: urpm/cli/commands/server.py
-msgid "Media"
-msgstr "Repositórios"
 
 #: urpm/cli/commands/server.py
 msgid "No linked media"
