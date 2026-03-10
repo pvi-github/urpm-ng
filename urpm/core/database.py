@@ -1224,17 +1224,29 @@ class PackageDatabase(
 
                 for pkg in obsolete_packages:
                     filename = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}.rpm"
-                    # Remove from cache_files and get path
-                    cache_entry = self.get_cache_file(filename, media_id)
-                    if cache_entry:
-                        file_path = base_dir / "medias" / cache_entry['file_path']
+                    # Query and delete cache_files using the SAME connection
+                    # already in transaction.  Calling self.get_cache_file() /
+                    # self.delete_cache_file() would use _get_connection() which
+                    # may return a different thread-local connection, and
+                    # delete_cache_file() does its own commit() — which would
+                    # prematurely commit the import transaction, corrupting the DB.
+                    cursor = conn.execute(
+                        "SELECT file_path FROM cache_files WHERE filename = ? AND media_id = ?",
+                        (filename, media_id)
+                    )
+                    cache_row = cursor.fetchone()
+                    if cache_row:
+                        file_path = base_dir / "medias" / cache_row['file_path']
                         try:
                             if file_path.exists():
                                 os.unlink(file_path)
                                 pkg_logger.debug(f"Deleted obsolete cached file: {filename}")
                         except OSError as e:
                             pkg_logger.warning(f"Could not delete {file_path}: {e}")
-                        self.delete_cache_file(filename, media_id)
+                        conn.execute(
+                            "DELETE FROM cache_files WHERE filename = ? AND media_id = ?",
+                            (filename, media_id)
+                        )
 
                 # Delete obsolete packages from DB
                 obsolete_ids = [p['id'] for p in obsolete_packages]
