@@ -3930,10 +3930,6 @@ msgstr "Date"
 msgid "Action"
 msgstr "Action"
 
-#: urpm/cli/commands/history.py:149 urpm/cli/commands/peer.py:55
-msgid "Status"
-msgstr "Statut"
-
 #: urpm/cli/commands/history.py:149
 msgid "Packages"
 msgstr "Paquets"
@@ -4467,10 +4463,6 @@ msgstr "Pairs découverts sur le LAN :\n"
 #: urpm/cli/commands/peer.py:110
 msgid "Peer"
 msgstr "Pair"
-
-#: urpm/cli/commands/peer.py:55 urpm/cli/commands/appstream.py:84
-msgid "Media"
-msgstr "Média"
 
 #: urpm/cli/commands/peer.py:55
 msgid "Last seen"

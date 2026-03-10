@@ -6098,10 +6098,6 @@ msgid "URL"
 msgstr "URL"
 
 #: urpm/cli/commands/server.py
-msgid "Status"
-msgstr "Estado"
-
-#: urpm/cli/commands/server.py
 msgid "Priority"
 msgstr "Prioridad"
 
@@ -6124,10 +6120,6 @@ msgstr "Tasa de éxito"
 #: urpm/cli/commands/server.py
 msgid "Last check"
 msgstr "Última comprobación"
-
-#: urpm/cli/commands/server.py
-msgid "Media"
-msgstr "Repositorios"
 
 #: urpm/cli/commands/server.py
 msgid "No linked media"
