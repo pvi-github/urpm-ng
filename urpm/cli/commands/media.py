@@ -905,6 +905,7 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
     from .. import colors
     from ...core.sync import sync_media, sync_all_media, sync_files_xml, sync_all_files_xml
     from ...core.install import check_root
+    from ...core.sync_lock import SyncLock
     import threading
 
     # Check root privileges (media update writes to database)
@@ -912,6 +913,31 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
         print(colors.error(_("Error: root privileges required for media update")))
         print(_("Try: sudo urpm media update"))
         return 1
+
+    # Prevent concurrent media syncs (CLI or daemon)
+    sync_lock = SyncLock()
+    acquired, holder_pid = sync_lock.try_acquire()
+    if not acquired:
+        if holder_pid:
+            print(colors.warning(
+                _("Media update already in progress (PID {pid})").format(pid=holder_pid)
+            ))
+        else:
+            print(colors.warning(_("Media update already in progress")))
+        return 0
+
+    try:
+        return _do_media_update(args, db, sync_lock)
+    finally:
+        sync_lock.release()
+
+
+def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
+    """Execute media update (called with sync lock held)."""
+    from .. import colors
+    from ...core.sync import sync_media, sync_all_media, sync_files_xml, sync_all_files_xml
+    from ...i18n import _, ngettext
+    import threading
 
     sync_files = getattr(args, 'files', False)
     skip_appstream = getattr(args, 'no_appstream', False)
@@ -1031,119 +1057,134 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
         else:
             print("\n" + colors.info(_("Total")) + ": " + colors.success(str(total_packages)) + " " + _("packages from {count} media in {elapsed}").format(count=len(results), elapsed=format_elapsed(sync_elapsed)))
 
-        # Sync files.xml if requested
+        # Sync files.xml if requested (separate lock from metadata sync)
         if sync_files:
+            from ...core.sync_lock import SyncLock, FILES_LOCK_PATH
+            files_sync_lock = SyncLock(FILES_LOCK_PATH)
+            f_acquired, f_holder = files_sync_lock.try_acquire()
+            if not f_acquired:
+                if f_holder:
+                    print(colors.warning(
+                        _("files.xml sync already in progress (PID {pid})").format(pid=f_holder)
+                    ))
+                else:
+                    print(colors.warning(_("files.xml sync already in progress")))
+                return 1 if errors else 0
+
             print(_("\nSyncing files.xml..."))
 
-            # Track status for each media (same pattern as synthesis sync)
-            # Filter by version/arch like sync_all_files_xml does
-            from ...core.config import get_accepted_versions
-            import platform
+            try:
+                # Track status for each media (same pattern as synthesis sync)
+                # Filter by version/arch like sync_all_files_xml does
+                from ...core.config import get_accepted_versions
+                import platform
 
-            accepted_versions, _ignored, _ignored2 = get_accepted_versions(db)
-            arch = platform.machine()
+                accepted_versions, _ignored, _ignored2 = get_accepted_versions(db)
+                arch = platform.machine()
 
-            files_status = {}
-            files_lock = threading.Lock()
-            files_media_list = []
-            for m in db.list_media():
-                if not m['enabled'] or not m.get('sync_files'):
-                    continue
-                # Same filter as sync_all_files_xml
-                media_version = m.get('mageia_version', '')
-                media_arch = m.get('architecture', '')
-                if accepted_versions:
-                    version_ok = not media_version or media_version in accepted_versions
-                else:
-                    version_ok = True
-                arch_ok = not media_arch or not arch or media_arch == arch
-                if version_ok and arch_ok:
-                    files_media_list.append(m['name'])
-            files_num_lines = 0
-
-            def files_progress(media_name, stage, dl_current, dl_total, import_current, import_total):
-                nonlocal files_num_lines
-                with files_lock:
-                    # Build status string
-                    if stage == 'checking':
-                        status = "checking..."
-                    elif stage == 'skipped':
-                        status = "up-to-date"
-                    elif stage == 'downloading':
-                        if dl_total > 0:
-                            pct = int(100 * dl_current / dl_total)
-                            status = f"downloading {pct}%"
-                        else:
-                            status = "downloading..."
-                    elif stage == 'downloaded':
-                        status = "downloaded"
-                    elif stage in ('syncing', 'analyzing', 'diff'):
-                        status = "analyzing..."
-                    elif stage == 'importing':
-                        if import_total > 0:
-                            pct = min(99, int(100 * import_current / import_total))
-                            status = f"importing {pct}%"
-                        else:
-                            status = "importing..."
-                    elif stage == 'indexing':
-                        status = "creating indexes..."
-                    elif stage == 'done':
-                        status = colors.success(_("done"))
-                    elif stage == 'error':
-                        status = colors.error(_("error"))
+                files_status = {}
+                files_lock = threading.Lock()
+                files_media_list = []
+                for m in db.list_media():
+                    if not m['enabled'] or not m.get('sync_files'):
+                        continue
+                    # Same filter as sync_all_files_xml
+                    media_version = m.get('mageia_version', '')
+                    media_arch = m.get('architecture', '')
+                    if accepted_versions:
+                        version_ok = not media_version or media_version in accepted_versions
                     else:
-                        status = stage
+                        version_ok = True
+                    arch_ok = not media_arch or not arch or media_arch == arch
+                    if version_ok and arch_ok:
+                        files_media_list.append(m['name'])
+                files_num_lines = 0
 
-                    files_status[media_name] = status
+                def files_progress(media_name, stage, dl_current, dl_total, import_current, import_total):
+                    nonlocal files_num_lines
+                    with files_lock:
+                        # Build status string
+                        if stage == 'checking':
+                            status = "checking..."
+                        elif stage == 'skipped':
+                            status = "up-to-date"
+                        elif stage == 'downloading':
+                            if dl_total > 0:
+                                pct = int(100 * dl_current / dl_total)
+                                status = f"downloading {pct}%"
+                            else:
+                                status = "downloading..."
+                        elif stage == 'downloaded':
+                            status = "downloaded"
+                        elif stage in ('syncing', 'analyzing', 'diff'):
+                            status = "analyzing..."
+                        elif stage == 'importing':
+                            if import_total > 0:
+                                pct = min(99, int(100 * import_current / import_total))
+                                status = f"importing {pct}%"
+                            else:
+                                status = "importing..."
+                        elif stage == 'indexing':
+                            status = "creating indexes..."
+                        elif stage == 'done':
+                            status = colors.success(_("done"))
+                        elif stage == 'error':
+                            status = colors.error(_("error"))
+                        else:
+                            status = stage
 
-                    # Redraw all status lines
-                    if files_num_lines > 0:
-                        print(f"\033[{files_num_lines}F", end='', flush=True)
+                        files_status[media_name] = status
 
-                    for name in files_media_list:
-                        st = files_status.get(name, "waiting...")
-                        print(f"\033[K  {name}: {st}")
+                        # Redraw all status lines
+                        if files_num_lines > 0:
+                            print(f"\033[{files_num_lines}F", end='', flush=True)
 
-                    files_num_lines = len(files_media_list)
+                        for name in files_media_list:
+                            st = files_status.get(name, "waiting...")
+                            print(f"\033[K  {name}: {st}")
 
-            # Run parallel sync (force=False to respect MD5 checks)
-            files_start = time.time()
-            files_results = sync_all_files_xml(
-                db,
-                progress_callback=files_progress,
-                force=False,
-                max_workers=4,
-                filter_version=True
-            )
-            files_elapsed = time.time() - files_start
+                        files_num_lines = len(files_media_list)
 
-            # Clear progress lines
-            if files_num_lines > 0:
-                print(f"\033[{files_num_lines}F", end='', flush=True)
-                for _i in range(files_num_lines):
-                    print("\033[K", end='')
-                    print("\033[1B", end='')
-                print(f"\033[{files_num_lines}F", end='', flush=True)
+                # Run parallel sync (force=False to respect MD5 checks)
+                files_start = time.time()
+                files_results = sync_all_files_xml(
+                    db,
+                    progress_callback=files_progress,
+                    force=False,
+                    max_workers=4,
+                    filter_version=True
+                )
+                files_elapsed = time.time() - files_start
 
-            # Print final results
-            for name, result in files_results:
-                if result.success:
-                    if result.skipped:
-                        print(f"  {name}: " + _("up-to-date"))
+                # Clear progress lines
+                if files_num_lines > 0:
+                    print(f"\033[{files_num_lines}F", end='', flush=True)
+                    for _i in range(files_num_lines):
+                        print("\033[K", end='')
+                        print("\033[1B", end='')
+                    print(f"\033[{files_num_lines}F", end='', flush=True)
+
+                # Print final results
+                for name, result in files_results:
+                    if result.success:
+                        if result.skipped:
+                            print(f"  {name}: " + _("up-to-date"))
+                        else:
+                            count_str = colors.success(f"{result.file_count:,}") if result.file_count > 0 else "0"
+                            print(f"  {name}: " + count_str + " " + ngettext("file", "files", result.file_count))
                     else:
-                        count_str = colors.success(f"{result.file_count:,}") if result.file_count > 0 else "0"
-                        print(f"  {name}: " + count_str + " " + ngettext("file", "files", result.file_count))
+                        print("  " + colors.error(name) + ": " + _("ERROR - {error}").format(error=result.error))
+
+                # Final summary
+                total_files = sum(r.file_count for _name, r in files_results if r.success)
+                files_errors = sum(1 for _name, r in files_results if not r.success)
+
+                if files_errors > 0:
+                    print("\n" + colors.info(_("Total files")) + ": " + colors.success(f'{total_files:,}') + " " + _("in {elapsed} ({errors} errors)").format(elapsed=format_elapsed(files_elapsed), errors=colors.error(str(files_errors))))
                 else:
-                    print("  " + colors.error(name) + ": " + _("ERROR - {error}").format(error=result.error))
-
-            # Final summary
-            total_files = sum(r.file_count for _name, r in files_results if r.success)
-            files_errors = sum(1 for _name, r in files_results if not r.success)
-
-            if files_errors > 0:
-                print("\n" + colors.info(_("Total files")) + ": " + colors.success(f'{total_files:,}') + " " + _("in {elapsed} ({errors} errors)").format(elapsed=format_elapsed(files_elapsed), errors=colors.error(str(files_errors))))
-            else:
-                print("\n" + colors.info(_("Total files")) + ": " + colors.success(f'{total_files:,}') + " " + _("in {elapsed}").format(elapsed=format_elapsed(files_elapsed)))
+                    print("\n" + colors.info(_("Total files")) + ": " + colors.success(f'{total_files:,}') + " " + _("in {elapsed}").format(elapsed=format_elapsed(files_elapsed)))
+            finally:
+                files_sync_lock.release()
 
         return 1 if errors else 0
 

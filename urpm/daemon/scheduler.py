@@ -281,6 +281,8 @@ class Scheduler:
         """Check if metadata needs refreshing using HTTP HEAD.
 
         Compares remote Last-Modified/Content-Length with local file.
+        Acquires the sync lock for the entire check so that a concurrent
+        ``urpm media update`` cannot interleave.
         """
         logger.info("Running scheduled metadata check")
 
@@ -288,6 +290,24 @@ class Scheduler:
             logger.warning("No database connection")
             return
 
+        from ..core.sync_lock import SyncLock
+
+        lock = SyncLock()
+        acquired, holder_pid = lock.try_acquire()
+        if not acquired:
+            logger.info(
+                "Metadata check skipped, sync lock held by PID %s",
+                holder_pid,
+            )
+            return
+
+        try:
+            self._run_metadata_check_locked()
+        finally:
+            lock.release()
+
+    def _run_metadata_check_locked(self):
+        """Inner metadata check — called with sync lock held."""
         from ..core.config import get_hostname_from_url, get_media_local_path
 
         # Check each enabled media
@@ -1030,6 +1050,17 @@ class Scheduler:
 
         logger.info("Running scheduled files.xml sync")
 
+        from ..core.sync_lock import SyncLock, FILES_LOCK_PATH
+
+        lock = SyncLock(FILES_LOCK_PATH)
+        acquired, holder_pid = lock.try_acquire()
+        if not acquired:
+            logger.info(
+                "files.xml sync skipped, sync lock held by PID %s",
+                holder_pid,
+            )
+            return
+
         try:
             from ..core.sync import sync_all_files_xml
 
@@ -1055,11 +1086,13 @@ class Scheduler:
 
         except Exception as e:
             logger.error(f"files.xml sync error: {e}")
+        finally:
+            lock.release()
 
     def _refresh_media(self, media_name: str):
         """Refresh metadata for a specific media.
 
-        Uses own database connection.
+        Caller must hold the sync lock (acquired in ``_run_metadata_check``).
         """
         from ..core.sync import sync_media
 

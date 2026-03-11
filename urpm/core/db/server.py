@@ -202,11 +202,12 @@ class ServerMixin:
             set_parts.append("failure_count = COALESCE(failure_count, 0) + 1")
 
         params.append(server_id)
-        conn.execute(
-            f"UPDATE server SET {', '.join(set_parts)} WHERE id = ?",
-            params
-        )
-        conn.commit()
+        with self._lock:
+            conn.execute(
+                f"UPDATE server SET {', '.join(set_parts)} WHERE id = ?",
+                params
+            )
+            conn.commit()
 
     def get_servers_for_media(self, media_id: int, enabled_only: bool = True,
                                limit: int = None) -> List[Dict]:
