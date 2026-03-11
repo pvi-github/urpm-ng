@@ -1035,6 +1035,12 @@ class Controller:
             self.view.on_download_progress(current, total, bytes_done, bytes_total, slot_dicts)
 
         def on_install_progress(name: str, current: int, total: int):
+            # The RPM callback sends "(updating rpmdb)" / "(rpmdb progress)"
+            # when the transaction is complete and RPM is syncing its database.
+            # Switch the progress widget to the rpmdb_sync phase.
+            if name.startswith("(updating rpmdb)") or name.startswith("(rpmdb progress)"):
+                self.view.start_rpmdb_sync()
+                return
             # Use appropriate method based on action type
             if action == 'erase':
                 self.view.on_erase_progress(name, current, total)
