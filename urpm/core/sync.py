@@ -1024,12 +1024,13 @@ def sync_all_files_xml(
 
     # Filter by version and architecture if requested
     if filter_version:
-        from .config import get_accepted_versions
+        from .config import get_accepted_versions, get_compatible_arches
         import platform
 
         # Get accepted versions (respects version-mode config)
         accepted_versions, _, _ = get_accepted_versions(db)
         arch = platform.machine()
+        compatible_arches = get_compatible_arches(arch)
 
         filtered_media = []
         for m in all_media:
@@ -1040,8 +1041,8 @@ def sync_all_files_xml(
                 version_ok = not media_version or media_version in accepted_versions
             else:
                 version_ok = True  # No filtering if accepted_versions is None
-            # Check arch match (accept if media arch is empty or matches)
-            arch_ok = not media_arch or not arch or media_arch == arch
+            # Check arch match (accept if media arch is empty or compatible)
+            arch_ok = not media_arch or media_arch in compatible_arches
             if version_ok and arch_ok:
                 filtered_media.append(m)
         all_media = filtered_media

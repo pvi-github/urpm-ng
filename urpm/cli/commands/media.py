@@ -1076,11 +1076,12 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
             try:
                 # Track status for each media (same pattern as synthesis sync)
                 # Filter by version/arch like sync_all_files_xml does
-                from ...core.config import get_accepted_versions
+                from ...core.config import get_accepted_versions, get_compatible_arches
                 import platform
 
                 accepted_versions, _ignored, _ignored2 = get_accepted_versions(db)
                 arch = platform.machine()
+                compatible_arches = get_compatible_arches(arch)
 
                 files_status = {}
                 files_lock = threading.Lock()
@@ -1095,7 +1096,7 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
                         version_ok = not media_version or media_version in accepted_versions
                     else:
                         version_ok = True
-                    arch_ok = not media_arch or not arch or media_arch == arch
+                    arch_ok = not media_arch or media_arch in compatible_arches
                     if version_ok and arch_ok:
                         files_media_list.append(m['name'])
                 files_num_lines = 0

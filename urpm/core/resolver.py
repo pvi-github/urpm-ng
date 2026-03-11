@@ -318,8 +318,12 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         self.urpm_root = urpm_root
         self.install_recommends = install_recommends
         self.ignore_installed = ignore_installed
-        # Default allowed architectures: system arch + noarch
-        self.allowed_arches = allowed_arches if allowed_arches is not None else [arch, 'noarch']
+        # Default allowed architectures: system arch + compatible arches + noarch
+        if allowed_arches is not None:
+            self.allowed_arches = allowed_arches
+        else:
+            from .config import get_compatible_arches
+            self.allowed_arches = get_compatible_arches(arch)
         self.pool = None
         self._solvable_to_pkg = {}  # Map solvable id -> pkg dict
         self._installed_count = 0  # Number of installed packages loaded

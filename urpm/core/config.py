@@ -429,6 +429,29 @@ def get_system_version(root: str = None) -> Optional[str]:
     return version
 
 
+def get_compatible_arches(arch: str) -> list:
+    """Return the list of RPM architectures compatible with *arch*.
+
+    On x86_64 systems RPM can natively install i586 and i686 packages
+    (multilib).  This function encodes that compatibility so that media
+    filtering and resolver setup accept the right set of architectures.
+
+    The result always includes ``'noarch'``.
+
+    Args:
+        arch: System architecture (e.g. ``'x86_64'``, ``'aarch64'``).
+
+    Returns:
+        List of compatible architectures, most specific first.
+    """
+    # x86_64 can run 32-bit x86 code (multilib)
+    if arch == 'x86_64':
+        return ['x86_64', 'i686', 'i586', 'noarch']
+    # ARM 64-bit can run armv7hl in some setups, but Mageia doesn't
+    # ship multilib ARM — keep it simple for now.
+    return [arch, 'noarch']
+
+
 def get_accepted_versions(db, system_version: str = None) -> tuple:
     """Determine which media versions to accept based on configured media.
 
