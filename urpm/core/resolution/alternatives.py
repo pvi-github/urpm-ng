@@ -88,7 +88,8 @@ class AlternativesMixin:
                         required_by = "dependency"
 
                     sorted_providers = self._prioritize_providers(
-                        list(provider_names), max_providers
+                        list(provider_names), max_providers,
+                        capability=base_cap,
                     )
                     alternatives.append(Alternative(
                         capability=base_cap,
@@ -136,7 +137,8 @@ class AlternativesMixin:
                         seen_caps.add(cap_str)
 
                         sorted_providers = self._prioritize_providers(
-                            list(provider_names), max_providers
+                            list(provider_names), max_providers,
+                            capability=base_cap,
                         )
                         alternatives.append(Alternative(
                             capability=base_cap,
@@ -263,14 +265,20 @@ class AlternativesMixin:
 
         return len(missing)
 
-    def _prioritize_providers(self, providers: List[str], max_count: int) -> List[str]:
-        """Prioritize providers based on missing dependencies, locale, and common usage.
+    def _prioritize_providers(self, providers: List[str], max_count: int,
+                              capability: str = None) -> List[str]:
+        """Prioritize providers based on provide version, missing deps, and locale.
 
-        Providers requiring fewer new dependencies are shown first.
+        When *capability* is given, the version each provider declares for
+        that capability is used as the primary sort key (highest first).
+        This ensures that ``b3`` providing ``cc = 3`` ranks above ``b1``
+        providing ``cc = 1``.
 
         Args:
             providers: List of provider package names
             max_count: Maximum number to return
+            capability: Optional capability name — when set, providers are
+                        sorted by descending version of this provide.
 
         Returns:
             Sorted and limited list of providers
@@ -289,27 +297,91 @@ class AlternativesMixin:
         for name in providers:
             missing_deps_cache[name] = self._count_missing_deps(name)
 
+        # Build a map of provider name -> best provide version for *capability*
+        provide_evr: Dict[str, str] = {}
+        if capability and self.pool:
+            cap_dep = self.pool.Dep(capability)
+            for s in self.pool.whatprovides(cap_dep):
+                if s.repo and s.repo != self.pool.installed and s.name in providers:
+                    # Walk the provides to find the version for *capability*
+                    for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                        dep_str = str(dep)
+                        # Format examples: "cc", "cc [= 3]", "cc [>= 2]"
+                        base = dep_str.split('[')[0].strip() if '[' in dep_str else dep_str
+                        if base == capability and '[' in dep_str:
+                            # Extract version string between brackets
+                            ver_part = dep_str.split('[')[1].rstrip(']').strip()
+                            # Remove operator: "= 3" -> "3", ">= 2.1" -> "2.1"
+                            ver = ver_part.split()[-1] if ver_part else ''
+                            # Keep the highest version per provider name
+                            if ver and (s.name not in provide_evr
+                                        or self._evr_compare(ver, provide_evr[s.name]) > 0):
+                                provide_evr[s.name] = ver
+
         def sort_key(name: str) -> tuple:
             name_lower = name.lower()
             missing_count = missing_deps_cache.get(name, 999)
 
-            # Primary sort: by number of missing dependencies (fewer = better)
-            # Secondary sort: locale matching
-            # Tertiary sort: alphabetical
+            # Primary sort: provide version for capability (higher = better, 0 = best)
+            # Negate by using a sortable tuple that puts higher versions first.
+            if provide_evr:
+                evr = provide_evr.get(name)
+                # Packages with a versioned provide sort before those without
+                evr_score = (1,) if evr is None else (0, self._evr_sort_key(evr))
+            else:
+                evr_score = (0,)
 
+            # Secondary sort: missing dependencies (fewer = better)
+            # Tertiary sort: locale matching
+            # Quaternary sort: alphabetical
             locale_score = 2  # Default: no locale match
             if f'-{lang}' in name_lower or name_lower.endswith(f'_{lang}'):
                 locale_score = 0
             else:
-                for i, common in enumerate(common_langs):
+                for common in common_langs:
                     if f'-{common}' in name_lower or name_lower.endswith(f'_{common}'):
                         locale_score = 1
                         break
 
-            return (missing_count, locale_score, name)
+            return (evr_score, missing_count, locale_score, name)
 
         sorted_providers = sorted(providers, key=sort_key)
         return sorted_providers[:max_count]
+
+    @staticmethod
+    def _evr_sort_key(evr: str) -> tuple:
+        """Convert a version string into a tuple that sorts highest-first.
+
+        Splits on '.' and '-', converts numeric segments to negative ints
+        so that higher numbers sort *before* lower ones in ascending order.
+        """
+        import re
+        parts = re.split(r'[.\-]', evr)
+        key = []
+        for p in parts:
+            if p.isdigit():
+                key.append(-int(p))  # negate so higher versions come first
+            else:
+                key.append(p)
+        return tuple(key)
+
+    @staticmethod
+    def _evr_compare(a: str, b: str) -> int:
+        """Compare two version strings. Returns >0 if a > b, <0 if a < b."""
+        import re
+        def split(v):
+            return [int(x) if x.isdigit() else x for x in re.split(r'[.\-]', v)]
+        sa, sb = split(a), split(b)
+        for x, y in zip(sa, sb):
+            if type(x) == type(y):
+                if x < y:
+                    return -1
+                if x > y:
+                    return 1
+            else:
+                # int vs str: int sorts first
+                return -1 if isinstance(x, int) else 1
+        return len(sa) - len(sb)
 
     def _is_library_package(self, name: str) -> bool:
         """Check if a package name looks like a library package.
@@ -481,7 +553,10 @@ class AlternativesMixin:
                         # Multiple providers - create an alternative for user choice
                         # Sort by missing deps count (fewer deps = shown first)
                         provider_names = [p.name for p in valid_providers]
-                        sorted_providers = self._prioritize_providers(provider_names, len(provider_names))
+                        sorted_providers = self._prioritize_providers(
+                            provider_names, len(provider_names),
+                            capability=dep_str,
+                        )
                         alternatives.append(Alternative(
                             capability=dep_str,
                             required_by=f"suggested by {pkg_name}",

@@ -529,7 +529,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                         # Multiple providers - need user choice before resolving
                         # Sort by version (descending) to show newest first
                         sorted_providers = self._prioritize_providers(
-                            list(provider_names), max_count=10
+                            list(provider_names), max_count=10,
+                            capability=name,
                         )
                         return Resolution(
                             success=False,
