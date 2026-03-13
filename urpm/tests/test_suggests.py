@@ -9,13 +9,11 @@ These tests verify:
 6. Cycle detection (A->B->C->A)
 """
 
-import pytest
-from unittest.mock import Mock, MagicMock, patch
-from typing import List, Dict, Set
+from typing import Dict, List
 
 import solv
 
-from urpm.core.resolver import Resolver, Alternative, PackageAction
+from urpm.core.resolver import Resolver
 
 
 class MockSolvable:
@@ -36,9 +34,9 @@ class MockSolvable:
         """Return dependencies based on type."""
         if dep_type == solv.SOLVABLE_SUGGESTS:
             return [MockDep(s) for s in self._suggests]
-        elif dep_type == solv.SOLVABLE_REQUIRES:
+        if dep_type == solv.SOLVABLE_REQUIRES:
             return [MockDep(r) for r in self._requires]
-        elif dep_type == solv.SOLVABLE_PROVIDES:
+        if dep_type == solv.SOLVABLE_PROVIDES:
             return [MockDep(p) for p in self._provides]
         return []
 
@@ -309,7 +307,7 @@ class TestSuggestsIterative:
         # Simulate iterative collection (like main.py should do)
         all_suggests = []
         packages_to_check = ['pkg-a']
-        checked = set(['pkg-a'])
+        checked = {'pkg-a'}
         max_iter = 5
 
         for _ in range(max_iter):
@@ -349,12 +347,10 @@ class TestSuggestsIterative:
         # Simulate iterative collection
         all_suggests = []
         packages_to_check = ['pkg-a']
-        checked = set(['pkg-a'])  # pkg-a is the initial package
+        checked = {'pkg-a'}  # pkg-a is the initial package
         max_iter = 5
-        iterations = 0
 
-        for _ in range(max_iter):
-            iterations += 1
+        for _iteration, _ in enumerate(range(max_iter)):
             suggests, alts = resolver.find_available_suggests(
                 packages_to_check, resolved_packages=list(checked)
             )
@@ -373,7 +369,7 @@ class TestSuggestsIterative:
                 break
 
         # Should complete without hitting max_iter due to infinite loop
-        assert iterations < max_iter, "Possible infinite loop detected"
+        assert _iteration < max_iter, "Possible infinite loop detected"
 
         suggest_names = [s.name for s in all_suggests]
         assert 'pkg-b' in suggest_names

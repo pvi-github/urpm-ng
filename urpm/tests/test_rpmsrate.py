@@ -1,8 +1,9 @@
 """Tests for rpmsrate parser"""
+from pathlib import Path
 
 import pytest
-from pathlib import Path
-from urpm.core.rpmsrate import RpmsrateParser, PackageEntry, Section
+
+from urpm.core.rpmsrate import RpmsrateParser
 
 
 # Sample rpmsrate content for testing
@@ -165,6 +166,7 @@ class TestRpmsrateWithRealFile:
             p.parse()
             return p
         pytest.skip("Real rpmsrate-raw file not found")
+        return None
 
     def test_real_file_has_install_section(self, real_parser):
         """Test that real file has INSTALL section."""
