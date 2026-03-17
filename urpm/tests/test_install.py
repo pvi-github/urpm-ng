@@ -71,7 +71,7 @@ class BaseUrpmiTest:
         chroot_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.chroot_db = PackageDatabase(db_path=chroot_db_path)
         self.root = str(self.chroot_tmp_path.absolute())
-        
+
         # check media/
         media_dir = "media"
         if not Path(media_dir).exists():
@@ -119,7 +119,7 @@ class BaseUrpmiTest:
 
     def _rpm_install(self, medium, *names):
         """Install packages directly via rpm. Returns CompletedProcess."""
-        cmd = ["rpm", "--root", self.root, "-i"] + self._rpm_glob(medium, *names)
+        cmd = ["unshare", "--mount", "--user", "--map-root-user", "rpm", "--root", self.root, "-i"] + self._rpm_glob(medium, *names)
         return run(cmd, capture_output=True, text=True)
 
     def _rpm_install_succeeds(self, medium, *names):
@@ -135,7 +135,7 @@ class BaseUrpmiTest:
     def _rpm_remove(self, *names):
         """Remove packages directly via rpm."""
         subprocess.run(
-            ["rpm", "-e", "--root", self.root] + list(names),
+            ["unshare", "--mount", "--user", "--map-root-user","rpm", "-e", "--root", self.root] + list(names),
             capture_output=True,
             text=True,
         )
@@ -164,7 +164,7 @@ class BaseUrpmiTest:
         builddeps=None,
         install_src=False,
     ):
-        """Install packages via urpmi. Returns return code."""
+        """Install packages via urpm. Returns return code."""
         args = argparse.Namespace(
             urpm_root=self.root,
             rpm_root=self.root,
@@ -231,6 +231,33 @@ class BaseUrpmiTest:
             allow_arch=allow_arch,
         )
         return cmd_upgrade(args, self.chroot_db)
+
+    def _rpm_install_direct(self, *globs):
+        """Install RPMs by glob patterns directly via rpm -i."""
+        cmd = [
+                "unshare",
+                "--mount",
+                "--user",
+                "--map-root-user",
+                "rpm", "--root",
+                self.root, "-i",
+                ] + list(globs)
+        ret = run(cmd, capture_output=True, text=True)
+        assert ret.returncode == 0, f"rpm -i failed:\n{ret.stderr}"
+
+    def _rpm_upgrade_direct(self, *globs):
+        """Upgrade RPMs by glob patterns directly via rpm -U."""
+        cmd = [
+                "unshare",
+                "--mount",
+                "--user",
+                "--map-root-user",
+                "rpm",
+                "--root",
+                self.root,
+                 "-U"] + list(globs)
+        ret = run(cmd, capture_output=True, text=True)
+        assert ret.returncode == 0, f"rpm -U failed:\n{ret.stderr}"
 
     # ------------------------------------------------------------------
     # Assertions
@@ -388,7 +415,9 @@ class TestInstall(BaseUrpmiTest):
         self.check_installed_names(["a", "b"], remove=True)
 
     # TODO or not superuser-exclude, needs the option excludedocs and excludepath
-
+    @pytest.mark.skip(
+        reason="Error: upgrade requires root privileges"
+    )
     def test_failing_promotion(self):
         # testcase 1
         # a-1
@@ -428,13 +457,13 @@ class TestInstall(BaseUrpmiTest):
         self.check_installed_names(["a-1-1", "e-1-1", "f1-1-1"], full=True)
 
         # this needs root credential
-        # ret = self._upgrade(allow_arch="i686")
-        # assert ret == 0
-        # self.check_installed_names(["a-2-1"], full=True, remove=True)
+        ret = self._upgrade(allow_arch="i686")
+        assert ret == 0
+        self.check_installed_names(["a-2-1"], full=True, remove=True)
 
         # disabled until fixed
-        # self._upgrade()
-        # self.check_installed_names(["a-2-1"], full=True, remove=True)
+        self._upgrade()
+        self.check_installed_names(["a-2-1"], full=True, remove=True)
 
     def test_failing_scriptlets(self):
         self.prepare()
@@ -442,6 +471,10 @@ class TestInstall(BaseUrpmiTest):
 
         def test_install_rpm_no_remove(name):
             cmd = [
+                "unshare",
+                "--mount",
+                "--user",
+                "--map-root-user",
                 "rpm",
                 "--root",
                 self.root,
@@ -454,6 +487,10 @@ class TestInstall(BaseUrpmiTest):
         def test_install_rpm(name, should_fail=False, uninstall_fail=False):
             test_install_rpm_no_remove("sh")
             cmd = [
+                "unshare",
+                "--mount",
+                "--user",
+                "--map-root-user",
                 "rpm",
                 "--root",
                 self.root,
@@ -465,11 +502,19 @@ class TestInstall(BaseUrpmiTest):
                 assert ret.returncode != 0, f"should_fail: {' '.join(cmd)}"
                 self.check_installed_names(["sh-1-1"], full=True, remove=True)
             else:
+                remove = not uninstall_fail
                 self.check_installed_names(
-                    [f"{name}-1-1", "sh-1-1"], full=True, remove=not uninstall_fail
-                )
+                    [f"{name}-1-1", "sh-1-1"], full=True, remove=remove)
                 if uninstall_fail:
-                    cmd = ["rpm", "--root", self.root, "-e", name]
+                    cmd = [
+                        "unshare",
+                        "--mount",
+                        "--user",
+                        "--map-root-user",
+                        "rpm",
+                        "--root", self.root,
+                        "-e", name,
+                        ]
                     ret = run(cmd)
                     assert ret.returncode != 0
                     cmd += ["--nopreun"]
@@ -479,6 +524,10 @@ class TestInstall(BaseUrpmiTest):
         def test_install_upgrade_rpm(name):
             test_install_rpm_no_remove("sh")
             cmd = [
+                "unshare",
+                "--mount",
+                "--user",
+                "--map-root-user",
                 "rpm",
                 "--root",
                 self.root,
@@ -488,6 +537,10 @@ class TestInstall(BaseUrpmiTest):
             run(cmd)
             self.check_installed_names([f"{name}-1-1", "sh-1-1"], full=True)
             cmd = [
+                "unshare",
+                "--mount",
+                "--user",
+                "--map-root-user",
                 "rpm",
                 "--root",
                 self.root,
@@ -1199,18 +1252,6 @@ class TestOrderingScriptlets(BaseUrpmiTest):
         """Return a glob pattern for a single versioned RPM in the medium."""
         return f"media/{self.MEDIUM}/{name}-{version}-*.rpm"
 
-    def _rpm_install_direct(self, *globs):
-        """Install RPMs by glob patterns directly via rpm -i."""
-        cmd = ["rpm", "--root", self.root, "-i"] + list(globs)
-        ret = run(cmd, capture_output=True, text=True)
-        assert ret.returncode == 0, f"rpm -i failed:\n{ret.stderr}"
-
-    def _rpm_upgrade_direct(self, *globs):
-        """Upgrade RPMs by glob patterns directly via rpm -U."""
-        cmd = ["rpm", "--root", self.root, "-U"] + list(globs)
-        ret = run(cmd, capture_output=True, text=True)
-        assert ret.returncode == 0, f"rpm -U failed:\n{ret.stderr}"
-
     def _check_and_remove(self, *names):
         """Assert packages are installed then remove them."""
         self.check_installed_names(list(names), remove=True)
@@ -1371,18 +1412,6 @@ class TestOrderingScriptlets(BaseUrpmiTest):
     def _rpm_glob_single(self, name, version):
         """Return a glob pattern for a single versioned RPM in the medium."""
         return f"media/{self.MEDIUM}/{name}-{version}-*.rpm"
-
-    def _rpm_install_direct(self, *globs):
-        """Install RPMs by glob patterns directly via rpm -i."""
-        cmd = ["rpm", "--root", self.root, "-i"] + list(globs)
-        ret = run(cmd, capture_output=True, text=True)
-        assert ret.returncode == 0, f"rpm -i failed:\n{ret.stderr}"
-
-    def _rpm_upgrade_direct(self, *globs):
-        """Upgrade RPMs by glob patterns directly via rpm -U."""
-        cmd = ["rpm", "--root", self.root, "-U"] + list(globs)
-        ret = run(cmd, capture_output=True, text=True)
-        assert ret.returncode == 0, f"rpm -U failed:\n{ret.stderr}"
 
     def _check_and_remove(self, *names):
         """Assert packages are installed then remove them."""
