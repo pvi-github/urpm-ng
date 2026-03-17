@@ -18,7 +18,6 @@ def rpmbuild(spec_file:Path, medium_name:str=None):
     cmd += ["--define", "__os_install_post %nil"]
     # is rpm_version needed
     cmd += ["--quiet", "--define", f'_topdir {current_dir}/tmp', '--define', f"_tmppath {current_dir}/tmp", "-bb", "--clean", "--nodeps", str(spec_file.absolute())]
-    print(" ".join(cmd))
     p = run(cmd)
     name = spec_file.stem
     if not medium_name:
@@ -26,7 +25,7 @@ def rpmbuild(spec_file:Path, medium_name:str=None):
     (current_dir /"media" / medium_name).mkdir(parents=True, exist_ok=True)
     run("find tmp/RPMS -type f -name '*.rpm' | xargs -I{} mv {} media/" + medium_name + "/", shell=True)
     return medium_name
-    
+
 def rpmbuild_srpm(spec_file:Path):
     cmd = ["rpmbuild"]
     current_dir = Path.cwd()
@@ -39,12 +38,15 @@ def rpmbuild_srpm(spec_file:Path):
     (current_dir /"media" / medium_name).mkdir(parents=True, exist_ok=True)
     os.system(f"mv tmp/SRPMS/*.rpm media/{medium_name}")
     return medium_name.name
-    
+
 def main():
     #TODO Test if genhdlist2 is installed
     def genhdlist(dir_test:Path):
-        print(dir_test)
-        run(["genhdlist2", "--xml-info", "media/" + dir_test])
+        ret = run(["genhdlist2", "--xml-info", "media/" + dir_test])
+        # ret = run(["python3", "upanier.py", "--xml-info", "media/" + dir_test])
+        if ret.returncode != 0:
+            print(ret.stderr)
+            sys.exit(1)
 
     if Path.cwd().name != "tests":
         print("Must be run from 'tests' directory")
@@ -69,9 +71,9 @@ def main():
             continue
         name = rpmbuild(spec_file)
         if name == "various":
-            os.system(f"cp -r media/{name} media/{name}_nohdlist");
-            os.system(f"cp -r media/{name} media/{name}_no_subdir");
-            os.system(f"genhdlist2 media/{name}_no_subdir");
+            os.system(f"cp -r media/{name} media/{name}_nohdlist")
+            os.system(f"cp -r media/{name} media/{name}_no_subdir")
+            genhdlist(f"{name}_no_subdir")
             Path(f"media/{name} nohdlist").symlink_to(f"{name}_nohdlist")
         genhdlist(name)
 
@@ -88,7 +90,7 @@ def main():
 
     (Path("media") / 'media_info').mkdir(exist_ok=True)
     os.system("cp -r data/media.cfg media/media_info")
-    os.system('gendistrib -s .')
+    os.system('./gendistrib -s .')
 
 
 if __name__ == '__main__':

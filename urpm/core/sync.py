@@ -469,7 +469,8 @@ def sync_media(db: PackageDatabase, media_name: str,
 
             name = candidate['name'] if candidate else candidate_url
             all_errors.append(f"{name}: {attempt.error}")
-            logger.warning(f"Sync failed on {name}: {attempt.error}")
+            # logger.warning(f"Sync failed on {name}: {attempt.error}")
+            print((f"Sync failed on {name}: {attempt.error}"))
 
         if result is None or not result.success:
             return SyncResult(
@@ -801,8 +802,9 @@ def sync_files_xml(
             if server_id:
                 db.update_server_stats(server_id, success=False)
             all_errors.append(f"{server['name']}: {result.error}")
-            logger.warning(f"files.xml download failed on {server['name']}: {result.error}")
+            # logger.warning(f"files.xml download failed on {server['name']}: {result.error}")
 
+            print(f"files.xml download failed on {server['name']}: {result.error}")
     if not files_xml_downloaded:
         return FilesXmlResult(
             success=False,
