@@ -50,6 +50,9 @@ class BaseUrpmiTest:
 
     MEDIUM: str = ""  # override in subclasses that have a fixed medium
 
+    media_dir =  Path(__file__).parent / "media"
+    base_dir = media_dir.parent
+
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
@@ -57,8 +60,8 @@ class BaseUrpmiTest:
     def prepare(self):
         """Reset the chroot and create a fresh PackageDatabase.
         Check that media/ exists or create it """
-        self.tmpdir = "root"
-        self.chroot_tmp_path = Path(self.tmpdir)
+        self.tmpdir =  Path(__file__).parent / "root"
+        self.chroot_tmp_path = self.tmpdir
         shutil.rmtree(self.chroot_tmp_path, ignore_errors=True)
         (self.chroot_tmp_path / "var" / "lib" / "rpm").mkdir(
             parents=True, exist_ok=True
@@ -73,9 +76,11 @@ class BaseUrpmiTest:
         self.root = str(self.chroot_tmp_path.absolute())
 
         # check media/
-        media_dir = "media"
-        if not Path(media_dir).exists():
-            run(["python3", "gen_test_rpms.py"])
+        print(self.base_dir)
+        if not self.media_dir.exists():
+            from urpm.tests.gen_test_rpms import main as main_gen_tests
+            main_gen_tests()
+            # run(["python3", "gen_test_rpms.py"])
 
     # ------------------------------------------------------------------
     # Media management
@@ -85,11 +90,12 @@ class BaseUrpmiTest:
         """Add a medium and sync it.  Uses self.MEDIUM when no path is given."""
         print(f"Adding media {media_path}")
         if media_path is None:
-            media_path = f"media/{self.MEDIUM}"
+            media_path = str(self.media_dir / self.MEDIUM)
             media_name = self.MEDIUM
         else:
+            media_path = str(self.media_dir / Path(media_path).stem)
             media_name = Path(media_path).stem
-
+        print("Media dir ",media_path)
         args = argparse.Namespace(
             custom=[media_name, media_name],
             name=media_name,
@@ -120,7 +126,7 @@ class BaseUrpmiTest:
     def _rpm_install(self, medium, *names):
         """Install packages directly via rpm. Returns CompletedProcess."""
         cmd = ["unshare", "--mount", "--user", "--map-root-user", "rpm", "--root", self.root, "-i"] + self._rpm_glob(medium, *names)
-        return run(cmd, capture_output=True, text=True)
+        return run(cmd, capture_output=True, text=True, cwd = self.base_dir)
 
     def _rpm_install_succeeds(self, medium, *names):
         ret = self._rpm_install(medium, *names)
@@ -138,6 +144,7 @@ class BaseUrpmiTest:
             ["unshare", "--mount", "--user", "--map-root-user","rpm", "-e", "--root", self.root] + list(names),
             capture_output=True,
             text=True,
+            cwd = self.base_dir,
         )
 
     def _rpm_query(self, name):
@@ -145,6 +152,7 @@ class BaseUrpmiTest:
         ret = subprocess.run(
             ["rpm", "-q", "--quiet", "--root", self.root, name],
             capture_output=True,
+            cwd = self.base_dir,
         )
         return ret.returncode == 0
 
@@ -242,7 +250,7 @@ class BaseUrpmiTest:
                 "rpm", "--root",
                 self.root, "-i",
                 ] + list(globs)
-        ret = run(cmd, capture_output=True, text=True)
+        ret = run(cmd, capture_output=True, text=True, cwd = self.base_dir)
         assert ret.returncode == 0, f"rpm -i failed:\n{ret.stderr}"
 
     def _rpm_upgrade_direct(self, *globs):
@@ -256,7 +264,7 @@ class BaseUrpmiTest:
                 "--root",
                 self.root,
                  "-U"] + list(globs)
-        ret = run(cmd, capture_output=True, text=True)
+        ret = run(cmd, capture_output=True, text=True, cwd = self.base_dir)
         assert ret.returncode == 0, f"rpm -U failed:\n{ret.stderr}"
 
     # ------------------------------------------------------------------
@@ -269,6 +277,7 @@ class BaseUrpmiTest:
             ["rpm", "-qa", "--qf", query_format, "--root", self.root],
             capture_output=True,
             text=True,
+            cwd = self.base_dir,
         )
         actual = "".join(sorted(result.stdout.splitlines(keepends=True)))
         expected = "".join(f"{name}\n" for name in sorted(names))
@@ -325,6 +334,7 @@ class BaseUrpmiTest:
             ["rpm", "--eval", "%{_arch}"],
             capture_output=True,
             text=True,
+            cwd = self.base_dir,
         )
         return result.stdout.strip()
 
@@ -479,7 +489,7 @@ class TestInstall(BaseUrpmiTest):
                 "--root",
                 self.root,
                 "-i",
-                f"media/{medium_name}/{name}-*.rpm",
+                str(self.media_dir / medium_name / f"{name}-*.rpm"),
             ]
             run(cmd)
             self.check_installed_names([f"{name}-1-1"], full=True, remove=False)
@@ -495,7 +505,7 @@ class TestInstall(BaseUrpmiTest):
                 "--root",
                 self.root,
                 "-i",
-                f"media/{medium_name}/{name}-*.rpm",
+                str(self.media_dir / medium_name / f"{name}-*.rpm"),
             ]
             ret = run(cmd)
             if should_fail:
@@ -532,7 +542,7 @@ class TestInstall(BaseUrpmiTest):
                 "--root",
                 self.root,
                 "-i",
-                f"media/{medium_name}/{name}-1-*.rpm",
+                str(self.media_dir / medium_name / f"{name}-1-*.rpm"),
             ]
             run(cmd)
             self.check_installed_names([f"{name}-1-1", "sh-1-1"], full=True)
@@ -545,7 +555,7 @@ class TestInstall(BaseUrpmiTest):
                 "--root",
                 self.root,
                 "-U",
-                f"media/{medium_name}/{name}-2-*.rpm",
+                str(self.media_dir / medium_name / f"{name}-2-*.rpm"),
             ]
             ret = run(cmd, capture_output=True, text=True)
             assert ret.returncode == 0
@@ -2202,8 +2212,8 @@ class TestSpecifyMedia(BaseUrpmiTest):
     def prepare(self):
         super().prepare()
         # Create the symlink 'media/various_bis' -> 'media/various'
-        src = Path("media/various")
-        dst = Path("media/various_bis")
+        src = self.media_dir / "various"
+        dst = self.media_dir / "various_bis"
         if not dst.exists():
             dst.symlink_to(src.resolve())
 
@@ -2212,7 +2222,7 @@ class TestSpecifyMedia(BaseUrpmiTest):
             assert ret, f"addmedia failed for '{medium}'"
 
     def _media_dir(self, medium):
-        return str(Path(f"media/{medium}").absolute())
+        return str((self.media_dir / medium).absolute())
 
     # ------------------------------------------------------------------
     # Helpers mirroring sub test_urpmq / sub test_urpmi
