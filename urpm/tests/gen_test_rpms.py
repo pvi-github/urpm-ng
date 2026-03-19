@@ -38,9 +38,10 @@ def rpmbuild_srpm(spec_file:Path, base_dir: Path):
 
 def main():
     #TODO Test if genhdlist2 is installed
+
     def genhdlist(dir_test:Path):
         # ret = run(["genhdlist2", "--xml-info", "media/" + dir_test], cwd=base_dir)
-        ret = run(["python3", "upanier.py", "--xml-info", "media/" + dir_test], cwd=base_dir)
+        ret = run(genmedia_cmd + ["--xml-info", "media/" + dir_test], cwd=base_dir)
         if ret.returncode != 0:
             print(ret.stderr)
             sys.exit(1)
@@ -54,7 +55,33 @@ def main():
     else:
         print("Must be run from 'urpm/tests' directory")
         sys.exit(0)
-    print(base_dir.absolute())
+
+    # Look for gendistrib executable
+    gendistrib_cmd = ''
+    for path in os.environ.get('PATH', '').split(':') + [base_dir]:
+        if os.path.isfile(os.path.join(path, 'gendistrib')):
+            gendistrib_cmd = os.path.join(path, 'gendistrib')
+            break
+    if gendistrib_cmd == '':
+        print("Executable gendistrib is missing, install it with rpmtools")
+        sys.exit(1)
+
+    # Look for upanier
+    genmedia_cmd = []
+    for path in os.environ.get('PATH', '').split(':') + [base_dir]:
+        if os.path.isfile(os.path.join(path, 'upanier.py')):
+            genmedia_cmd = ["/usr/bin/python3", os.path.join(path, 'upanier.py')]
+            break
+    if genmedia_cmd == []:
+        # try fallback with genhdlist2
+        for path in os.environ.get('PATH', '').split(':') + [base_dir]:
+            if os.path.isfile(os.path.join(path, 'genhdlist2')):
+                genmedia_cmd = [os.path.join(path, 'genhdlist2')]
+                break
+    if genmedia_cmd == []:
+        print("Executable for generating media data is missing, install upanier or genhdlist2")
+        sys.exit(1)
+
     # cleaning previous tests
     for to_delete in ("media", "tmp"):
         shutil.rmtree(base_dir / to_delete, ignore_errors=True)
@@ -85,15 +112,15 @@ def main():
         genhdlist(name)
 
     name = 'rpm-i586-to-i686'
-    run( ["cp", "-r", f"data/{name}", "media"], cwd=base_dir)
+    run( ["cp", "-r", f"data/{name}", "media"], cwd=base_dir, check=True)
     genhdlist(name)
 
     (base_dir / 'media/reconfig').mkdir(exist_ok=True)
-    run( ["cp", "-r", "data/reconfig.urpmi", "media/reconfig"], cwd=base_dir)
+    run( ["cp", "-r", "data/reconfig.urpmi", "media/reconfig"], cwd=base_dir, check=True)
 
     (base_dir / 'media/media_info').mkdir(exist_ok=True)
-    run( ["cp", "-r", "data/media.cfg", "media/media_info"], cwd=base_dir)
-    run([(base_dir / 'gendistrib').absolute(),'-s', base_dir.absolute()])
+    run( ["cp", "-r", "data/media.cfg", "media/media_info"], cwd=base_dir, check=True)
+    run([gendistrib_cmd,'-s', base_dir.absolute()], check=True)
 
 
 if __name__ == '__main__':
