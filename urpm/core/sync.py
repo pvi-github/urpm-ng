@@ -5,6 +5,7 @@ Downloads synthesis/hdlist files from media sources and imports into cache.
 """
 
 import hashlib
+import logging
 import shutil
 import tempfile
 import time
@@ -19,6 +20,8 @@ from .synthesis import parse_synthesis
 from .hdlist import parse_hdlist
 from .database import PackageDatabase
 
+
+logger = logging.getLogger(__name__)
 
 # Default paths for media metadata
 SYNTHESIS_PATH = "media_info/synthesis.hdlist.cz"
