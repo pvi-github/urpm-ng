@@ -67,7 +67,7 @@ class Controller:
 
         # State
         self.filter_state = FilterState()
-        self.selection: Set[str] = set()  # Selected package names
+        self.selection: Set[str] = set()  # Selected package NEVRAs
         self._packages: List[PackageDisplayInfo] = []
         self._installed_cache: Dict[str, str] = {}  # name -> version
         self._installed_packages: List[dict] = []  # Full list for filtering
@@ -102,12 +102,6 @@ class Controller:
         # checkboxes in FilterZone reflect reality from the start.
         if self._upgradeable_packages:
             self.filter_state.states = {PackageState.UPGRADES, PackageState.INSTALLED}
-            # Pre-select all upgradeable packages so user just clicks "Màj"
-            for name_lower in self._upgradeable_packages:
-                for p in self._installed_packages:
-                    if p['name'].lower() == name_lower:
-                        self.selection.add(p['name'])
-                        break
         else:
             self.filter_state.states = {PackageState.INSTALLED}
 
@@ -116,8 +110,11 @@ class Controller:
 
         self._refresh_packages()
 
-        # Update selection display after packages are loaded
-        if self.selection:
+        # Pre-select all upgradeable packages using their NEVRAs from the display list
+        if self._upgradeable_packages:
+            for pkg in self._packages:
+                if pkg.has_update:
+                    self.selection.add(pkg.nevra)
             self._update_selection_display()
 
     def refresh_after_transaction(self) -> None:
@@ -702,7 +699,10 @@ class Controller:
         return sections
 
     def _convert_to_display_info(self, packages: List[dict]) -> List[PackageDisplayInfo]:
-        """Convert database results to display info."""
+        """Convert database results to display info.
+
+        Marks older versions of multi-version packages with is_latest=False.
+        """
         from .models import InstallReason
 
         # Map string reasons to enum
@@ -711,6 +711,15 @@ class Controller:
             'dependency': InstallReason.DEPENDENCY,
             'orphan': InstallReason.ORPHAN,
         }
+
+        # Detect latest version per (name, arch) for multi-version marking
+        latest_versions: Dict[tuple, str] = {}  # (name, arch) -> "version-release"
+        for p in packages:
+            key = (p['name'], p.get('arch', 'x86_64'))
+            vr = f"{p.get('version', '')}-{p.get('release', '')}"
+            existing = latest_versions.get(key)
+            if existing is None or self._compare_vr(vr, existing) > 0:
+                latest_versions[key] = vr
 
         result = []
         for i, p in enumerate(packages, start=1):
@@ -721,7 +730,12 @@ class Controller:
             reason_str = p.get('install_reason')
             install_reason = reason_map.get(reason_str) if reason_str else None
 
-            result.append(PackageDisplayInfo(
+            # Check if this is the latest version for this (name, arch)
+            key = (p['name'], p.get('arch', 'x86_64'))
+            vr = f"{p.get('version', '')}-{p.get('release', '')}"
+            is_latest = (vr == latest_versions.get(key))
+
+            pkg_info = PackageDisplayInfo(
                 name=p['name'],
                 version=p.get('version', ''),
                 release=p.get('release', ''),
@@ -731,10 +745,53 @@ class Controller:
                 installed_version=installed_version,
                 has_update=p.get('has_update', False),
                 install_reason=install_reason,
-                selected=p['name'] in self.selection,
+                is_latest=is_latest,
                 row_number=i,
-            ))
+            )
+            # Set selected based on NEVRA (need the built object for .nevra property)
+            pkg_info.selected = pkg_info.nevra in self.selection
+            result.append(pkg_info)
         return result
+
+    @staticmethod
+    def _compare_vr(vr1: str, vr2: str) -> int:
+        """Compare two version-release strings using RPM rules.
+
+        Returns:
+            >0 if vr1 > vr2, <0 if vr1 < vr2, 0 if equal.
+        """
+        try:
+            import rpm
+            return rpm.labelCompare(('0', *vr1.split('-', 1)),
+                                    ('0', *vr2.split('-', 1)))
+        except ImportError:
+            # Fallback: simple string comparison (imperfect but usable)
+            return (vr1 > vr2) - (vr1 < vr2)
+
+    @staticmethod
+    def _name_from_nevra(nevra: str) -> str:
+        """Extract package name from a NEVRA string (name-version-release.arch).
+
+        Handles names with hyphens (e.g., 'chromium-browser-130.0-1.mga10.x86_64').
+        Falls back to returning the string as-is if it doesn't look like a NEVRA.
+        """
+        # NEVRA format: name-version-release.arch
+        # The arch is after the last dot, release before that, version before that.
+        # We strip .arch first, then split from right on '-' twice to get name.
+        dot_pos = nevra.rfind('.')
+        if dot_pos < 0:
+            return nevra  # No arch suffix — probably a plain name
+        without_arch = nevra[:dot_pos]
+        # Split off release (after last '-')
+        dash_pos = without_arch.rfind('-')
+        if dash_pos < 0:
+            return nevra
+        without_release = without_arch[:dash_pos]
+        # Split off version (after last '-')
+        dash_pos = without_release.rfind('-')
+        if dash_pos < 0:
+            return nevra
+        return without_release[:dash_pos]
 
     # =========================================================================
     # Search with Debounce
@@ -843,40 +900,40 @@ class Controller:
     # Selection Management
     # =========================================================================
 
-    def select_package(self, name: str) -> None:
+    def select_package(self, nevra: str) -> None:
         """Add package to selection.
 
         Args:
-            name: Package name.
+            nevra: Package NEVRA (name-version-release.arch).
         """
-        self.selection.add(name)
+        self.selection.add(nevra)
         self._update_selection_display()
 
-    def unselect_package(self, name: str) -> None:
+    def unselect_package(self, nevra: str) -> None:
         """Remove package from selection.
 
         Args:
-            name: Package name.
+            nevra: Package NEVRA (name-version-release.arch).
         """
-        self.selection.discard(name)
+        self.selection.discard(nevra)
         self._update_selection_display()
 
-    def toggle_selection(self, name: str) -> None:
+    def toggle_selection(self, nevra: str) -> None:
         """Toggle package selection.
 
         Args:
-            name: Package name.
+            nevra: Package NEVRA (name-version-release.arch).
         """
-        if name in self.selection:
-            self.selection.discard(name)
+        if nevra in self.selection:
+            self.selection.discard(nevra)
         else:
-            self.selection.add(name)
+            self.selection.add(nevra)
         self._update_selection_display()
 
     def select_all(self) -> None:
         """Select all visible packages."""
         for pkg in self._packages:
-            self.selection.add(pkg.name)
+            self.selection.add(pkg.nevra)
         self._update_selection_display()
 
     def clear_selection(self) -> None:
@@ -887,7 +944,7 @@ class Controller:
     def _update_selection_display(self) -> None:
         """Update package selected state in-place and repaint without rebuilding."""
         for pkg in self._packages:
-            pkg.selected = pkg.name in self.selection
+            pkg.selected = pkg.nevra in self.selection
         self.view.refresh_package_states()
 
     # =========================================================================
@@ -921,7 +978,7 @@ class Controller:
 
         Args:
             action: One of 'install', 'erase', 'upgrade'.
-            packages: List of package names.
+            packages: List of package NEVRAs (or names for upgrade_all).
         """
         from urpm.core.resolver import Resolver
 
@@ -989,7 +1046,8 @@ class Controller:
                 return
 
             # Build detailed summary for confirmation
-            requested_set = {p.lower() for p in packages} if packages != ['__all__'] else set()
+            # Extract package names from NEVRAs for the summary comparison
+            requested_set = {self._name_from_nevra(p).lower() for p in packages} if packages != ['__all__'] else set()
             summary = self._build_resolution_summary(resolution, action, requested_set)
 
             # Show detailed confirmation

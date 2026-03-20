@@ -7,6 +7,7 @@ from .compat import (
     Qt,
     QApplication,
     QMainWindow,
+    QMessageBox,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -23,7 +24,7 @@ from .compat import (
 from urpm.core.database import PackageDatabase
 
 from ..common.controller import Controller, ControllerConfig
-from .palette import button_stylesheet
+from .palette import button_stylesheet, get_secondary_colors
 from .view import QtView
 from .widgets.search_bar import SearchBar
 from .widgets.package_list import PackageList, PackageTableModel
@@ -64,6 +65,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("rpmdrake-ng")
         self.resize(1100, 768)
 
+        # Center on screen
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            x = (geo.width() - 1100) // 2 + geo.x()
+            y = (geo.height() - 768) // 2 + geo.y()
+            self.move(x, y)
+
         self._font_size = self.DEFAULT_FONT_SIZE
         self._apply_font_size()
 
@@ -96,14 +105,16 @@ class MainWindow(QMainWindow):
     def _create_widgets(self) -> None:
         """Instantiate all UI widgets."""
         # --- Top bar ---
+        sc = get_secondary_colors()
         self.search_bar = SearchBar()
 
+        toggle_border = sc['border']
         self.btn_filter_toggle = QPushButton("⊟")
         self.btn_filter_toggle.setToolTip("Afficher/masquer les filtres")
         self.btn_filter_toggle.setFixedWidth(32)
         self.btn_filter_toggle.setCheckable(True)
         self.btn_filter_toggle.setStyleSheet(
-            "QPushButton { border: 1px solid palette(mid); border-radius: 4px; padding: 4px; }"
+            f"QPushButton {{ border: 1px solid {toggle_border}; border-radius: 4px; padding: 4px; }}"
             "QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); }"
         )
 
@@ -113,7 +124,7 @@ class MainWindow(QMainWindow):
         self.btn_cat_toggle.setCheckable(True)
         self.btn_cat_toggle.setChecked(True)    # Categories visible by default
         self.btn_cat_toggle.setStyleSheet(
-            "QPushButton { border: 1px solid palette(mid); border-radius: 4px; padding: 4px; }"
+            f"QPushButton {{ border: 1px solid {toggle_border}; border-radius: 4px; padding: 4px; }}"
             "QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); }"
         )
 
@@ -165,7 +176,7 @@ class MainWindow(QMainWindow):
 
         # --- Status / count label ---
         self.lbl_count = QLabel("")
-        self.lbl_count.setStyleSheet("color: palette(mid);")
+        self.lbl_count.setStyleSheet(f"color: {sc['text_muted']};")
 
         # --- Status frame (when progress widget is hidden) ---
         self.status_frame = QFrame()
@@ -281,14 +292,35 @@ class MainWindow(QMainWindow):
     # Slots
     # ------------------------------------------------------------------
 
-    def _on_checkbox_changed(self, name: str, selected: bool) -> None:
+    def _on_checkbox_changed(self, nevra: str, selected: bool) -> None:
         """Handle checkbox selection change for a package."""
         if selected:
-            self.controller.select_package(name)
+            # Warn if selecting an older (non-latest) version
+            pkg = self._find_package_by_nevra(nevra)
+            if pkg and not pkg.is_latest:
+                result = QMessageBox.question(
+                    self, "Ancienne version",
+                    f"{pkg.name} {pkg.version}-{pkg.release} n'est pas la dernière "
+                    f"version disponible.\n\nInstaller quand même cette ancienne version ?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if result != QMessageBox.StandardButton.Yes:
+                    # Uncheck the checkbox visually
+                    self.controller.unselect_package(nevra)
+                    return
+            self.controller.select_package(nevra)
         else:
-            self.controller.unselect_package(name)
+            self.controller.unselect_package(nevra)
         self._update_button_states()
         self._update_upgrade_button()
+
+    def _find_package_by_nevra(self, nevra: str):
+        """Find a PackageDisplayInfo by its NEVRA in the current package list."""
+        for pkg in self.controller._packages:
+            if pkg.nevra == nevra:
+                return pkg
+        return None
 
     def _on_current_row_changed(self, current, previous) -> None:
         """Load and display details for the newly selected row."""
@@ -467,6 +499,9 @@ def main() -> int:
     Returns:
         Application exit code.
     """
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     app = QApplication(sys.argv)
     app.setApplicationName("rpmdrake-ng")
     app.setApplicationDisplayName("rpmdrake-ng")

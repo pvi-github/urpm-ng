@@ -59,6 +59,9 @@ class PackageDisplayInfo:
     # Selection
     selected: bool = False
 
+    # Version ordering (False = older version when multiple versions available)
+    is_latest: bool = True
+
     # Row number (for command reference)
     row_number: int = 0
 

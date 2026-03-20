@@ -204,6 +204,10 @@ class PackageTableModel(QAbstractTableModel):
             if col == self.COL_STATE:
                 color = self._state_color(pkg)
                 return QBrush(color) if color else None
+            # Dim text for older (non-latest) package versions
+            if not pkg.is_latest:
+                from ..palette import get_secondary_colors
+                return QBrush(QColor(get_secondary_colors()['text_muted']))
             return None
 
         elif role == Qt.ItemDataRole.ToolTipRole:
@@ -211,8 +215,11 @@ class PackageTableModel(QAbstractTableModel):
                 return pkg.nevra
             elif col == self.COL_STATE:
                 return self._state_tooltip(pkg)
-            elif col == self.COL_VERSION and pkg.has_update:
-                return f"Mise à jour : {pkg.installed_version} → {pkg.version}-{pkg.release}"
+            elif col == self.COL_VERSION:
+                if pkg.has_update:
+                    return f"Mise à jour : {pkg.installed_version} → {pkg.version}-{pkg.release}"
+                if not pkg.is_latest:
+                    return "Ancienne version — une version plus récente est disponible"
             return None
 
         elif role == Qt.ItemDataRole.UserRole:
@@ -311,8 +318,10 @@ class PackageTableModel(QAbstractTableModel):
         """Version cell text — shows the available (new) version.
 
         The installed→available arrow is shown in the tooltip to keep the
-        column compact.
+        column compact. Older versions are prefixed with a clock icon.
         """
+        if not pkg.is_latest:
+            return f"\u231b {pkg.version}"  # ⌛ hourglass for older versions
         return pkg.version
 
     def _state_icon(self, pkg: PackageDisplayInfo) -> str:
@@ -643,7 +652,7 @@ class PackageList(QTableView):
     - Virtual scrolling for performance
     """
 
-    selection_changed = Signal(str, bool)   # package_name, selected
+    selection_changed = Signal(str, bool)   # package nevra, selected
     package_activated = Signal(str)         # package_name (double-click)
 
     # Row index of the currently highlighted row, -1 if none.
@@ -812,4 +821,4 @@ class PackageList(QTableView):
         for row in range(top_left.row(), bottom_right.row() + 1):
             pkg = self._model.get_package(row)
             if pkg:
-                self.selection_changed.emit(pkg.name, pkg.selected)
+                self.selection_changed.emit(pkg.nevra, pkg.selected)
