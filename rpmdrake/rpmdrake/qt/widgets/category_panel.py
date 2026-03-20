@@ -17,7 +17,7 @@ from ..compat import (
     QTreeWidget,
     QTreeWidgetItem,
 )
-from ..palette import get_state_colors
+from ..palette import get_state_colors, get_secondary_colors
 
 if TYPE_CHECKING:
     from ...common.controller import Controller
@@ -240,7 +240,7 @@ class CategoryPanel(QWidget):
         colors = get_state_colors()
         for badge, (state_key, _letter, _label) in zip(self._legend_badges, _LEGEND):
             color = colors.get(state_key)
-            hex_color = color.name() if color else '#9e9e9e'
+            hex_color = color.name() if color else get_secondary_colors()['text_muted']
             badge.setStyleSheet(
                 f"background-color: {hex_color};"
                 " color: white;"

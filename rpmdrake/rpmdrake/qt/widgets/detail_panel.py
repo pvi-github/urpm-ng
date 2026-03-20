@@ -21,7 +21,7 @@ from ..compat import (
     QScrollArea,
 )
 from .collapsible_group import CollapsibleGroup
-from ..palette import get_state_colors
+from ..palette import get_state_colors, get_secondary_colors
 
 __all__ = ["PackageDetailPanel"]
 
@@ -165,14 +165,15 @@ class PackageDetailPanel(QWidget):
         if palette_key:
             colors = get_state_colors()
             color = colors.get(palette_key)
-            hex_col = color.name() if color else '#888888'
+            hex_col = color.name() if color else get_secondary_colors()['text_muted']
             self._lbl_state.setStyleSheet(
                 f"color: white; background-color: {hex_col};"
                 " border-radius: 3px; padding: 2px 8px; font-weight: bold;"
             )
         else:
+            sc = get_secondary_colors()
             self._lbl_state.setStyleSheet(
-                "color: palette(text); border: 1px solid palette(mid);"
+                f"color: palette(text); border: 1px solid {sc['border']};"
                 " border-radius: 3px; padding: 2px 8px;"
             )
 
@@ -267,7 +268,8 @@ class PackageDetailPanel(QWidget):
         self._placeholder = QLabel("Sélectionnez un paquet pour afficher ses détails.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._placeholder.setWordWrap(True)
-        self._placeholder.setStyleSheet("color: palette(mid); padding: 20px;")
+        sc = get_secondary_colors()
+        self._placeholder.setStyleSheet(f"color: {sc['text_muted']}; padding: 20px;")
         root.addWidget(self._placeholder, stretch=1)
 
         # --- Scrollable content ---

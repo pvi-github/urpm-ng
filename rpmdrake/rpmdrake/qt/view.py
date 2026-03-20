@@ -10,7 +10,7 @@ from .compat import (
 )
 
 from ..common.models import PackageDisplayInfo
-from .palette import DIALOG_COLORS
+from .palette import DIALOG_COLORS, get_secondary_colors
 
 if TYPE_CHECKING:
     from .main import MainWindow
@@ -334,7 +334,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet("color: palette(mid);")
+        separator.setStyleSheet(f"color: {get_secondary_colors()['border']};")
         layout.addWidget(separator)
 
         # Scrollable content area
@@ -568,8 +568,15 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
             self._show_styled_message("Terminé", msg, "info")
             # Refresh package list after successful transaction
             self.window.controller.refresh_after_transaction()
+            # Reset action buttons (selection was cleared)
+            self.window._update_button_states()
+            # Refresh detail panel if a package row is still selected
+            self._refresh_detail_panel()
         else:
             errors = summary.get('errors', [])
+            # Cancel is not an error — silently ignore it
+            if errors == ['Cancelled']:
+                return
             msg = "La transaction a échoué.\n\n" + "\n".join(errors)
             self._show_styled_message("Erreur", msg, "error")
 
@@ -655,6 +662,17 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
         if result == QMessageBox.StandardButton.Yes:
             self.window.show_status_message(f"Exécution de {action}...")
+
+    def _refresh_detail_panel(self) -> None:
+        """Re-fetch and display details for the currently selected package row."""
+        idx = self.window.package_list.currentIndex()
+        if not idx.isValid():
+            return
+        pkg = self.window.package_list._model.get_package(idx.row())
+        if pkg is None:
+            return
+        details = self.window.controller.get_package_details(pkg.name)
+        self.window.detail_panel.show_package(details)
 
     @Slot()
     def _do_filter_changed(self) -> None:

@@ -8,6 +8,8 @@ from .compat import QApplication, QColor, QPalette
 
 __all__ = [
     "get_state_colors",
+    "get_secondary_colors",
+    "is_dark_theme",
     "PHASE_COLORS",
     "DIALOG_COLORS",
     "button_stylesheet",
@@ -54,6 +56,52 @@ def get_state_colors() -> dict[str, QColor | None]:
     """
     bg = QApplication.palette().color(QPalette.ColorRole.Window)
     return _DARK if bg.lightness() < 128 else _LIGHT
+
+
+# --- Theme detection ----------------------------------------------------------
+
+def is_dark_theme() -> bool:
+    """Return True when the current Qt theme uses a dark background."""
+    bg = QApplication.palette().color(QPalette.ColorRole.Window)
+    return bg.lightness() < 128
+
+
+# --- Secondary UI colors (borders, muted text, surfaces) ---------------------
+#
+# These colors guarantee sufficient contrast in both light and dark themes.
+# They are computed at call time so they track live theme switches.
+#
+# Usage:
+#   colors = get_secondary_colors()
+#   widget.setStyleSheet(f"color: {colors['text_muted']};")
+
+_SECONDARY_LIGHT: dict[str, str] = {
+    "text_muted": "#666666",   # Muted text (readable on white)
+    "border":     "#cccccc",   # Subtle borders / separators
+    "surface":    "#f5f5f5",   # Elevated panel background
+    "hover":      "#e0e0e0",   # Hover state for clickable areas
+    "peer":       "#388e3c",   # Peer/LAN source (dark green)
+}
+
+_SECONDARY_DARK: dict[str, str] = {
+    "text_muted": "#999999",   # Muted text (readable on dark bg)
+    "border":     "#555555",   # Subtle borders / separators
+    "surface":    "#383838",   # Elevated panel background
+    "hover":      "#4a4a4a",   # Hover state for clickable areas
+    "peer":       "#81c784",   # Peer/LAN source (light green)
+}
+
+
+def get_secondary_colors() -> dict[str, str]:
+    """Return theme-aware colors for secondary UI elements.
+
+    Provides consistent, readable colors for borders, muted text, and
+    panel backgrounds that work in both light and dark themes.
+
+    Returns:
+        Dict with keys: 'text_muted', 'border', 'surface', 'hover', 'peer'.
+    """
+    return _SECONDARY_DARK if is_dark_theme() else _SECONDARY_LIGHT
 
 
 # --- Phase colors (download/install progress) ---------------------------------

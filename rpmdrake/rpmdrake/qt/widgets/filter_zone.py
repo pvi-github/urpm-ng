@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from ...common.controller import Controller
 
 from ...common.models import PackageState
+from ..palette import get_secondary_colors
 
 __all__ = ["FilterZone"]
 
@@ -96,9 +97,10 @@ class FilterZone(QWidget):
         layout.addWidget(self.chk_available)
 
         # Visual separator
+        sc = get_secondary_colors()
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: palette(mid);")
+        sep.setStyleSheet(f"color: {sc['border']};")
         layout.addWidget(sep)
 
         # Display filters

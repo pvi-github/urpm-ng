@@ -1,6 +1,7 @@
 """Collapsible group widget for rpmdrake-ng."""
 
 from ..compat import Qt, QWidget, QVBoxLayout, QPushButton
+from ..palette import get_secondary_colors
 
 __all__ = ["CollapsibleGroup"]
 
@@ -22,17 +23,18 @@ class CollapsibleGroup(QWidget):
 
         self._header = QPushButton(f"▼ {title}")
         self._header.setFlat(True)
-        self._header.setStyleSheet("""
-            QPushButton {
+        sc = get_secondary_colors()
+        self._header.setStyleSheet(f"""
+            QPushButton {{
                 text-align: left;
                 font-weight: bold;
                 padding: 4px 8px;
                 border: none;
-                background: palette(mid);
-            }
-            QPushButton:hover {
-                background: palette(dark);
-            }
+                background: {sc['surface']};
+            }}
+            QPushButton:hover {{
+                background: {sc['hover']};
+            }}
         """)
         self._header.clicked.connect(self._toggle)
 
