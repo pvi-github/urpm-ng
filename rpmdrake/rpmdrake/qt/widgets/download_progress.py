@@ -8,7 +8,7 @@ from ..compat import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
     QFrame, Qt, QPushButton, Signal
 )
-from ..palette import PHASE_COLORS
+from ..palette import PHASE_COLORS, get_secondary_colors
 
 
 class ProgressPhase(Enum):
@@ -42,6 +42,7 @@ class DownloadSlotWidget(QFrame):
     def _setup_ui(self):
         """Setup the UI."""
         self.setFrameStyle(QFrame.Shape.NoFrame)
+        sc = get_secondary_colors()
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 1, 4, 1)
@@ -49,7 +50,7 @@ class DownloadSlotWidget(QFrame):
 
         # Col 1: Slot number (auto-size based on font)
         self.slot_label = QLabel(f"#{self.slot_num + 1}")
-        self.slot_label.setStyleSheet("color: #888; font-family: monospace;")
+        self.slot_label.setStyleSheet(f"color: {sc['text_muted']}; font-family: monospace;")
         layout.addWidget(self.slot_label)
 
         # Col 2: Progress bar
@@ -59,9 +60,9 @@ class DownloadSlotWidget(QFrame):
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setStyleSheet(f"""
             QProgressBar {{
-                border: 1px solid #ccc;
+                border: 1px solid {sc['border']};
                 border-radius: 2px;
-                background: #f0f0f0;
+                background: {sc['surface']};
             }}
             QProgressBar::chunk {{
                 background: {PHASE_COLORS["download"]};
@@ -76,12 +77,12 @@ class DownloadSlotWidget(QFrame):
 
         # Col 4: Size info + source (right-aligned, auto-size)
         self.size_label = QLabel("")
-        self.size_label.setStyleSheet("color: #666; font-family: monospace;")
+        self.size_label.setStyleSheet(f"color: {sc['text_muted']}; font-family: monospace;")
         self.size_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.size_label)
 
         self.source_label = QLabel("")
-        self.source_label.setStyleSheet("color: #888;")
+        self.source_label.setStyleSheet(f"color: {sc['text_muted']};")
         self.source_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.source_label)
 
@@ -113,13 +114,14 @@ class DownloadSlotWidget(QFrame):
 
             # Source with color based on type
             if info.source:
+                sc = get_secondary_colors()
                 source_text = info.source
                 if info.source_type == "peer":
-                    self.source_label.setStyleSheet("color: #388e3c;")
+                    self.source_label.setStyleSheet(f"color: {sc['peer']};")
                     if not source_text.startswith("peer@"):
                         source_text = f"peer@{source_text}"
                 else:
-                    self.source_label.setStyleSheet("color: #888;")
+                    self.source_label.setStyleSheet(f"color: {sc['text_muted']};")
                 self.source_label.setText(f"({source_text})")
             else:
                 self.source_label.setText("")
@@ -151,6 +153,8 @@ class CollapsibleProgressWidget(QWidget):
 
     def _setup_ui(self):
         """Setup the UI."""
+        sc = get_secondary_colors()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -167,7 +171,7 @@ class CollapsibleProgressWidget(QWidget):
 
         # Expand/collapse indicator (auto-size)
         self.expand_label = QLabel("▶")
-        self.expand_label.setStyleSheet("color: #666;")
+        self.expand_label.setStyleSheet(f"color: {sc['text_muted']};")
         header_layout.addWidget(self.expand_label)
 
         # Phase label
@@ -177,7 +181,7 @@ class CollapsibleProgressWidget(QWidget):
 
         # Count label [3/14]
         self.count_label = QLabel("")
-        self.count_label.setStyleSheet("color: #666;")
+        self.count_label.setStyleSheet(f"color: {sc['text_muted']};")
         header_layout.addWidget(self.count_label)
 
         # Main progress bar
@@ -193,7 +197,7 @@ class CollapsibleProgressWidget(QWidget):
 
         # Speed / current package name (auto-size, stretch to fill)
         self.info_label = QLabel("")
-        self.info_label.setStyleSheet("color: #666; font-family: monospace;")
+        self.info_label.setStyleSheet(f"color: {sc['text_muted']}; font-family: monospace;")
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self.info_label, stretch=1)
 
@@ -219,7 +223,9 @@ class CollapsibleProgressWidget(QWidget):
         # Detail panel (shown when expanded)
         self.detail_panel = QFrame()
         self.detail_panel.setFrameStyle(QFrame.Shape.StyledPanel)
-        self.detail_panel.setStyleSheet("background: #fafafa; border-top: 1px solid #ddd;")
+        self.detail_panel.setStyleSheet(
+            f"background: {sc['surface']}; border-top: 1px solid {sc['border']};"
+        )
         detail_layout = QVBoxLayout(self.detail_panel)
         detail_layout.setContentsMargins(4, 4, 4, 4)
         detail_layout.setSpacing(0)
@@ -259,12 +265,13 @@ class CollapsibleProgressWidget(QWidget):
     def _update_phase_style(self):
         """Update styling based on current phase."""
         color = PHASE_COLORS.get(self._phase.value, "#2196f3")
+        sc = get_secondary_colors()
 
         self.main_progress.setStyleSheet(f"""
             QProgressBar {{
-                border: 1px solid #ccc;
+                border: 1px solid {sc['border']};
                 border-radius: 3px;
-                background: #e0e0e0;
+                background: {sc['surface']};
             }}
             QProgressBar::chunk {{
                 background: {color};
@@ -315,6 +322,11 @@ class CollapsibleProgressWidget(QWidget):
         self.pct_label.setText("0%")
         self.info_label.setText("")
         self.show()
+        # Auto-expand detail panel for download phase
+        if self._phase == ProgressPhase.DOWNLOAD:
+            self._expanded = True
+            self.expand_label.setText("▼")
+            self.detail_panel.setVisible(True)
         # Hide status frame if we have access to the main window
         if hasattr(self.parent(), 'parent') and hasattr(self.parent().parent(), 'status_frame'):
             self.parent().parent().status_frame.hide()
@@ -351,11 +363,16 @@ class CollapsibleProgressWidget(QWidget):
         else:
             self.info_label.setText("")
 
-        # Update slots
+        # Update slots — map by slot number for stable display (sticky lines)
+        updated = set()
+        for info in slots:
+            idx = info.slot
+            if 0 <= idx < len(self._slots):
+                self._slots[idx].set_progress(info)
+                updated.add(idx)
+        # Clear slots that received no update
         for i, slot_widget in enumerate(self._slots):
-            if i < len(slots):
-                slot_widget.set_progress(slots[i])
-            else:
+            if i not in updated:
                 slot_widget.set_progress(SlotInfo(slot=i))
 
     def update_install(self, name: str, current: int, total: int):
