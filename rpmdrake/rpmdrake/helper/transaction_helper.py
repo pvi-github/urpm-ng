@@ -23,6 +23,7 @@ Protocol:
 import json
 import sys
 import signal
+import threading
 from pathlib import Path
 from typing import List
 
@@ -41,6 +42,7 @@ class TransactionHelper:
         self.db = PackageDatabase()
         self.ops = PackageOperations(self.db)
         self.cancelled = False
+        self._stdin_watcher: threading.Thread | None = None
         self._setup_signal_handlers()
 
     def _setup_signal_handlers(self):
@@ -67,7 +69,11 @@ class TransactionHelper:
         self._send({"type": "error", "message": message})
 
     def run(self):
-        """Main loop: read commands from stdin."""
+        """Main loop: read commands from stdin.
+
+        Reads one command at a time. During long operations (download/install),
+        a background stdin watcher thread reads cancel commands in parallel.
+        """
         for line in sys.stdin:
             if self.cancelled:
                 break
@@ -89,12 +95,51 @@ class TransactionHelper:
         cmd_type = cmd.get("cmd")
 
         if cmd_type == "execute":
-            self._execute(cmd)
+            # Start a stdin watcher so cancel commands are received
+            # while the operation is running (download blocks the main loop).
+            self._start_stdin_watcher()
+            try:
+                self._execute(cmd)
+            finally:
+                self._stop_stdin_watcher()
         elif cmd_type == "cancel":
             self.cancelled = True
             self._send({"type": "cancelled"})
         else:
             self._error(f"Unknown command: {cmd_type}")
+
+    def _start_stdin_watcher(self):
+        """Start a daemon thread that reads stdin for cancel commands.
+
+        While _execute is running (blocking the main loop), this thread
+        listens for {"cmd": "cancel"} and sets self.cancelled = True.
+        The download callback checks this flag and stops cleanly.
+        """
+        self._stdin_watcher_stop = threading.Event()
+
+        def _watch():
+            for line in sys.stdin:
+                if self._stdin_watcher_stop.is_set():
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if msg.get("cmd") == "cancel":
+                    self.cancelled = True
+                    break
+
+        self._stdin_watcher = threading.Thread(target=_watch, daemon=True)
+        self._stdin_watcher.start()
+
+    def _stop_stdin_watcher(self):
+        """Stop the stdin watcher thread."""
+        if self._stdin_watcher:
+            self._stdin_watcher_stop.set()
+            self._stdin_watcher = None
 
     def _execute(self, cmd: dict):
         """Execute a package operation."""
@@ -217,6 +262,25 @@ class TransactionHelper:
         except Exception as e:
             self._error(f"System upgrade failed: {e}")
 
+    @staticmethod
+    def _name_from_nevra(nevra: str) -> str:
+        """Extract package name from a NEVRA string (name-version-release.arch).
+
+        Falls back to returning the string as-is if it doesn't look like a NEVRA.
+        """
+        dot_pos = nevra.rfind('.')
+        if dot_pos < 0:
+            return nevra
+        without_arch = nevra[:dot_pos]
+        dash_pos = without_arch.rfind('-')
+        if dash_pos < 0:
+            return nevra
+        without_release = without_arch[:dash_pos]
+        dash_pos = without_release.rfind('-')
+        if dash_pos < 0:
+            return nevra
+        return without_release[:dash_pos]
+
     def _download_and_install(self, resolution, resolver, operation_id: str, requested_packages: List[str] = None):
         """Download packages and run install/upgrade transaction."""
         # Build download items
@@ -266,6 +330,11 @@ class TransactionHelper:
                 download_items, progress_callback=progress_callback
             )
 
+            # Cancel check: if cancelled during download, abort before install
+            if self.cancelled:
+                self._send({"type": "cancelled"})
+                return
+
             # Check for failures
             failed = [r for r in dl_results if not r.success]
             if failed:
@@ -274,6 +343,11 @@ class TransactionHelper:
 
             # Collect downloaded paths
             rpm_paths.extend([str(r.path) for r in dl_results if r.success and r.path])
+
+        # Cancel check before install phase
+        if self.cancelled:
+            self._send({"type": "cancelled"})
+            return
 
         if not rpm_paths:
             self._send({"type": "done", "success": True, "count": 0, "message": "Nothing to install"})
@@ -307,11 +381,12 @@ class TransactionHelper:
 
             # Mark dependency packages (not explicitly requested)
             if requested_packages:
-                requested_lower = {p.lower() for p in requested_packages}
+                # Extract names from NEVRAs for comparison (handles both names and NEVRAs)
+                requested_names = {self._name_from_nevra(p).lower() for p in requested_packages}
                 dep_packages = []
                 for a in resolution.actions:
                     if a.action.name in ('INSTALL', 'UPGRADE'):
-                        if a.name.lower() not in requested_lower:
+                        if a.name.lower() not in requested_names:
                             dep_packages.append(a.name)
                 if dep_packages:
                     try:

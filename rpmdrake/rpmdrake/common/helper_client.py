@@ -64,6 +64,7 @@ class HelperClient:
 
         self._process: Optional[subprocess.Popen] = None
         self._reader_thread: Optional[threading.Thread] = None
+        self._cancelled = False
 
     def _get_helper_path(self) -> str:
         """Get path to the helper script."""
@@ -131,7 +132,15 @@ class HelperClient:
                 self.on_error(f"Reader error: {e}")
 
     def _handle_message(self, msg: dict):
-        """Handle a message from the helper."""
+        """Handle a message from the helper.
+
+        After cancel, only the 'cancelled' message is processed —
+        all others are silently dropped to prevent a dying helper
+        from polluting the UI of a new transaction.
+        """
+        if self._cancelled:
+            return
+
         msg_type = msg.get("type")
 
         if msg_type == "status":
@@ -296,14 +305,35 @@ class HelperClient:
         return self._send_command(cmd)
 
     def cancel(self):
-        """Cancel the current operation."""
+        """Cancel the current operation cleanly.
+
+        1. Sends {"cmd": "cancel"} via the pipe — the helper's stdin
+           watcher thread receives it and sets its cancelled flag.
+        2. Closes stdin so the helper's stdin iterator ends if the
+           watcher missed it (belt and suspenders).
+        3. Sets _cancelled to suppress any further callbacks from the
+           reader thread (the old helper may still emit a few messages
+           before it stops).
+        4. Waits for the helper to exit. No kill/terminate needed:
+           the helper exits on its own after cancel.
+        """
+        self._cancelled = True
         if self._process:
             self._send_command({"cmd": "cancel"})
-            # Give it a moment to clean up
+            # Close stdin — the helper's stdin watcher will see EOF
             try:
-                self._process.wait(timeout=2)
+                self._process.stdin.close()
+            except Exception:
+                pass
+            # Wait for clean exit (the helper should stop within seconds)
+            try:
+                self._process.wait(timeout=15)
             except subprocess.TimeoutExpired:
-                self._process.terminate()
+                # Last resort — should not happen with a working cancel
+                try:
+                    self._process.terminate()
+                except PermissionError:
+                    pass
             self._process = None
 
     def wait(self, timeout: float = None) -> bool:
