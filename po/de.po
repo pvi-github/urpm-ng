@@ -3903,6 +3903,7 @@ msgid "Action"
 msgstr "Aktion"
 
 #: urpm/cli/commands/history.py:149 urpm/cli/commands/peer.py:55
+#: urpm/cli/commands/server.py
 msgid "Status"
 msgstr "Status"
 
@@ -6098,12 +6099,28 @@ msgid "{n}d ago"
 msgstr "vor {n}T"
 
 #: urpm/cli/commands/server.py
-msgid "URL"
-msgstr "URL"
+msgid "Name"
+msgstr "Name"
 
 #: urpm/cli/commands/server.py
-msgid "Status"
-msgstr "Status"
+msgid "Protocol"
+msgstr "Protokoll"
+
+#: urpm/cli/commands/server.py
+msgid "Host"
+msgstr "Host"
+
+#: urpm/cli/commands/server.py
+msgid "Pri"
+msgstr "Pri"
+
+#: urpm/cli/commands/server.py
+msgid "IP"
+msgstr "IP"
+
+#: urpm/cli/commands/server.py
+msgid "URL"
+msgstr "URL"
 
 #: urpm/cli/commands/server.py
 msgid "Priority"
@@ -6130,6 +6147,7 @@ msgid "Last check"
 msgstr "Letzte Prüfung"
 
 #: urpm/cli/commands/server.py
+msgctxt "server"
 msgid "Media"
 msgstr "Medien"
 
@@ -6177,7 +6195,7 @@ msgstr "benötigt von"
 #: urpm/cli/helpers/package.py
 #, python-brace-format
 msgid "Warning: '{pkg}' is only provided by {provider}"
-msgstr "Warnung: „{pkg}" wird nur von {provider} bereitgestellt"
+msgstr "Warnung: „{pkg}“ wird nur von {provider} bereitgestellt"
 
 #: urpm/cli/helpers/package.py
 #, python-brace-format
@@ -6199,12 +6217,12 @@ msgstr "Trotzdem installieren? [j/N] "
 #: urpm/cli/helpers/package.py
 #, python-brace-format
 msgid "Multiple providers for '{pkg}':"
-msgstr "Mehrere Anbieter für „{pkg}":"
+msgstr "Mehrere Anbieter für „{pkg}“:"
 
 #: urpm/cli/helpers/package.py
 #, python-brace-format
 msgid "Multiple installed families provide '{pkg}':"
-msgstr "Mehrere installierte Familien bieten „{pkg}" an:"
+msgstr "Mehrere installierte Familien bieten „{pkg}“ an:"
 
 #: urpm/cli/helpers/kernel.py
 #, python-brace-format

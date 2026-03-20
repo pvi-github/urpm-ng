@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from ...i18n import _, ngettext
+from ...i18n import _, ngettext, pgettext
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -23,7 +23,7 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
     host_width = max(4, max(len(srv['host']) for srv in servers))
 
     # Header
-    print(f"\n{'Name':<{name_width}} {'Protocol':<8} {'Host':<{host_width}} {'Pri':>4} {'IP':>6} {'Status':<8}")
+    print(f"\n{_('Name'):<{name_width}} {_('Protocol'):<8} {_('Host'):<{host_width}} {_('Pri'):>4} {_('IP'):>6} {_('Status'):<8}")
     print("-" * (name_width + host_width + 35))
 
     for srv in servers:
@@ -372,18 +372,18 @@ def cmd_server_stats(args, db: 'PackageDatabase') -> int:
     media_list = db.get_media_for_server(server['id'])
 
     print(f"\n{colors.bold(server['name'])}")
-    print(f"  {'URL':<14} {server['protocol']}://{server['host']}{server.get('base_path','')}")
-    print(f"  {'Status':<14} {'enabled' if server['enabled'] else colors.dim('disabled')}")
-    print(f"  {'Priority':<14} {server['priority']}")
-    print(f"  {'IP mode':<14} {server.get('ip_mode', 'auto')}")
+    print(f"  {_('URL'):<14} {server['protocol']}://{server['host']}{server.get('base_path','')}")
+    print(f"  {_('Status'):<14} {'enabled' if server['enabled'] else colors.dim('disabled')}")
+    print(f"  {_('Priority'):<14} {server['priority']}")
+    print(f"  {_('IP mode'):<14} {server.get('ip_mode', 'auto')}")
     print()
-    print(f"  {'Bandwidth':<14} {fmt_bandwidth(server.get('bandwidth_kbps'))}")
-    print(f"  {'Latency':<14} {fmt_latency(server.get('latency_ms'))}")
-    print(f"  {'Success rate':<14} {rate_str}  ({success} ok / {failure} failed)")
-    print(f"  {'Last check':<14} {fmt_age(server.get('last_check'))}")
+    print(f"  {_('Bandwidth'):<14} {fmt_bandwidth(server.get('bandwidth_kbps'))}")
+    print(f"  {_('Latency'):<14} {fmt_latency(server.get('latency_ms'))}")
+    print(f"  {_('Success rate'):<14} {rate_str}  ({success} ok / {failure} {_('failed')})")
+    print(f"  {_('Last check'):<14} {fmt_age(server.get('last_check'))}")
     print()
     if media_list:
-        print(f"  {_('Media')} ({len(media_list)}):")
+        print(f"  {pgettext('server', 'Media')} ({len(media_list)}):")
         for m in media_list:
             print(f"    {colors.dim('-')} {m['name']}")
     else:

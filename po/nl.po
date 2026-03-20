@@ -3888,6 +3888,7 @@ msgid "Action"
 msgstr "Actie"
 
 #: urpm/cli/commands/history.py:149 urpm/cli/commands/peer.py:55
+#: urpm/cli/commands/server.py
 msgid "Status"
 msgstr "Status"
 
@@ -6076,12 +6077,28 @@ msgid "{n}d ago"
 msgstr "{n}d geleden"
 
 #: urpm/cli/commands/server.py
-msgid "URL"
-msgstr "URL"
+msgid "Name"
+msgstr "Naam"
 
 #: urpm/cli/commands/server.py
-msgid "Status"
-msgstr "Status"
+msgid "Protocol"
+msgstr "Protocol"
+
+#: urpm/cli/commands/server.py
+msgid "Host"
+msgstr "Host"
+
+#: urpm/cli/commands/server.py
+msgid "Pri"
+msgstr "Pri"
+
+#: urpm/cli/commands/server.py
+msgid "IP"
+msgstr "IP"
+
+#: urpm/cli/commands/server.py
+msgid "URL"
+msgstr "URL"
 
 #: urpm/cli/commands/server.py
 msgid "Priority"
@@ -6108,6 +6125,7 @@ msgid "Last check"
 msgstr "Laatste controle"
 
 #: urpm/cli/commands/server.py
+msgctxt "server"
 msgid "Media"
 msgstr "Media"
 

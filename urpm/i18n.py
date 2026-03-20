@@ -122,6 +122,25 @@ def confirm_yes(response: str) -> bool:
     return r in ('y', 'yes', _('y'), _('yes'))
 
 
+def pgettext(context: str, message: str) -> str:
+    """Translate a string with context disambiguation.
+
+    Use this when the same English string needs different translations
+    depending on context (e.g., "Media" as a column header vs. section title).
+
+    Args:
+        context: A short context string (e.g., "server", "table header").
+        message: The string to translate (in English).
+
+    Returns:
+        Translated string, or original if no translation found.
+    """
+    global _translation
+    if _translation is None:
+        init()
+    return _translation.pgettext(context, message)
+
+
 def N_(message: str) -> str:
     """Mark a string for extraction without translating.
 
