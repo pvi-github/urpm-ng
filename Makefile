@@ -12,6 +12,7 @@ version:
 	$(SED) -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' urpm/__init__.py
 	$(SED) -i 's/^version = .*/version = "$(VERSION)"/' pyproject.toml
 	$(SED) -i 's/^%define version .*/%define version $(VERSION)/' rpmbuild/SPECS/urpm-ng.spec
+	echo $(VERSION) > rpmdrake/VERSION
 	$(MAKE) -C rpmdrake version
 
 tarball: version
