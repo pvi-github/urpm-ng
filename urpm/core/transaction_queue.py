@@ -682,14 +682,21 @@ queue._child_process_standalone()
                     ).to_json() + "\n")
 
                 if op.op_type == OperationType.INSTALL:
-                    # Always release parent after last install package
-                    # (before rpmdb sync which can take 30-60 seconds)
                     is_last_install = (i + 1 >= len(self.operations) or
                                        self.operations[i + 1].op_type != OperationType.INSTALL)
+                    # In non-sync mode (CLI), release the parent before rpmdb
+                    # sync so the CLI returns quickly while sync happens in
+                    # background.  In sync mode (GUI), keep the pipe open so
+                    # we can send "(updating rpmdb)" and op_done AFTER
+                    # ts.run() completes — the GUI needs to show progress
+                    # during the 30-60s rpmdb sync.
+                    release_early = (
+                        (is_last_foreground or is_last_install) and not sync
+                    )
                     success, count, errors, rpmnew_files = self._execute_install(
                         op,
                         pipe_state,
-                        release_parent_after=(is_last_foreground or is_last_install)
+                        release_parent_after=release_early
                     )
                 else:
                     # For erase: release parent after if it's background OR if it's the last operation
@@ -892,10 +899,22 @@ queue._child_process_standalone()
                 # Track closed packages
                 closed_count[0] += 1
 
+                # All packages closed — RPM will now sync the database.
+                # Notify the UI before releasing the parent so it can
+                # switch from the install progress bar to "Finalisation".
+                if (closed_count[0] == total
+                        and not extraction_error[0] and not pipe_state['closed']):
+                    pipe_state['file'].write(QueueProgressMessage(
+                        msg_type='progress',
+                        operation_id=op.operation_id,
+                        name='(updating rpmdb)',
+                        current=total,
+                        total=total
+                    ).to_json() + "\n")
+                    pipe_state['file'].flush()
+
                 # Release parent early when all packages are closed AND no errors seen
                 # ts.run() will continue in background for rpmdb sync/scriptlets
-                # If errors occur later, we'll alert on stderr
-                # Note: rpmnew_files not available yet (ts.run() still in progress)
                 if (closed_count[0] == total and release_parent_after
                         and not extraction_error[0] and not pipe_state['closed']):
                     pipe_state['file'].write(QueueProgressMessage(
@@ -976,19 +995,21 @@ queue._child_process_standalone()
                 if not real_problems:
                     # All problems were benign "already installed"
                     _log_background(f"Upgrade completed: {total} packages (some already at target version)")
-                    if release_parent_after and not pipe_state['closed']:
+                    if not pipe_state['closed']:
                         pipe_state['file'].write(QueueProgressMessage(
                             msg_type='op_done',
                             operation_id=op.operation_id,
                             count=total,
                             rpmnew_files=new_rpmnew_files
                         ).to_json() + "\n")
-                        pipe_state['file'].write(QueueProgressMessage(
-                            msg_type='parent_can_exit'
-                        ).to_json() + "\n")
                         pipe_state['file'].flush()
-                        pipe_state['file'].close()
-                        pipe_state['closed'] = True
+                        if release_parent_after:
+                            pipe_state['file'].write(QueueProgressMessage(
+                                msg_type='parent_can_exit'
+                            ).to_json() + "\n")
+                            pipe_state['file'].flush()
+                            pipe_state['file'].close()
+                            pipe_state['closed'] = True
                     return True, total, [], new_rpmnew_files
                 problems = real_problems
 
@@ -1018,21 +1039,28 @@ queue._child_process_standalone()
 
         _log_background(f"Transaction completed: {total} packages")
 
-        # If parent wasn't released early (e.g., extraction error seen), release now
-        if release_parent_after and not pipe_state['closed']:
+        # Send op_done if pipe is still open (sync mode, or late release
+        # after extraction error).  In non-sync mode the early release
+        # already sent op_done + parent_can_exit and closed the pipe.
+        if not pipe_state['closed']:
             pipe_state['file'].write(QueueProgressMessage(
                 msg_type='op_done',
                 operation_id=op.operation_id,
                 count=total,
                 rpmnew_files=new_rpmnew_files
             ).to_json() + "\n")
-            pipe_state['file'].write(QueueProgressMessage(
-                msg_type='parent_can_exit'
-            ).to_json() + "\n")
             pipe_state['file'].flush()
-            pipe_state['file'].close()
-            pipe_state['closed'] = True
-            _log_background("Parent released after transaction complete")
+            # Only close the pipe here if we were supposed to release
+            # the parent.  In sync mode, _child_process sends queue_done
+            # and closes the pipe after all operations complete.
+            if release_parent_after:
+                pipe_state['file'].write(QueueProgressMessage(
+                    msg_type='parent_can_exit'
+                ).to_json() + "\n")
+                pipe_state['file'].flush()
+                pipe_state['file'].close()
+                pipe_state['closed'] = True
+                _log_background("Parent released after transaction complete")
 
         return True, total, [], new_rpmnew_files
 
