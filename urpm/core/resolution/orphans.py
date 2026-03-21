@@ -70,23 +70,20 @@ class OrphansMixin:
             if name == 'gpg-pubkey':
                 continue
 
+            # Collect provides — use the full capability name including
+            # parenthesised qualifiers like devel(libeconf(64bit)).
+            # The parentheses are part of the capability name, NOT version
+            # info (versions are tracked separately via PROVIDEVERSION).
             provides = set()
             for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                # Strip version from provide for simpler matching
-                base_prov = prov.split('(')[0] if '(' in prov else prov
-                provides.add(base_prov)
-                provides.add(prov)  # Also keep full provide
-                if base_prov not in provides_map:
-                    provides_map[base_prov] = set()
-                provides_map[base_prov].add(name)
+                provides.add(prov)
+                provides_map.setdefault(prov, set()).add(name)
 
             requires = set()
             for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
                 if req.startswith('rpmlib(') or req.startswith('/'):
                     continue
-                # Strip version for matching
-                base_req = req.split('(')[0] if '(' in req else req
-                requires.add(base_req)
+                requires.add(req)
 
             installed_pkgs[name] = {
                 'provides': provides,
@@ -135,14 +132,12 @@ class OrphansMixin:
                 # Check if any remaining package requires this one
                 is_required = False
                 for prov in pkg['provides']:
-                    base_prov = prov.split('(')[0] if '(' in prov else prov
-                    # Check all installed packages
                     for other_name, other_pkg in installed_pkgs.items():
                         if other_name == name:
                             continue
                         if other_name in to_remove:
                             continue
-                        if base_prov in other_pkg['requires']:
+                        if prov in other_pkg['requires']:
                             is_required = True
                             break
                     if is_required:
@@ -320,16 +315,15 @@ class OrphansMixin:
             if name == 'gpg-pubkey':
                 continue
 
-            # Collect provides
+            # Collect provides — use the full capability name.
+            # Parentheses are part of the name (e.g. devel(libeconf(64bit))),
+            # NOT version info.  Truncating with split('(') would merge
+            # unrelated capabilities like devel(libfoo) and devel(libbar)
+            # into a single "devel" bucket, creating phantom dependencies.
             provides = set()
             for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
                 provides.add(prov)
-                base_prov = prov.split('(')[0] if '(' in prov else prov
-                provides.add(base_prov)
-                # Map capability -> provider
-                if base_prov not in provides_map:
-                    provides_map[base_prov] = set()
-                provides_map[base_prov].add(name)
+                provides_map.setdefault(prov, set()).add(name)
 
             installed_pkgs[name] = {
                 'provides': provides,
@@ -347,16 +341,13 @@ class OrphansMixin:
             for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
                 if req.startswith('rpmlib(') or req.startswith('/'):
                     continue
-                base_req = req.split('(')[0] if '(' in req else req
-                # Find who provides this
-                for provider in provides_map.get(base_req, set()):
+                for provider in provides_map.get(req, set()):
                     if provider != name:
                         reverse_deps[provider].add(name)
 
             # Process Recommends
             for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
-                base_rec = rec.split('(')[0] if '(' in rec else rec
-                for provider in provides_map.get(base_rec, set()):
+                for provider in provides_map.get(rec, set()):
                     if provider != name:
                         reverse_deps[provider].add(name)
 
@@ -444,12 +435,9 @@ class OrphansMixin:
                 # Skip rpmlib, file deps, and self-requires
                 if req.startswith("rpmlib(") or req.startswith("/"):
                     continue
-                # Extract base name from capability (remove version stuff)
-                req_name = req.split("(")[0] if "(" in req else req
-
-                if req_name not in required_by:
-                    required_by[req_name] = set()
-                required_by[req_name].add(name)
+                # Use the full capability name — parentheses are part of
+                # the name (e.g. devel(libeconf(64bit))), not version info.
+                required_by.setdefault(req, set()).add(name)
 
         # Find packages that nothing requires (potential orphans)
         for hdr in ts.dbMatch():
@@ -468,11 +456,9 @@ class OrphansMixin:
             is_required = False
 
             for prov in provides:
-                prov_name = prov.split("(")[0] if "(" in prov else prov
-                if prov_name in required_by:
+                if prov in required_by:
                     # Check if any requirer is still installed (not in exclude list)
-                    requirers = required_by[prov_name]
-                    for req in requirers:
+                    for req in required_by[prov]:
                         if req.lower() not in exclude and req != name:
                             is_required = True
                             break
