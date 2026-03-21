@@ -30,9 +30,17 @@ _KNOWN_ARCHES = {"x86_64", "i586", "i686", "noarch", "aarch64", "armv7hl"}
 def _is_nevra(input_str: str) -> bool:
     """Detect if the input string is a full NEVRA (name-version-release.arch).
 
-    Returns False for globs, version constraints, and simple package names.
-    Only returns True when the string has the full name-version-release.arch
-    structure with a known architecture suffix.
+    A NEVRA always ends with an explicit ".arch" suffix (e.g. ".x86_64", ".noarch").
+    Without this explicit suffix, the string is treated as a simple package name,
+    even if it contains enough hyphens to look like a NEVRA to parse_nevra()
+    (which defaults to arch="noarch" when there's no dot).
+
+    Examples:
+        "firefox-130.0-1.mga10.x86_64" → True (explicit .x86_64)
+        "urpm-ng-all" → False (no .arch suffix, just a package name)
+        "perl-File-Temp" → False (no .arch suffix)
+        "firefox >= 130" → False (version constraint)
+        "firefox*" → False (glob)
 
     Args:
         input_str: Package specification string
@@ -46,8 +54,13 @@ def _is_nevra(input_str: str) -> bool:
     # Version constraints (space-separated) are not NEVRAs
     if ' ' in input_str:
         return False
+    # A real NEVRA must end with ".arch" — check for explicit arch suffix
+    dot_pos = input_str.rfind('.')
+    if dot_pos < 0 or input_str[dot_pos + 1:] not in _KNOWN_ARCHES:
+        return False
+    # Now parse and verify we have all components (name, version, release)
     name, version, release, arch = parse_nevra(input_str)
-    return bool(version) and bool(release) and arch in _KNOWN_ARCHES
+    return bool(version) and bool(release)
 
 
 def _name_from_nevra(input_str: str) -> str:
@@ -528,6 +541,19 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     favored.add(pkg_name)
 
         for name in package_names:
+            # NEVRA mode: select the exact target version with SELECTION_CANON.
+            # Unlike SOLVER_UPDATE (which needs to target an installed package),
+            # SOLVER_INSTALL works correctly with a specific repo solvable.
+            if _is_nevra(name):
+                sel = self.pool.select(name,
+                    solv.Selection.SELECTION_CANON |
+                    solv.Selection.SELECTION_DOTARCH)
+                if sel.isempty():
+                    not_found.append(name)
+                else:
+                    jobs += sel.jobs(solv.Job.SOLVER_INSTALL)
+                continue
+
             # Parse version constraint if present (formats: "name >= ver" or "name[>= ver]")
             base_name = name
             version_constraint = None
@@ -797,6 +823,130 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
         return graph
 
+    def _find_best_upgrade(self, pkg_name: str, installed_arch: str = None):
+        """Find the best available version of a package in enabled repos.
+
+        Prefers the same architecture as the installed package, then the
+        highest version.  This is the single source of truth for "which
+        version should we upgrade to?" — used by both selective and full
+        system upgrade paths so that behaviour is identical.
+
+        Args:
+            pkg_name: Package name to look up.
+            installed_arch: Architecture of the installed version.  When set,
+                same-arch candidates are preferred over cross-arch ones.
+
+        Returns:
+            The best available solvable, or None if nothing is available
+            in the repos.
+        """
+        sel = self.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
+        best = None
+        for s in sel.solvables():
+            if s.repo == self.pool.installed:
+                continue
+            if best is None:
+                best = s
+                continue
+            if installed_arch:
+                s_same = (s.arch == installed_arch)
+                best_same = (best.arch == installed_arch)
+                if s_same and not best_same:
+                    best = s
+                    continue
+                if not s_same and best_same:
+                    continue
+            # Same arch status (or no arch preference): compare version
+            if s.evrcmp(best) > 0:
+                best = s
+        return best
+
+    def _scan_obsoletes(
+        self,
+        held_packages: set[str],
+        skip_names: set[str] | None = None,
+        only_names: set[str] | None = None,
+    ) -> tuple[list, set[str], list[tuple[str, str]]]:
+        """Scan repo solvables for Obsoletes that affect installed packages.
+
+        This handles package renames and replacements (e.g., dhcpcd obsoleting
+        dhcp-client, lib64netcdf-plugins replaced by lib64netcdf-plugins-hdf5).
+
+        Args:
+            held_packages: Names of held packages (obsoletes skipped for these).
+            skip_names: Installed names to ignore (already handled by upgrade jobs).
+            only_names: If set, only consider obsoletes targeting these installed
+                names (lowercase).  Used by selective upgrades to avoid a full scan.
+
+        Returns:
+            Tuple of (jobs, will_be_obsoleted, held_warnings):
+            - jobs: SOLVER_INSTALL jobs for the replacement packages
+            - will_be_obsoleted: set of installed package names being replaced
+            - held_warnings: list of (old_name, new_name) for held packages
+        """
+        debug = get_solver_debug()
+        installed_names = {pkg.name for pkg in self.pool.installed.solvables}
+        will_be_obsoleted: set[str] = set()
+        held_warnings: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        jobs = []
+
+        for repo in self.pool.repos:
+            if repo == self.pool.installed:
+                continue
+            for s in repo.solvables:
+                # Skip if the obsoleting package is already installed
+                if s.name in installed_names:
+                    continue
+                obs_ids = s.lookup_idarray(solv.SOLVABLE_OBSOLETES)
+                if not obs_ids:
+                    continue
+
+                for obs_id in obs_ids:
+                    for provider in self.pool.whatprovides(obs_id):
+                        if provider.repo != self.pool.installed:
+                            continue
+                        # Self-obsoletes are normal upgrades, not replacements
+                        if s.name == provider.name:
+                            continue
+                        # Scope filter for selective upgrades
+                        if only_names is not None and provider.name.lower() not in only_names:
+                            continue
+                        # Skip names already handled by upgrade jobs
+                        if skip_names and provider.name in skip_names:
+                            continue
+                        # Deduplicate
+                        obs_key = (provider.name, s.name)
+                        if obs_key in seen:
+                            continue
+                        seen.add(obs_key)
+
+                        will_be_obsoleted.add(provider.name)
+
+                        if provider.name in held_packages:
+                            held_warnings.append((provider.name, s.name))
+                            debug.log(
+                                f"HELD: {provider.name} would be obsoleted "
+                                f"by {s.name} (skipped)"
+                            )
+                        else:
+                            jobs.append(self.pool.Job(
+                                solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE,
+                                s.id
+                            ))
+                            debug.log(
+                                f"OBSOLETES: {s.name} obsoletes "
+                                f"installed {provider.name}"
+                            )
+                        break  # Found a match, next obsolete
+
+        debug.log(
+            f"Obsoletes scan: {len(jobs)} job(s), "
+            f"{len(will_be_obsoleted)} package(s) replaced, "
+            f"{len(held_warnings)} held"
+        )
+        return jobs, will_be_obsoleted, held_warnings
+
     def resolve_upgrade(self, package_names: List[str] = None,
                         local_packages: set = None) -> Resolution:
         """Resolve packages to upgrade.
@@ -850,81 +1000,55 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                         not_found.append(name)
                     continue
 
-                # NEVRA mode: use the name part to check installed, full NEVRA for target
+                # Extract package name (from NEVRA or plain name)
                 if _is_nevra(name):
                     pkg_name = _name_from_nevra(name)
                     debug.log(f"NEVRA detected: {name} → name={pkg_name}")
+                else:
+                    pkg_name = name
 
-                    # 1. Check that the package is installed (by name only)
-                    inst_flags = (solv.Selection.SELECTION_NAME |
-                                 solv.Selection.SELECTION_DOTARCH |
-                                 solv.Selection.SELECTION_INSTALLED_ONLY)
-                    inst_sel = self.pool.select(pkg_name, inst_flags)
-                    debug.log_selection(pkg_name, inst_sel, "installed, by name from NEVRA")
-
-                    if inst_sel.isempty():
-                        debug.log(f"NOT INSTALLED (NEVRA): {pkg_name}")
-                        not_installed.append(pkg_name)
-                        continue
-
-                    # 2. Select the exact target version (full NEVRA, all repos)
-                    target_flags = (solv.Selection.SELECTION_CANON |
-                                   solv.Selection.SELECTION_DOTARCH)
-                    sel = self.pool.select(name, target_flags)
-                    debug.log_selection(name, sel, "target NEVRA, all repos")
-
-                    if sel.isempty():
-                        debug.log(f"NEVRA NOT FOUND in any repo: {name}")
-                        not_found.append(name)
-                    else:
-                        new_jobs = sel.jobs(solv.Job.SOLVER_UPDATE)
-                        debug.log(f"Adding {len(new_jobs)} UPDATE job(s) for NEVRA {name}")
-                        jobs += new_jobs
-                    continue
-
-                # Simple name mode (existing behavior)
-                # First check if it's installed
+                # 1. Check that the package is installed
                 inst_flags = (solv.Selection.SELECTION_NAME |
-                             solv.Selection.SELECTION_CANON |
                              solv.Selection.SELECTION_DOTARCH |
                              solv.Selection.SELECTION_INSTALLED_ONLY)
-                inst_sel = self.pool.select(name, inst_flags)
-                debug.log_selection(name, inst_sel, "installed, exact")
+                inst_sel = self.pool.select(pkg_name, inst_flags)
+                debug.log_selection(pkg_name, inst_sel, "installed")
 
-                if inst_sel.isempty():
-                    # Try glob
+                if inst_sel.isempty() and not _is_nevra(name):
+                    # Try glob for plain names only
                     inst_sel = self.pool.select(name, solv.Selection.SELECTION_GLOB |
                                                 solv.Selection.SELECTION_INSTALLED_ONLY)
                     debug.log_selection(name, inst_sel, "installed, glob")
 
                 if inst_sel.isempty():
-                    debug.log(f"NOT INSTALLED: {name}")
-                    debug.watch(name, "Not found in installed packages")
-                    not_installed.append(name)
+                    debug.log(f"NOT INSTALLED: {pkg_name}")
+                    not_installed.append(pkg_name)
                     continue
 
-                # Log what we found installed
-                for s in inst_sel.solvables():
-                    debug.watch(name, f"Found installed: {s}")
+                # Get the installed solvable for arch comparison
+                installed_pkg = next(iter(inst_sel.solvables()))
+                debug.watch(pkg_name, f"Found installed: {installed_pkg}")
 
-                # Now select from ALL repos (not just installed) for the update
-                flags = (solv.Selection.SELECTION_NAME |
-                        solv.Selection.SELECTION_CANON |
-                        solv.Selection.SELECTION_DOTARCH)
-                sel = self.pool.select(name, flags)
-                debug.log_selection(name, sel, "all repos, exact")
+                # 2. Find the best available version — same logic as full
+                # system upgrade.  Uses SOLVER_INSTALL (mandatory) instead of
+                # SOLVER_UPDATE (passive) so the solver resolves the full
+                # dependency chain including cross-package transitions.
+                best = self._find_best_upgrade(pkg_name, installed_pkg.arch)
 
-                if sel.isempty():
-                    sel = self.pool.select(name, solv.Selection.SELECTION_GLOB)
-                    debug.log_selection(name, sel, "all repos, glob")
-
-                if sel.isempty():
-                    debug.log(f"NOT FOUND in any repo: {name}")
+                if best is None:
+                    debug.log(f"NOT FOUND in any repo: {pkg_name}")
                     not_found.append(name)
+                elif best.evrcmp(installed_pkg) > 0:
+                    jobs.append(self.pool.Job(
+                        solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE,
+                        best.id
+                    ))
+                    debug.log(
+                        f"UPGRADE: {pkg_name} {installed_pkg.evr} → "
+                        f"{best.evr} (SOLVER_INSTALL)"
+                    )
                 else:
-                    new_jobs = sel.jobs(solv.Job.SOLVER_UPDATE)
-                    debug.log(f"Adding {len(new_jobs)} UPDATE job(s) for {name}")
-                    jobs += new_jobs
+                    debug.log(f"UP TO DATE: {pkg_name} {installed_pkg.evr}")
 
             if not_installed:
                 debug.log(f"FAILED: packages not installed: {not_installed}")
@@ -941,6 +1065,28 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     actions=[],
                     problems=[f"Package not found: {n}" for n in not_found]
                 )
+
+            # Scan for obsoletes targeting the requested packages.
+            # A package may have no newer version under its own name but be
+            # replaced by a different package via Obsoletes (e.g.,
+            # lib64netcdf-plugins → lib64netcdf-plugins-hdf5).
+            requested_names = set()
+            for n in package_names:
+                if n in local_packages:
+                    continue
+                if _is_nevra(n):
+                    requested_names.add(_name_from_nevra(n).lower())
+                else:
+                    requested_names.add(n.lower())
+
+            if requested_names:
+                held_packages = self.db.get_held_packages_set()
+                obs_jobs, _, held_obs = self._scan_obsoletes(
+                    held_packages, only_names=requested_names,
+                )
+                jobs += obs_jobs
+                self._held_obsolete_warnings = held_obs
+
         else:
             # Find installed packages that have updates available
             # and create SOLVER_INSTALL jobs for the newer versions
@@ -949,26 +1095,13 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             held_upgrade_warnings = []
             updates_found = 0
 
-            # Pre-compute which installed packages will be replaced via Obsoletes.
-            # An available package X (not yet installed) declaring "Obsoletes: Y"
-            # means X replaces Y — we must NOT also queue an upgrade job for Y,
-            # otherwise the solver receives two conflicting INSTALL requests and
-            # tries to co-install them, triggering file conflicts.
-            installed_names = {pkg.name for pkg in self.pool.installed.solvables}
-            will_be_obsoleted: set[str] = set()
-            for repo in self.pool.repos:
-                if repo == self.pool.installed:
-                    continue
-                for s in repo.solvables:
-                    if s.name in installed_names:
-                        continue  # The obsoleting package is itself installed — skip
-                    obs_ids = s.lookup_idarray(solv.SOLVABLE_OBSOLETES)
-                    if not obs_ids:
-                        continue
-                    for obs_id in obs_ids:
-                        for provider in self.pool.whatprovides(obs_id):
-                            if provider.repo == self.pool.installed and s.name != provider.name:
-                                will_be_obsoleted.add(provider.name)
+            # Pre-compute obsoletes: which installed packages will be replaced,
+            # and the SOLVER_INSTALL jobs for their replacements.
+            # We must know will_be_obsoleted BEFORE the upgrade loop to avoid
+            # queuing conflicting INSTALL requests for packages that share files.
+            obs_jobs, will_be_obsoleted, held_obs = self._scan_obsoletes(
+                held_packages,
+            )
             if will_be_obsoleted:
                 debug.log(
                     f"Packages replaced via Obsoletes (upgrade job skipped): "
@@ -980,10 +1113,10 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 is_held = installed_pkg.name in held_packages
 
                 # Skip packages that will be replaced by an Obsoletes transition.
-                # The obsoletes loop below will add the SOLVER_INSTALL job for
-                # the replacement package; adding an upgrade job here too would
-                # give the solver two conflicting INSTALL requests for packages
-                # that share files, causing a file-conflict error.
+                # _scan_obsoletes() already created the SOLVER_INSTALL job for
+                # the replacement; adding an upgrade job here too would give the
+                # solver two conflicting INSTALL requests for packages that
+                # share files, causing a file-conflict error.
                 if installed_pkg.name in will_be_obsoleted:
                     debug.log(
                         f"SKIP UPGRADE: {installed_pkg.name} will be replaced via Obsoletes",
@@ -991,57 +1124,10 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     )
                     continue
 
-                # Find the best available version of this package
-                # For UPGRADES, prefer same architecture as installed package
-                # (but solver can still INSTALL other arches as new dependencies)
-                sel = self.pool.select(installed_pkg.name, solv.Selection.SELECTION_NAME)
-                best_available = None
-                available_versions = []
-                installed_arch = installed_pkg.arch
+                best_available = self._find_best_upgrade(
+                    installed_pkg.name, installed_pkg.arch,
+                )
 
-                for s in sel.solvables():
-                    if s.repo != self.pool.installed:
-                        available_versions.append(s)
-                        if best_available is None:
-                            best_available = s
-                        else:
-                            # Priority: same arch > different arch, then higher version
-                            s_same_arch = (s.arch == installed_arch)
-                            best_same_arch = (best_available.arch == installed_arch)
-
-                            if s_same_arch and not best_same_arch:
-                                # s is same arch, best isn't -> prefer s
-                                best_available = s
-                            elif s_same_arch == best_same_arch:
-                                # Both same arch status, compare version
-                                if s.evrcmp(best_available) > 0:
-                                    best_available = s
-                            # else: s is different arch, best is same arch -> keep best
-
-                # Debug output for watched packages
-                if is_watched:
-                    debug.watch(installed_pkg.name, f"Installed: {installed_pkg}")
-                    if available_versions:
-                        for av in available_versions[:5]:
-                            debug.watch(installed_pkg.name, f"Available: {av} [{av.repo.name}]")
-                        if len(available_versions) > 5:
-                            debug.watch(installed_pkg.name, f"... and {len(available_versions) - 5} more versions")
-                    else:
-                        debug.watch(installed_pkg.name, "No versions available in repos")
-
-                    if best_available:
-                        cmp_result = best_available.evrcmp(installed_pkg)
-                        if cmp_result > 0:
-                            debug.watch(installed_pkg.name, f"UPGRADE: {installed_pkg.evr} -> {best_available.evr}")
-                        elif cmp_result == 0:
-                            debug.watch(installed_pkg.name, f"SAME VERSION: {installed_pkg.evr} == {best_available.evr}")
-                        else:
-                            debug.watch(installed_pkg.name, f"DOWNGRADE (skipped): {installed_pkg.evr} > {best_available.evr}")
-                    else:
-                        debug.watch(installed_pkg.name, "NO UPGRADE: no available version found")
-
-                # If there's a newer version available, add an install job for it
-                # (unless the package is held)
                 if best_available and best_available.evrcmp(installed_pkg) > 0:
                     if is_held:
                         # Only warn if there's actually an upgrade to skip
@@ -1058,78 +1144,12 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             if held_upgrade_warnings:
                 debug.log(f"Skipped {len(held_upgrade_warnings)} held packages from upgrade")
 
-            # Scan for packages that obsolete installed packages
-            # This handles cases like dhcpcd obsoleting dhcp-client
-            debug.log("Scanning for packages that obsolete installed packages...")
-            # Reuse held_packages from above
-            held_warnings = []
-            obsoletes_found = 0
-
-            already_warned = set(held_upgrade_warnings)  # Avoid duplicate warnings
-            seen_obsoletes = set()  # Track what we've already processed
-            # installed_names is already computed above (pre-scan for will_be_obsoleted)
-
-            for repo in self.pool.repos:
-                if repo == self.pool.installed:
-                    continue  # Skip installed repo
-                for s in repo.solvables:
-                    # Check if this package obsoletes any installed package
-                    obsoletes = s.lookup_idarray(solv.SOLVABLE_OBSOLETES)
-                    if not obsoletes:
-                        continue
-
-                    for obs_id in obsoletes:
-                        # Use whatprovides to find packages matching this obsolete
-                        # This is much faster than iterating all installed packages
-                        for provider in self.pool.whatprovides(obs_id):
-                            if provider.repo != self.pool.installed:
-                                continue  # Only care about installed packages
-
-                            # Skip self-obsoletes (same package name)
-                            # This happens when a package has Obsoletes: pkgname < version
-                            # to clean up upgrades - it's not a replacement, just an upgrade
-                            if s.name == provider.name:
-                                continue
-
-                            # Skip if obsoleting package is already installed
-                            # This prevents "downgrade" scenarios where mageia-release-common
-                            # obsoletes mageia-release-Default but is already installed
-                            if s.name in installed_names:
-                                debug.log(f"SKIP: {s.name} obsoletes {provider.name} but is already installed")
-                                continue
-
-                            # Skip if already warned in upgrade loop
-                            if provider.name in already_warned:
-                                continue
-
-                            # Skip duplicates (same obsolete pair)
-                            obs_key = (provider.name, s.name)
-                            if obs_key in seen_obsoletes:
-                                continue
-                            seen_obsoletes.add(obs_key)
-
-                            # Check if obsoleted package is held
-                            if provider.name in held_packages:
-                                held_warnings.append((provider.name, s.name))
-                                debug.log(f"HELD: {provider.name} would be obsoleted by {s.name} (skipped)")
-                            else:
-                                # Add install job for the obsoleting package
-                                jobs.append(self.pool.Job(
-                                    solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE,
-                                    s.id
-                                ))
-                                obsoletes_found += 1
-                                debug.log(f"OBSOLETES: {s.name} obsoletes installed {provider.name}")
-                            break  # Found a match, move to next obsolete
-
-            debug.log(f"Found {obsoletes_found} packages that obsolete installed packages")
-            if held_warnings:
-                debug.log(f"Skipped {len(held_warnings)} obsoletes due to held packages")
-            # Store held warnings for later display (both upgrade and obsoletes)
-            self._held_obsolete_warnings = held_warnings
+            # Add the obsoletes jobs computed earlier (before the upgrade loop)
+            jobs += obs_jobs
+            self._held_obsolete_warnings = held_obs
             self._held_upgrade_warnings = held_upgrade_warnings
 
-            if updates_found == 0 and obsoletes_found == 0:
+            if updates_found == 0 and len(obs_jobs) == 0:
                 debug.log("No updates or obsoletes found, returning empty resolution")
                 return Resolution(
                     success=True,
