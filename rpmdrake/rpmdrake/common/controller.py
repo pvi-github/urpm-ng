@@ -1037,7 +1037,7 @@ class Controller:
             self.view.show_loading(False)
 
             if not resolution.success:
-                problems = "; ".join(resolution.problems) if resolution.problems else "Échec de la résolution"
+                problems = "\n".join(resolution.problems) if resolution.problems else "Échec de la résolution"
                 self.view.show_error("Erreur de résolution", problems)
                 return
 

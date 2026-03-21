@@ -21,6 +21,47 @@ from .database import PackageDatabase
 from .config import get_media_local_path, get_base_dir, get_system_version
 from .compression import decompress_stream
 from .resolution import PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin
+from .synthesis import parse_nevra
+
+# Known RPM architectures for NEVRA detection
+_KNOWN_ARCHES = {"x86_64", "i586", "i686", "noarch", "aarch64", "armv7hl"}
+
+
+def _is_nevra(input_str: str) -> bool:
+    """Detect if the input string is a full NEVRA (name-version-release.arch).
+
+    Returns False for globs, version constraints, and simple package names.
+    Only returns True when the string has the full name-version-release.arch
+    structure with a known architecture suffix.
+
+    Args:
+        input_str: Package specification string
+
+    Returns:
+        True if input_str is a valid NEVRA, False otherwise
+    """
+    # Globs are not NEVRAs
+    if any(c in input_str for c in ('*', '?', '[')):
+        return False
+    # Version constraints (space-separated) are not NEVRAs
+    if ' ' in input_str:
+        return False
+    name, version, release, arch = parse_nevra(input_str)
+    return bool(version) and bool(release) and arch in _KNOWN_ARCHES
+
+
+def _name_from_nevra(input_str: str) -> str:
+    """Extract the package name from a NEVRA string.
+
+    Must only be called when _is_nevra(input_str) is True.
+
+    Args:
+        input_str: A valid NEVRA string (e.g. "firefox-130.0-1.mga10.x86_64")
+
+    Returns:
+        The package name component (e.g. "firefox")
+    """
+    return parse_nevra(input_str)[0]
 
 
 class VersionConflictError(Exception):
@@ -599,7 +640,15 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         trans.order()
 
         # Build set of explicitly requested package names (lowercase)
-        explicit_names = set(n.lower() for n in package_names)
+        # Extract the base name from NEVRAs and version constraints
+        explicit_names = set()
+        for n in package_names:
+            if _is_nevra(n):
+                explicit_names.add(_name_from_nevra(n).lower())
+            else:
+                # Extract base name from version constraints ("firefox >= 130" or "firefox[>= 130]")
+                base = re.match(r'^(.+?)\s*[\[>=<]', n)
+                explicit_names.add(base.group(1).lower() if base else n.lower())
 
         actions = []
         install_size = 0
@@ -801,6 +850,39 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                         not_found.append(name)
                     continue
 
+                # NEVRA mode: use the name part to check installed, full NEVRA for target
+                if _is_nevra(name):
+                    pkg_name = _name_from_nevra(name)
+                    debug.log(f"NEVRA detected: {name} → name={pkg_name}")
+
+                    # 1. Check that the package is installed (by name only)
+                    inst_flags = (solv.Selection.SELECTION_NAME |
+                                 solv.Selection.SELECTION_DOTARCH |
+                                 solv.Selection.SELECTION_INSTALLED_ONLY)
+                    inst_sel = self.pool.select(pkg_name, inst_flags)
+                    debug.log_selection(pkg_name, inst_sel, "installed, by name from NEVRA")
+
+                    if inst_sel.isempty():
+                        debug.log(f"NOT INSTALLED (NEVRA): {pkg_name}")
+                        not_installed.append(pkg_name)
+                        continue
+
+                    # 2. Select the exact target version (full NEVRA, all repos)
+                    target_flags = (solv.Selection.SELECTION_CANON |
+                                   solv.Selection.SELECTION_DOTARCH)
+                    sel = self.pool.select(name, target_flags)
+                    debug.log_selection(name, sel, "target NEVRA, all repos")
+
+                    if sel.isempty():
+                        debug.log(f"NEVRA NOT FOUND in any repo: {name}")
+                        not_found.append(name)
+                    else:
+                        new_jobs = sel.jobs(solv.Job.SOLVER_UPDATE)
+                        debug.log(f"Adding {len(new_jobs)} UPDATE job(s) for NEVRA {name}")
+                        jobs += new_jobs
+                    continue
+
+                # Simple name mode (existing behavior)
                 # First check if it's installed
                 inst_flags = (solv.Selection.SELECTION_NAME |
                              solv.Selection.SELECTION_CANON |
@@ -1094,6 +1176,17 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
         trans.order()
 
+        # Build set of explicitly requested package names for reason tracking
+        if package_names:
+            upgrade_explicit = set()
+            for n in package_names:
+                if _is_nevra(n):
+                    upgrade_explicit.add(_name_from_nevra(n).lower())
+                else:
+                    upgrade_explicit.add(n.lower())
+        else:
+            upgrade_explicit = set()
+
         actions = []
         install_size = 0
         remove_size = 0
@@ -1119,6 +1212,11 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             else:
                 continue
 
+            # Determine install reason: explicit if user requested it, dependency otherwise
+            reason = (InstallReason.EXPLICIT
+                      if s.name.lower() in upgrade_explicit
+                      else InstallReason.DEPENDENCY)
+
             size = pkg_info.get('size', 0)
             if action in (TransactionType.INSTALL, TransactionType.UPGRADE):
                 install_size += size
@@ -1134,6 +1232,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 size=size,
                 filesize=pkg_info.get('filesize', 0),
                 media_name=pkg_info.get('media_name', ''),
+                reason=reason,
             ))
 
         return Resolution(

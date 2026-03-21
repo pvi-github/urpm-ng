@@ -171,7 +171,7 @@ class TransactionHelper:
             resolution = resolver.resolve_install(packages, choices=choices or {})
 
             if not resolution.success:
-                problems = "; ".join(resolution.problems) if resolution.problems else "Resolution failed"
+                problems = "\n".join(resolution.problems) if resolution.problems else "Resolution failed"
                 self._error(f"Resolution failed: {problems}")
                 return
 
@@ -198,7 +198,7 @@ class TransactionHelper:
             resolution = resolver.resolve_remove(packages)
 
             if not resolution.success:
-                problems = "; ".join(resolution.problems) if resolution.problems else "Échec de la résolution"
+                problems = "\n".join(resolution.problems) if resolution.problems else "Échec de la résolution"
                 self._error(f"Échec de la résolution: {problems}")
                 return
 
@@ -225,7 +225,7 @@ class TransactionHelper:
             resolution = resolver.resolve_upgrade(package_names=packages)
 
             if not resolution.success:
-                problems = "; ".join(resolution.problems) if resolution.problems else "Resolution failed"
+                problems = "\n".join(resolution.problems) if resolution.problems else "Resolution failed"
                 self._error(f"Resolution failed: {problems}")
                 return
 
@@ -248,7 +248,7 @@ class TransactionHelper:
             resolution = resolver.resolve_upgrade()
 
             if not resolution.success:
-                problems = "; ".join(resolution.problems) if resolution.problems else "Resolution failed"
+                problems = "\n".join(resolution.problems) if resolution.problems else "Resolution failed"
                 self._error(f"Resolution failed: {problems}")
                 return
 
@@ -405,7 +405,7 @@ class TransactionHelper:
                 errors.extend(op.errors)
             if result.overall_error:
                 errors.append(result.overall_error)
-            self._error("; ".join(errors) if errors else "Transaction failed")
+            self._error("\n".join(errors) if errors else "Transaction failed")
 
     def _run_erase_transaction(self, resolution):
         """Run erase transaction."""
@@ -446,7 +446,7 @@ class TransactionHelper:
                 errors.extend(op.errors)
             if result.overall_error:
                 errors.append(result.overall_error)
-            self._error("; ".join(errors) if errors else "Transaction failed")
+            self._error("\n".join(errors) if errors else "Transaction failed")
 
 
 def run_helper():

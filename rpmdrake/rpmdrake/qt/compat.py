@@ -50,6 +50,7 @@ __all__ = [
     "QToolButton",
     "QMenu",
     "QTextBrowser",
+    "QTextEdit",
     "QStackedWidget",
     "QColor",
     "QBrush",
@@ -108,6 +109,7 @@ try:
         QToolButton,
         QMenu,
         QTextBrowser,
+        QTextEdit,
         QStackedWidget,
     )
     from PySide6.QtGui import (
@@ -172,6 +174,7 @@ except ImportError:
         QToolButton,
         QMenu,
         QTextBrowser,
+        QTextEdit,
         QStackedWidget,
     )
     from PyQt6.QtGui import (

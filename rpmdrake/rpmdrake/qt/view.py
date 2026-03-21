@@ -7,6 +7,7 @@ from .compat import (
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QListWidget, QListWidgetItem, QDialog, Qt, QFrame,
     QTreeWidget, QTreeWidgetItem, QHeaderView, QScrollArea, QWidget,
+    QTextEdit,
 )
 
 from ..common.models import PackageDisplayInfo
@@ -610,10 +611,24 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         header = QLabel(f"<span style='font-size: 18pt;'>{icon}</span> <b>{title}</b>")
         layout.addWidget(header)
 
-        # Message
-        msg_label = QLabel(message)
-        msg_label.setWordWrap(True)
-        layout.addWidget(msg_label)
+        # Message — read-only text area, selectable and copyable
+        msg_text = QTextEdit()
+        msg_text.setReadOnly(True)
+        msg_text.setPlainText(message)
+        msg_text.setFrameShape(QTextEdit.Shape.NoFrame)
+        msg_text.setStyleSheet("""
+            QTextEdit {
+                background: transparent;
+                font-family: monospace;
+                font-size: 10pt;
+            }
+        """)
+        # Auto-size: estimate height from content
+        line_count = message.count('\n') + 1
+        line_height = msg_text.fontMetrics().lineSpacing()
+        text_height = min(max(line_count * line_height + 16, 60), 400)
+        msg_text.setMinimumHeight(text_height)
+        layout.addWidget(msg_text)
 
         # Button
         btn_layout = QHBoxLayout()
