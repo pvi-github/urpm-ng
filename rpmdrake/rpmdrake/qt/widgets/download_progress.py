@@ -296,10 +296,10 @@ class CollapsibleProgressWidget(QWidget):
                 self.phase_label.setText("Suppression")
                 self._collapse_details()
             elif phase == ProgressPhase.RPMDB_SYNC:
-                self.phase_label.setText("Finalisation")
+                self.phase_label.setText("Waiting for rpmdb update")
                 self.main_progress.setRange(0, 0)  # Indeterminate
                 self.pct_label.setText("")
-                self.info_label.setText("Mise à jour de la base RPM…")
+                self.info_label.setText("")
                 self._collapse_details()
             elif phase == ProgressPhase.IDLE:
                 self.hide()

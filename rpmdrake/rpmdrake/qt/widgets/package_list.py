@@ -600,23 +600,37 @@ class CheckboxDelegate(QStyledItemDelegate):
             or current == 2
         )
 
-        checkbox_option = QStyleOptionButton()
-        checkbox_option.state = QStyle.StateFlag.State_Enabled
-        checkbox_option.state |= (
-            QStyle.StateFlag.State_On if checked else QStyle.StateFlag.State_Off
-        )
+        # Draw the checkbox manually so it works correctly in both
+        # light and dark themes (Fusion style ignores the option palette
+        # for checkbox indicators, giving black-on-black in dark mode).
+        pal = QApplication.palette()
+        size = 14
+        x = option.rect.x() + (option.rect.width() - size) // 2
+        y = option.rect.y() + (option.rect.height() - size) // 2
+        box = QRect(x, y, size, size)
 
-        # Centre the checkbox indicator in the cell
-        indicator_rect = QApplication.style().subElementRect(
-            QStyle.SubElement.SE_CheckBoxIndicator, checkbox_option
-        )
-        x = option.rect.x() + (option.rect.width() - indicator_rect.width()) // 2
-        y = option.rect.y() + (option.rect.height() - indicator_rect.height()) // 2
-        checkbox_option.rect = QRect(x, y, indicator_rect.width(), indicator_rect.height())
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        QApplication.style().drawControl(
-            QStyle.ControlElement.CE_CheckBox, checkbox_option, painter
-        )
+        # Box background + border
+        border_color = pal.color(QPalette.ColorRole.Text)
+        bg_color = pal.color(QPalette.ColorRole.Base)
+        painter.setPen(QPen(border_color, 1.5))
+        painter.setBrush(QBrush(bg_color))
+        painter.drawRoundedRect(box, 2, 2)
+
+        # Checkmark
+        if checked:
+            accent = pal.color(QPalette.ColorRole.Highlight)
+            painter.setBrush(QBrush(accent))
+            painter.setPen(QPen(accent, 1.5))
+            painter.drawRoundedRect(box, 2, 2)
+            # White checkmark
+            painter.setPen(QPen(QColor("#ffffff"), 2.0))
+            painter.drawLine(x + 3, y + size // 2, x + size // 2 - 1, y + size - 4)
+            painter.drawLine(x + size // 2 - 1, y + size - 4, x + size - 3, y + 3)
+
+        painter.restore()
 
     def editorEvent(self, event, model, option, index):
         # Skip section header rows

@@ -125,22 +125,29 @@ class Controller:
         self.clear_selection()
 
     def _load_installed_cache(self) -> None:
-        """Load installed packages into cache."""
+        """Load installed packages into cache.
+
+        The four sub-caches (dependencies, orphans, upgradeables, groups)
+        are independent — we run them in parallel to cut startup time
+        roughly in half.
+        """
         try:
             self._installed_packages = self.ops.get_installed_packages()
             self._installed_cache = {
                 p['name']: f"{p['version']}-{p['release']}"
                 for p in self._installed_packages
             }
-            # Load dependency packages list
-            self._dependency_packages = self._load_dependency_packages()
-            # Load orphan packages list
-            self._orphan_packages = self._load_orphan_packages()
-            # Load upgradeable packages list
-            self._upgradeable_packages = self._load_upgradeable_packages()
-            # Load available groups and per-group package counts
-            self._available_groups, self._group_package_counts = \
-                self._load_available_groups()
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                f_deps = pool.submit(self._load_dependency_packages)
+                f_orphans = pool.submit(self._load_orphan_packages)
+                f_upgrades = pool.submit(self._load_upgradeable_packages)
+                f_groups = pool.submit(self._load_available_groups)
+
+                self._dependency_packages = f_deps.result()
+                self._orphan_packages = f_orphans.result()
+                self._upgradeable_packages = f_upgrades.result()
+                self._available_groups, self._group_package_counts = \
+                    f_groups.result()
         except Exception as e:
             self.view.show_error("Erreur", f"Impossible de charger les paquets installés: {e}")
 
@@ -459,11 +466,17 @@ class Controller:
             name = p['name']
             name_lower = name.lower()
 
-            # Install status
-            p['installed'] = name in self._installed_cache
+            # Install status: check name AND version-release match
+            installed_vr = self._installed_cache.get(name)
+            if installed_vr is not None:
+                pkg_vr = f"{p.get('version', '')}-{p.get('release', '')}"
+                p['installed'] = (pkg_vr == installed_vr)
+            else:
+                p['installed'] = False
 
-            # Update status
-            p['has_update'] = name_lower in self._upgradeable_packages
+            # Update status: only the installed version row shows "has update"
+            # Other versions of the same package are just "available"
+            p['has_update'] = p['installed'] and name_lower in self._upgradeable_packages
 
             # Install reason (only for installed packages)
             if p['installed']:
@@ -1114,7 +1127,9 @@ class Controller:
         def on_done(result: TransactionResult):
             self._current_helper = None
             self.view.show_loading(False)
-            self.view.finish_transaction()
+            # finish_transaction() is called by the view after the refresh
+            # completes, so the progress widget stays visible during the
+            # potentially long _load_installed_cache() rebuild.
             self.view.on_transaction_complete(
                 result.success,
                 {

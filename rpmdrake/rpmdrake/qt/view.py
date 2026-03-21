@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, List
 
 from .compat import (
-    QObject, Signal, Slot, QMessageBox,
+    QObject, Signal, Slot, QMessageBox, QApplication,
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QListWidget, QListWidgetItem, QDialog, Qt, QFrame,
     QTreeWidget, QTreeWidgetItem, QHeaderView, QScrollArea, QWidget,
@@ -562,22 +562,34 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
     @Slot(bool, dict)
     def _do_show_complete(self, success: bool, summary: dict) -> None:
-        """Show completion on main thread."""
+        """Show completion on main thread.
+
+        Called after the helper reports the transaction result.  In sync
+        mode the "(updating rpmdb)" message already triggered
+        start_rpmdb_sync() via on_install_progress, so the progress
+        widget is already showing "Finalisation" while we get here.
+        We refresh the package list first (the progress widget stays
+        visible), then show the success dialog once everything is done.
+        """
         if success:
             count = summary.get('installed', 0) or summary.get('removed', 0)
             msg = f"Transaction terminée avec succès.\n{count} paquet(s) traité(s)."
-            self._show_styled_message("Terminé", msg, "info")
-            # Refresh package list after successful transaction
+            # Refresh caches while "Finalisation" is still visible
             self.window.controller.refresh_after_transaction()
+            self.window.progress_widget.finish()
             # Reset action buttons (selection was cleared)
             self.window._update_button_states()
             # Refresh detail panel if a package row is still selected
             self._refresh_detail_panel()
+            # Show success dialog after everything is updated
+            self._show_styled_message("Terminé", msg, "info")
         else:
             errors = summary.get('errors', [])
             # Cancel is not an error — silently ignore it
             if errors == ['Cancelled']:
+                self.window.progress_widget.finish()
                 return
+            self.window.progress_widget.finish()
             msg = "La transaction a échoué.\n\n" + "\n".join(errors)
             self._show_styled_message("Erreur", msg, "error")
 

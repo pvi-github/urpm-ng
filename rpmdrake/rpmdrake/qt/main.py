@@ -19,6 +19,8 @@ from .compat import (
     QFont,
     QFrame,
     QStackedWidget,
+    QColor,
+    QPalette,
 )
 
 from urpm.core.database import PackageDatabase
@@ -92,10 +94,21 @@ class MainWindow(QMainWindow):
         # Apply initial font size now that all widgets exist
         self._apply_font_size()
 
-        # Load packages and categories
+        # Package loading is deferred to _deferred_load() so the window
+        # is visible immediately.  See main() which calls singleShot(0).
+
+    def _deferred_load(self) -> None:
+        """Load packages and categories after the window is visible.
+
+        Called via QTimer.singleShot(0) from main() so the event loop
+        has a chance to paint the empty window first.
+        """
+        self.set_loading(True)
+        # Force a repaint so "Chargement..." is visible before the
+        # blocking _load_installed_cache() call inside load_initial().
+        QApplication.processEvents()
         self.controller.load_initial()
         self.category_panel.populate_categories()
-
         self._update_upgrade_button()
 
     # ------------------------------------------------------------------
@@ -493,6 +506,57 @@ class MainWindow(QMainWindow):
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _apply_system_dark_mode(app: QApplication) -> None:
+    """Detect GNOME/GTK dark mode and apply a matching Qt palette.
+
+    Qt6 does not follow the GNOME color-scheme preference by default.
+    This reads the org.freedesktop.appearance portal (works on GNOME,
+    Cinnamon, MATE, and any XDG-compliant desktop) and applies a dark
+    QPalette when the system requests dark mode.
+
+    Has no effect if the desktop already provides a Qt platform theme
+    (KDE Breeze, qt6ct, etc.) or if the preference is not set.
+    """
+    # Only intervene if Qt didn't already pick up a dark palette
+    if app.palette().color(QPalette.ColorRole.Window).lightness() < 128:
+        return  # Already dark — nothing to do
+
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if "prefer-dark" not in result.stdout:
+            return
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+
+    # Build a dark palette from scratch
+    dark = QPalette()
+    dark.setColor(QPalette.ColorRole.Window,          QColor(43, 43, 43))
+    dark.setColor(QPalette.ColorRole.WindowText,       QColor(220, 220, 220))
+    dark.setColor(QPalette.ColorRole.Base,             QColor(30, 30, 30))
+    dark.setColor(QPalette.ColorRole.AlternateBase,    QColor(50, 50, 50))
+    dark.setColor(QPalette.ColorRole.Text,             QColor(220, 220, 220))
+    dark.setColor(QPalette.ColorRole.Button,           QColor(53, 53, 53))
+    dark.setColor(QPalette.ColorRole.ButtonText,       QColor(220, 220, 220))
+    dark.setColor(QPalette.ColorRole.BrightText,       QColor(255, 255, 255))
+    dark.setColor(QPalette.ColorRole.Highlight,        QColor(42, 130, 218))
+    dark.setColor(QPalette.ColorRole.HighlightedText,  QColor(255, 255, 255))
+    dark.setColor(QPalette.ColorRole.ToolTipBase,      QColor(50, 50, 50))
+    dark.setColor(QPalette.ColorRole.ToolTipText,      QColor(220, 220, 220))
+    dark.setColor(QPalette.ColorRole.PlaceholderText,  QColor(128, 128, 128))
+    dark.setColor(QPalette.ColorRole.Link,             QColor(86, 164, 255))
+
+    # Disabled state: dimmed text
+    dark.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text,       QColor(128, 128, 128))
+    dark.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(128, 128, 128))
+    dark.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(128, 128, 128))
+
+    app.setPalette(dark)
+
+
 def main() -> int:
     """Entry point for rpmdrake-ng Qt frontend.
 
@@ -507,11 +571,17 @@ def main() -> int:
     app.setApplicationDisplayName("rpmdrake-ng")
     app.setOrganizationName("Mageia")
 
+    _apply_system_dark_mode(app)
+
     from rpmdrake.i18n import init_qt_translation
     init_qt_translation(app)
 
     window = MainWindow()
     window.show()
+
+    # Defer heavy loading so the window appears immediately
+    from .compat import QTimer
+    QTimer.singleShot(0, window._deferred_load)
 
     return app.exec()
 
