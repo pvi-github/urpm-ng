@@ -150,8 +150,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         print(_("Try: sudo urpm install <packages>"))
         return 1
 
-    # Handle --builddeps option (install build dependencies from spec/SRPM)
-    builddeps = getattr(args, 'builddeps', None)
+    # Handle --buildrequires option (install build dependencies from spec/SRPM)
+    builddeps = getattr(args, 'buildrequires', None)
     if builddeps:
         from ...core.buildrequires import get_buildrequires, list_specs_in_workdir, rpm_dep_to_solver_format
 
@@ -198,7 +198,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Check that we have something to install
     if not args.packages and not builddeps:
         print(colors.error(_("Error: No packages specified")))
-        print(_("Usage: urpm install <packages> or urpm install --builddeps <spec>"))
+        print(_("Usage: urpm install <packages> or urpm install --buildrequires <spec>"))
         return 1
 
     # Separate local RPM files from package names
@@ -1001,6 +1001,20 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         # Debug: copy the installed-through-deps.list for inspection
         _copy_installed_deps_list()
 
+        # Track build dependencies for selective cleanup
+        if builddeps:
+            from pathlib import Path
+            source_name = Path(builddeps).name if builddeps != 'AUTO' else source
+            all_names = [a.name for a in result.actions]
+            # BuildRequires get EXPLICIT reason in the solver but are not
+            # user-explicit — mark them as auto-installed first so
+            # mark_as_builddep() accepts them (it skips truly explicit pkgs)
+            explicit_bd = [a.name for a in result.actions
+                           if a.reason == InstallReason.EXPLICIT]
+            if explicit_bd:
+                resolver.mark_as_dependency(explicit_bd)
+            resolver.mark_as_builddep(all_names, source_name)
+
         return 0
 
     except Exception as e:
@@ -1036,8 +1050,8 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     # Collect packages to download
     packages = list(args.packages) if args.packages else []
 
-    # Handle --builddeps option
-    builddeps = getattr(args, 'builddeps', None)
+    # Handle --buildrequires option
+    builddeps = getattr(args, 'buildrequires', None)
     if builddeps:
         from ...core.buildrequires import get_buildrequires, list_specs_in_workdir, rpm_dep_to_solver_format
 
@@ -1083,7 +1097,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
 
     if not packages:
         print(colors.error(_("Error: No packages specified")))
-        print(_("Usage: urpm download [packages...] [--builddeps [spec]]"))
+        print(_("Usage: urpm download [packages...] [--buildrequires [spec]]"))
         return 1
 
     # Get target release/arch

@@ -1021,7 +1021,7 @@ def _build_single_package(
         # 5. Install build dependencies
         print(_("  Installing BuildRequires..."))
         ret = container.exec_stream(cid, [
-            'urpm', 'install', '--auto', '--sync', '--builddeps', spec_path
+            'urpm', 'install', '--auto', '--sync', '--buildrequires', spec_path
         ])
         if ret != 0:
             return (source_path, False, f"BuildRequires install failed")

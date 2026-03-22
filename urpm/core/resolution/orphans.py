@@ -190,6 +190,92 @@ class OrphansMixin:
         root = self.root or '/'
         return Path(root) / 'var/lib/rpm/installed-through-deps.list'
 
+    def _get_builddeps_file(self) -> Path:
+        """Get path to the installed-through-builddeps.list file."""
+        root = self.root or '/'
+        return Path(root) / 'var/lib/rpm/installed-through-builddeps.list'
+
+    def _get_builddep_packages(self) -> dict:
+        """Read packages installed as build dependencies.
+
+        Returns:
+            Dict mapping lowercase package name to source (spec/srpm basename).
+        """
+        bd_file = self._get_builddeps_file()
+        result = {}
+        if bd_file.exists():
+            try:
+                for line in bd_file.read_text().splitlines():
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = line.split('\t')
+                        name = parts[0].lower()
+                        source = parts[1] if len(parts) > 1 else ''
+                        result[name] = source
+            except (IOError, OSError):
+                pass
+        return result
+
+    def _save_builddep_packages(self, packages: dict) -> bool:
+        """Save the list of packages installed as build dependencies.
+
+        Args:
+            packages: Dict mapping lowercase package name to source basename.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        bd_file = self._get_builddeps_file()
+        try:
+            bd_file.parent.mkdir(parents=True, exist_ok=True)
+            lines = [f"{name}\t{source}" for name, source in sorted(packages.items())]
+            bd_file.write_text('\n'.join(lines) + '\n' if lines else '')
+            return True
+        except (IOError, OSError, PermissionError):
+            return False
+
+    def mark_as_builddep(self, package_names: List[str], source: str) -> bool:
+        """Mark packages as installed through build dependencies.
+
+        Does not demote packages that are already explicitly installed
+        (i.e. not in unrequested and not already in builddeps).
+
+        Args:
+            package_names: Package names to mark.
+            source: Basename of the .spec or .src.rpm that required them.
+
+        Returns:
+            True if successful.
+        """
+        builddeps = self._get_builddep_packages()
+        unrequested = self._get_unrequested_packages()
+        for name in package_names:
+            lower = name.lower()
+            # Don't demote an explicitly installed package to builddep
+            if lower not in unrequested and lower not in builddeps:
+                continue
+            builddeps[lower] = source
+        return self._save_builddep_packages(builddeps)
+
+    def unmark_builddep_packages(self, package_names: List[str]) -> bool:
+        """Remove packages from the builddeps tracking list.
+
+        Args:
+            package_names: Package names to remove from builddeps tracking.
+
+        Returns:
+            True if successful.
+        """
+        builddeps = self._get_builddep_packages()
+        changed = False
+        for name in package_names:
+            if name.lower() in builddeps:
+                del builddeps[name.lower()]
+                changed = True
+        if changed:
+            return self._save_builddep_packages(builddeps)
+        return True
+
     def _get_unrequested_packages(self) -> set:
         """Read the list of packages installed as dependencies (not explicitly requested).
 
@@ -254,7 +340,8 @@ class OrphansMixin:
         """Mark packages as explicitly installed (remove from deps list).
 
         Call this when a user explicitly installs a package that was
-        previously installed as a dependency.
+        previously installed as a dependency. Also removes the package
+        from the builddeps list — explicit install takes precedence.
 
         Args:
             package_names: List of package names to mark as explicit
@@ -265,6 +352,17 @@ class OrphansMixin:
         unrequested = self._get_unrequested_packages()
         for name in package_names:
             unrequested.discard(name.lower())
+
+        # Also remove from builddeps — explicit install takes precedence
+        builddeps = self._get_builddep_packages()
+        bd_changed = False
+        for name in package_names:
+            if name.lower() in builddeps:
+                del builddeps[name.lower()]
+                bd_changed = True
+        if bd_changed:
+            self._save_builddep_packages(builddeps)
+
         return self._save_unrequested_packages(unrequested)
 
     def unmark_packages(self, package_names: List[str]) -> bool:
@@ -354,16 +452,20 @@ class OrphansMixin:
         # Build lowercase -> actual name mapping for unrequested lookup
         name_to_lower = {name: name.lower() for name in installed_pkgs}
 
+        # Builddep packages block orphan detection (they are intentionally installed)
+        builddeps_set = set(self._get_builddep_packages().keys())
+
         # For each unrequested package, check if it leads to an explicit package
         def has_explicit_ancestor(pkg_name: str, visited: set) -> bool:
-            """Walk up reverse deps to find if any explicit package depends on this."""
+            """Walk up reverse deps to find if any explicit or builddep package depends on this."""
             if pkg_name in visited:
                 return False
             visited.add(pkg_name)
 
             for dep_name in reverse_deps.get(pkg_name, set()):
-                # Found an explicitly installed package that needs this
-                if name_to_lower.get(dep_name, dep_name.lower()) not in unrequested:
+                dep_lower = name_to_lower.get(dep_name, dep_name.lower())
+                # Found an explicitly installed or builddep package that needs this
+                if dep_lower not in unrequested or dep_lower in builddeps_set:
                     return True
                 # Recurse up
                 if has_explicit_ancestor(dep_name, visited):
@@ -376,6 +478,10 @@ class OrphansMixin:
         for name in installed_pkgs:
             if name.lower() not in unrequested:
                 # Not a dependency - explicitly installed
+                continue
+
+            # Builddep packages have their own cleanup (autoremove --buildrequires)
+            if name.lower() in builddeps_set:
                 continue
 
             # Check if any explicit package depends on this (directly or indirectly)
@@ -401,6 +507,117 @@ class OrphansMixin:
                     nevra=f"{name}-{evr}.{arch}",
                     size=size,
                 ))
+
+        return orphans
+
+    def find_all_builddep_orphans(self) -> list:
+        """Find builddep packages that can be safely removed.
+
+        A builddep is removable if it has no explicit ancestor outside
+        the builddeps and unrequested sets (i.e. nothing explicitly
+        installed by the user depends on it).
+
+        Returns:
+            List of PackageAction for removable builddep packages.
+        """
+        from ..resolver import TransactionType, PackageAction
+
+        if not HAS_RPM:
+            return []
+
+        builddeps = self._get_builddep_packages()
+        if not builddeps:
+            return []
+
+        unrequested = self._get_unrequested_packages()
+        builddeps_set = set(builddeps.keys())
+
+        ts = rpm.TransactionSet(self.root or '/')
+
+        # Build package info and reverse dependency map
+        installed_pkgs = {}
+        provides_map = {}
+        reverse_deps = {}
+
+        for hdr in ts.dbMatch():
+            name = hdr[rpm.RPMTAG_NAME]
+            if name == 'gpg-pubkey':
+                continue
+
+            provides = set()
+            for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                provides.add(prov)
+                provides_map.setdefault(prov, set()).add(name)
+
+            installed_pkgs[name] = {
+                'provides': provides,
+                'hdr': hdr,
+            }
+            reverse_deps[name] = set()
+
+        for hdr in ts.dbMatch():
+            name = hdr[rpm.RPMTAG_NAME]
+            if name == 'gpg-pubkey':
+                continue
+
+            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
+                if req.startswith('rpmlib(') or req.startswith('/'):
+                    continue
+                for provider in provides_map.get(req, set()):
+                    if provider != name:
+                        reverse_deps[provider].add(name)
+
+            for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
+                for provider in provides_map.get(rec, set()):
+                    if provider != name:
+                        reverse_deps[provider].add(name)
+
+        name_to_lower = {name: name.lower() for name in installed_pkgs}
+
+        def has_real_explicit_ancestor(pkg_name: str, visited: set) -> bool:
+            """Check if an explicit package (not builddep, not unrequested) depends on this."""
+            if pkg_name in visited:
+                return False
+            visited.add(pkg_name)
+
+            for dep_name in reverse_deps.get(pkg_name, set()):
+                dep_lower = name_to_lower.get(dep_name, dep_name.lower())
+                # A real explicit package: not in unrequested AND not a builddep
+                if dep_lower not in unrequested and dep_lower not in builddeps_set:
+                    return True
+                if has_real_explicit_ancestor(dep_name, visited):
+                    return True
+
+            return False
+
+        orphans = []
+        for name in installed_pkgs:
+            if name.lower() not in builddeps_set:
+                continue
+
+            if has_real_explicit_ancestor(name, set()):
+                continue
+
+            hdr = installed_pkgs[name]['hdr']
+            epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+            version = hdr[rpm.RPMTAG_VERSION]
+            release = hdr[rpm.RPMTAG_RELEASE]
+            arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+            size = hdr[rpm.RPMTAG_SIZE] or 0
+
+            if epoch and epoch > 0:
+                evr = f"{epoch}:{version}-{release}"
+            else:
+                evr = f"{version}-{release}"
+
+            orphans.append(PackageAction(
+                action=TransactionType.REMOVE,
+                name=name,
+                evr=evr,
+                arch=arch,
+                nevra=f"{name}-{evr}.{arch}",
+                size=size,
+            ))
 
         return orphans
 

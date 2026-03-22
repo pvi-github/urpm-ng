@@ -409,7 +409,7 @@ Examples:
     )
     install_parser.add_argument(
         'packages', nargs='*',
-        help=_('Package names to install (optional with --builddeps)')
+        help=_('Package names to install (optional with --buildrequires)')
     )
     install_parser.add_argument(
         '--auto', '-y',
@@ -482,7 +482,7 @@ Examples:
         help=_('Skip dependency resolution (use with --download-only)')
     )
     install_parser.add_argument(
-        '--builddeps', '-b',
+        '--buildrequires', '--builddeps', '--br', '-b',
         nargs='?',
         const='AUTO',
         metavar='SPEC_OR_SRPM',
@@ -517,7 +517,7 @@ Examples:
     )
     download_parser.add_argument(
         'packages', nargs='*',
-        help=_('Package names to download (optional with --builddeps)')
+        help=_('Package names to download (optional with --buildrequires)')
     )
     download_parser.add_argument(
         '--release', '-r',
@@ -530,7 +530,7 @@ Examples:
         help=_('Target architecture (default: host arch)')
     )
     download_parser.add_argument(
-        '--builddeps', '-b',
+        '--buildrequires', '--builddeps', '--br', '-b',
         nargs='?',
         const='AUTO',
         metavar='SPEC_OR_SRPM',
@@ -1136,6 +1136,11 @@ Examples:
         '--all', '-a',
         action='store_true',
         help=_('All of the above')
+    )
+    autoremove_parser.add_argument(
+        '--buildrequires', '--builddeps', '--br', '-b',
+        action='store_true',
+        help=_('Remove packages installed as build dependencies')
     )
     autoremove_parser.add_argument(
         '--auto', '-y',

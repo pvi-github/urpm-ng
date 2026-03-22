@@ -41,14 +41,15 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
     do_orphans = getattr(args, 'orphans', False)
     do_kernels = getattr(args, 'kernels', False)
     do_faildeps = getattr(args, 'faildeps', False)
+    do_builddeps = getattr(args, 'buildrequires', False)
     do_all = getattr(args, 'all', False)
 
     # --all enables everything
     if do_all:
-        do_orphans = do_kernels = do_faildeps = True
+        do_orphans = do_kernels = do_faildeps = do_builddeps = True
 
     # Default to --orphans if no selector specified
-    if not (do_orphans or do_kernels or do_faildeps):
+    if not (do_orphans or do_kernels or do_faildeps or do_builddeps):
         do_orphans = True
 
     arch = platform.machine()
@@ -99,6 +100,20 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
                 len(faildeps)).format(count=colors.warning(str(len(faildeps)))))
         else:
             print(colors.success(_("  No failed dependencies found")))
+
+    # --buildrequires: packages installed as build dependencies
+    if do_builddeps:
+        print(_("Searching for build dependency packages..."))
+        bd_orphans = resolver.find_all_builddep_orphans()
+        for o in bd_orphans:
+            packages_to_remove.append((o.name, o.nevra, o.size, 'builddep'))
+        if bd_orphans:
+            print("  " + ngettext(
+                "Found {count} build dependency package",
+                "Found {count} build dependency packages",
+                len(bd_orphans)).format(count=colors.warning(str(len(bd_orphans)))))
+        else:
+            print(colors.success(_("  No build dependency packages found")))
 
     # Remove duplicates (keep first occurrence)
     seen = set()
@@ -176,6 +191,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         'orphan': _('Orphaned packages'),
         'old-kernel': _('Old kernels'),
         'faildep': _('Failed dependencies'),
+        'builddep': _('Build dependencies'),
     }
 
     for reason, nevras in by_reason.items():
@@ -209,6 +225,8 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         cmd_parts.append("--kernels")
     if do_faildeps and not do_all:
         cmd_parts.append("--faildeps")
+    if do_builddeps and not do_all:
+        cmd_parts.append("--buildrequires")
     if do_all:
         cmd_parts.append("--all")
     cmd_line = " ".join(cmd_parts)
@@ -305,6 +323,9 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
         # Update installed-through-deps.list for urpmi compatibility
         resolver.unmark_packages(package_names)
+
+        # Update builddeps tracking list
+        resolver.unmark_builddep_packages(package_names)
 
         return 0
 

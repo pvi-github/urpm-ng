@@ -1113,6 +1113,15 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
     resolver = Resolver(db)
     unrequested = resolver._get_unrequested_packages()
 
+    # Check if it's a build dependency
+    builddeps = resolver._get_builddep_packages()
+    if pkg_name.lower() in builddeps:
+        source = builddeps[pkg_name.lower()]
+        msg = _("build dependency of {source}").format(source=source)
+        print(f"{colors.bold(pkg_name)}: {colors.info(msg)}")
+        print("\n" + _("This package can be removed with: urpm autoremove --buildrequires"))
+        return 0
+
     # Check if manually installed
     if pkg_name.lower() not in unrequested:
         print(f"{colors.bold(pkg_name)}: {colors.success(_('explicitly installed'))}")
