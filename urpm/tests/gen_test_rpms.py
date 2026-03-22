@@ -56,15 +56,15 @@ def main():
         print("Must be run from 'urpm/tests' directory")
         sys.exit(0)
 
-    # Look for gendistrib executable
+    # Look for gendistrib executable (optional, only needed for media_info tests)
     gendistrib_cmd = ''
     for path in os.environ.get('PATH', '').split(':') + [base_dir]:
         if os.path.isfile(os.path.join(path, 'gendistrib')):
             gendistrib_cmd = os.path.join(path, 'gendistrib')
             break
     if gendistrib_cmd == '':
-        print("Executable gendistrib is missing, install it with rpmtools")
-        sys.exit(1)
+        print("Warning: gendistrib not found (install rpmtools). "
+              "media_info tests will be skipped.")
 
     # Look for upanier
     genmedia_cmd = []
@@ -118,9 +118,10 @@ def main():
     (base_dir / 'media/reconfig').mkdir(exist_ok=True)
     run( ["cp", "-r", "data/reconfig.urpmi", "media/reconfig"], cwd=base_dir, check=True)
 
-    (base_dir / 'media/media_info').mkdir(exist_ok=True)
-    run( ["cp", "-r", "data/media.cfg", "media/media_info"], cwd=base_dir, check=True)
-    run([gendistrib_cmd,'-s', base_dir.absolute()], check=True)
+    if gendistrib_cmd:
+        (base_dir / 'media/media_info').mkdir(exist_ok=True)
+        run( ["cp", "-r", "data/media.cfg", "media/media_info"], cwd=base_dir, check=True)
+        run([gendistrib_cmd,'-s', base_dir.absolute()], check=True)
 
 
 if __name__ == '__main__':
