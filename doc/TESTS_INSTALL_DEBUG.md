@@ -46,19 +46,23 @@
 | `test_unorphan_v1` | `u2` absent après opérations | Résolveur : le paquet `u2` n'est pas conservé/installé correctement |
 | `test_unorphan_v2` | Idem | Même cause |
 
-### Échecs pré-existants (inchangés, pas touchés)
+### Échecs infra (vboxsf)
 
 | Classe (nb) | Cause |
 |-------------|-------|
-| TestSpecifyMedia (7) | Symlinks vboxsf — fonctionne sur ext3 natif |
-| TestFileConflicts (4) | Gestion conflits fichiers manquante |
-| TestMediaInfoDir (2) | `addmedia` échoue pour layout `various` |
-| test_arch_to_noarch (1) | Gestion arch noarch |
-| test_failing_promotion (1) | Bug résolveur (skippé avec raison correcte) |
+| TestFileConflicts (4) | Les specs utilisent `ln -s` en `%install`, impossible sur vboxsf — passe sur ext3 natif |
 
-### Score TestOrphans : 15 passés, 5 échoués, 3 skippés (sur 23)
+### Échecs pré-existants (papoteur, non touchés)
 
-### Score global : 35 passés, 21 échoués, 21 skippés (sur 77)
+| Test | Cause |
+|------|-------|
+| test_failing_promotion | Bug résolveur (skippé avec raison correcte) |
+
+### Score final : 50 passés, 5 échoués, 22 skippés (sur 77)
+
+- **Gains nets** : +17 tests passants, -19 échecs (24→5), -12 skips inutiles retirés
+- **5 échecs restants** : tous bugs résolveur (f, o, gg_g, unorphan_v1, unorphan_v2)
+- **Note** : les 4 TestFileConflicts passent sur ext3 natif (échouent uniquement sur vboxsf)
 
 ## Corrections apportées
 
@@ -73,6 +77,13 @@
 - Retrait de 24 `@pytest.mark.skip` "root privileges" (les tests tournent en userns)
 - `without_recommends` passé de `True` à `False` (cohérence avec le comportement réel de urpm)
 - Skips ajoutés avec raisons précises pour les vrais blocages (genhdlist2, version constraints, résolveur)
+
+### Génération des media de test (`gen_test_rpms.py`)
+- `rpmbuild()` et `rpmbuild_srpm()` retournent `None` en cas d'échec au lieu du nom du medium — les appelants skipent `genhdlist` sur les builds échoués
+- Boucle sous-répertoires : `genhdlist` appelé une seule fois par medium (au lieu d'une fois par spec)
+- `sorted()` sur tous les globs pour un ordre de build déterministe
+- Fallback `shutil.copytree` quand `symlink_to` échoue (vboxsf)
+- Docstrings ajoutées sur les fonctions publiques
 
 ## Bugs identifiés à traiter séparément
 

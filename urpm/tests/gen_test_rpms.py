@@ -6,41 +6,57 @@ import os, sys
 
 # generate packages for testing urpm
 
-def rpmbuild(spec_file: Path, base_dir: Path, medium_name:str=None):
+def rpmbuild(spec_file: Path, base_dir: Path, medium_name: str = None) -> str | None:
+    """Build a binary RPM from a spec file and move it to media/<medium_name>.
+
+    Returns the medium name on success, None on failure.
+    """
     cmd = ["rpmbuild"]
     if "i586" in spec_file.name:
-        cmd.append("--target")
-        cmd.append("i686")
+        cmd += ["--target", "i686"]
     elif '86_64' in spec_file.name:
-        cmd.append("--target")
-        cmd.append("x86_64")
+        cmd += ["--target", "x86_64"]
     cmd += ["--define", "__os_install_post %nil"]
-    # is rpm_version needed
-    cmd += ["--quiet", "--define", f'_topdir {base_dir}/tmp', '--define', f"_tmppath {base_dir}/tmp", "-bb", "--clean", "--nodeps", str(spec_file.absolute())]
+    cmd += ["--quiet", "--define", f'_topdir {base_dir}/tmp',
+            '--define', f"_tmppath {base_dir}/tmp",
+            "-bb", "--clean", "--nodeps", str(spec_file.absolute())]
     p = run(cmd)
     name = spec_file.stem
     if not medium_name:
         medium_name = name
-    (base_dir /"media" / medium_name).mkdir(parents=True, exist_ok=True)
-    run("find tmp/RPMS -type f -name '*.rpm' | xargs -I{} mv {} media/" + medium_name + "/", shell=True, cwd=base_dir)
+    if p.returncode != 0:
+        print(f"Warning: rpmbuild failed for {spec_file.name} (rc={p.returncode})")
+        return None
+    (base_dir / "media" / medium_name).mkdir(parents=True, exist_ok=True)
+    run("find tmp/RPMS -type f -name '*.rpm' | xargs -I{} mv {} media/"
+        + medium_name + "/", shell=True, cwd=base_dir)
     return medium_name
 
-def rpmbuild_srpm(spec_file:Path, base_dir: Path):
+def rpmbuild_srpm(spec_file: Path, base_dir: Path) -> str | None:
+    """Build a source RPM from a spec file and move it to media/SRPMS-<name>.
+
+    Returns the medium name on success, None on failure.
+    """
     cmd = ["rpmbuild"]
-    # is rpm_version needed
-    cmd += ["--quiet", "--define", f'_topdir {base_dir}/tmp', '--define', f"_tmppath {base_dir}/tmp", "-bs", "--clean", "--nodeps", "--build-in-place", str(spec_file.absolute())]
+    cmd += ["--quiet", "--define", f'_topdir {base_dir}/tmp',
+            '--define', f"_tmppath {base_dir}/tmp",
+            "-bs", "--clean", "--nodeps", "--build-in-place",
+            str(spec_file.absolute())]
     p = run(cmd)
     name = spec_file.stem
+    if p.returncode != 0:
+        print(f"Warning: rpmbuild -bs failed for {spec_file.name} (rc={p.returncode})")
+        return None
     medium_name = Path("SRPMS-" + name)
-    (base_dir /"media" / medium_name).mkdir(parents=True, exist_ok=True)
+    (base_dir / "media" / medium_name).mkdir(parents=True, exist_ok=True)
     run(f"mv tmp/SRPMS/*.rpm media/{medium_name}", shell=True, cwd=base_dir)
     return medium_name.name
 
 def main():
-    #TODO Test if genhdlist2 is installed
+    """Generate all test media (RPMs + synthesis) from spec files in data/SPECS/."""
 
-    def genhdlist(dir_test:Path):
-        # ret = run(["genhdlist2", "--xml-info", "media/" + dir_test], cwd=base_dir)
+    def genhdlist(dir_test: str):
+        """Generate synthesis/hdlist for a media directory."""
         ret = run(genmedia_cmd + ["--xml-info", "media/" + dir_test], cwd=base_dir)
         if ret.returncode != 0:
             print(ret.stderr)
@@ -89,27 +105,40 @@ def main():
     for p in ( "BUILD", "RPMS/noarch", "SRPMS"):
         (base_dir / "tmp" / p).mkdir(parents=True, exist_ok=True)
 
-    for spec_dir in base_dir.glob("data/SPECS/*"):
+    # Build specs grouped in sub-directories (one medium per directory)
+    for spec_dir in sorted(base_dir.glob("data/SPECS/*")):
         if spec_dir.is_dir():
-            medium_name = Path(spec_dir).name
-            for spec_file in spec_dir.glob("*"):
-                name = rpmbuild(spec_file, base_dir, medium_name=medium_name)
-                genhdlist(name)
+            medium_name = spec_dir.name
+            ok = False
+            for spec_file in sorted(spec_dir.glob("*")):
+                if rpmbuild(spec_file, base_dir, medium_name=medium_name) is not None:
+                    ok = True
+            if ok:
+                genhdlist(medium_name)
 
-    for spec_file in base_dir.glob("data/SPECS/*.spec"):
+    # Build standalone specs (one medium per spec)
+    for spec_file in sorted(base_dir.glob("data/SPECS/*.spec")):
         if "rpm-query-in-scriptlet" in spec_file.name:
             continue
         name = rpmbuild(spec_file, base_dir)
+        if name is None:
+            continue
         if name == "various":
             shutil.copytree(base_dir / f"media/{name}", base_dir / f"media/{name}_nohdlist")
             shutil.copytree(base_dir / f"media/{name}", base_dir / f"media/{name}_no_subdir")
             genhdlist(f"{name}_no_subdir")
-            (base_dir / f"media/{name} nohdlist").symlink_to( base_dir / f"{name}_nohdlist")
+            try:
+                (base_dir / f"media/{name} nohdlist").symlink_to(base_dir / f"{name}_nohdlist")
+            except OSError:
+                # Symlinks not supported (e.g. vboxsf), use a copy instead
+                shutil.copytree(base_dir / f"media/{name}_nohdlist",
+                                base_dir / f"media/{name} nohdlist")
         genhdlist(name)
 
-    for spec_file in base_dir.glob("data/SPECS/srpm*.spec"):
+    for spec_file in sorted(base_dir.glob("data/SPECS/srpm*.spec")):
         name = rpmbuild_srpm(spec_file, base_dir)
-        genhdlist(name)
+        if name is not None:
+            genhdlist(name)
 
     name = 'rpm-i586-to-i686'
     run( ["cp", "-r", f"data/{name}", "media"], cwd=base_dir, check=True)
