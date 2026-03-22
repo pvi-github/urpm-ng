@@ -422,21 +422,20 @@ queue._child_process_standalone()
                 elif msg.msg_type == 'parent_can_exit':
                     pass  # Ignore in userns mode
 
-            # Wait for subprocess
+            # Wait for subprocess to finish
+            # In sync mode, show a message since scriptlets may take time.
+            # Always wait — proc.returncode is None until wait() is called.
             if sync:
                 print("\033[33m  Waiting for scriptlets to complete...\033[0m", flush=True)
-                proc.wait()
+            proc.wait()
 
-            # Check return code and stderr
+            # Collect stderr (RPM warnings, systemd inhibition messages, etc.)
             stderr_output = proc.stderr.read().decode('utf-8').strip() if proc.stderr else ""
-
-            # Show stderr for debugging even on success (temporary)
             if stderr_output:
                 import sys
                 print(f"\033[33m  [userns stderr]:\n{stderr_output}\033[0m", file=sys.stderr, flush=True)
 
-            # Only treat stderr as error if return code is non-zero
-            # RPM prints warnings to stderr even on success (e.g., "group X does not exist")
+            # Only treat as error if the child process actually failed
             if proc.returncode != 0:
                 if stderr_output:
                     overall_error = stderr_output
