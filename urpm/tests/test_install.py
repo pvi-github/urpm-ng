@@ -325,6 +325,8 @@ class BaseUrpmiTest:
             nodeps=False,
             force=False,
             test=False,
+            allow_no_root=True,
+            sync=True,
         )
         return cmd_erase(args, self.chroot_db)
 
