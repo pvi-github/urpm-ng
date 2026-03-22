@@ -55,8 +55,9 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
     _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
     _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
-    # Check root
-    if not check_root():
+    # Check root (not required for chroot operations)
+    allow_no_root = getattr(args, 'allow_no_root', False)
+    if not allow_no_root and not check_root():
         print(colors.error(_("Error: erase requires root privileges")))
         return 1
 
@@ -224,7 +225,9 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
     packages_to_erase = [action.name for action in all_actions]
 
     # Check if another operation is in progress
-    lock = InstallLock()
+    # Use root path for lock file when operating on chroot
+    install_root = getattr(args, 'root', None) or getattr(args, 'urpm_root', None)
+    lock = InstallLock(root=install_root)
     if not lock.acquire(blocking=False):
         print(colors.warning(_("  RPM database is locked by another process.")))
         print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
@@ -240,6 +243,7 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             force=getattr(args, 'force', False),
             test=getattr(args, 'test', False),
             root=rpm_root or "/",
+            use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
             sync=getattr(args, 'sync', False),
         )
 
