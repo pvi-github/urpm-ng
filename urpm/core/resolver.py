@@ -683,7 +683,17 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             else:
                 # Extract base name from version constraints ("firefox >= 130" or "firefox[>= 130]")
                 base = re.match(r'^(.+?)\s*[\[>=<]', n)
-                explicit_names.add(base.group(1).lower() if base else n.lower())
+                if base:
+                    explicit_names.add(base.group(1).lower())
+                else:
+                    explicit_names.add(n.lower())
+                    # Also extract base name from NVR without .arch suffix
+                    # (e.g. "kernel-desktop-latest-5.15.41-1" → "kernel-desktop-latest")
+                    # Use the same heuristic as extract_pkg_name: name ends
+                    # where the first digit-starting segment begins.
+                    nvr_match = re.match(r'^(.+?)-\d', n)
+                    if nvr_match and nvr_match.group(1).lower() != n.lower():
+                        explicit_names.add(nvr_match.group(1).lower())
 
         actions = []
         install_size = 0
