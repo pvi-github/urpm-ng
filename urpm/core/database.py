@@ -1547,6 +1547,17 @@ class PackageDatabase(
                     if limit and len(results) >= limit:
                         break
 
+        # Deduplicate by NEVRA — the same noarch package can appear in
+        # both x86_64 and i586 media with different database IDs.
+        seen_nevras = set()
+        unique = []
+        for pkg in results:
+            nevra = pkg.get('nevra') or f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}"
+            if nevra not in seen_nevras:
+                seen_nevras.add(nevra)
+                unique.append(pkg)
+        results = unique
+
         # Add installed status by checking RPM database
         for pkg in results:
             pkg['installed'] = self._is_installed(pkg['name'])
