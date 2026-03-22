@@ -126,6 +126,7 @@ class MainWindow(QMainWindow):
         self.btn_filter_toggle.setToolTip("Afficher/masquer les filtres")
         self.btn_filter_toggle.setFixedWidth(32)
         self.btn_filter_toggle.setCheckable(True)
+        self.btn_filter_toggle.setChecked(True)     # Filters visible by default
         self.btn_filter_toggle.setStyleSheet(
             f"QPushButton {{ border: 1px solid {toggle_border}; border-radius: 4px; padding: 4px; }}"
             "QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); }"
@@ -141,9 +142,8 @@ class MainWindow(QMainWindow):
             "QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); }"
         )
 
-        # --- Filter zone (collapsible, hidden by default) ---
+        # --- Filter zone (collapsible, visible by default) ---
         self.filter_zone = FilterZone(self.controller)
-        self.filter_zone.hide()
 
         # --- Package list ---
         self.package_list = PackageList()
