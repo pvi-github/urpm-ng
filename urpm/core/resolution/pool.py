@@ -138,9 +138,24 @@ class PoolMixin:
         media_list = self.db.list_media()
         debug.log(f"Found {len(media_list)} media in database")
 
+        # Sort media by priority if --sortmedia is specified
+        if self.sortmedia:
+            priority_map = {name: i for i, name in enumerate(self.sortmedia)}
+            media_list = sorted(media_list, key=lambda m: priority_map.get(m['name'], len(self.sortmedia)))
+
         for media in media_list:
             if not media['enabled']:
                 debug.log(f"Skipping disabled media: {media['name']}")
+                continue
+
+            # --media filter: only load specified media
+            if self.media_filter and media['name'] not in self.media_filter:
+                debug.log(f"Skipping media {media['name']}: not in --media filter")
+                continue
+
+            # --excludemedia filter: skip excluded media
+            if self.excludemedia and media['name'] in self.excludemedia:
+                debug.log(f"Skipping media {media['name']}: excluded by --excludemedia")
                 continue
 
             # Filter by Mageia version using smart version detection

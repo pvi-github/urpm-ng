@@ -63,6 +63,14 @@ def create_resolver(db: 'PackageDatabase', args, **kwargs) -> 'Resolver':
             seen = set()
             kwargs['allowed_arches'] = [x for x in allowed_arches if not (x in seen or seen.add(x))]
 
+    # Pass media filtering options from CLI args
+    if 'media' not in kwargs:
+        kwargs['media'] = getattr(args, 'media', None)
+    if 'excludemedia' not in kwargs:
+        kwargs['excludemedia'] = getattr(args, 'excludemedia', None)
+    if 'sortmedia' not in kwargs:
+        kwargs['sortmedia'] = getattr(args, 'sortmedia', None)
+
     return Resolver(db, root=root, urpm_root=urpm_root, **kwargs)
 
 
