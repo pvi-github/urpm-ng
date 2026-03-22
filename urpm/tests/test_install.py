@@ -2413,13 +2413,14 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         assert ret, f"addmedia failed for {self.MEDIUM}"
 
     def _install_builddeps(self, *packages):
-        """Install build dependencies via urpmi --buildrequires --auto.
+        """Install build dependencies via urpm install --buildrequires.
 
         Mirrors: urpmi --buildrequires --auto <packages>
-        Uses builddeps="AUTO" to let urpmi resolve build deps automatically.
+        Passes the first package (spec/SRPM path or name) as the
+        --buildrequires target.
         """
-        print(f"Install {packages}")
-        return self._install(*packages, builddeps="AUTO")
+        print(f"Install builddeps for {packages}")
+        return self._install(builddeps=str(packages[0]))
 
     def _install_src(self, *packages):
         """Install source RPM(s) via urpmi --install-src.
@@ -2431,8 +2432,8 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
 
     def _check_spec(self):
         """Assert the installed .spec matches the reference copy in data/SPECS/."""
-        installed = Path(f"root/root/rpmbuild/SPECS/{self.MEDIUM}.spec")
-        reference = Path(f"data/SPECS/{self.MEDIUM}.spec")
+        installed = self.chroot_tmp_path / f"root/rpmbuild/SPECS/{self.MEDIUM}.spec"
+        reference = self.base_dir / f"data/SPECS/{self.MEDIUM}.spec"
         assert installed.exists(), f"spec file not found: {installed}"
         assert (
             installed.read_bytes() == reference.read_bytes()
@@ -2441,7 +2442,7 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
     def _run_test(self, *packages):
         """Mirror sub test(): install builddeps, check, install src, verify spec."""
         # Create the rpmbuild directory tree inside the chroot
-        Path(f"root/root/rpmbuild/SOURCES").mkdir(parents=True, exist_ok=True)
+        (self.chroot_tmp_path / "root/rpmbuild/SOURCES").mkdir(parents=True, exist_ok=True)
 
         # Install build dependencies and verify
         assert self._install_builddeps(*packages) == 0
@@ -2452,7 +2453,7 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         self._check_spec()
 
         # Clean up rpmbuild tree and remove installed packages
-        shutil.rmtree("root/usr/src/rpm", ignore_errors=True)
+        shutil.rmtree(self.chroot_tmp_path / "usr/src/rpm", ignore_errors=True)
         self.check_installed_names([self.MEDIUM], remove=True)
 
     # ------------------------------------------------------------------
@@ -2462,10 +2463,9 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
     def test_buildrequires_from_srpm_file(self):
         """Pass the .src.rpm path directly to --buildrequires."""
         self.prepare()
-        srpm_glob = list(
-            Path(f"media/SRPMS-{self.MEDIUM}").glob(f"{self.MEDIUM}-*.src.rpm")
-        )
-        assert srpm_glob, f"no src.rpm found in media/SRPMS-{self.MEDIUM}"
+        srpm_dir = self.media_dir / f"SRPMS-{self.MEDIUM}"
+        srpm_glob = list(srpm_dir.glob(f"{self.MEDIUM}-*.src.rpm"))
+        assert srpm_glob, f"no src.rpm found in {srpm_dir}"
         self._run_test(str(srpm_glob[0]))
 
     @pytest.mark.skip(reason="No .spec file found. Run from an RPM build tree or specify a .spec/.src.rpm file")
