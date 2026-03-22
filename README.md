@@ -210,11 +210,18 @@ urpm upgrade <package>        # Upgrade specific packages
 ### Auto-remove orphans
 
 ```bash
-urpm autoremove               # Remove unused dependencies
+urpm autoremove               # Remove unused dependencies (default: --orphans)
 urpm ar                       # Short alias
 
+# Selectors
+--orphans, -o                 # Orphaned packages (default)
+--kernels, -k                 # Old kernels
+--faildeps, -f                # Deps from interrupted transactions
+--buildrequires, -b           # Build dependencies (--builddeps, --br)
+--all, -a                     # All of the above
+
 # Options
---auto                        # Non-interactive mode
+--auto, -y                    # Non-interactive mode
 --include-warned              # Also remove packages in redlist
 ```
 
@@ -613,12 +620,21 @@ urpm key remove <keyid>       # Remove a GPG key
 Install build dependencies for RPM building:
 
 ```bash
-urpm install --builddeps foo.spec       # From spec file
-urpm install --builddeps foo.src.rpm    # From source RPM
+urpm install --buildrequires foo.spec    # From spec file
+urpm install --buildrequires foo.src.rpm # From source RPM
 urpm i -b                                # Auto-detect in RPM build tree
+urpm i --br                              # Short alias
 
 # Options
 --sync                        # Wait for all scriptlets to complete
+```
+
+Installed build dependencies are tracked in `/var/lib/rpm/installed-through-builddeps.list`
+and excluded from regular orphan removal. To clean them up:
+
+```bash
+urpm autoremove --buildrequires          # Remove all tracked build deps
+urpm ar -b                               # Short form
 ```
 
 ## Container Build System

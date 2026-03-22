@@ -52,7 +52,7 @@ Also install suggested packages.
 .B \-\-only\-peers
 Only download from LAN peers, no upstream mirrors.
 .TP
-.BR \-b ", " \-\-builddeps " " \fI[spec]\fR
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
 Install build dependencies from spec file or SRPM. Auto-detects if no file specified.
 .TP
 .B \-\-sync
@@ -77,7 +77,29 @@ Also remove orphaned dependencies.
 .RE
 .TP
 .B autoremove
-Remove orphaned packages, old kernels, or failed dependencies.
+Remove orphaned packages, old kernels, failed dependencies, or build dependencies.
+Alias: \fBar\fR.
+.RS
+.TP
+.BR \-o ", " \-\-orphans
+Remove orphaned packages (default if no selector given).
+.TP
+.BR \-k ", " \-\-kernels
+Remove old kernels (keeps running + N recent, see \fBurpm config kernel\-keep\fR).
+.TP
+.BR \-f ", " \-\-faildeps
+Remove orphan dependencies from interrupted transactions.
+.TP
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br
+Remove packages installed as build dependencies (tracked in
+.IR /var/lib/rpm/installed\-through\-builddeps.list ")."
+.TP
+.BR \-a ", " \-\-all
+All of the above.
+.TP
+.BR \-y ", " \-\-auto
+No confirmation prompt.
+.RE
 .SS Metadata and Package Updates
 .TP
 .B update \fR[\fImedia\fR]
@@ -380,7 +402,7 @@ Download packages to cache without installing.
 .BR \-r ", " \-\-release " " \fIversion\fR
 Target release for cross-release downloads.
 .TP
-.BR \-b ", " \-\-builddeps " " \fI[spec]\fR
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
 Download build dependencies from spec file.
 .TP
 .B \-\-only\-peers

@@ -53,7 +53,7 @@ Installe aussi les paquets suggeres.
 .B \-\-only\-peers
 Telecharge uniquement depuis les pairs LAN, pas de miroirs upstream.
 .TP
-.BR \-b ", " \-\-builddeps " " \fI[spec]\fR
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
 Installe les dependances de build depuis un fichier spec ou SRPM. Auto-detection si non specifie.
 .TP
 .B \-\-sync
@@ -78,7 +78,29 @@ Supprime aussi les dependances orphelines.
 .RE
 .TP
 .B autoremove
-Supprime les paquets orphelins, anciens noyaux ou dependances cassees.
+Supprime les paquets orphelins, anciens noyaux, dependances cassees ou dependances de build.
+Alias : \fBar\fR.
+.RS
+.TP
+.BR \-o ", " \-\-orphans
+Supprime les paquets orphelins (par defaut si aucun selecteur).
+.TP
+.BR \-k ", " \-\-kernels
+Supprime les anciens noyaux (garde le courant + N recents, voir \fBurpm config kernel\-keep\fR).
+.TP
+.BR \-f ", " \-\-faildeps
+Supprime les dependances orphelines de transactions interrompues.
+.TP
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br
+Supprime les paquets installes comme dependances de build (suivis dans
+.IR /var/lib/rpm/installed\-through\-builddeps.list ")."
+.TP
+.BR \-a ", " \-\-all
+Tous les selecteurs ci-dessus.
+.TP
+.BR \-y ", " \-\-auto
+Pas de confirmation.
+.RE
 .SS Metadonnees et mises a jour
 .TP
 .B update \fR[\fImedia\fR]
@@ -384,7 +406,7 @@ Telecharge les paquets dans le cache sans les installer.
 .BR \-r ", " \-\-release " " \fIversion\fR
 Version cible pour les telechargements multi-versions.
 .TP
-.BR \-b ", " \-\-builddeps " " \fI[spec]\fR
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
 Telecharge les dependances de build depuis un fichier spec.
 .TP
 .B \-\-only\-peers

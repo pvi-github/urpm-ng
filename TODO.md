@@ -257,7 +257,7 @@ Les utilisateurs comparent défavorablement à GNOME Software sur d'autres distr
 - [x] Réplication intelligente (rpmsrate seeds)
 - [x] Download multi-release/arch
 - [x] Container builds (mkimage, build)
-- [x] BuildRequires parser (--builddeps)
+- [x] BuildRequires parser (--buildrequires)
 
 ### v0.1.x
 - [x] Package holds (hold/unhold)

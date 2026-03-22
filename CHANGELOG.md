@@ -7,8 +7,8 @@
 - **erase**: Removal with reverse dependency handling
 - **upgrade**: Full system update
 - **reinstall**: `urpm install --reinstall <pkg>`
-- **autoremove**: Cleanup orphans, old kernels, failed deps
-  - `--orphans`, `--kernels`, `--faildeps`, `--all`
+- **autoremove**: Cleanup orphans, old kernels, failed deps, build deps
+  - `--orphans`, `--kernels`, `--faildeps`, `--buildrequires`, `--all`
   - Blacklist/redlist with two-level protection
 
 ### Installation Options
@@ -18,6 +18,7 @@
 - `--test`: Dry-run without modifications
 - `--no-recommends`: Skip Recommends
 - `--with-suggests`: Include Suggests
+- `--buildrequires` (`--builddeps`, `--br`, `-b`): Install build deps from spec/SRPM with tracking
 
 ### Dependencies
 - **Weak dependencies**: Recommends, Suggests, Supplements, Enhances
