@@ -382,19 +382,28 @@ class Controller:
         return results
 
     def _get_packages_by_category(self, category: str) -> List[dict]:
-        """Get all packages in a category (prefix match)."""
+        """Get all packages in a category (prefix match).
+
+        No LIMIT is applied here — categories like Development can have
+        24 000+ packages across subcategories.  The state and display
+        filters applied afterwards reduce the result to a manageable size.
+        Deduplication by NEVRA is done via GROUP BY to avoid showing the
+        same noarch package twice when both x86_64 and i586 media are
+        enabled.
+        """
         import sqlite3
         results = []
         try:
             conn = sqlite3.connect(self.db.db_path)
             cur = conn.cursor()
             cur.execute('''
-                SELECT name, version, release, arch, summary, group_name
+                SELECT name, version, release, arch,
+                       summary, group_name
                 FROM packages
                 WHERE group_name LIKE ? OR group_name = ?
+                GROUP BY name, version, release, arch
                 ORDER BY name
-                LIMIT ?
-            ''', (category + '/%', category, self.config.search_limit))
+            ''', (category + '/%', category))
             for row in cur.fetchall():
                 results.append({
                     'name': row[0],
