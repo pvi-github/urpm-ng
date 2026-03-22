@@ -328,13 +328,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     prefer_str = getattr(args, 'prefer', None)
     preferences = PreferencesMatcher(prefer_str)
 
-    # Determine initial recommends behavior:
-    # - Auto mode: no recommends (never ask)
-    # - Interactive mode: yes unless --without-recommends (will ask user)
-    if args.auto:
-        initial_recommends = False
-    else:
-        initial_recommends = not without_recommends
+    # Install recommends by default (like DNF/apt), opt-out with --without-recommends.
+    # In interactive mode, the user will be asked to confirm (lines 620+).
+    initial_recommends = not without_recommends
 
     resolver = _create_resolver(db, args, install_recommends=initial_recommends)
     # choices dict was initialized earlier (line ~4818) with virtual package resolutions

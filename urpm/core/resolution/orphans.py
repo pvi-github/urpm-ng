@@ -719,14 +719,16 @@ class OrphansMixin:
             cap = cap.split('[')[0]
         return cap
 
-    def find_upgrade_orphans(self, upgrade_actions: list) -> list:
-        """Find packages that will become orphans after an upgrade.
+    def find_upgrade_orphans(self, all_actions: list) -> list:
+        """Find packages that will become orphans after a transaction.
 
-        Compares requires of old (installed) vs new (to be installed) packages
-        to find dependencies that are no longer needed.
+        Simulates the post-transaction state (applying upgrades, installs,
+        and removes) then checks which unrequested packages are no longer
+        required by anyone.
 
         Args:
-            upgrade_actions: List of PackageAction with action=UPGRADE
+            all_actions: All PackageActions in the transaction (upgrades,
+                         installs, removes, downgrades).
 
         Returns:
             List of PackageAction for packages that will become orphans
@@ -736,107 +738,128 @@ class OrphansMixin:
         if not HAS_RPM:
             return []
 
-        # Get packages installed as dependencies
         unrequested = self._get_unrequested_packages()
         if not unrequested:
             return []
 
         ts = rpm.TransactionSet(self.root or '/')
 
-        # Step 1: Collect old requires and new requires for upgraded packages
-        old_requires = set()  # Base capability names from old packages
-        new_requires = set()  # Base capability names from new packages
-        upgraded_names = set()
+        # Classify transaction actions
+        upgraded_names = set()   # Packages being upgraded (same name, new version)
+        installed_names = set()  # New packages being installed
+        removed_names = set()    # Packages being removed (obsoleted, etc.)
 
-        for action in upgrade_actions:
-            if action.action != TransactionType.UPGRADE:
-                continue
+        for action in all_actions:
+            if action.action == TransactionType.UPGRADE:
+                upgraded_names.add(action.name)
+            elif action.action == TransactionType.INSTALL:
+                installed_names.add(action.name)
+            elif action.action == TransactionType.REMOVE:
+                removed_names.add(action.name)
 
-            upgraded_names.add(action.name)
-
-            # Get OLD requires from librpm
-            for hdr in ts.dbMatch('name', action.name):
-                for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                    if not req.startswith('rpmlib('):
-                        old_requires.add(self._extract_cap_name(req))
-                break  # Just first match
-
-            # Get NEW requires from our database
-            pkg = self.db.get_package(action.name)
-            if pkg and pkg.get('requires'):
-                for req in pkg['requires']:
-                    new_requires.add(self._extract_cap_name(req))
-
-        # Step 2: Find capabilities that disappeared
-        lost_caps = old_requires - new_requires
-        if not lost_caps:
+        # If nothing changes, no orphans
+        if not upgraded_names and not installed_names and not removed_names:
             return []
 
-        # Step 3: Build reverse-requires map for post-upgrade state
-        # We need to know what each package will require AFTER the upgrade
-        post_upgrade_requires = {}  # pkg_name -> set of base cap names
+        # Build post-transaction state: {name -> (requires, provides)}
+        # Start with current installed packages
+        post_state = {}  # name -> {'requires': set, 'provides': set}
 
         for hdr in ts.dbMatch():
             name = hdr[rpm.RPMTAG_NAME]
+            if name == 'gpg-pubkey':
+                continue
+
+            # Skip packages being removed
+            if name in removed_names:
+                continue
+
             if name in upgraded_names:
-                # This package is being upgraded, use new requires
+                # Use NEW requires/provides from the database
                 pkg = self.db.get_package(name)
-                if pkg and pkg.get('requires'):
-                    caps = set(self._extract_cap_name(r) for r in pkg['requires'])
-                    post_upgrade_requires[name] = caps
+                requires = set()
+                provides = {name}  # Self-provide
+                if pkg:
+                    for r in pkg.get('requires', []):
+                        cap = self._extract_cap_name(r)
+                        if not cap.startswith('rpmlib('):
+                            requires.add(cap)
+                    for p in pkg.get('provides', []):
+                        provides.add(self._extract_cap_name(p))
+                post_state[name] = {'requires': requires, 'provides': provides}
             else:
-                # This package stays as-is, use current requires
-                caps = set()
+                # Package stays as-is
+                requires = set()
                 for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
                     if not req.startswith('rpmlib('):
-                        caps.add(self._extract_cap_name(req))
-                post_upgrade_requires[name] = caps
+                        requires.add(self._extract_cap_name(req))
+                provides = {name}
+                for p in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                    provides.add(self._extract_cap_name(p))
+                post_state[name] = {'requires': requires, 'provides': provides}
 
-        # Step 4: For each lost capability, find what provides it
-        # and check if that provider becomes orphan
+        # Add newly installed packages (not in rpmdb yet)
+        for name in installed_names:
+            if name in post_state:
+                continue  # Already handled (shouldn't happen)
+            pkg = self.db.get_package(name)
+            requires = set()
+            provides = {name}
+            if pkg:
+                for r in pkg.get('requires', []):
+                    cap = self._extract_cap_name(r)
+                    if not cap.startswith('rpmlib('):
+                        requires.add(cap)
+                for p in pkg.get('provides', []):
+                    provides.add(self._extract_cap_name(p))
+            post_state[name] = {'requires': requires, 'provides': provides}
+
+        # Build reverse-provides map: capability -> set of package names
+        cap_providers = {}  # cap -> {pkg_names}
+        for name, info in post_state.items():
+            for cap in info['provides']:
+                cap_providers.setdefault(cap, set()).add(name)
+
+        # Build reverse-dependency graph: who requires each package?
+        reverse_deps = {name: set() for name in post_state}
+        for name, info in post_state.items():
+            for req in info['requires']:
+                for provider in cap_providers.get(req, set()):
+                    if provider != name:
+                        reverse_deps.setdefault(provider, set()).add(name)
+
+        # Extend unrequested with newly installed packages (they are deps,
+        # not explicitly requested by the user)
+        effective_unrequested = set(unrequested)
+        for name in installed_names:
+            effective_unrequested.add(name.lower())
+
+        # Find orphans: unrequested packages with no path to an explicit package
+        def has_explicit_ancestor(pkg_name: str, visited: set) -> bool:
+            """Walk up reverse deps to find any explicit (non-unrequested) package."""
+            if pkg_name in visited:
+                return False
+            visited.add(pkg_name)
+            for dep_name in reverse_deps.get(pkg_name, set()):
+                if dep_name.lower() not in effective_unrequested:
+                    return True
+                if has_explicit_ancestor(dep_name, visited):
+                    return True
+            return False
+
+        # Check all unrequested packages in the post-transaction state
         orphan_candidates = set()
-
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-
-            # Only consider packages installed as dependencies
-            if name not in unrequested:
+        for name in post_state:
+            if name.lower() not in effective_unrequested:
                 continue
-
-            # Skip packages being upgraded (they're not orphans, they're updated)
-            if name in upgraded_names:
-                continue
-
-            # Check if this package provides any lost capability
-            provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
-            provides_lost = False
-            for prov in provides:
-                prov_base = self._extract_cap_name(prov)
-                if prov_base in lost_caps:
-                    provides_lost = True
-                    break
-
-            if not provides_lost:
-                continue
-
-            # This package provides something that was lost
-            # Check if it's still required by anyone after upgrade
-            is_still_required = False
-            pkg_provides = set(self._extract_cap_name(p) for p in provides)
-
-            for other_name, other_requires in post_upgrade_requires.items():
-                if other_name == name:
-                    continue
-                # Check if other package requires any of our provides
-                if pkg_provides & other_requires:
-                    is_still_required = True
-                    break
-
-            if not is_still_required:
+            if not has_explicit_ancestor(name, set()):
                 orphan_candidates.add(name)
 
-        # Step 5: Build PackageAction list for orphans
+        # Build PackageAction list for orphans
         orphans = []
+        seen_orphans = set()
+
+        # Orphans already in rpmdb (upgraded or unchanged packages)
         for hdr in ts.dbMatch():
             name = hdr[rpm.RPMTAG_NAME]
             if name not in orphan_candidates:
@@ -861,6 +884,20 @@ class OrphansMixin:
                 nevra=f"{name}-{evr}.{arch}",
                 size=size,
             ))
+            seen_orphans.add(name)
+
+        # Orphans that are new installs (not yet in rpmdb) — these should
+        # be excluded from the transaction rather than erased
+        for action in all_actions:
+            if action.name in orphan_candidates and action.name not in seen_orphans:
+                orphans.append(PackageAction(
+                    action=TransactionType.REMOVE,
+                    name=action.name,
+                    evr=action.evr,
+                    arch=action.arch,
+                    nevra=action.nevra,
+                    size=action.size,
+                ))
 
         return orphans
 

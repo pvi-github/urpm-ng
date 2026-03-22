@@ -167,11 +167,11 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     downgrades = [a for a in result.actions if a.action.value == 'downgrade']
 
     # Find orphaned dependencies (unless --noerase-orphans)
-    # Exclude packages already in removes to avoid duplicates
+    # Pass all actions so orphan detection can simulate the full post-transaction state
     orphans = []
-    if upgrades and not getattr(args, 'noerase_orphans', False):
+    if not getattr(args, 'noerase_orphans', False):
         removes_names = {a.name for a in removes}
-        orphans = [o for o in resolver.find_upgrade_orphans(upgrades)
+        orphans = [o for o in resolver.find_upgrade_orphans(result.actions)
                    if o.name not in removes_names]
 
     # Show packages by category
@@ -309,9 +309,17 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         else:
             action.reason = InstallReason.DEPENDENCY
 
+    # Exclude orphan new-installs from rpm_paths (don't install them)
+    orphan_names = [a.name for a in orphans] if orphans else []
+    if orphan_names:
+        import os
+        orphan_set = set(orphan_names)
+        rpm_paths = [p for p in rpm_paths
+                     if not any(os.path.basename(p).startswith(f"{n}-")
+                                for n in orphan_set)]
+
     # Include orphans in transaction recording (with 'orphan' reason)
     all_record_actions = list(result.actions)
-    orphan_names = [a.name for a in orphans] if orphans else []
     if orphans:
         for o in orphans:
             o.reason = 'orphan'
