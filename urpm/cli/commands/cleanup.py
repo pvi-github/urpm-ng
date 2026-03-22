@@ -53,7 +53,9 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         do_orphans = True
 
     arch = platform.machine()
-    resolver = Resolver(db, arch=arch)
+    root = getattr(args, 'root', None)
+    urpm_root = getattr(args, 'urpm_root', None)
+    resolver = Resolver(db, arch=arch, root=root, urpm_root=urpm_root)
 
     # Collect packages to remove from each selector
     packages_to_remove = []  # List of (name, nevra, size, reason)
@@ -212,8 +214,9 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
             print(_("\nAborted."))
             return 130
 
-    # Check root
-    if not check_root():
+    # Check root (not required for chroot operations)
+    allow_no_root = getattr(args, 'allow_no_root', False)
+    if not allow_no_root and not check_root():
         print(colors.error(_("Error: autoremove requires root privileges")))
         return 1
 
@@ -261,7 +264,8 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         package_names = [name for name, _v, _s, _r in packages_to_remove]
 
         # Check if another operation is in progress
-        lock = InstallLock()
+        install_root = getattr(args, 'root', None) or getattr(args, 'urpm_root', None)
+        lock = InstallLock(root=install_root)
         if not lock.acquire(blocking=False):
             print(colors.warning(_("  RPM database is locked by another process.")))
             print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
@@ -273,7 +277,8 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         # Build transaction queue
         from ...core.config import get_rpm_root
         rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        queue = TransactionQueue(root=rpm_root or "/")
+        use_userns = bool(allow_no_root and rpm_root)
+        queue = TransactionQueue(root=rpm_root or "/", use_userns=use_userns)
         queue.add_erase(package_names, operation_id="autoremove")
 
         # Progress callback
@@ -620,7 +625,8 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
             db.record_package(transaction_id, nevra, name, 'remove', 'cleandeps')
 
         # Check if another operation is in progress
-        lock = InstallLock()
+        install_root = getattr(args, 'root', None) or getattr(args, 'urpm_root', None)
+        lock = InstallLock(root=install_root)
         if not lock.acquire(blocking=False):
             print(colors.warning(_("  RPM database is locked by another process.")))
             print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
