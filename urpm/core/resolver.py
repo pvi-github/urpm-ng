@@ -351,7 +351,9 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
     def __init__(self, db: PackageDatabase, arch: str = "x86_64", root: str = None,
                  urpm_root: str = None, install_recommends: bool = True,
                  ignore_installed: bool = False,
-                 allowed_arches: list = None):
+                 allowed_arches: list = None,
+                 media: str = None, excludemedia: str = None,
+                 sortmedia: str = None):
         """Initialize resolver.
 
         Args:
@@ -364,6 +366,9 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             allowed_arches: List of allowed package architectures.
                            Default: [arch, 'noarch'] (system arch + noarch)
                            Use --allow-arch to add more (e.g., i686 for wine/steam)
+            media: Comma-separated list of media names to restrict to (--media)
+            excludemedia: Comma-separated list of media names to exclude (--excludemedia)
+            sortmedia: Comma-separated list of media names for priority ordering (--sortmedia)
         """
         self.db = db
         self.arch = arch
@@ -378,6 +383,10 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         else:
             from .config import get_compatible_arches
             self.allowed_arches = get_compatible_arches(arch)
+        # Media filtering
+        self.media_filter = set(media.split(',')) if media else None
+        self.excludemedia = set(excludemedia.split(',')) if excludemedia else None
+        self.sortmedia = sortmedia.split(',') if sortmedia else None
         self.pool = None
         self._solvable_to_pkg = {}  # Map solvable id -> pkg dict
         self._installed_count = 0  # Number of installed packages loaded
