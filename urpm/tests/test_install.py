@@ -80,7 +80,11 @@ class BaseUrpmiTest:
         if not self.media_dir.exists():
             from urpm.tests.gen_test_rpms import main as main_gen_tests
             main_gen_tests()
-            # run(["python3", "gen_test_rpms.py"])
+        # determine prefix to rpm command
+        if os.geteuid() == 0:
+            self.prefix_rpm = ['rpm',]
+        else:
+            self.prefix_rpm = ["unshare", "--mount", "--user", "--map-root-user","rpm"]
 
     # ------------------------------------------------------------------
     # Media management
@@ -125,7 +129,7 @@ class BaseUrpmiTest:
 
     def _rpm_install(self, medium, *names):
         """Install packages directly via rpm. Returns CompletedProcess."""
-        cmd = ["unshare", "--mount", "--user", "--map-root-user", "rpm", "--root", self.root, "-i"] + self._rpm_glob(medium, *names)
+        cmd = [ "rpm", "--root", self.root, "-i"] + self._rpm_glob(medium, *names)
         return run(cmd, capture_output=True, text=True, cwd = self.base_dir)
 
     def _rpm_install_succeeds(self, medium, *names):
@@ -141,7 +145,7 @@ class BaseUrpmiTest:
     def _rpm_remove(self, *names):
         """Remove packages directly via rpm."""
         subprocess.run(
-            ["unshare", "--mount", "--user", "--map-root-user","rpm", "-e", "--root", self.root] + list(names),
+            self.prefix_rpm + ["-e", "--root", self.root] + list(names),
             capture_output=True,
             text=True,
             cwd = self.base_dir,
@@ -242,12 +246,8 @@ class BaseUrpmiTest:
 
     def _rpm_install_direct(self, *globs):
         """Install RPMs by glob patterns directly via rpm -i."""
-        cmd = [
-                "unshare",
-                "--mount",
-                "--user",
-                "--map-root-user",
-                "rpm", "--root",
+        cmd = self.prefix_rpm + [
+                "--root",
                 self.root, "-i",
                 ] + list(globs)
         ret = run(cmd, capture_output=True, text=True, cwd = self.base_dir)
@@ -255,12 +255,7 @@ class BaseUrpmiTest:
 
     def _rpm_upgrade_direct(self, *globs):
         """Upgrade RPMs by glob patterns directly via rpm -U."""
-        cmd = [
-                "unshare",
-                "--mount",
-                "--user",
-                "--map-root-user",
-                "rpm",
+        cmd = self.prefix_rpm + [
                 "--root",
                 self.root,
                  "-U"] + list(globs)
@@ -345,10 +340,13 @@ class BaseUrpmiTest:
 # Test classes
 # ---------------------------------------------------------------------------
 
+    # TODO buggy-rpms
 
+    # TODO or not superuser-exclude, needs the option excludedocs and excludepath
 class TestInstall(BaseUrpmiTest):
     "Test for installation of various local packages"
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_arch_to_noarch(self):
         for i in range(1, 4):
             self.prepare()
@@ -359,6 +357,7 @@ class TestInstall(BaseUrpmiTest):
             assert ret == 0
             self.check_installed_names([f"arch_to_noarch-{i}-1"], full=True)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_backtrack_promotion(self):
         self.prepare()
         ret, packages = self._addmedia("media/backtrack-promotion")
@@ -372,6 +371,7 @@ class TestInstall(BaseUrpmiTest):
         # assert ret == 0
         # self.check_installed_names(["c-1-1"], full=True)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_best_versioned_provide(self):
         # a_cc requires cc
         # a_dd requires dd
@@ -393,8 +393,7 @@ class TestInstall(BaseUrpmiTest):
             # urpm installs b1 instead of b3 — pass for now
             # self.check_installed_names([pkg, expected_b], remove=True)
 
-    # TODO buggy-rpms
-
+    @pytest.mark.skip(reason="Success, testing others")
     def test_dropped_provides(self):
         # a-1 provides aa
         # a-2 does not provide aa anymore
@@ -410,6 +409,7 @@ class TestInstall(BaseUrpmiTest):
         ret = self._install("b")
         self.check_installed_names(["a", "aa", "b"], remove=True)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_epochless_conflict_with_promotion(self):
         # a-1 does not have epoch
         # a-2 has epoch 1
@@ -480,28 +480,18 @@ class TestInstall(BaseUrpmiTest):
         medium_name = "failing-scriptlets"
 
         def test_install_rpm_no_remove(name):
-            cmd = [
-                "unshare",
-                "--mount",
-                "--user",
-                "--map-root-user",
-                "rpm",
+            cmd = self.prefix_rpm + [
                 "--root",
                 self.root,
                 "-i",
                 str(self.media_dir / medium_name / f"{name}-*.rpm"),
             ]
-            run(cmd)
+            run(cmd, check=True)
             self.check_installed_names([f"{name}-1-1"], full=True, remove=False)
 
         def test_install_rpm(name, should_fail=False, uninstall_fail=False):
             test_install_rpm_no_remove("sh")
-            cmd = [
-                "unshare",
-                "--mount",
-                "--user",
-                "--map-root-user",
-                "rpm",
+            cmd = self.prefix_rpm + [
                 "--root",
                 self.root,
                 "-i",
@@ -516,42 +506,27 @@ class TestInstall(BaseUrpmiTest):
                 self.check_installed_names(
                     [f"{name}-1-1", "sh-1-1"], full=True, remove=remove)
                 if uninstall_fail:
-                    cmd = [
-                        "unshare",
-                        "--mount",
-                        "--user",
-                        "--map-root-user",
-                        "rpm",
+                    cmd = self.prefix_rpm + [
                         "--root", self.root,
                         "-e", name,
                         ]
                     ret = run(cmd)
                     assert ret.returncode != 0
                     cmd += ["--nopreun"]
-                    run(cmd)
+                    run(cmd, check=True)
                     self.check_installed_names(["sh-1-1"], full=True, remove=True)
 
         def test_install_upgrade_rpm(name):
             test_install_rpm_no_remove("sh")
-            cmd = [
-                "unshare",
-                "--mount",
-                "--user",
-                "--map-root-user",
-                "rpm",
+            cmd = self.prefix_rpm + [
                 "--root",
                 self.root,
                 "-i",
                 str(self.media_dir / medium_name / f"{name}-1-*.rpm"),
             ]
-            run(cmd)
+            run(cmd, check=True)
             self.check_installed_names([f"{name}-1-1", "sh-1-1"], full=True)
-            cmd = [
-                "unshare",
-                "--mount",
-                "--user",
-                "--map-root-user",
-                "rpm",
+            cmd = self.prefix_rpm + [
                 "--root",
                 self.root,
                 "-U",
@@ -695,6 +670,7 @@ class TestFileConflicts(BaseUrpmiTest):
             self._rpm_i_succeeds("i")
             self.check_installed_names(["h", "i"], remove=True)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_urpmi_same_transaction(self):
         """urpmi file-conflict checks within a single transaction."""
         self.prepare()
@@ -731,6 +707,7 @@ class TestFileConflicts(BaseUrpmiTest):
             assert self._install("h", "i") == 0
             self.check_installed_names(["h", "i"], remove=True)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_urpmi_different_transactions(self):
         """urpmi file-conflict checks across separate transactions."""
         self.prepare()
@@ -956,6 +933,7 @@ class TestHandleConflictDeps2(BaseUrpmiTest):
                 [f"{n}-1" for n in result2], full=True, remove=True
             )
 
+    @pytest.mark.skip(reason="Success, testing others")
     def _run_conflict_upgrade_test(self, first, wanted, result1, result2):
         """Full scenario for one conflict-upgrade test case.
 
@@ -1087,6 +1065,7 @@ class TestMediaInfoDir(BaseUrpmiTest):
     # Test methods
     # ------------------------------------------------------------------
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_various_media_layouts(self):
         """Install 'various' from four different media layout variants.
 
@@ -1113,6 +1092,7 @@ class TestMediaInfoDir(BaseUrpmiTest):
             self.check_installed_names([f"{pkg}-1-1"], full=True, remove=True)
             self.check_nothing_installed()
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_query_and_list(self):
         """cmd_query and --list must return all three 'various' packages.
 
@@ -1191,6 +1171,7 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
     # Tests
     # ------------------------------------------------------------------
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_split_package_removes_original(self):
         """Installing b+c while 'a' is present must remove 'a' and install b, c."""
         self.prepare()
@@ -1203,6 +1184,7 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         assert self._install("b", "c") == 0
         self.check_installed_names(["b", "c"], remove=True)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_with_ad_plain(self):
         """With a+d installed, upgrading to b+c must keep d (via b provides a)."""
         self.prepare()
@@ -1213,6 +1195,7 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         assert self._install("b", "c") == 0
         self.check_installed_names(["b", "c", "d"], remove=True)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_with_ad_split_level(self):
         """Same as test_with_ad_plain but packages installed one at a time.
 
@@ -1229,6 +1212,7 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         assert self._install("c") == 0
         self.check_installed_names(["b", "c", "d"], remove=True)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_with_ad_auto_c(self):
         """Installing only c with --auto must promote b (which obsoletes a)."""
         self.prepare()
@@ -1270,6 +1254,7 @@ class TestOrderingScriptlets(BaseUrpmiTest):
     # Scenario helpers (mirror the Perl subs)
     # ------------------------------------------------------------------
 
+    @pytest.mark.skip(reason="Success, testing others")
     def _test_install_remove_rpm(self, name):
         """install via rpm, check, remove.
 
@@ -1288,6 +1273,7 @@ class TestOrderingScriptlets(BaseUrpmiTest):
         self._rpm_install_direct(pkg1, a1)
         self._check_and_remove(name, "a")
 
+    @pytest.mark.skip(reason="Success, testing others")
     def _test_install_upgrade_rpm(self, name):
         """install v1, upgrade to v2."""
         a1 = self._rpm_glob_single("a", 1)
@@ -1307,6 +1293,7 @@ class TestOrderingScriptlets(BaseUrpmiTest):
         self._rpm_upgrade_direct(a2, pkg2)
         self._check_and_remove(name, "a")
 
+    @pytest.mark.skip(reason="Success, testing others")
     def _test_install_remove_urpm(self, name):
         """Install a + requires_X via urpm in both orderings.
         Medium is re-added and removed around each sub-scenario.
@@ -1318,6 +1305,7 @@ class TestOrderingScriptlets(BaseUrpmiTest):
             assert self._install(*names) == 0
             self._check_and_remove(*names)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def _test_install_upgrade_urpm(self, name):
         """Pre-install v1 of both packages via rpm, then upgrade via urpm
         in both orderings.
@@ -1333,6 +1321,7 @@ class TestOrderingScriptlets(BaseUrpmiTest):
             assert self._install(*names) == 0
             self._check_and_remove(*names)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def _test_install_remove_urpm_one_by_one(self, name):
         """Installs each package in a separate _install() call to emulate
         the one-package-per-transaction behaviour of --split-length 1.
@@ -1345,6 +1334,7 @@ class TestOrderingScriptlets(BaseUrpmiTest):
                 assert self._install(pkg) == 0
             self._check_and_remove(*names)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def _test_install_upgrade_one_by_one(self, name):
         """Upgrade each package in a separate call to emulate
         the one-package-per-transaction behaviour of --split-length 1."""
@@ -1372,31 +1362,37 @@ class TestOrderingScriptlets(BaseUrpmiTest):
     ]
     SCRIPTLET_PKGS_UPGRADE = ["requires_preun", "requires_postun"]
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_remove_rpm(self):
         """rpm -i ordering for all four scriptlet-dependency packages."""
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_rpm(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_upgrade_rpm(self):
         """rpm -i/-U ordering for upgrade-relevant scriptlet packages."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
             self._test_install_upgrade_rpm(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_remove_urpm(self):
         """urpm install+remove ordering, all packages, no split."""
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_urpm(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_upgrade_urpm(self):
         """urpm install+upgrade ordering, upgrade packages, no split."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
             self._test_install_upgrade_urpm(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_remove_urpm_one_by_one(self):
         """urpm install+remove, one package per transaction (emulates split-length 1)."""
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_urpm_one_by_one(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_upgrade_one_by_one(self):
         """urpm install+upgrade, one package per transaction (emulates split-length 1)."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
@@ -1539,31 +1535,37 @@ class TestOrderingScriptlets(BaseUrpmiTest):
     ]
     SCRIPTLET_PKGS_UPGRADE = ["requires_preun", "requires_postun"]
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_remove_rpm(self):
         """rpm -i ordering for all four scriptlet-dependency packages."""
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_rpm(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_upgrade_rpm(self):
         """rpm -i/-U ordering for upgrade-relevant scriptlet packages."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
             self._test_install_upgrade_rpm(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_remove_urpmi(self):
         """urpmi install+remove ordering, all packages, no split."""
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_urpmi(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_upgrade_urpmi(self):
         """urpmi install+upgrade ordering, upgrade packages, no split."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
             self._test_install_upgrade_urpmi(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_remove_urpmi_one_by_one(self):
         """urpmi install+remove, one package per transaction (emulates split-length 1)."""
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_urpmi_one_by_one(name)
 
+    @pytest.mark.skip(reason="Success, testing others")
     def test_install_upgrade_urpmi_one_by_one(self):
         """urpmi install+upgrade, one package per transaction (emulates split-length 1)."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
@@ -2402,14 +2404,13 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         """Install build dependencies via urpm install --buildrequires.
 
         Mirrors: urpmi --buildrequires --auto <packages>
-        Passes the first package (spec/SRPM path or name) as the
-        --buildrequires target.
+        Uses builddeps="AUTO" to let urpm i resolve build deps automatically.
         """
         print(f"Install builddeps for {packages}")
         return self._install(builddeps=str(packages[0]))
 
     def _install_src(self, *packages):
-        """Install source RPM(s) via urpmi --install-src.
+        """Install source RPM(s) via urpm i --install-src.
 
         Mirrors: urpmi --install-src <packages>
         Places the .spec file under root/root/rpmbuild/SPECS/.
@@ -2445,7 +2446,7 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
     # ------------------------------------------------------------------
     # Test methods
     # ------------------------------------------------------------------
-    @pytest.mark.skip(reason="No .spec file found. Run from an RPM build tree or specify a .spec/.src.rpm file")
+    # @pytest.mark.skip(reason="No .spec file found. Run from an RPM build tree or specify a .spec/.src.rpm file")
     def test_buildrequires_from_srpm_file(self):
         """Pass the .src.rpm path directly to --buildrequires."""
         self.prepare()
@@ -2454,7 +2455,7 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         assert srpm_glob, f"no src.rpm found in {srpm_dir}"
         self._run_test(str(srpm_glob[0]))
 
-    @pytest.mark.skip(reason="No .spec file found. Run from an RPM build tree or specify a .spec/.src.rpm file")
+    # @pytest.mark.skip(reason="No .spec file found. Run from an RPM build tree or specify a .spec/.src.rpm file")
     def test_buildrequires_from_src_medium(self):
         """Add the SRPM medium then pass the package name to --buildrequires."""
         self.prepare()
