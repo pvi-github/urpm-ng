@@ -2527,7 +2527,7 @@ class TestSuggests(BaseUrpmiTest):
         self._install(name2, without_recommends=False, with_suggests=True)
         self.check_installed_names([name1] + required1 + [name2] + required2 + suggested2, remove=True)
 
-    @pytest.skip("Installing a-1 pulls suggested_c, which is not expected")
+    @pytest.mark.skip("Installing a-1 pulls suggested_c, which is not expected")
     def test_suggests_upgrade(self):
         self.prepare()
         self._install("a-1", without_recommends=False, with_suggests=True);
