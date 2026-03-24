@@ -129,7 +129,7 @@ class BaseUrpmiTest:
 
     def _rpm_install(self, medium, *names):
         """Install packages directly via rpm. Returns CompletedProcess."""
-        cmd = [ "rpm", "--root", self.root, "-i"] + self._rpm_glob(medium, *names)
+        cmd = self.prefix_rpm +[ "rpm", "--root", self.root, "-i"] + self._rpm_glob(medium, *names)
         return run(cmd, capture_output=True, text=True, cwd = self.base_dir)
 
     def _rpm_install_succeeds(self, medium, *names):
@@ -144,16 +144,17 @@ class BaseUrpmiTest:
 
     def _rpm_remove(self, *names):
         """Remove packages directly via rpm."""
-        subprocess.run(
+        ret = run(
             self.prefix_rpm + ["-e", "--root", self.root] + list(names),
             capture_output=True,
             text=True,
             cwd = self.base_dir,
         )
+        return ret.returncode == 0
 
     def _rpm_query(self, name):
         """Return True if the package is currently installed in the chroot."""
-        ret = subprocess.run(
+        ret = run(
             ["rpm", "-q", "--quiet", "--root", self.root, name],
             capture_output=True,
             cwd = self.base_dir,
@@ -175,6 +176,8 @@ class BaseUrpmiTest:
         sortmedia=None,
         builddeps=None,
         install_src=False,
+        without_recommends=True,
+        with_suggests=False,
     ):
         """Install packages via urpm. Returns return code."""
         args = argparse.Namespace(
@@ -183,8 +186,8 @@ class BaseUrpmiTest:
             root=self.root,
             packages=list(names),
             auto=auto,
-            without_recommends=False,
-            with_suggests=False,
+            without_recommends=without_recommends,
+            with_suggests=with_suggests,
             download_only=False,
             nodeps=False,
             nosignature=True,
@@ -2462,3 +2465,100 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         ret, _ = self._addmedia(f"media/SRPMS-{self.MEDIUM}")
         assert ret, f"addmedia failed for SRPMS medium"
         self._run_test(self.MEDIUM)
+
+
+class TestSuggests(BaseUrpmiTest):
+    """Tests for testing suggests management
+        a-1 suggests suggested_b
+        a-2 suggests suggested_b suggested_c
+        a-3 suggests suggested_b
+
+        b requires bb
+        bb suggests suggested_b
+        c suggests cc
+        cc requires b
+        c2 requires cc
+
+        with-invalid suggests invalid
+
+    """
+
+    MEDIUM = "suggests"
+
+    def prepare(self):
+        super().prepare()
+        ret, _ = self._addmedia(f"media/{self.MEDIUM}")
+        assert ret, f"addmedia failed for {self.MEDIUM}"
+
+    def test_suggests_b(self):
+        self._test('b', ['bb'], ['suggested_b'])
+        self._test_2('bb', [], 'b', [], [])
+
+    @pytest.mark.skip("suggested_b is missing")
+    def test_suggests_c(self):
+        self._test('c', [], ['cc', 'b', 'bb', 'suggested_b'])
+        self._test_2('b', ['bb'], 'c', [], ['cc'])
+        self._test_2('bb', [], 'c', [], ['cc', 'b'])
+
+    def test_suggests_invalid(self):
+        self.prepare()
+        self._install("with-invalid")
+        self.check_installed_names(['with-invalid'], remove=True)
+
+    def _test(self, name: str, required: list[str], suggested: list[str]):
+        self.prepare()
+        self._install(name)
+        self.check_installed_names([name] + required, remove=True)
+        self._install(name, without_recommends=False, with_suggests=True)
+        self.check_installed_names([name] + required + suggested)
+        self._rpm_remove(name, *required)
+        self.check_installed_names(suggested, remove=True)
+
+
+    def _test_2(self, name1: str, required1: list[str], name2: str, required2: list[str], suggested2: list[str]):
+        self.prepare()
+        self._install(name1)
+        self.check_installed_names([name1] + required1)
+        self._install(name2)
+        self.check_installed_names([name1] + required1 + [name2] + required2, remove=True)
+
+        self._install(name1)
+        self.check_installed_names([name1] + required1)
+        self._install(name2, without_recommends=False, with_suggests=True)
+        self.check_installed_names([name1] + required1 + [name2] + required2 + suggested2, remove=True)
+
+    @pytest.skip("Installing a-1 pulls suggested_c, which is not expected")
+    def test_suggests_upgrade(self):
+        self.prepare()
+        self._install("a-1", without_recommends=False, with_suggests=True);
+        self.check_installed_names(['a', 'suggested_b']);
+        self._install("a-2", without_recommends=False, with_suggests=True)
+        self.check_installed_names(['a', 'suggested_b', 'suggested_c'])
+        self._install("a-3", without_recommends=False, with_suggests=True)
+        self.check_installed_names(['a', 'suggested_b', 'suggested_c'], remove=True)
+
+        self._install("a-1")
+        self.check_installed_names('a')
+        self._install("a-2", without_recommends=False, with_suggests=True)
+        self.check_installed_names(['a', 'suggested_b', 'suggested_c'])
+        self._install("a-3", without_recommends=False, with_suggests=True)
+        self.check_installed_names(['a', 'suggested_b', 'suggested_c'], remove=True)
+
+
+    @pytest.mark.skip("Installing c-1 pulls nothing, which is not expected")
+    def test_suggests_d(self):
+        self.prepare()
+        common = ['b', 'bb', 'suggested_b']
+        self._install("c", without_recommends=False, with_suggests=True)
+        self.check_installed_names(['c', 'cc'] + common)
+        self._rpm_remove("cc")
+        self.check_installed_names(['c'] + common, remove=True)
+
+        for names in ('c2', 'c c2', 'c2 c'):  # 'c c2' was broken (#34342)
+            pkgs = names.split(' ')
+            for pkg in pkgs:
+                self._install(pkg, without_recommends=False)
+            self.check_installed_names(names + ['cc'] + common)
+            ret = self._rpm_remove("cc")
+            assert ret == False
+            self.check_installed_names(names + ['cc'] + common, remove=True)
