@@ -1,8 +1,10 @@
 """Tests for SQLite database"""
 
-import pytest
 import tempfile
 from pathlib import Path
+
+import pytest
+
 from urpm.core.database import PackageDatabase
 
 
