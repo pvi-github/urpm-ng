@@ -181,6 +181,12 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     builddeps = 'AUTO'
 
             target = None if builddeps == 'AUTO' else builddeps
+            # If target is a package name (not a file path), try to find
+            # the .src.rpm in configured media
+            if target and not Path(target).exists():
+                resolved = _resolve_srpm_path(target, db)
+                if resolved:
+                    target = str(resolved)
             reqs, source = get_buildrequires(target)
             print(colors.info(_("Build dependencies from: {source}").format(source=source)))
             print("  " + _("Found {count} BuildRequires").format(count=len(reqs)))
@@ -211,7 +217,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         return 1
 
     # Separate local RPM files from package names
-    from pathlib import Path
     from ...core.rpm import is_local_rpm, read_rpm_header
     from ...core.download import verify_rpm_signature
 
@@ -1008,7 +1013,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
         # Track build dependencies for selective cleanup
         if builddeps:
-            from pathlib import Path
             source_name = Path(builddeps).name if builddeps != 'AUTO' else source
             all_names = [a.name for a in result.actions]
             # BuildRequires get EXPLICIT reason in the solver but are not
@@ -1087,6 +1091,12 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
                     builddeps = 'AUTO'  # Let get_buildrequires handle it
 
             target = None if builddeps == 'AUTO' else builddeps
+            # If target is a package name (not a file path), try to find
+            # the .src.rpm in configured media
+            if target and not Path(target).exists():
+                resolved = _resolve_srpm_path(target, db)
+                if resolved:
+                    target = str(resolved)
             reqs, source = get_buildrequires(target)
             print(colors.info(_("Build dependencies from: {source}").format(source=source)))
             print("  " + _("Found {count} BuildRequires").format(count=len(reqs)))
@@ -1421,13 +1431,17 @@ def _resolve_srpm_path(pkg: str, db: 'PackageDatabase') -> 'Path | None':
 
     # Case 3: package name — search in configured media for matching .src.rpm
     for media in db.list_media():
-        url = media.get('url', '')
-        if not url.startswith('file://'):
+        # Resolve media directory from url or relative_path
+        url = media.get('url') or ''
+        rel_path = media.get('relative_path') or ''
+        if url.startswith('file://'):
+            media_dir = Path(url.removeprefix('file://'))
+        elif rel_path:
+            media_dir = Path('/') / rel_path
+        else:
             continue
-        media_dir = Path(url.removeprefix('file://'))
         if not media_dir.is_dir():
             continue
-        # Look for a matching .src.rpm in this media directory
         for srpm in media_dir.glob(f"{pkg}-*.src.rpm"):
             return srpm
 
