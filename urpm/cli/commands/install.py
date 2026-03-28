@@ -195,6 +195,15 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             print(colors.error(_("Error: {error}").format(error=e)))
             return 1
 
+    # Handle --install-src option (extract source RPM to ~/rpmbuild/)
+    install_src = getattr(args, 'install_src', False)
+    if install_src:
+        if not args.packages:
+            print(colors.error(_("Error: No packages specified")))
+            print(_("Usage: urpm install --install-src <srpm_file_or_package_name>"))
+            return 1
+        return _install_src(args, db)
+
     # Check that we have something to install
     if not args.packages and not builddeps:
         print(colors.error(_("Error: No packages specified")))
@@ -1316,3 +1325,110 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     return 0
 
 
+def _install_src(args, db: 'PackageDatabase') -> int:
+    """Install source RPM(s): extract .spec and sources to ~/rpmbuild/.
+
+    Handles two input modes:
+    - Local .src.rpm file path: install directly via rpm -i
+    - Package name: find the .src.rpm from configured SRPM media, then install
+
+    Uses ``rpm -i`` which extracts spec files to ~/rpmbuild/SPECS/ and
+    source archives to ~/rpmbuild/SOURCES/ without touching the RPM database.
+
+    Args:
+        args: Parsed CLI arguments with packages list and optional root.
+        db: Package database for media lookups.
+
+    Returns:
+        0 on success, 1 on error.
+    """
+    from .. import colors
+
+    root = getattr(args, 'root', None)
+    failed = False
+
+    for pkg in args.packages:
+        srpm_path = _resolve_srpm_path(pkg, db)
+        if srpm_path is None:
+            print(colors.error(
+                _("Error: cannot find source RPM for '{pkg}'").format(pkg=pkg)
+            ))
+            failed = True
+            continue
+
+        # Build the rpmbuild directory tree
+        if root:
+            rpmbuild_base = Path(root) / "root" / "rpmbuild"
+        else:
+            rpmbuild_base = Path.home() / "rpmbuild"
+        rpmbuild_base.mkdir(parents=True, exist_ok=True)
+        (rpmbuild_base / "SPECS").mkdir(exist_ok=True)
+        (rpmbuild_base / "SOURCES").mkdir(exist_ok=True)
+
+        srpm_name = Path(srpm_path).name
+        print(colors.info(
+            _("Extracting source RPM: {srpm}").format(srpm=srpm_name)
+        ))
+
+        # rpm -i with _topdir extracts spec → SPECS/ and sources → SOURCES/
+        # No --root needed: source RPMs don't touch the RPM database.
+        cmd = ["rpm", "-i",
+               "--define", f"_topdir {rpmbuild_base}",
+               str(srpm_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            print(colors.error(
+                _("Error: rpm -i failed for {srpm}").format(srpm=srpm_name)
+            ))
+            if stderr:
+                print(colors.warning(f"  {stderr}"))
+            failed = True
+            continue
+
+        # Show what was extracted
+        specs = list((rpmbuild_base / "SPECS").glob("*.spec"))
+        sources = list((rpmbuild_base / "SOURCES").iterdir())
+        print(colors.success(
+            _("  Extracted {specs} spec file(s) and {sources} source file(s) to {dest}").format(
+                specs=len(specs), sources=len(sources), dest=rpmbuild_base
+            )
+        ))
+
+    return 1 if failed else 0
+
+
+def _resolve_srpm_path(pkg: str, db: 'PackageDatabase') -> 'Path | None':
+    """Resolve a package specification to a .src.rpm file path.
+
+    Args:
+        pkg: Either a local .src.rpm file path or a package name.
+        db: Package database for media lookups.
+
+    Returns:
+        Path to the .src.rpm file, or None if not found.
+    """
+    from ...core.rpm import is_local_rpm
+
+    # Case 1: direct .src.rpm file path
+    if pkg.endswith('.src.rpm'):
+        p = Path(pkg)
+        return p if p.exists() else None
+
+    # Case 2: local RPM file (non-source) — not valid for --install-src
+    if is_local_rpm(pkg):
+        return None
+
+    # Case 3: package name — search in configured media for matching .src.rpm
+    for media in db.list_media():
+        url = media.get('url', '')
+        if not url.startswith('file://'):
+            continue
+        media_dir = Path(url.removeprefix('file://'))
+        if not media_dir.is_dir():
+            continue
+        # Look for a matching .src.rpm in this media directory
+        for srpm in media_dir.glob(f"{pkg}-*.src.rpm"):
+            return srpm
+
+    return None

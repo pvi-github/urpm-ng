@@ -2503,8 +2503,9 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
     # ------------------------------------------------------------------
     # Test methods
     # ------------------------------------------------------------------
-    @pytest.mark.wip
-    @pytest.mark.skip(reason="--install-src not implemented yet")
+    @pytest.mark.rootonly
+    @pytest.mark.skipif(os.geteuid() != 0,
+                        reason="rpm -i cpio chmod/utime fails on vboxsf as non-root")
     def test_buildrequires_from_srpm_file(self):
         """Pass the .src.rpm path directly to --buildrequires."""
         self.prepare()
@@ -2513,8 +2514,9 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         assert srpm_glob, f"no src.rpm found in {srpm_dir}"
         self._run_test(str(srpm_glob[0]))
 
-    @pytest.mark.wip
-    @pytest.mark.skip(reason="--install-src not implemented yet")
+    @pytest.mark.rootonly
+    @pytest.mark.skipif(os.geteuid() != 0,
+                        reason="rpm -i cpio chmod/utime fails on vboxsf as non-root")
     def test_buildrequires_from_src_medium(self):
         """Add the SRPM medium then pass the package name to --buildrequires."""
         self.prepare()

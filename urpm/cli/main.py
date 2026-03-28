@@ -489,6 +489,11 @@ Examples:
         help=_('Install build dependencies from spec file or SRPM')
     )
     install_parser.add_argument(
+        '--install-src',
+        action='store_true',
+        help=_('Install source RPM: extract .spec and sources to ~/rpmbuild/')
+    )
+    install_parser.add_argument(
         '--allow-arch',
         type=str,
         action='append',
