@@ -95,9 +95,6 @@ class TransactionHelper:
         cmd_type = cmd.get("cmd")
 
         if cmd_type == "execute":
-            # Start a stdin watcher so cancel commands are received
-            # while the operation is running (download blocks the main loop).
-            self._start_stdin_watcher()
             try:
                 self._execute(cmd)
             finally:
@@ -107,6 +104,26 @@ class TransactionHelper:
             self._send({"type": "cancelled"})
         else:
             self._error(f"Unknown command: {cmd_type}")
+
+    def _wait_response(self, timeout: float = 300) -> dict | None:
+        """Wait for a single JSON response from stdin (synchronous).
+
+        Called before the stdin watcher is started (e.g. for README
+        confirmation), so there is no contention on stdin.
+
+        Returns the parsed JSON dict, or None on timeout / error.
+        """
+        import select
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+            if not ready:
+                return None
+            line = sys.stdin.readline().strip()
+            if not line:
+                return None
+            return json.loads(line)
+        except (json.JSONDecodeError, OSError):
+            return None
 
     def _start_stdin_watcher(self):
         """Start a daemon thread that reads stdin for cancel commands.
@@ -356,6 +373,31 @@ class TransactionHelper:
         # Get packages to erase (for obsoletes)
         erase_names = [a.name for a in resolution.actions if a.action.name == 'REMOVE']
 
+        # Collect README.urpmi messages from cached RPMs (before install)
+        readme_messages = []
+        try:
+            from urpm.core.readme import collect_readme_from_rpms
+            readme_messages = [
+                {"package": m.package, "content": m.content}
+                for m in collect_readme_from_rpms(rpm_paths, resolution.actions)
+            ]
+        except Exception:
+            pass  # Non-critical
+
+        if readme_messages:
+            self._send({
+                "type": "readme",
+                "readme_messages": readme_messages,
+            })
+            # Wait for GUI confirmation (or cancellation)
+            response = self._wait_response()
+            if not response or response.get("action") == "cancel":
+                self._send({"type": "cancelled"})
+                return
+
+        # Restart stdin watcher for cancel commands during install
+        self._start_stdin_watcher()
+
         # Run transaction
         self._status(f"Installing {len(rpm_paths)} package(s)...")
 
@@ -397,7 +439,8 @@ class TransactionHelper:
             self._send({
                 "type": "done",
                 "success": True,
-                "count": total_count
+                "count": total_count,
+                "readme_messages": readme_messages,
             })
         else:
             errors = []

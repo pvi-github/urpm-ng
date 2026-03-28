@@ -1,5 +1,6 @@
 """Qt implementation of ViewInterface."""
 
+import threading
 from typing import TYPE_CHECKING, List
 
 from .compat import (
@@ -44,6 +45,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
     _show_confirm = Signal(str, str, dict)
     _filter_changed = Signal()
     _show_package_details = Signal(dict)
+    _show_readme = Signal(list)  # README.urpmi messages before install
 
     def __init__(self, window: 'MainWindow'):
         super().__init__()
@@ -66,6 +68,9 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         self._show_confirm.connect(self._do_show_confirm)
         self._filter_changed.connect(self._do_filter_changed)
         self._show_package_details.connect(self._do_show_package_details)
+        self._show_readme.connect(self._do_show_readme)
+        self._readme_result: bool = True
+        self._readme_event: 'threading.Event | None' = None
 
     # =========================================================================
     # ViewInterface implementation (called from any thread)
@@ -561,6 +566,55 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         pass
 
     @Slot(bool, dict)
+    def show_readme_messages(self, messages: list) -> bool:
+        """Show README.urpmi dialog and wait for user response (thread-safe).
+
+        Called from the helper reader thread.  Emits a signal to display the
+        dialog on the main thread, then blocks until the user responds.
+
+        Returns:
+            True to proceed with install, False to cancel.
+        """
+        self._readme_event = threading.Event()
+        self._readme_result = True
+        self._show_readme.emit(messages)
+        self._readme_event.wait()  # Block until main thread responds
+        return self._readme_result
+
+    @Slot(list)
+    def _do_show_readme(self, messages: list) -> None:
+        """Display README.urpmi messages in a scrollable dialog (main thread)."""
+        separator = "\n" + "—" * 50 + "\n"
+        text = ""
+        for rm in messages:
+            text += f"\n{rm['package']} :\n{rm['content']}{separator}"
+
+        dialog = QDialog(self.window)
+        dialog.setWindowTitle("README.urpmi")
+        dialog.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(dialog)
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(text.strip())
+        layout.addWidget(text_edit)
+
+        btn_layout = QHBoxLayout()
+        btn_cancel = QPushButton("Annuler")
+        btn_ok = QPushButton("Continuer l'installation")
+        btn_ok.setDefault(True)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_cancel)
+        btn_layout.addWidget(btn_ok)
+        layout.addLayout(btn_layout)
+
+        btn_ok.clicked.connect(dialog.accept)
+        btn_cancel.clicked.connect(dialog.reject)
+
+        result = dialog.exec()
+        self._readme_result = (result == QDialog.DialogCode.Accepted)
+        self._readme_event.set()  # Unblock the helper thread
+
     def _do_show_complete(self, success: bool, summary: dict) -> None:
         """Show completion on main thread.
 

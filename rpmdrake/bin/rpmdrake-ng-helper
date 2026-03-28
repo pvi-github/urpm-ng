@@ -3,5 +3,13 @@
 
 This script is called via pkexec to perform privileged operations.
 """
+import sys
+from pathlib import Path
+
+# Add project roots to path for development
+_here = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_here))          # rpmdrake/
+sys.path.insert(0, str(_here.parent))   # urpm-ng-wt/ (for urpm.core)
+
 from rpmdrake.helper.transaction_helper import run_helper
 run_helper()

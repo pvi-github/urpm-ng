@@ -33,6 +33,7 @@ class TransactionResult:
     count: int = 0
     error: str = ""
     message: str = ""
+    readme_messages: list = None  # List of {"package": str, "content": str}
 
 
 class HelperClient:
@@ -45,6 +46,7 @@ class HelperClient:
         on_install_progress: Callable[[str, int, int], None] = None,
         on_error: Callable[[str], None] = None,
         on_done: Callable[[TransactionResult], None] = None,
+        on_readme: Callable[[list], bool] = None,
     ):
         """Initialize helper client.
 
@@ -55,28 +57,34 @@ class HelperClient:
             on_install_progress: Called with (name, current, total) during install.
             on_error: Called with error messages.
             on_done: Called when transaction completes.
+            on_readme: Called with README.urpmi messages before install.
+                       Returns True to proceed, False to cancel.
         """
         self.on_status = on_status
         self.on_download_progress = on_download_progress
         self.on_install_progress = on_install_progress
         self.on_error = on_error
         self.on_done = on_done
+        self.on_readme = on_readme
 
         self._process: Optional[subprocess.Popen] = None
         self._reader_thread: Optional[threading.Thread] = None
         self._cancelled = False
 
     def _get_helper_path(self) -> str:
-        """Get path to the helper script."""
-        # Try installed path first
+        """Get path to the helper script.
+
+        Prefers the development path (next to the source tree) so that
+        local changes are picked up without rebuilding the RPM.
+        Falls back to the installed system path for production.
+        """
+        dev_path = Path(__file__).resolve().parent.parent.parent / "bin" / "rpmdrake-ng-helper"
+        if dev_path.exists():
+            return str(dev_path)
+
         installed = "/usr/libexec/rpmdrake-ng-helper"
         if os.path.exists(installed):
             return installed
-
-        # Development path
-        dev_path = Path(__file__).parent.parent.parent / "bin" / "rpmdrake-ng-helper"
-        if dev_path.exists():
-            return str(dev_path)
 
         raise FileNotFoundError("rpmdrake-ng-helper not found")
 
@@ -192,8 +200,16 @@ class HelperClient:
                 self.on_done(TransactionResult(
                     success=msg.get("success", False),
                     count=msg.get("count", 0),
-                    message=msg.get("message", "")
+                    message=msg.get("message", ""),
+                    readme_messages=msg.get("readme_messages"),
                 ))
+
+        elif msg_type == "readme":
+            proceed = True
+            if self.on_readme:
+                proceed = self.on_readme(msg.get("readme_messages", []))
+            # Send confirmation back to helper
+            self._send_command({"action": "proceed" if proceed else "cancel"})
 
         elif msg_type == "cancelled":
             if self.on_done:

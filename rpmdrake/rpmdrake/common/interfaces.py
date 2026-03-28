@@ -120,6 +120,8 @@ class ViewInterface(ABC):
                 - removed: int, number of packages removed
                 - rpmnew_files: List[str], config files saved as .rpmnew
                 - errors: List[str], any errors that occurred
+                - readme_messages: List[dict], README.urpmi messages
+                  with keys 'package' (str) and 'content' (str)
         """
         pass
 

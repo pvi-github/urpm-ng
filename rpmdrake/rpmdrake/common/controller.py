@@ -1146,8 +1146,15 @@ class Controller:
                     'removed': result.count if action == 'erase' else 0,
                     'message': result.message,
                     'errors': [result.error] if result.error else [],
+                    'readme_messages': result.readme_messages or [],
                 }
             )
+
+        def on_readme(messages: list) -> bool:
+            """Show README.urpmi dialog via the view (blocking)."""
+            if hasattr(self.view, 'show_readme_messages'):
+                return self.view.show_readme_messages(messages)
+            return True  # Non-GUI views: proceed
 
         client = HelperClient(
             on_status=on_status,
@@ -1155,6 +1162,7 @@ class Controller:
             on_install_progress=on_install_progress,
             on_error=on_error,
             on_done=on_done,
+            on_readme=on_readme,
         )
         self._current_helper = client
 
