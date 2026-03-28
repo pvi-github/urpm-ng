@@ -63,6 +63,9 @@ env/
 .DS_Store
 Thumbs.db
 
+# Test build artifacts
+urpm/tests/rpmbuild/
+
 # RPM build
 rpmbuild/SOURCES/*.tar.gz
 rpmbuild/RPMS/
