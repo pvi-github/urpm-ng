@@ -129,7 +129,7 @@ class BaseUrpmiTest:
 
     def _rpm_install(self, medium, *names):
         """Install packages directly via rpm. Returns CompletedProcess."""
-        cmd = self.prefix_rpm +[ "rpm", "--root", self.root, "-i"] + self._rpm_glob(medium, *names)
+        cmd = self.prefix_rpm + ["--root", self.root, "-i"] + self._rpm_glob(medium, *names)
         return run(cmd, capture_output=True, text=True, cwd = self.base_dir)
 
     def _rpm_install_succeeds(self, medium, *names):
