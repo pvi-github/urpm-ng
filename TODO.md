@@ -83,6 +83,13 @@
 - [ ] Phase apply (reboot ou online)
 - [ ] Gestion conflits version majeure
 
+### Test container (`urpm test`)
+- [ ] Utiliser mkimage pour créer un conteneur de test avec vrai root
+  - Les 18 tests `rootonly` (cpio chown) passeraient sans être root sur l'hôte
+  - Profil YAML dédié (`test`) avec le minimum pour rpm + les données de test
+  - Commande `urpm test` ou `pytest --container` pour lancer dans l'image
+  - Résout le problème vboxsf (TestFileConflicts) et le problème chown en un coup
+
 ### Container commands (compléments)
 - [ ] `urpm container list` : lister containers actifs
 - [ ] `urpm container shell --image <tag>` : shell interactif
@@ -120,6 +127,28 @@
 - [ ] Cohérence avec `urpm seed`
 
 ### rpmdrake-ng
+
+#### Bugs & manques critiques (retours utilisateurs 2026-03)
+
+**Liste des mises à jour**
+- [ ] Colonnes non triables : impossible de trier par nom, date, taille, etc.
+- [ ] Pas de recherche/filtre dans la liste des updates (pattern matching)
+- [ ] Pas de sélection/désélection globale des mises à jour (tout cocher / tout décocher)
+
+**Résilience téléchargement**
+- [ ] RPM corrompu (signature invalide ou download partiel) bloque l'update mais le fichier reste en cache
+  - L'utilisateur novice se retrouve coincé (il faut supprimer manuellement les fichiers)
+  - En cas de fail d'install : supprimer ou déplacer les fichiers corrompus automatiquement
+  - Au prochain essai, le re-téléchargement doit se faire naturellement
+
+**Texte non copiable**
+- [ ] Encore de nombreuses boîtes de dialogue et messages d'erreur avec texte non sélectionnable/copiable
+  - Utiliser des QLabel avec `setTextInteractionFlags(Qt.TextSelectableByMouse)` ou des QTextEdit readonly
+
+**Database locked**
+- [ ] Erreurs "database is locked" quand rpmdrake tente d'accéder à la DB pendant un lock
+  - Le programme devrait retry automatiquement (backoff) au lieu de planter
+  - Voir aussi : `doc/TODO_MU_LOCK.md` pour le fix côté CLI/daemon
 
 #### Refonte UX — priorité haute (retours utilisateurs)
 
