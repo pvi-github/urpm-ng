@@ -206,7 +206,7 @@ class BaseUrpmiTest:
             media=media,
             excludemedia=excludemedia,
             sortmedia=sortmedia,
-            builddeps=builddeps,
+            buildrequires=builddeps,
             install_src=install_src,
         )
         return cmd_install(args, self.chroot_db)
@@ -2504,7 +2504,7 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
     # Test methods
     # ------------------------------------------------------------------
     @pytest.mark.wip
-    @pytest.mark.skip(reason="SRPM medium missing synthesis.hdlist.cz")
+    @pytest.mark.skip(reason="--install-src not implemented yet")
     def test_buildrequires_from_srpm_file(self):
         """Pass the .src.rpm path directly to --buildrequires."""
         self.prepare()
@@ -2514,7 +2514,7 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         self._run_test(str(srpm_glob[0]))
 
     @pytest.mark.wip
-    @pytest.mark.skip(reason="SRPM medium missing synthesis.hdlist.cz")
+    @pytest.mark.skip(reason="--install-src not implemented yet")
     def test_buildrequires_from_src_medium(self):
         """Add the SRPM medium then pass the package name to --buildrequires."""
         self.prepare()
