@@ -77,6 +77,7 @@ class QueuedOperation:
     background: bool = False  # If True, parent doesn't wait for this operation
     reinstall: bool = False  # If True, allow reinstalling same version
     noscripts: bool = False  # If True, skip pre/post install scripts
+    actions: list = field(default_factory=list)  # PackageAction list from resolver (for README collection)
 
 
 @dataclass
@@ -88,6 +89,7 @@ class OperationResult:
     count: int = 0
     errors: List[str] = field(default_factory=list)
     rpmnew_files: List[str] = field(default_factory=list)  # Config files saved as .rpmnew
+    readme_messages: list = field(default_factory=list)  # README.urpmi [{package, content}]
 
 
 @dataclass
@@ -115,6 +117,7 @@ class QueueProgressMessage:
     error: str = ""
     errors: List[str] = field(default_factory=list)
     rpmnew_files: List[str] = field(default_factory=list)  # Config files saved as .rpmnew
+    readme_messages: list = field(default_factory=list)  # README.urpmi [{package, content}]
 
     def to_json(self) -> str:
         return json.dumps({
@@ -128,6 +131,7 @@ class QueueProgressMessage:
             'error': self.error,
             'errors': self.errors,
             'rpmnew_files': self.rpmnew_files,
+            'readme_messages': self.readme_messages,
         })
 
     @classmethod
@@ -144,6 +148,7 @@ class QueueProgressMessage:
             error=d.get('error', ''),
             errors=d.get('errors', []),
             rpmnew_files=d.get('rpmnew_files', []),
+            readme_messages=d.get('readme_messages', []),
         )
 
 
@@ -194,7 +199,8 @@ class TransactionQueue:
         test: bool = False,
         erase_names: List[str] = None,
         reinstall: bool = False,
-        noscripts: bool = False
+        noscripts: bool = False,
+        actions: list = None
     ) -> 'TransactionQueue':
         """Add an install operation to the queue.
 
@@ -208,6 +214,8 @@ class TransactionQueue:
                         (for obsoleted packages that must be removed atomically)
             reinstall: Allow reinstalling same version without --force
             noscripts: Skip pre/post install scripts
+            actions: PackageAction list from resolver (used for README.urpmi
+                     collection in the child process after transaction completes)
 
         Returns:
             self for method chaining
@@ -222,6 +230,7 @@ class TransactionQueue:
                 test=test,
                 reinstall=reinstall,
                 noscripts=noscripts,
+                actions=actions or [],
             )
             # Store erase_names as extra attribute
             op.erase_names = erase_names or []
@@ -409,6 +418,7 @@ queue._child_process_standalone()
                     if current_op_result:
                         current_op_result.count = msg.count or 0
                         current_op_result.rpmnew_files = msg.rpmnew_files or []
+                        current_op_result.readme_messages = msg.readme_messages or []
                         results.append(current_op_result)
                         current_op_result = None
                 elif msg.msg_type == 'op_error':
@@ -584,6 +594,7 @@ queue._child_process_standalone()
                     if current_op_result:
                         current_op_result.count = msg.count
                         current_op_result.rpmnew_files = msg.rpmnew_files or []
+                        current_op_result.readme_messages = msg.readme_messages or []
                         results.append(current_op_result)
                     current_op_result = None
 
@@ -756,6 +767,33 @@ queue._child_process_standalone()
                 pass
             lock.release()
             os._exit(1)
+
+    def _collect_readme_messages(self, op: QueuedOperation) -> list:
+        """Collect README.urpmi messages after a successful transaction.
+
+        Called from the child process where installed files are guaranteed
+        to be on disk.
+
+        Args:
+            op: The completed operation (uses ``op.actions`` for README filtering).
+
+        Returns:
+            List of dicts with 'package' and 'content' keys.
+        """
+        if not op.actions:
+            _log_background("README: no actions on op")
+            return []
+        try:
+            from .readme import collect_readme_messages
+            msgs = collect_readme_messages(op.actions, root=self.root)
+            _log_background(f"README: collected {len(msgs)} messages from {len(op.actions)} actions")
+            return [
+                {'package': m.package, 'content': m.content}
+                for m in msgs
+            ]
+        except Exception as e:
+            _log_background(f"README collection error: {e}")
+            return []
 
     def _execute_install(
         self,
@@ -934,11 +972,14 @@ queue._child_process_standalone()
                 # ts.run() will continue in background for rpmdb sync/scriptlets
                 if (closed_count[0] == total and release_parent_after
                         and not extraction_error[0] and not pipe_state['closed']):
+                    # README collection deferred to after ts.run() — files
+                    # are not yet fully on disk at CLOSE_FILE callback time.
                     pipe_state['file'].write(QueueProgressMessage(
                         msg_type='op_done',
                         operation_id=op.operation_id,
                         count=total,
-                        rpmnew_files=[]  # Not available during early release
+                        rpmnew_files=[],  # Not available during early release
+                        readme_messages=[]  # Deferred to post-ts.run()
                     ).to_json() + "\n")
                     pipe_state['file'].write(QueueProgressMessage(
                         msg_type='parent_can_exit'
@@ -1013,11 +1054,13 @@ queue._child_process_standalone()
                     # All problems were benign "already installed"
                     _log_background(f"Upgrade completed: {total} packages (some already at target version)")
                     if not pipe_state['closed']:
+                        readme_data = self._collect_readme_messages(op)
                         pipe_state['file'].write(QueueProgressMessage(
                             msg_type='op_done',
                             operation_id=op.operation_id,
                             count=total,
-                            rpmnew_files=new_rpmnew_files
+                            rpmnew_files=new_rpmnew_files,
+                            readme_messages=readme_data
                         ).to_json() + "\n")
                         pipe_state['file'].flush()
                         if release_parent_after:
@@ -1045,12 +1088,14 @@ queue._child_process_standalone()
                     remaining.append(p)
             if not remaining:
                 _log_background("All ts.run() problems were installed-dep warnings, continuing")
+                readme_data = self._collect_readme_messages(op)
                 if not pipe_state['closed']:
                     pipe_state['file'].write(QueueProgressMessage(
                         msg_type='op_done',
                         operation_id=op.operation_id,
                         count=total,
-                        rpmnew_files=new_rpmnew_files
+                        rpmnew_files=new_rpmnew_files,
+                        readme_messages=readme_data
                     ).to_json() + "\n")
                     pipe_state['file'].flush()
                     if release_parent_after:
@@ -1089,6 +1134,22 @@ queue._child_process_standalone()
 
         _log_background(f"Transaction completed: {total} packages")
 
+        readme_data = self._collect_readme_messages(op)
+
+        # If parent was released early (optimistic), the pipe is closed —
+        # print README messages directly to stdout from the child process.
+        # The child's stdout still points to the terminal after fork().
+        if parent_released_early[0] and readme_data:
+            try:
+                from .readme import format_readme_output, ReadmeMessage
+                messages = [ReadmeMessage(package=m['package'], content=m['content'])
+                            for m in readme_data]
+                output = format_readme_output(messages)
+                if output:
+                    print(output, file=sys.stdout, flush=True)
+            except Exception as e:
+                _log_background(f"README display error: {e}")
+
         # Send op_done if pipe is still open (sync mode, or late release
         # after extraction error).  In non-sync mode the early release
         # already sent op_done + parent_can_exit and closed the pipe.
@@ -1097,7 +1158,8 @@ queue._child_process_standalone()
                 msg_type='op_done',
                 operation_id=op.operation_id,
                 count=total,
-                rpmnew_files=new_rpmnew_files
+                rpmnew_files=new_rpmnew_files,
+                readme_messages=readme_data
             ).to_json() + "\n")
             pipe_state['file'].flush()
             # Only close the pipe here if we were supposed to release

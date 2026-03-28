@@ -923,6 +923,37 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
     signal.signal(signal.SIGINT, sigint_handler)
 
+    # Display README.urpmi messages extracted from cached RPMs (before fork)
+    try:
+        from ...core.readme import collect_readme_from_rpms, format_readme_output
+        readme_msgs = collect_readme_from_rpms(rpm_paths, result.actions)
+        readme_output = format_readme_output(readme_msgs)
+        if readme_output:
+            # Use a pager for long output, plain print for short
+            import os, shutil
+            term_lines = shutil.get_terminal_size().lines
+            output_lines = readme_output.count('\n') + 1
+            if output_lines > term_lines - 5:
+                # Append prompt at the end so user sees it after scrolling
+                pager_text = readme_output + _("\n\n(press q to quit pager, then Enter to install or Ctrl+C to abort)")
+                import subprocess as _sp
+                pager = os.environ.get('PAGER', 'less')
+                try:
+                    _sp.run([pager, '-R'], input=pager_text,
+                            text=True, check=False)
+                except FileNotFoundError:
+                    print(readme_output)
+            else:
+                print(readme_output)
+            try:
+                input(_("\nPress Enter to proceed or Ctrl+C to abort..."))
+            except (EOFError, KeyboardInterrupt):
+                print(_("\nAborted"))
+                ops.abort_transaction(transaction_id)
+                return 1
+    except Exception:
+        pass  # Non-fatal — don't block install for README errors
+
     print(colors.info("\n" + ngettext(
         "Installing {count} package...",
         "Installing {count} packages...",
@@ -966,7 +997,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 last_shown[0] = name
 
         queue_result = ops.execute_install(
-            rpm_paths, options=install_opts, progress_callback=queue_progress
+            rpm_paths, options=install_opts, progress_callback=queue_progress,
+            actions=result.actions
         )
 
         # Print done
@@ -1023,15 +1055,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             if explicit_bd:
                 resolver.mark_as_dependency(explicit_bd)
             resolver.mark_as_builddep(all_names, source_name)
-
-        # Display README.urpmi messages for installed/upgraded packages
-        from ...core.readme import collect_readme_messages, format_readme_output
-        install_actions = [a for a in result.actions
-                          if a.action != TransactionType.REMOVE]
-        readme_msgs = collect_readme_messages(install_actions, root=rpm_root)
-        readme_output = format_readme_output(readme_msgs)
-        if readme_output:
-            print(readme_output)
 
         return 0
 

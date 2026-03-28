@@ -45,19 +45,31 @@ _VERSION_UPGRADE_RE = re.compile(r"^README\.(\d+)\.upgrade\.urpmi$")
 """Matches ``README.<N>.upgrade.urpmi`` and captures N."""
 
 
-def _rpm_query_docfiles(name: str, root: str | None) -> List[str]:
-    """Return the list of doc files owned by *name* in the RPM database.
+def _find_readme_files(name: str, root: str | None) -> List[Path]:
+    """Find README.urpmi files for a package by scanning the filesystem.
 
-    Uses ``rpm -ql --docfiles`` so we only get documentation entries.
+    Looks for ``/usr/share/doc/<name>*/README*.urpmi`` under *root*.
+    This is more reliable than querying the RPM database, which may not
+    be fully committed yet after an optimistic transaction release.
     """
-    cmd = ["rpm"]
-    if root:
-        cmd += ["--root", str(Path(root).resolve())]
-    cmd += ["-ql", "--docfiles", name]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
+    doc_base = Path(root or "/") / "usr/share/doc"
+    if not doc_base.is_dir():
         return []
-    return [line for line in result.stdout.splitlines() if line]
+    results: List[Path] = []
+    for doc_dir in doc_base.glob(f"{name}-*"):
+        if not doc_dir.is_dir():
+            continue
+        for readme in doc_dir.iterdir():
+            if readme.name.endswith(".urpmi") and readme.is_file():
+                results.append(readme)
+    # Also check /usr/share/doc/<name>/ (without version suffix)
+    plain_dir = doc_base / name
+    if plain_dir.is_dir():
+        for readme in plain_dir.iterdir():
+            if readme.name.endswith(".urpmi") and readme.is_file():
+                if readme not in results:
+                    results.append(readme)
+    return results
 
 
 def _compare_versions(ver_a: str, ver_b: str) -> int:
@@ -174,23 +186,99 @@ def collect_readme_messages(
         if act.action == TransactionType.REMOVE:
             continue
 
-        doc_files = _rpm_query_docfiles(act.name, root)
+        readme_files = _find_readme_files(act.name, root)
 
-        for filepath in doc_files:
-            basename = Path(filepath).name
-            if not basename.endswith(".urpmi"):
+        for full_path in readme_files:
+            if not _should_show(full_path.name, act.action,
+                                act.from_evr, act.evr):
                 continue
-            if not _should_show(basename, act.action, act.from_evr, act.evr):
-                continue
-
-            # Read the file content from the target root
-            full_path = Path(root or "/") / filepath.lstrip("/")
             try:
-                content = full_path.read_text(encoding="utf-8", errors="replace").strip()
+                content = full_path.read_text(
+                    encoding="utf-8", errors="replace").strip()
             except OSError:
                 continue
             if content:
-                messages.append(ReadmeMessage(package=act.name, content=content))
+                messages.append(ReadmeMessage(
+                    package=act.name, content=content))
+
+    return messages
+
+
+def collect_readme_from_rpms(
+    rpm_paths: Sequence[str],
+    actions: Sequence,
+) -> List[ReadmeMessage]:
+    """Collect README.urpmi messages by extracting from cached RPM files.
+
+    Reads package headers to find README.urpmi files, then extracts their
+    content via ``rpm2cpio``.  This runs **before** the install fork so the
+    parent process has the data immediately — compatible with optimistic
+    parent release.
+
+    Args:
+        rpm_paths: Paths to the cached ``.rpm`` files.
+        actions: Sequence of :class:`PackageAction` from the resolver.
+
+    Returns:
+        List of :class:`ReadmeMessage`.
+    """
+    import os
+
+    try:
+        import rpm as rpmlib
+    except ImportError:
+        return []
+
+    # Map package names to their actions (skip removals)
+    action_map: dict[str, object] = {}
+    for act in actions:
+        if act.action != TransactionType.REMOVE:
+            action_map[act.name] = act
+
+    if not action_map:
+        return []
+
+    messages: List[ReadmeMessage] = []
+    ts = rpmlib.TransactionSet()
+    ts.setVSFlags(rpmlib._RPMVSF_NOSIGNATURES)
+
+    for rpm_path in rpm_paths:
+        try:
+            fdno = os.open(rpm_path, os.O_RDONLY)
+            try:
+                hdr = ts.hdrFromFdno(fdno)
+            finally:
+                os.close(fdno)
+        except Exception:
+            continue
+
+        name = hdr[rpmlib.RPMTAG_NAME]
+        act = action_map.get(name)
+        if not act:
+            continue
+
+        # Check file list for README.urpmi candidates
+        filenames = hdr[rpmlib.RPMTAG_FILENAMES] or []
+        readme_files = [
+            f for f in filenames
+            if f.endswith(".urpmi")
+            and _should_show(Path(f).name, act.action, act.from_evr, act.evr)
+        ]
+
+        # Extract content from RPM via rpm2cpio + cpio
+        for readme_file in readme_files:
+            try:
+                result = subprocess.run(
+                    ["sh", "-c",
+                     f"rpm2cpio '{rpm_path}'"
+                     f" | cpio -i --to-stdout '.{readme_file}' 2>/dev/null"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                content = result.stdout.strip()
+                if content:
+                    messages.append(ReadmeMessage(package=name, content=content))
+            except (subprocess.TimeoutExpired, OSError):
+                continue
 
     return messages
 

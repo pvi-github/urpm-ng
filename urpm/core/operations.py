@@ -272,7 +272,8 @@ class PackageOperations:
         rpm_paths: List[str],
         options: InstallOptions = None,
         progress_callback: Callable[[str, str, int, int], None] = None,
-        auth_context=None
+        auth_context=None,
+        actions: list = None
     ) -> Any:
         """Execute RPM installation via TransactionQueue.
 
@@ -281,6 +282,8 @@ class PackageOperations:
             options: Install options
             progress_callback: Called with (op_id, name, current, total)
             auth_context: Optional AuthContext for permission check + audit
+            actions: PackageAction list from resolver (used for README.urpmi
+                     display after transaction completes in the child process)
 
         Returns:
             TransactionQueue result
@@ -305,7 +308,8 @@ class PackageOperations:
             force=options.force,
             test=options.test,
             reinstall=options.reinstall,
-            noscripts=options.noscripts
+            noscripts=options.noscripts,
+            actions=actions
         )
 
         result = queue.execute(
