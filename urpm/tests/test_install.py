@@ -2090,8 +2090,7 @@ class TestProvideAndNoObsolete(BaseUrpmiTest):
         """Run urpmi --auto-select --auto (upgrade all, no prompt)."""
         return self._upgrade()
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: a not upgraded despite higher version available", strict=False)
+    @pytest.mark.stable
     def test_upgrade_a(self):
         """urpm a: a-1 must be upgraded to a-2 despite b-3 providing c-3."""
         self.prepare()
