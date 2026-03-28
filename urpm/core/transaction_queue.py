@@ -832,10 +832,28 @@ queue._child_process_standalone()
                 sys.stderr.flush()
             unresolved = ts.check()
             if unresolved:
-                print(f"[_execute_install] unresolved deps: {unresolved}", file=sys.stderr)
-                sys.stderr.flush()
-                errors = [f"Dependency: {prob}" for prob in unresolved]
-                return False, 0, errors, []
+                # Separate deps from OLD packages being replaced (scriptlet
+                # deps — safe to ignore, RPM skips the scriptlet if the
+                # interpreter is missing) from deps of NEW packages (fatal).
+                # ts.check() returns: ((N, V, R), (depN, depV), flags, suggest, sense)
+                new_names = {Path(p).name.rsplit('-', 2)[0] for p in rpm_paths}
+                fatal = []
+                warned = []
+                for prob in unresolved:
+                    pkg_name = prob[0][0] if isinstance(prob[0], tuple) else str(prob[0])
+                    if pkg_name in new_names:
+                        fatal.append(prob)
+                    else:
+                        warned.append(prob)
+                if warned:
+                    print(f"[_execute_install] scriptlet deps (ignored): {warned}",
+                          file=sys.stderr)
+                    sys.stderr.flush()
+                if fatal:
+                    print(f"[_execute_install] unresolved deps: {fatal}", file=sys.stderr)
+                    sys.stderr.flush()
+                    errors = [f"Dependency: {prob}" for prob in fatal]
+                    return False, 0, errors, []
             if DEBUG_EXECINSTALL:
                 print(f"[_execute_install] dependencies OK", file=sys.stderr)
                 sys.stderr.flush()
@@ -1011,6 +1029,39 @@ queue._child_process_standalone()
                             pipe_state['closed'] = True
                     return True, total, [], new_rpmnew_files
                 problems = real_problems
+
+            # Filter "needed by (installed)" problems: these occur when
+            # upgrading a package removes a file that another installed
+            # package depends on (e.g., scriptlet interpreters).  In split
+            # transactions the dependent package will be upgraded later,
+            # so these are non-fatal warnings — same as urpmi --split-length.
+            remaining = []
+            for p in problems:
+                msg = str(p) if isinstance(p, str) else (
+                    p[0] if isinstance(p, tuple) else str(p))
+                if "is needed by (installed)" in msg:
+                    _log_background(f"NOTE: {msg} (ignored — installed dep)")
+                else:
+                    remaining.append(p)
+            if not remaining:
+                _log_background("All ts.run() problems were installed-dep warnings, continuing")
+                if not pipe_state['closed']:
+                    pipe_state['file'].write(QueueProgressMessage(
+                        msg_type='op_done',
+                        operation_id=op.operation_id,
+                        count=total,
+                        rpmnew_files=new_rpmnew_files
+                    ).to_json() + "\n")
+                    pipe_state['file'].flush()
+                    if release_parent_after:
+                        pipe_state['file'].write(QueueProgressMessage(
+                            msg_type='parent_can_exit'
+                        ).to_json() + "\n")
+                        pipe_state['file'].flush()
+                        pipe_state['file'].close()
+                        pipe_state['closed'] = True
+                return True, total, [], new_rpmnew_files
+            problems = remaining
 
             _log_background(f"Transaction failed: {problems}")
             errors = [str(p) for p in problems]

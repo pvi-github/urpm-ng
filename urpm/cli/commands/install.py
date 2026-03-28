@@ -1024,6 +1024,15 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 resolver.mark_as_dependency(explicit_bd)
             resolver.mark_as_builddep(all_names, source_name)
 
+        # Display README.urpmi messages for installed/upgraded packages
+        from ...core.readme import collect_readme_messages, format_readme_output
+        install_actions = [a for a in result.actions
+                          if a.action != TransactionType.REMOVE]
+        readme_msgs = collect_readme_messages(install_actions, root=rpm_root)
+        readme_output = format_readme_output(readme_msgs)
+        if readme_output:
+            print(readme_output)
+
         return 0
 
     except Exception as e:

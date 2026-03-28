@@ -2174,16 +2174,14 @@ class TestReadmeUrpmi(BaseUrpmiTest):
     # Tests
     # ------------------------------------------------------------------
 
-    @pytest.mark.wip
-    @pytest.mark.skip(reason="README.urpmi display not yet implemented")
+    @pytest.mark.stable
     def test_a(self):
         """Installing a fresh package shows 'installing/upgrading a'."""
         self.prepare()
         self._check_readme(["a"], ["installing/upgrading a"])
         self.check_installed_names(["a"], remove=True)
 
-    @pytest.mark.wip
-    @pytest.mark.skip(reason="README.urpmi display not yet implemented")
+    @pytest.mark.stable
     def test_b(self):
         """Upgrading b-1 to b-2 shows the upgrade messages; then upgrading via name."""
         self.prepare()
@@ -2193,20 +2191,20 @@ class TestReadmeUrpmi(BaseUrpmiTest):
         # Explicit upgrade to b-2
         self._check_readme(["b-2"], ["upgrading b", "upgrading b 2"])
 
-        # Upgrade again via package name only
+        # Upgrade again via package name only (b-2 → b-3);
+        # version-specific README.2.upgrade.urpmi should NOT be shown
+        # (old_version=2, threshold=2, not < 2)
         self._check_readme(["b"], ["upgrading b"])
         self.check_installed_names(["b"], remove=True)
 
-    @pytest.mark.wip
-    @pytest.mark.skip(reason="README.urpmi display not yet implemented")
+    @pytest.mark.stable
     def test_c(self):
         """Installing c shows 'installing c'."""
         self.prepare()
         self._check_readme(["c"], ["installing c"])
         self.check_installed_names(["c"], remove=True)
 
-    @pytest.mark.wip
-    @pytest.mark.skip(reason="README.urpmi display not yet implemented")
+    @pytest.mark.stable
     def test_d(self):
         """Installing d then d_ shows their respective README messages."""
         self.prepare()

@@ -637,6 +637,14 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     not_found.append(name)
             else:
                 jobs += sel.jobs(solv.Job.SOLVER_INSTALL)
+                # Also add SOLVER_UPDATE so that already-installed packages
+                # get upgraded to the newest available version — matching
+                # urpmi behavior where "urpmi b" upgrades if newer exists.
+                if self.pool.installed:
+                    for s in sel.solvables():
+                        if s.repo == self.pool.installed:
+                            jobs += sel.jobs(solv.Job.SOLVER_UPDATE)
+                            break
 
         if not_found:
             return Resolution(
@@ -738,6 +746,14 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             elif action == TransactionType.REMOVE:
                 remove_size += size
 
+            # Get previous version for upgrades/downgrades
+            from_evr = ""
+            if action in (TransactionType.UPGRADE, TransactionType.DOWNGRADE,
+                          TransactionType.REINSTALL):
+                old = trans.othersolvable(s)
+                if old:
+                    from_evr = old.evr
+
             actions.append(PackageAction(
                 action=action,
                 name=s.name,
@@ -747,6 +763,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 size=size,
                 media_name=pkg_info.get('media_name', ''),
                 reason=reason,
+                from_evr=from_evr,
             ))
 
         # Detect alternatives: packages that could satisfy the same dependency
@@ -1262,6 +1279,14 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             elif action == TransactionType.REMOVE:
                 remove_size += size
 
+            # Get previous version for upgrades/downgrades
+            from_evr = ""
+            if action in (TransactionType.UPGRADE, TransactionType.DOWNGRADE,
+                          TransactionType.REINSTALL):
+                old = trans.othersolvable(s)
+                if old:
+                    from_evr = old.evr
+
             actions.append(PackageAction(
                 action=action,
                 name=s.name,
@@ -1272,6 +1297,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 filesize=pkg_info.get('filesize', 0),
                 media_name=pkg_info.get('media_name', ''),
                 reason=reason,
+                from_evr=from_evr,
             ))
 
         return Resolution(
