@@ -349,8 +349,7 @@ class BaseUrpmiTest:
 class TestInstall(BaseUrpmiTest):
     "Test for installation of various local packages"
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_arch_to_noarch(self):
         for i in range(1, 4):
             self.prepare()
@@ -580,8 +579,7 @@ class TestFileConflicts(BaseUrpmiTest):
     def _rpm_i_fails(self, *names):
         self._rpm_install_fails(self.MEDIUM, *names)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_rpm_same_transaction(self):
         """RPM file-conflict checks within a single transaction."""
         self.prepare()
@@ -618,8 +616,7 @@ class TestFileConflicts(BaseUrpmiTest):
             self._rpm_i_fails("h", "i")
             self.check_nothing_installed()
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_rpm_different_transactions(self):
         """RPM file-conflict checks across separate transactions."""
         self.prepare()
@@ -680,8 +677,7 @@ class TestFileConflicts(BaseUrpmiTest):
             self._rpm_i_succeeds("i")
             self.check_installed_names(["h", "i"], remove=True)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_urpmi_same_transaction(self):
         """urpmi file-conflict checks within a single transaction."""
         self.prepare()
@@ -718,8 +714,7 @@ class TestFileConflicts(BaseUrpmiTest):
             assert self._install("h", "i") == 0
             self.check_installed_names(["h", "i"], remove=True)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_urpmi_different_transactions(self):
         """urpmi file-conflict checks across separate transactions."""
         self.prepare()
@@ -1069,8 +1064,7 @@ class TestMediaInfoDir(BaseUrpmiTest):
     # Test methods
     # ------------------------------------------------------------------
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_various_media_layouts(self):
         """Install 'various' from four different media layout variants.
 
@@ -1177,8 +1171,7 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
     # Tests
     # ------------------------------------------------------------------
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_split_package_removes_original(self):
         """Installing b+c while 'a' is present must remove 'a' and install b, c."""
         self.prepare()
@@ -1191,8 +1184,7 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         assert self._install("b", "c") == 0
         self.check_installed_names(["b", "c"], remove=True)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_with_ad_plain(self):
         """With a+d installed, upgrading to b+c must keep d (via b provides a)."""
         self.prepare()
@@ -1203,8 +1195,7 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         assert self._install("b", "c") == 0
         self.check_installed_names(["b", "c", "d"], remove=True)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_with_ad_split_level(self):
         """Same as test_with_ad_plain but packages installed one at a time.
 
@@ -1221,8 +1212,7 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         assert self._install("c") == 0
         self.check_installed_names(["b", "c", "d"], remove=True)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_with_ad_auto_c(self):
         """Installing only c with --auto must promote b (which obsoletes a)."""
         self.prepare()
@@ -1366,15 +1356,13 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
     ]
     SCRIPTLET_PKGS_UPGRADE = ["requires_preun", "requires_postun"]
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_install_remove_rpm(self):
         """rpm -i ordering for all four scriptlet-dependency packages."""
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_rpm(name)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_install_upgrade_rpm(self):
         """rpm -i/-U ordering for upgrade-relevant scriptlet packages."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
@@ -1386,8 +1374,7 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_urpm(name)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (rpm pre-install needs chown)")
+    @pytest.mark.stable
     def test_install_upgrade_urpm(self):
         """urpm install+upgrade ordering, upgrade packages, no split."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
@@ -1399,8 +1386,7 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_urpm_one_by_one(name)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (rpm pre-install needs chown)")
+    @pytest.mark.stable
     def test_install_upgrade_one_by_one(self):
         """urpm install+upgrade, one package per transaction (emulates split-length 1)."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
@@ -1543,15 +1529,13 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
     ]
     SCRIPTLET_PKGS_UPGRADE = ["requires_preun", "requires_postun"]
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_install_remove_rpm(self):
         """rpm -i ordering for all four scriptlet-dependency packages."""
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_rpm(name)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (cpio chown)")
+    @pytest.mark.stable
     def test_install_upgrade_rpm(self):
         """rpm -i/-U ordering for upgrade-relevant scriptlet packages."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
@@ -1563,8 +1547,7 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_urpmi(name)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (rpm pre-install needs chown)")
+    @pytest.mark.stable
     def test_install_upgrade_urpmi(self):
         """urpmi install+upgrade ordering, upgrade packages, no split."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
@@ -1576,8 +1559,7 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
         for name in self.SCRIPTLET_PKGS_INSTALL:
             self._test_install_remove_urpmi_one_by_one(name)
 
-    @pytest.mark.rootonly
-    @pytest.mark.skipif(os.geteuid() != 0, reason="requires real root (rpm pre-install needs chown)")
+    @pytest.mark.stable
     def test_install_upgrade_urpmi_one_by_one(self):
         """urpmi install+upgrade, one package per transaction (emulates split-length 1)."""
         for name in self.SCRIPTLET_PKGS_UPGRADE:
