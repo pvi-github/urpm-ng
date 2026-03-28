@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "urpm"
-version = "0.6.0"
+version = "0.6.1"
 description = "Modern package manager for Mageia Linux"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -49,6 +49,13 @@ include = ["urpm*"]
 [tool.pytest.ini_options]
 testpaths = ["urpm/tests"]
 python_files = ["test_*.py"]
+markers = [
+    "stable: validated, passes in non-root (unshare) — CI baseline",
+    "rootonly: validated, passes only as real root (cpio/chown)",
+    "wip: work in progress, not yet functional",
+    "todo: known bug, fix needed — runs as xfail",
+    "deferred: low priority, revisit later",
+]
 filterwarnings = [
     # libsolv SWIG bindings bug - upstream issue, not ours
     "ignore:builtin type Swig.*:DeprecationWarning",
