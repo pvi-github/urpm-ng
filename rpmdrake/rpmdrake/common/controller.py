@@ -188,11 +188,7 @@ class Controller:
         Uses a fresh subprocess to query the RPM database to avoid any
         caching issues that might show stale data after a transaction.
         """
-        import gc
         import subprocess
-
-        # Force garbage collection to release any stale rpm connections
-        gc.collect()
 
         upgradeable = set()
 
@@ -425,30 +421,33 @@ class Controller:
         can show 'installed → available' correctly.
         """
         # Build a map of available versions for upgradeable packages
+        # Single batched query instead of N individual ones
         available_versions = {}
-        try:
-            import sqlite3
-            conn = sqlite3.connect(self.db.db_path)
-            cur = conn.cursor()
-            for name_lower in self._upgradeable_packages:
-                cur.execute('''
-                    SELECT p.version, p.release, p.summary
+        if self._upgradeable_packages:
+            try:
+                import sqlite3
+                conn = sqlite3.connect(self.db.db_path)
+                cur = conn.cursor()
+                placeholders = ','.join('?' for _ in self._upgradeable_packages)
+                names_list = list(self._upgradeable_packages)
+                cur.execute(f'''
+                    SELECT LOWER(p.name), p.version, p.release, p.summary
                     FROM packages p
                     JOIN media m ON p.media_id = m.id
-                    WHERE m.enabled = 1 AND LOWER(p.name) = ?
+                    WHERE m.enabled = 1 AND LOWER(p.name) IN ({placeholders})
                     ORDER BY p.version DESC, p.release DESC
-                    LIMIT 1
-                ''', (name_lower,))
-                row = cur.fetchone()
-                if row:
-                    available_versions[name_lower] = {
-                        'version': row[0],
-                        'release': row[1],
-                        'summary': row[2],
-                    }
-            conn.close()
-        except Exception:
-            pass
+                ''', names_list)
+                for row in cur:
+                    name_lower = row[0]
+                    if name_lower not in available_versions:
+                        available_versions[name_lower] = {
+                            'version': row[1],
+                            'release': row[2],
+                            'summary': row[3],
+                        }
+                conn.close()
+            except Exception:
+                pass
 
         results = []
         for name_lower in self._upgradeable_packages:
