@@ -832,11 +832,11 @@ class OrphansMixin:
                     if provider != name:
                         reverse_deps.setdefault(provider, set()).add(name)
 
-        # Extend unrequested with newly installed packages (they are deps,
-        # not explicitly requested by the user)
+        # New dependencies pulled by upgrades are NOT orphan candidates —
+        # they are required by an installed package that is being upgraded.
+        # Only existing unrequested packages can become orphans.
         effective_unrequested = set(unrequested)
-        for name in installed_names:
-            effective_unrequested.add(name.lower())
+        effective_unrequested -= {name.lower() for name in installed_names}
 
         # Find orphans: unrequested packages with no path to an explicit package
         def has_explicit_ancestor(pkg_name: str, visited: set) -> bool:
@@ -889,19 +889,6 @@ class OrphansMixin:
                 size=size,
             ))
             seen_orphans.add(name)
-
-        # Orphans that are new installs (not yet in rpmdb) — these should
-        # be excluded from the transaction rather than erased
-        for action in all_actions:
-            if action.name in orphan_candidates and action.name not in seen_orphans:
-                orphans.append(PackageAction(
-                    action=TransactionType.REMOVE,
-                    name=action.name,
-                    evr=action.evr,
-                    arch=action.arch,
-                    nevra=action.nevra,
-                    size=action.size,
-                ))
 
         return orphans
 
