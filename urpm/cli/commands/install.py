@@ -930,28 +930,31 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         readme_msgs = collect_readme_from_rpms(rpm_paths, result.actions)
         readme_output = format_readme_output(readme_msgs)
         if readme_output:
-            # Use a pager for long output, plain print for short
-            import os, shutil
-            term_lines = shutil.get_terminal_size().lines
-            output_lines = readme_output.count('\n') + 1
-            if output_lines > term_lines - 5:
-                # Append prompt at the end so user sees it after scrolling
-                pager_text = readme_output + _("\n\n(press q to quit pager, then Enter to install or Ctrl+C to abort)")
-                import subprocess as _sp
-                pager = os.environ.get('PAGER', 'less')
-                try:
-                    _sp.run([pager, '-R'], input=pager_text,
-                            text=True, check=False)
-                except FileNotFoundError:
+            if not args.auto:
+                # Interactive: pager for long output, prompt to continue
+                import os, shutil
+                term_lines = shutil.get_terminal_size().lines
+                output_lines = readme_output.count('\n') + 1
+                if output_lines > term_lines - 5:
+                    pager_text = readme_output + _("\n\n(press q to quit pager, then Enter to install or Ctrl+C to abort)")
+                    import subprocess as _sp
+                    pager = os.environ.get('PAGER', 'less')
+                    try:
+                        _sp.run([pager, '-R'], input=pager_text,
+                                text=True, check=False)
+                    except FileNotFoundError:
+                        print(readme_output)
+                else:
                     print(readme_output)
+                try:
+                    input(_("\nPress Enter to proceed or Ctrl+C to abort..."))
+                except (EOFError, KeyboardInterrupt):
+                    print(_("\nAborted"))
+                    ops.abort_transaction(transaction_id)
+                    return 1
             else:
+                # Auto mode: print README but don't wait
                 print(readme_output)
-            try:
-                input(_("\nPress Enter to proceed or Ctrl+C to abort..."))
-            except (EOFError, KeyboardInterrupt):
-                print(_("\nAborted"))
-                ops.abort_transaction(transaction_id)
-                return 1
     except Exception:
         pass  # Non-fatal — don't block install for README errors
 
