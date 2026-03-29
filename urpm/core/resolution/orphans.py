@@ -742,6 +742,10 @@ class OrphansMixin:
         if not unrequested:
             return []
 
+        # Exclude builddeps — managed separately via autoremove --buildrequires
+        builddeps = self._get_builddep_packages()
+        unrequested -= set(builddeps.keys())
+
         ts = rpm.TransactionSet(self.root or '/')
 
         # Classify transaction actions
@@ -925,7 +929,10 @@ class OrphansMixin:
             return []
 
         # Get packages installed as dependencies (not explicitly requested)
+        # Exclude builddeps — managed separately via autoremove --buildrequires
         unrequested = self._get_unrequested_packages()
+        builddeps = self._get_builddep_packages()
+        unrequested -= set(builddeps.keys())
 
         ts = rpm.TransactionSet(self.root or '/')
 
