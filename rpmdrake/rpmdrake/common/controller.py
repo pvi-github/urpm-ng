@@ -1291,71 +1291,59 @@ class Controller:
 
         if installed:
             # Query live RPM database.
-            # %{DESCRIPTION} contains embedded newlines and is queried in a
-            # separate call to avoid corrupting the tab-split of scalar fields.
+            # Single call for scalar fields + description using a sentinel
+            # separator that cannot appear in RPM metadata.
+            _SEP = '<<<URPM_DESC_SEP>>>'
             fmt = (
                 '%{NAME}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\t%{EPOCH}\\t'
                 '%{SUMMARY}\\t%{URL}\\t%{LICENSE}\\t'
-                '%{GROUP}\\t%{SIZE}\\t%{PACKAGER}\\t%{BUILDTIME}\\n'
+                '%{GROUP}\\t%{SIZE}\\t%{PACKAGER}\\t%{BUILDTIME}\\t'
+                + _SEP + '%{DESCRIPTION}'
             )
             try:
-                result = subprocess.run(
-                    ['rpm', '-q', '--qf', fmt, name],
-                    capture_output=True, timeout=10
-                )
-                line = result.stdout.decode(errors='replace').split('\n')[0]
-                parts = line.split('\t')
-                if len(parts) >= 12:
-                    details.update({
-                        'version':   parts[1],
-                        'release':   parts[2],
-                        'arch':      parts[3],
-                        'epoch':     int(parts[4]) if parts[4] not in ('', '(none)') else 0,
-                        'summary':   parts[5],
-                        'url':       parts[6] if parts[6] != '(none)' else '',
-                        'license':   parts[7],
-                        'group':     parts[8],
-                        'size':      int(parts[9]) if parts[9].isdigit() else 0,
-                        'packager':  parts[10] if parts[10] != '(none)' else '',
-                        'buildtime': int(parts[11]) if parts[11].isdigit() else 0,
-                    })
+                from concurrent.futures import ThreadPoolExecutor
 
-                # Description: separate call because %{DESCRIPTION} spans multiple
-                # lines and would break the tab-split of the main query above.
-                desc_result = subprocess.run(
-                    ['rpm', '-q', '--qf', '%{DESCRIPTION}', name],
-                    capture_output=True, timeout=10
-                )
-                details['description'] = desc_result.stdout.decode(errors='replace').strip()
+                # Run metadata query + 3 independent queries in parallel
+                def _rpm_query(args_list):
+                    return subprocess.run(
+                        args_list, capture_output=True, timeout=10
+                    ).stdout.decode(errors='replace')
 
-                # Requires
-                req_result = subprocess.run(
-                    ['rpm', '-q', '--requires', name],
-                    capture_output=True, timeout=10
-                )
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    f_meta = pool.submit(_rpm_query, ['rpm', '-q', '--qf', fmt, name])
+                    f_req = pool.submit(_rpm_query, ['rpm', '-q', '--requires', name])
+                    f_prov = pool.submit(_rpm_query, ['rpm', '-q', '--provides', name])
+                    f_files = pool.submit(_rpm_query, ['rpm', '-ql', name])
+
+                # Parse metadata + description from single call
+                raw = f_meta.result()
+                if _SEP in raw:
+                    scalar_part, desc_part = raw.split(_SEP, 1)
+                    parts = scalar_part.split('\t')
+                    if len(parts) >= 12:
+                        details.update({
+                            'version':   parts[1],
+                            'release':   parts[2],
+                            'arch':      parts[3],
+                            'epoch':     int(parts[4]) if parts[4] not in ('', '(none)') else 0,
+                            'summary':   parts[5],
+                            'url':       parts[6] if parts[6] != '(none)' else '',
+                            'license':   parts[7],
+                            'group':     parts[8],
+                            'size':      int(parts[9]) if parts[9].isdigit() else 0,
+                            'packager':  parts[10] if parts[10] != '(none)' else '',
+                            'buildtime': int(parts[11]) if parts[11].isdigit() else 0,
+                        })
+                    details['description'] = desc_part.strip()
+
                 details['requires'] = [
-                    l.strip() for l in req_result.stdout.decode(errors='replace').splitlines()
-                    if l.strip()
+                    l.strip() for l in f_req.result().splitlines() if l.strip()
                 ]
-
-                # Provides
-                prov_result = subprocess.run(
-                    ['rpm', '-q', '--provides', name],
-                    capture_output=True, timeout=10
-                )
                 details['provides'] = [
-                    l.strip() for l in prov_result.stdout.decode(errors='replace').splitlines()
-                    if l.strip()
+                    l.strip() for l in f_prov.result().splitlines() if l.strip()
                 ]
-
-                # Files (limit to 200)
-                files_result = subprocess.run(
-                    ['rpm', '-ql', name],
-                    capture_output=True, timeout=10
-                )
                 details['files'] = [
-                    l.strip() for l in files_result.stdout.decode(errors='replace').splitlines()
-                    if l.strip()
+                    l.strip() for l in f_files.result().splitlines() if l.strip()
                 ][:200]
 
             except Exception:
