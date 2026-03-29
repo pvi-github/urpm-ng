@@ -1591,13 +1591,13 @@ class TestOrphans(BaseUrpmiTest):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _install_v1(self, *names):
+    def _install_v1(self, *names, **kwargs):
         """Install packages from the v1 medium."""
-        return self._install(*names, media=self.MEDIUM_V1)
+        return self._install(*names, media=self.MEDIUM_V1, **kwargs)
 
-    def _install_v2(self, *names):
+    def _install_v2(self, *names, **kwargs):
         """Install packages from the v2 medium."""
-        return self._install(*names, media=self.MEDIUM_V2)
+        return self._install(*names, media=self.MEDIUM_V2, **kwargs)
 
     def _auto_select_v2(self, auto_orphans=False):
         """Run urpmi --auto-select against the v2 medium."""
@@ -1697,15 +1697,21 @@ class TestOrphans(BaseUrpmiTest):
         self.check_installed_names(remaining, full=True, remove=bool(remaining))
         self._reset_unrequested_list()
 
-    def _test_auto_select(self, req_v1_list, wanted_v1_nvr, wanted_v2, orphans_v2):
+    def _test_auto_select(self, req_v1_list, wanted_v1_nvr, wanted_v2, orphans_v2,
+                          without_recommends=True):
         """Mirror sub test_auto_select(): both urpmq/urpme and auto-orphans variants."""
         self._test_auto_select_urpmq_urpme(
-            req_v1_list, wanted_v1_nvr, wanted_v2, orphans_v2
+            req_v1_list, wanted_v1_nvr, wanted_v2, orphans_v2,
+            without_recommends=without_recommends,
         )
-        self._test_auto_select_auto_orphans(req_v1_list, wanted_v1_nvr, wanted_v2)
+        self._test_auto_select_auto_orphans(
+            req_v1_list, wanted_v1_nvr, wanted_v2,
+            without_recommends=without_recommends,
+        )
 
     def _test_auto_select_urpmq_urpme(
-        self, req_v1_list, wanted_v1_nvr, wanted_v2, orphans_v2
+        self, req_v1_list, wanted_v1_nvr, wanted_v2, orphans_v2,
+        without_recommends=True,
     ):
         """Mirror sub test_auto_select_raw_urpmq_urpme().
 
@@ -1714,7 +1720,7 @@ class TestOrphans(BaseUrpmiTest):
         """
         self.prepare()
         for pkg in req_v1_list:
-            assert self._install_v1(pkg) == 0
+            assert self._install_v1(pkg, without_recommends=without_recommends) == 0
         self.check_installed_names(wanted_v1_nvr.split(), full=True)
 
         self._auto_select_v2(auto_orphans=False)
@@ -1725,11 +1731,12 @@ class TestOrphans(BaseUrpmiTest):
         self.check_installed_names(remaining, full=True, remove=True)
         self._reset_unrequested_list()
 
-    def _test_auto_select_auto_orphans(self, req_v1_list, wanted_v1_nvr, wanted_v2):
+    def _test_auto_select_auto_orphans(self, req_v1_list, wanted_v1_nvr, wanted_v2,
+                                       without_recommends=True):
         """Mirror sub test_auto_select_raw_auto_orphans()."""
         self.prepare()
         for pkg in req_v1_list:
-            assert self._install_v1(pkg) == 0
+            assert self._install_v1(pkg, without_recommends=without_recommends) == 0
         self.check_installed_names(wanted_v1_nvr.split(), full=True)
 
         self._auto_select_v2(auto_orphans=True)
@@ -1738,11 +1745,12 @@ class TestOrphans(BaseUrpmiTest):
         self.check_installed_names(remaining, full=True, remove=True)
         self._reset_unrequested_list()
 
-    def _test_auto_select_both(self, pkg, wanted_v1, wanted_v2, orphans_v2=""):
+    def _test_auto_select_both(self, pkg, wanted_v1, wanted_v2, orphans_v2="",
+                               without_recommends=True):
         """Mirror sub test_auto_select_both()."""
         # test_urpme1: install pkg from v1, remove with auto-orphans
         self.prepare()
-        assert self._install_v1(pkg) == 0
+        assert self._install_v1(pkg, without_recommends=without_recommends) == 0
         self._urpme_auto_orphans(pkg)
         self.check_nothing_installed()
         self._reset_unrequested_list()
@@ -1751,7 +1759,7 @@ class TestOrphans(BaseUrpmiTest):
         skip_urpme2 = bool(set(pkg) & set("mlno"))
         if not skip_urpme2:
             self.prepare()
-            assert self._install_v1(pkg) == 0
+            assert self._install_v1(pkg, without_recommends=without_recommends) == 0
             self.check_installed_names([pkg] + list(filter(None, wanted_v1.split())))
             self._urpme_auto_orphans()  # must not remove anything
             self.check_installed_names([pkg] + list(filter(None, wanted_v1.split())))
@@ -1769,6 +1777,7 @@ class TestOrphans(BaseUrpmiTest):
             wanted_v1_nvr,
             wanted_v2,
             orphans_v2,
+            without_recommends=without_recommends,
         )
 
         # test_auto_select for req-pkg (package that requires pkg)
@@ -1781,6 +1790,7 @@ class TestOrphans(BaseUrpmiTest):
             req_wanted_v1_nvr,
             f"req-{pkg}-2",
             f"{wanted_v2} {orphans_v2}".strip(),
+            without_recommends=without_recommends,
         )
 
     def _test_unorphan_v1(self, pkg1, pkg2):
@@ -1857,11 +1867,10 @@ class TestOrphans(BaseUrpmiTest):
     def test_auto_select_g(self):
         self._test_auto_select_both("g", "gg", "g-2 gg-2")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="genhdlist2 maps Recommends to @suggests@ — libsolv ignores Suggests", strict=False)
+    @pytest.mark.stable
     def test_auto_select_h(self):
         """h Recommends hh: after upgrade h-2 is kept, hh-1 becomes orphan."""
-        self._test_auto_select_both("h", "hh", "h-2", "hh-1")
+        self._test_auto_select_both("h", "hh", "h-2", "hh-1", without_recommends=False)
 
     @pytest.mark.stable
     def test_auto_select_l(self):
@@ -2528,8 +2537,7 @@ class TestSuggests(BaseUrpmiTest):
         self._test('b', ['bb'], ['suggested_b'])
         self._test_2('bb', [], 'b', [], [])
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="suggested_b is missing from resolution", strict=False)
+    @pytest.mark.stable
     def test_suggests_c(self):
         self._test('c', [], ['cc', 'b', 'bb', 'suggested_b'])
         self._test_2('b', ['bb'], 'c', [], ['cc'])
@@ -2563,8 +2571,7 @@ class TestSuggests(BaseUrpmiTest):
         self._install(name2, without_recommends=False, with_suggests=True)
         self.check_installed_names([name1] + required1 + [name2] + required2 + suggested2, remove=True)
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Installing a-1 pulls suggested_c unexpectedly", strict=False)
+    @pytest.mark.stable
     def test_suggests_upgrade(self):
         self.prepare()
         self._install("a-1", without_recommends=False, with_suggests=True);
@@ -2582,8 +2589,7 @@ class TestSuggests(BaseUrpmiTest):
         self.check_installed_names(['a', 'suggested_b', 'suggested_c'], remove=True)
 
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Installing c-1 pulls nothing, expected suggests chain", strict=False)
+    @pytest.mark.stable
     def test_suggests_d(self):
         self.prepare()
         common = ['b', 'bb', 'suggested_b']
@@ -2596,7 +2602,7 @@ class TestSuggests(BaseUrpmiTest):
             pkgs = names.split(' ')
             for pkg in pkgs:
                 self._install(pkg, without_recommends=False)
-            self.check_installed_names(names + ['cc'] + common)
+            self.check_installed_names(pkgs + ['cc'] + common)
             ret = self._rpm_remove("cc")
             assert ret == False
-            self.check_installed_names(names + ['cc'] + common, remove=True)
+            self.check_installed_names(pkgs + ['cc'] + common, remove=True)
