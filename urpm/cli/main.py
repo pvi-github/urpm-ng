@@ -1870,6 +1870,18 @@ Examples:
         help=_('system=use system version, cauldron=use cauldron, auto=remove preference (show current if omitted)')
     )
 
+    config_subparsers.add_parser(
+        'show', help=_('Show effective configuration from config files')
+    )
+
+    edit_parser = config_subparsers.add_parser(
+        'edit', help=_('Edit config file with $EDITOR')
+    )
+    edit_parser.add_argument(
+        'edit_file', nargs='?', default=None,
+        help=_('Drop-in file to edit (e.g. 00-urpmi-compat); edits urpm.cfg if omitted')
+    )
+
     # =========================================================================
     # key - GPG key management
     # =========================================================================

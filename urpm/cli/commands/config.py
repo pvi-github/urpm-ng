@@ -20,8 +20,10 @@ def cmd_config(args) -> int:
     """Handle config command - manage urpm configuration."""
 
     if not hasattr(args, 'config_cmd') or not args.config_cmd:
-        print(_("Usage: urpm config <blacklist|redlist|kernel-keep|version-mode> ..."))
+        print(_("Usage: urpm config <subcommand> ..."))
         print(_("\nSubcommands:"))
+        print(_("  show          Show effective configuration"))
+        print(_("  edit [file]   Edit config file with $EDITOR"))
         print(_("  blacklist     Manage blacklist (critical packages)"))
         print(_("  redlist       Manage redlist (packages requiring confirmation)"))
         print(_("  kernel-keep   Number of kernels to keep"))
@@ -67,6 +69,16 @@ def cmd_config(args) -> int:
                 print("\n" + _("Active version filter: {versions}").format(versions=', '.join(sorted(accepted))))
             print()
             return 0
+
+    # Handle show (dump effective config from files)
+    if args.config_cmd == 'show':
+        from ...core.settings import get_settings, format_settings
+        print(format_settings(get_settings()))
+        return 0
+
+    # Handle edit (open config file in $EDITOR)
+    if args.config_cmd == 'edit':
+        return _cmd_config_edit(args)
 
     config = _read_config()
 
@@ -146,6 +158,46 @@ def cmd_config(args) -> int:
     else:
         print(_("Usage: urpm config {name} <list|add|remove> [package]").format(name=list_name))
         return 1
+
+
+def _cmd_config_edit(args) -> int:
+    """Open a config file in $EDITOR.
+
+    Usage:
+        urpm config edit              — edit /etc/urpm/urpm.cfg
+        urpm config edit <name>.cfg   — edit /etc/urpm/conf.d/<name>.cfg
+    """
+    from ...core.settings import get_settings
+
+    editor = os.environ.get("EDITOR", "vi")
+    settings = get_settings()
+    config_dir = settings._config_dir
+
+    target_name = getattr(args, 'edit_file', None)
+
+    if not target_name:
+        # Default: main config file
+        target = config_dir / "urpm.cfg"
+    else:
+        # Normalize: accept "foo", "foo.cfg", or a path inside conf.d/
+        name = target_name
+        if not name.endswith(".cfg"):
+            name += ".cfg"
+        target = config_dir / "conf.d" / name
+
+    if not target.exists():
+        print(_("File not found: {path}").format(path=target))
+        # List available files
+        confdir = config_dir / "conf.d"
+        if confdir.is_dir():
+            available = sorted(f.name for f in confdir.iterdir() if f.suffix == ".cfg")
+            if available:
+                print(_("\nAvailable drop-in files in {dir}:").format(dir=confdir))
+                for name in available:
+                    print(f"  {name}")
+        return 1
+
+    return subprocess.call([editor, str(target)])
 
 
 def cmd_key(args) -> int:
