@@ -442,7 +442,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     if with_suggests:
         suggests = []
         suggest_alternatives = []
-        packages_to_check = all_to_install[:]
+        # Use NEVRAs so find_available_suggests matches the exact resolved version
+        packages_to_check = [a.nevra for a in result.actions if a.nevra] or all_to_install[:]
         checked_packages = set(p.lower() for p in all_to_install)
         max_iterations = 10  # Safety limit against infinite loops
 

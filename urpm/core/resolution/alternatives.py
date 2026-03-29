@@ -469,15 +469,41 @@ class AlternativesMixin:
         if DEBUG_RESOLVER and 'phpmyadmin' in package_names:
             print(f"DEBUG rejected_packages from choices: {sorted(rejected_packages)[:20]}")
 
-        # For each package, find its suggests
+        # When suggests_as_recommends is active, genhdlist2 Recommends are
+        # loaded as SOLVABLE_RECOMMENDS in the pool.  find_available_suggests
+        # must look there instead of SOLVABLE_SUGGESTS.
+        from ..settings import get_settings
+        _suggests_key = (
+            solv.SOLVABLE_RECOMMENDS
+            if get_settings().resolver.suggests_as_recommends
+            else solv.SOLVABLE_SUGGESTS
+        )
+
+        # For each package, find its suggests.
+        # When a NEVRA is given (e.g. "a-1-1.x86_64"), match that exact
+        # solvable.  When only a name is given, keep only the best (highest
+        # EVR) candidate to avoid pulling suggests from unrelated versions.
         for pkg_name in package_names:
-            # Find the package in available repos
             flags = solv.Selection.SELECTION_NAME | solv.Selection.SELECTION_CANON
             sel = self.pool.select(pkg_name, flags)
 
-            for s in sel.solvables():
+            candidates = list(sel.solvables())
+            if not candidates:
+                continue
+
+            # If all candidates share the same name, keep only the best EVR.
+            # This avoids collecting suggests from e.g. a-2 when a-1 was resolved.
+            names_seen = {s.name for s in candidates}
+            if len(names_seen) == 1:
+                best = candidates[0]
+                for s in candidates[1:]:
+                    if s.evrcmp(best) > 0:
+                        best = s
+                candidates = [best]
+
+            for s in candidates:
                 # Get suggests deps
-                suggests_deps = s.lookup_deparray(solv.SOLVABLE_SUGGESTS)
+                suggests_deps = s.lookup_deparray(_suggests_key)
                 if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
                     print(f"DEBUG SUGGESTS: {pkg_name} has {len(suggests_deps)} suggests")
                     for d in suggests_deps:
