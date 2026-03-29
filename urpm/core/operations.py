@@ -570,22 +570,25 @@ class PackageOperations:
         import subprocess
 
         result = subprocess.run(
-            ['rpm', '-qa', '--qf', '%{NAME}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\t%{SUMMARY}\\t%{GROUP}\\n'],
+            ['rpm', '-qa', '--qf',
+             '%{NAME}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\t%{EPOCH}\\t%{SUMMARY}\\t%{GROUP}\\n'],
             capture_output=True,
             timeout=60
         )
 
         packages = []
         for line in result.stdout.decode(errors='replace').splitlines():
-            parts = line.split('\t', 5)
-            if len(parts) >= 4:
+            parts = line.split('\t', 6)
+            if len(parts) >= 5:
+                epoch_str = parts[4]
                 packages.append({
                     'name': parts[0],
                     'version': parts[1],
                     'release': parts[2],
                     'arch': parts[3],
-                    'summary': parts[4] if len(parts) > 4 else '',
-                    'group': parts[5] if len(parts) > 5 else '',
+                    'epoch': int(epoch_str) if epoch_str not in ('', '(none)') else 0,
+                    'summary': parts[5] if len(parts) > 5 else '',
+                    'group': parts[6] if len(parts) > 6 else '',
                     'installed': True,
                 })
 

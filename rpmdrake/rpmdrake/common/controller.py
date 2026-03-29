@@ -140,7 +140,8 @@ class Controller:
             with ThreadPoolExecutor(max_workers=4) as pool:
                 f_deps = pool.submit(self._load_dependency_packages)
                 f_orphans = pool.submit(self._load_orphan_packages)
-                f_upgrades = pool.submit(self._load_upgradeable_packages)
+                f_upgrades = pool.submit(self._load_upgradeable_packages,
+                                         self._installed_packages)
                 f_groups = pool.submit(self._load_available_groups)
 
                 self._dependency_packages = f_deps.result()
@@ -182,35 +183,25 @@ class Controller:
             pass
         return orphans
 
-    def _load_upgradeable_packages(self) -> Set[str]:
+    def _load_upgradeable_packages(self, installed_packages: list) -> Set[str]:
         """Load list of packages with available updates.
 
-        Uses a fresh subprocess to query the RPM database to avoid any
-        caching issues that might show stale data after a transaction.
+        Args:
+            installed_packages: List of package dicts from get_installed_packages()
+                (reused to avoid a second rpm -qa subprocess).
         """
-        import subprocess
-
         upgradeable = set()
 
         try:
-            # Get installed packages via subprocess (guaranteed fresh)
-            result = subprocess.run(
-                ['rpm', '-qa', '--qf', '%{NAME}\\t%{EPOCH}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\n'],
-                capture_output=True,
-                timeout=60
-            )
-            installed = {}
-            for line in result.stdout.decode(errors='replace').splitlines():
-                parts = line.split('\t')
-                if len(parts) >= 5:
-                    name, epoch, version, release, arch = parts[:5]
-                    epoch = '0' if epoch == '(none)' else epoch
-                    installed[name.lower()] = {
-                        'epoch': int(epoch),
-                        'version': version,
-                        'release': release,
-                        'arch': arch,
-                    }
+            installed = {
+                p['name'].lower(): {
+                    'epoch': p.get('epoch', 0),
+                    'version': p['version'],
+                    'release': p['release'],
+                    'arch': p['arch'],
+                }
+                for p in installed_packages
+            }
 
             # Compare with available packages from synthesis database
             import sqlite3
