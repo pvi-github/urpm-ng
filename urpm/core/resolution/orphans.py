@@ -398,96 +398,81 @@ class OrphansMixin:
         # Get packages that were installed as dependencies
         unrequested = self._get_unrequested_packages()
         if not unrequested:
-            # No tracking file or empty - can't determine orphans reliably
             return []
 
         ts = rpm.TransactionSet(self.root or '/')
 
-        # Build package info and reverse dependency map
-        installed_pkgs = {}  # name -> {provides, hdr}
-        provides_map = {}    # capability -> set of package names providing it
+        # Single-pass: build provides map, reverse deps, and collect headers
+        installed_pkgs = {}  # name -> hdr
+        provides_map = {}    # capability -> set of package names
         reverse_deps = {}    # name -> set of names that require/recommend it
+        pkg_requires = {}    # name -> list of capability names
+        pkg_recommends = {}  # name -> list of capability names
 
         for hdr in ts.dbMatch():
             name = hdr[rpm.RPMTAG_NAME]
             if name == 'gpg-pubkey':
                 continue
 
-            # Collect provides — use the full capability name.
-            # Parentheses are part of the name (e.g. devel(libeconf(64bit))),
-            # NOT version info.  Truncating with split('(') would merge
-            # unrelated capabilities like devel(libfoo) and devel(libbar)
-            # into a single "devel" bucket, creating phantom dependencies.
-            provides = set()
-            for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                provides.add(prov)
-                provides_map.setdefault(prov, set()).add(name)
-
-            installed_pkgs[name] = {
-                'provides': provides,
-                'hdr': hdr,
-            }
+            installed_pkgs[name] = hdr
             reverse_deps[name] = set()
 
-        # Build reverse dependency graph (who requires/recommends each package)
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            if name == 'gpg-pubkey':
-                continue
+            for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                provides_map.setdefault(prov, set()).add(name)
 
-            # Process Requires
-            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                if req.startswith('rpmlib(') or req.startswith('/'):
-                    continue
+            pkg_requires[name] = [
+                r for r in (hdr[rpm.RPMTAG_REQUIRENAME] or [])
+                if not r.startswith('rpmlib(') and not r.startswith('/')
+            ]
+            pkg_recommends[name] = list(hdr[rpm.RPMTAG_RECOMMENDNAME] or [])
+
+        # Build reverse dependency graph from cached requires/recommends
+        for name in installed_pkgs:
+            for req in pkg_requires[name]:
                 for provider in provides_map.get(req, set()):
                     if provider != name:
                         reverse_deps[provider].add(name)
-
-            # Process Recommends
-            for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
+            for rec in pkg_recommends[name]:
                 for provider in provides_map.get(rec, set()):
                     if provider != name:
                         reverse_deps[provider].add(name)
 
-        # Build lowercase -> actual name mapping for unrequested lookup
-        name_to_lower = {name: name.lower() for name in installed_pkgs}
-
-        # Builddep packages block orphan detection (they are intentionally installed)
+        # Builddep packages block orphan detection
         builddeps_set = set(self._get_builddep_packages().keys())
 
-        # For each unrequested package, check if it leads to an explicit package
-        def has_explicit_ancestor(pkg_name: str, visited: set) -> bool:
-            """Walk up reverse deps to find if any explicit or builddep package depends on this."""
-            if pkg_name in visited:
+        # Cached DFS: True = has explicit ancestor, False = orphan
+        _cache: Dict[str, bool] = {}
+
+        def has_explicit_ancestor(pkg_name: str, path: set) -> bool:
+            """Walk up reverse deps with memoization."""
+            if pkg_name in _cache:
+                return _cache[pkg_name]
+            if pkg_name in path:
                 return False
-            visited.add(pkg_name)
+            path.add(pkg_name)
 
             for dep_name in reverse_deps.get(pkg_name, set()):
-                dep_lower = name_to_lower.get(dep_name, dep_name.lower())
-                # Found an explicitly installed or builddep package that needs this
+                dep_lower = dep_name.lower()
                 if dep_lower not in unrequested or dep_lower in builddeps_set:
+                    _cache[pkg_name] = True
                     return True
-                # Recurse up
-                if has_explicit_ancestor(dep_name, visited):
+                if has_explicit_ancestor(dep_name, path):
+                    _cache[pkg_name] = True
                     return True
 
+            _cache[pkg_name] = False
             return False
 
-        # Find orphans - iterate through installed packages that are in unrequested
+        # Find orphans
         orphans = []
-        for name in installed_pkgs:
-            if name.lower() not in unrequested:
-                # Not a dependency - explicitly installed
+        for name, hdr in installed_pkgs.items():
+            name_lower = name.lower()
+            if name_lower not in unrequested:
+                continue
+            if name_lower in builddeps_set:
                 continue
 
-            # Builddep packages have their own cleanup (autoremove --buildrequires)
-            if name.lower() in builddeps_set:
-                continue
-
-            # Check if any explicit package depends on this (directly or indirectly)
             if not has_explicit_ancestor(name, set()):
-                # No explicit package needs this -> orphan
-                hdr = installed_pkgs[name]['hdr']
                 epoch = hdr[rpm.RPMTAG_EPOCH] or 0
                 version = hdr[rpm.RPMTAG_VERSION]
                 release = hdr[rpm.RPMTAG_RELEASE]
