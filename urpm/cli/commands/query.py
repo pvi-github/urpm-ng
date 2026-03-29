@@ -597,33 +597,34 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
                     })
             else:
                 # Pattern search - need to iterate all packages
-                import fnmatch
+                import fnmatch, re as _re
                 # Convert SQL wildcards to fnmatch wildcards
                 fnmatch_pattern = pattern.replace('%', '*').replace('_', '?')
                 has_wildcards = '*' in fnmatch_pattern or '?' in fnmatch_pattern
 
                 if fnmatch_pattern.startswith('/'):
-                    # Absolute path - use as-is
                     pass
                 elif has_wildcards:
-                    # User specified wildcards - use as-is
                     pass
                 else:
-                    # No wildcards, no leading / - search for exact filename
-                    # nvim → */nvim (file named nvim)
                     fnmatch_pattern = '*/' + fnmatch_pattern
+
+                # Compile pattern once instead of per-file fnmatch call
+                _pat_re = _re.compile(fnmatch.translate(fnmatch_pattern), _re.IGNORECASE)
 
                 for hdr in ts.dbMatch():
                     name = hdr[rpm.RPMTAG_NAME]
                     if name == 'gpg-pubkey':
                         continue
                     files = hdr[rpm.RPMTAG_FILENAMES] or []
+                    if not files:
+                        continue
                     version = hdr[rpm.RPMTAG_VERSION]
                     release = hdr[rpm.RPMTAG_RELEASE]
                     arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
                     nevra = f"{name}-{version}-{release}.{arch}"
                     for f in files:
-                        if fnmatch.fnmatch(f, fnmatch_pattern):
+                        if _pat_re.match(f):
                             installed_found.append({
                                 'nevra': nevra,
                                 'file': f
@@ -632,9 +633,11 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
             pass
 
     # Search in available packages via database (files.xml)
+    files_stats = None  # Cache for get_files_stats (avoid double call)
     if search_available or search_both:
         # Check if we have files.xml data
-        stats = db.get_files_stats()
+        files_stats = db.get_files_stats()
+        stats = files_stats
         if stats['total_files'] == 0:
             # No data - check if sync_files is enabled on any media
             has_sync_files = db.has_any_sync_files_media()
@@ -703,8 +706,9 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
     if not installed_found and not available_found:
         print(_("No package contains '{pattern}'").format(pattern=pattern))
         if search_both or search_available:
-            stats = db.get_files_stats()
-            if stats['total_files'] == 0:
+            if files_stats is None:
+                files_stats = db.get_files_stats()
+            if files_stats['total_files'] == 0:
                 print(colors.info(_("Hint: run 'sudo urpm media update --files' to enable searching available packages")))
         return 1
 

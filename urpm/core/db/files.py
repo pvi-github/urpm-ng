@@ -457,17 +457,16 @@ class FilesMixin:
     def get_files_stats(self) -> Dict[str, Any]:
         """Get statistics about the package files database.
 
+        Uses the pre-computed counters in files_xml_state instead of
+        scanning the (potentially huge) package_files table.
+
         Returns:
             Dict with keys: total_files, total_packages, media_stats (list)
         """
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # Total counts
-        cursor.execute("SELECT COUNT(*), COUNT(DISTINCT pkg_nevra) FROM package_files")
-        total_files, total_packages = cursor.fetchone()
-
-        # Per-media stats
+        # Per-media stats (from the lightweight state table)
         cursor.execute("""
             SELECT m.name, fxs.file_count, fxs.pkg_count, fxs.last_sync
             FROM files_xml_state fxs
@@ -475,19 +474,22 @@ class FilesMixin:
             ORDER BY m.name
         """)
 
-        media_stats = [
-            {
+        media_stats = []
+        total_files = 0
+        total_packages = 0
+        for row in cursor.fetchall():
+            media_stats.append({
                 'media_name': row[0],
                 'file_count': row[1],
                 'pkg_count': row[2],
                 'last_sync': row[3]
-            }
-            for row in cursor.fetchall()
-        ]
+            })
+            total_files += row[1] or 0
+            total_packages += row[2] or 0
 
         return {
-            'total_files': total_files or 0,
-            'total_packages': total_packages or 0,
+            'total_files': total_files,
+            'total_packages': total_packages,
             'media_stats': media_stats
         }
 
