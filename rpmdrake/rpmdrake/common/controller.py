@@ -87,6 +87,9 @@ class Controller:
         self._cache_term: str = ""
         self._cache_results: List[dict] = []
 
+        # Cache for upgrade packages (invalidated on transaction)
+        self._upgrade_packages_cache: Optional[List[dict]] = None
+
         # Current transaction helper (for cancel)
         self._current_helper = None
 
@@ -95,9 +98,15 @@ class Controller:
     # =========================================================================
 
     def load_initial(self) -> None:
-        """Load initial package list based on filter state."""
+        """Load initial package list based on filter state (synchronous)."""
         self._load_installed_cache()
+        self._finish_load_initial()
 
+    def _finish_load_initial(self) -> None:
+        """Finalize initialization after data is loaded.
+
+        This part touches the view and must run on the main thread.
+        """
         # Sync filter state with what will actually be displayed so that the
         # checkboxes in FilterZone reflect reality from the start.
         if self._upgradeable_packages:
@@ -406,11 +415,14 @@ class Controller:
         return results
 
     def _get_upgrade_packages(self) -> List[dict]:
-        """Get packages with available upgrades.
+        """Get packages with available upgrades (cached between refreshes).
 
         Shows the available (new) version/release so that display_version
         can show 'installed → available' correctly.
         """
+        if self._upgrade_packages_cache is not None:
+            return self._upgrade_packages_cache
+
         # Build a map of available versions for upgradeable packages
         # Single batched query instead of N individual ones
         available_versions = {}
@@ -440,23 +452,28 @@ class Controller:
             except Exception:
                 pass
 
+        # Index installed by lowercase name for O(1) lookup
+        installed_by_name = {
+            p['name'].lower(): p for p in self._installed_packages
+        }
+
         results = []
         for name_lower in self._upgradeable_packages:
-            for p in self._installed_packages:
-                if p['name'].lower() == name_lower:
-                    pkg = dict(p)
-                    pkg['installed'] = True
-                    pkg['has_update'] = True
-                    pkg['install_reason'] = 'explicit'  # Simplification
-                    # Use available version/release for display
-                    avail = available_versions.get(name_lower)
-                    if avail:
-                        pkg['version'] = avail['version']
-                        pkg['release'] = avail['release']
-                        if avail.get('summary'):
-                            pkg['summary'] = avail['summary']
-                    results.append(pkg)
-                    break
+            p = installed_by_name.get(name_lower)
+            if not p:
+                continue
+            pkg = dict(p)
+            pkg['installed'] = True
+            pkg['has_update'] = True
+            pkg['install_reason'] = 'explicit'  # Simplification
+            avail = available_versions.get(name_lower)
+            if avail:
+                pkg['version'] = avail['version']
+                pkg['release'] = avail['release']
+                if avail.get('summary'):
+                    pkg['summary'] = avail['summary']
+            results.append(pkg)
+        self._upgrade_packages_cache = results
         return results
 
     def _enrich_packages(self, packages: List[dict]) -> List[dict]:
@@ -904,9 +921,10 @@ class Controller:
         self._refresh_packages()
 
     def _invalidate_cache(self) -> None:
-        """Invalidate search cache."""
+        """Invalidate search and upgrade caches."""
         self._cache_term = ""
         self._cache_results = []
+        self._upgrade_packages_cache = None
 
     # =========================================================================
     # Selection Management

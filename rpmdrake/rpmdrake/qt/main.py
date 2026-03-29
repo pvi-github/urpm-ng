@@ -38,6 +38,9 @@ from .widgets.download_progress import CollapsibleProgressWidget, SlotInfo
 __all__ = ["MainWindow", "main"]
 
 
+from PySide6.QtCore import Signal
+
+
 class MainWindow(QMainWindow):
     """Main window for rpmdrake-ng.
 
@@ -56,6 +59,9 @@ class MainWindow(QMainWindow):
         │ [📥 Installer][🗑 Supprimer][⬆ Mettre à jour (N)][🔄] N pkgs│
         └───────────────────────────────────────────────────────────────┘
     """
+
+    # Signal emitted from background thread to finish loading on main thread
+    _load_finished = Signal()
 
     MIN_FONT_SIZE = 8
     MAX_FONT_SIZE = 24
@@ -94,6 +100,9 @@ class MainWindow(QMainWindow):
         # Apply initial font size now that all widgets exist
         self._apply_font_size()
 
+        # Signal for thread-safe load completion
+        self._load_finished.connect(self._finish_load)
+
         # Package loading is deferred to _deferred_load() so the window
         # is visible immediately.  See main() which calls singleShot(0).
 
@@ -101,13 +110,27 @@ class MainWindow(QMainWindow):
         """Load packages and categories after the window is visible.
 
         Called via QTimer.singleShot(0) from main() so the event loop
-        has a chance to paint the empty window first.
+        has a chance to paint the empty window first.  The heavy loading
+        runs in a background thread so the UI stays responsive.
         """
         self.set_loading(True)
-        # Force a repaint so "Chargement..." is visible before the
-        # blocking _load_installed_cache() call inside load_initial().
         QApplication.processEvents()
-        self.controller.load_initial()
+
+        import threading
+
+        def _bg_load():
+            try:
+                self.controller._load_installed_cache()
+            except Exception:
+                pass
+            # Signal the main thread (thread-safe via Qt signal)
+            self._load_finished.emit()
+
+        threading.Thread(target=_bg_load, daemon=True).start()
+
+    def _finish_load(self) -> None:
+        """Complete initialization on the main thread after background loading."""
+        self.controller._finish_load_initial()
         self.category_panel.populate_categories()
         self._update_upgrade_button()
 
