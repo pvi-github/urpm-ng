@@ -33,8 +33,12 @@ class MockSolvable:
         self._suggests = suggests or []
 
     def lookup_deparray(self, dep_type):
-        """Return dependencies based on type."""
-        if dep_type == solv.SOLVABLE_SUGGESTS:
+        """Return dependencies based on type.
+
+        Suggests are returned for both SOLVABLE_SUGGESTS and SOLVABLE_RECOMMENDS
+        to handle the suggests_as_recommends compatibility mode.
+        """
+        if dep_type in (solv.SOLVABLE_SUGGESTS, solv.SOLVABLE_RECOMMENDS):
             return [MockDep(s) for s in self._suggests]
         elif dep_type == solv.SOLVABLE_REQUIRES:
             return [MockDep(r) for r in self._requires]
