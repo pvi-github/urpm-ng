@@ -817,11 +817,13 @@ class OrphansMixin:
                     if provider != name:
                         reverse_deps.setdefault(provider, set()).add(name)
 
-        # New dependencies pulled by upgrades are NOT orphan candidates —
-        # they are required by an installed package that is being upgraded.
-        # Only existing unrequested packages can become orphans.
+        # New packages installed as deps or Obsoletes replacements are
+        # unrequested candidates. The DFS correctly determines whether
+        # they have an explicit requester in the post-transaction state.
         effective_unrequested = set(unrequested)
-        effective_unrequested -= {name.lower() for name in installed_names}
+        # New packages installed as deps/replacements are also unrequested candidates.
+        # The DFS will correctly determine if they have an explicit requester.
+        effective_unrequested |= {name.lower() for name in installed_names}
 
         # Find orphans: unrequested packages with no path to an explicit package
         def has_explicit_ancestor(pkg_name: str, visited: set) -> bool:
@@ -874,6 +876,26 @@ class OrphansMixin:
                 size=size,
             ))
             seen_orphans.add(name)
+
+        # Orphans from newly installed packages (not in rpmdb yet)
+        # These are Obsoletes replacements or new deps with no explicit requester.
+        # The caller (upgrade.py) will exclude them from rpm_paths.
+        for action in all_actions:
+            if action.action != TransactionType.INSTALL:
+                continue
+            if action.name in seen_orphans:
+                continue
+            if action.name not in orphan_candidates:
+                continue
+            orphans.append(PackageAction(
+                action=TransactionType.REMOVE,
+                name=action.name,
+                evr=action.evr,
+                arch=action.arch,
+                nevra=action.nevra,
+                size=action.size,
+            ))
+            seen_orphans.add(action.name)
 
         return orphans
 
