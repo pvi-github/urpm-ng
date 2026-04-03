@@ -440,13 +440,18 @@ class OrphansMixin:
         # Builddep packages block orphan detection
         builddeps_set = set(self._get_builddep_packages().keys())
 
-        # Cached DFS: True = has explicit ancestor, False = orphan
-        _cache: Dict[str, bool] = {}
+        # Cached DFS: only True results are cached.  False is never cached
+        # because it may be path-dependent: cycle detection returns False
+        # when a node is already in the current DFS path, but the node may
+        # be reachable via a different path that avoids the cycle.  Since
+        # set iteration order is non-deterministic (Python hash seed), caching
+        # False would produce random false-positive orphans.
+        _cache_true: set = set()
 
         def has_explicit_ancestor(pkg_name: str, path: set) -> bool:
-            """Walk up reverse deps with memoization."""
-            if pkg_name in _cache:
-                return _cache[pkg_name]
+            """Walk up reverse deps with memoization (True-only cache)."""
+            if pkg_name in _cache_true:
+                return True
             if pkg_name in path:
                 return False
             path.add(pkg_name)
@@ -454,13 +459,12 @@ class OrphansMixin:
             for dep_name in reverse_deps.get(pkg_name, set()):
                 dep_lower = dep_name.lower()
                 if dep_lower not in unrequested or dep_lower in builddeps_set:
-                    _cache[pkg_name] = True
+                    _cache_true.add(pkg_name)
                     return True
                 if has_explicit_ancestor(dep_name, path):
-                    _cache[pkg_name] = True
+                    _cache_true.add(pkg_name)
                     return True
 
-            _cache[pkg_name] = False
             return False
 
         # Find orphans
