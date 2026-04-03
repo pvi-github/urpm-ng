@@ -117,6 +117,7 @@ class DownloadItem:
     # Pre-loaded servers (list of dicts with protocol, host, base_path)
     servers: List[dict] = field(default_factory=list)
     size: int = 0
+    exclude_server_ids: List[int] = field(default_factory=list)  # Servers to skip on retry
 
     @property
     def hostname(self) -> str:
@@ -169,6 +170,7 @@ class DownloadResult:
     peer_info: Optional[PeerProvenance] = None  # Set if downloaded from peer
     blacklist_peer: Optional[PeerToBlacklist] = None  # Set if peer should be blacklisted
     from_peer: bool = False  # True if downloaded from peer (not upstream)
+    source_server_id: Optional[int] = None  # Server that served this file
 
 
 @dataclass
@@ -885,6 +887,17 @@ class Downloader:
                 start_idx = worker_slot % len(servers)
                 servers = servers[start_idx:] + servers[:start_idx]
 
+            # Filter out excluded servers (used on retry to skip failing servers)
+            if item.exclude_server_ids:
+                servers = [s for s in servers
+                           if s.get('id') not in item.exclude_server_ids]
+                if not servers:
+                    return DownloadResult(
+                        item=item,
+                        success=False,
+                        error="All servers excluded by exclude_server_ids"
+                    )
+
             all_errors = []
             for server in servers:
                 url = self._build_package_url(server, item.relative_path, item.filename)
@@ -946,7 +959,8 @@ class Downloader:
                         return DownloadResult(
                             item=item,
                             success=True,
-                            path=cache_path
+                            path=cache_path,
+                            source_server_id=server_id
                         )
 
                     # Download failed on this attempt
@@ -1076,13 +1090,8 @@ class Downloader:
 
                 checksum = sha256.hexdigest()
 
-                # NOTE: GPG verification removed from peer download for performance.
-                # Rationale:
-                # 1. Peers are trusted local network hosts (discovered via mDNS)
-                # 2. rpm will verify signature anyway at install time
-                # 3. Per-package GPG check was adding ~0.5-1s latency each
-                #
-                # If a peer serves tampered packages, rpm install will reject them.
+                # GPG signature is verified after download to prevent caching
+                # tampered RPMs.  Peers serving bad signatures are blacklisted.
 
                 # Move to final location
                 temp_path.rename(cache_path)
@@ -1101,6 +1110,25 @@ class Downloader:
                         error=f"Peer served invalid file: {rpm_error}"
                     )
 
+                # Verify GPG signature — don't cache tampered RPMs from peers
+                sig_ok = verify_rpm_signature(cache_path)
+                if not sig_ok:
+                    logger.warning("P2P download %s: signature verification failed, discarding", item.name)
+                    try:
+                        cache_path.unlink()
+                    except OSError:
+                        pass
+                    return DownloadResult(
+                        item=item,
+                        success=False,
+                        error="signature verification failed (from peer)",
+                        blacklist_peer=PeerToBlacklist(
+                            host=peer.host,
+                            port=peer.port,
+                            reason="bad signature",
+                        ),
+                    )
+
                 # Register in cache for quota tracking
                 self._register_cache_file(item, cache_path)
 
@@ -1114,7 +1142,7 @@ class Downloader:
                         peer_port=peer.port,
                         checksum_sha256=checksum,
                         file_size=downloaded,
-                        verified=False  # GPG verification deferred to rpm install
+                        verified=True  # GPG signature verified after download
                     )
                 )
 

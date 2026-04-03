@@ -394,12 +394,16 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_shown[0] = name
 
-        queue_result = ops.execute_upgrade(
+        resilient_result = ops.resilient_install(
             rpm_paths,
+            download_items=download_items,
+            options=upgrade_opts,
             erase_names=remove_names,
             orphan_names=orphan_names or None,
-            options=upgrade_opts,
+            mode="upgrade",
             progress_callback=queue_progress,
+            root=upgrade_opts.root,
+            urpm_root=getattr(args, 'urpm_root', None),
         )
 
         # Clear the line after last progress
@@ -410,27 +414,40 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             ops.abort_transaction(transaction_id)
             return 130
 
-        # Process results for each operation
-        upgrade_success = True
+        # Process results from the resilient pipeline
+        queue_result = resilient_result.queue_result
+        upgrade_success = resilient_result.success
 
-        for op_result in queue_result.operations:
-            if op_result.operation_id == "upgrade":
-                if op_result.success:
-                    msg_parts = []
-                    if op_result.count > 0:
-                        msg_parts.append(f"{op_result.count} packages upgraded")
-                    if remove_names:
-                        msg_parts.append(f"{len(remove_names)} removed (obsoleted)")
-                    if msg_parts:
-                        print(colors.success(f"  {', '.join(msg_parts)}"))
-                    # Apply config policy for .rpmnew files
-                    if op_result.rpmnew_files:
-                        _apply_config_policy(op_result.rpmnew_files, upgrade_opts.config_policy)
-                else:
-                    upgrade_success = False
-                    print(colors.error("\n" + _("Upgrade failed:")))
-                    for err in op_result.errors[:3]:
-                        print(f"  {colors.error(err)}")
+        if queue_result is not None:
+            for op_result in queue_result.operations:
+                if op_result.operation_id == "upgrade":
+                    if op_result.success:
+                        msg_parts = []
+                        if op_result.count > 0:
+                            msg_parts.append(f"{op_result.count} packages upgraded")
+                        if remove_names:
+                            msg_parts.append(f"{len(remove_names)} removed (obsoleted)")
+                        if msg_parts:
+                            print(colors.success(f"  {', '.join(msg_parts)}"))
+                        # Apply config policy for .rpmnew files
+                        if op_result.rpmnew_files:
+                            _apply_config_policy(op_result.rpmnew_files, upgrade_opts.config_policy)
+                    else:
+                        print(colors.error("\n" + _("Upgrade failed:")))
+                        for err in op_result.errors[:3]:
+                            print(f"  {colors.error(err)}")
+
+        # Show excluded packages from resilient pipeline
+        if resilient_result.excluded_packages:
+            excluded_count = len(resilient_result.excluded_packages)
+            print(colors.warning("\n" + ngettext(
+                "{count} package could not be upgraded due to verification errors:",
+                "{count} packages could not be upgraded due to verification errors:",
+                excluded_count).format(count=excluded_count)))
+            for name, reason in resilient_result.excluded_packages[:10]:
+                print(f"  {colors.warning(name)}: {reason}")
+            print(colors.warning(
+                _("These packages will be retried on the next update.")))
 
         # Orphan cleanup runs in background - just display status
         if orphan_names:

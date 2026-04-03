@@ -1000,21 +1000,36 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
                 last_shown[0] = name
 
-        queue_result = ops.execute_install(
-            rpm_paths, options=install_opts, progress_callback=queue_progress,
-            actions=result.actions
+        # Use resilient pipeline for signature pre-check + retry + exclusion
+        resilient_result = ops.resilient_install(
+            rpm_paths=rpm_paths,
+            download_items=download_items,
+            options=install_opts,
+            actions=result.actions,
+            progress_callback=queue_progress,
+            root=rpm_root or '/',
+            urpm_root=getattr(args, 'urpm_root', None),
         )
 
         # Print done
         print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done"))
 
-        if not queue_result.success:
+        # Show excluded packages warning
+        if resilient_result.excluded_packages:
+            excluded_count = len(resilient_result.excluded_packages)
+            print(colors.warning("\n" + ngettext(
+                "{count} package could not be installed due to verification errors:",
+                "{count} packages could not be installed due to verification errors:",
+                excluded_count).format(count=excluded_count)))
+            for name, reason in resilient_result.excluded_packages[:10]:
+                print(f"  {colors.warning(name)}: {reason}")
+            print(colors.warning(
+                _("These packages will be retried on the next update.")))
+
+        if not resilient_result.success:
             print(colors.error("\n" + _("Installation failed:")))
-            if queue_result.operations:
-                for err in queue_result.operations[0].errors[:3]:
-                    print(f"  {colors.error(err)}")
-            elif queue_result.overall_error:
-                print(f"  {colors.error(queue_result.overall_error)}")
+            for err in resilient_result.errors[:3]:
+                print(f"  {colors.error(err)}")
             ops.abort_transaction(transaction_id)
             return 1
 
@@ -1023,15 +1038,16 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             ops.abort_transaction(transaction_id)
             return 130
 
-        installed_count = queue_result.operations[0].count if queue_result.operations else len(rpm_paths)
+        installed_count = resilient_result.installed_count
         if remove_pkgs:
             print(colors.success("  " + _("{installed} packages installed, {removed} removed").format(installed=installed_count, removed=len(remove_pkgs))))
         else:
             print(colors.success("  " + ngettext("{count} package installed", "{count} packages installed", installed_count).format(count=installed_count)))
 
         # Apply config policy for .rpmnew files
-        if queue_result.operations:
-            rpmnew_files = queue_result.operations[0].rpmnew_files
+        qr = resilient_result.queue_result
+        if qr is not None and qr.operations:
+            rpmnew_files = qr.operations[0].rpmnew_files
             if rpmnew_files:
                 _apply_config_policy(rpmnew_files, install_opts.config_policy)
 
@@ -1352,6 +1368,23 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
         for r in failed[:5]:
             print(f"  {colors.error(r.item.name)}: {r.error}")
         return 1
+
+    # Verify signatures on downloaded RPMs
+    if not getattr(args, 'nosignature', False):
+        successful_paths = [r.path for r in dl_results if r.success and r.path]
+        if successful_paths:
+            from ...core.resilient_install import pre_verify_signatures, purge_failed_from_cache
+            valid, sig_failed = pre_verify_signatures(successful_paths)
+            if sig_failed:
+                print(colors.warning("\n" + ngettext(
+                    "{count} downloaded package failed signature verification:",
+                    "{count} downloaded packages failed signature verification:",
+                    len(sig_failed)).format(count=len(sig_failed))))
+                for path, err in sig_failed:
+                    print(f"  {colors.warning(path.name)}: {err}")
+                purge_failed_from_cache([p for p, _ in sig_failed], db)
+                print(colors.warning(
+                    _("Corrupt files have been removed from cache.")))
 
     # Summary
     from_peers = peer_stats.get('from_peers', 0)

@@ -21,6 +21,10 @@ from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from .database import PackageDatabase
 from .download import Downloader, DownloadItem
+from .resilient_install import (
+    ResilientInstallResult, pre_verify_signatures, purge_failed_from_cache,
+    find_dependents, retry_failed_downloads, _extract_name_from_path,
+)
 from .transaction_queue import TransactionQueue
 
 logger = logging.getLogger(__name__)
@@ -318,6 +322,162 @@ class PackageOperations:
         )
         self._audit_complete(auth_context, "install", pkg_names, success=True)
         return result
+
+    def resilient_install(
+        self,
+        rpm_paths: List[str],
+        download_items: list,
+        options: "InstallOptions" = None,
+        actions: list = None,
+        progress_callback: Callable[[str, str, int, int], None] = None,
+        auth_context=None,
+        root: str = "/",
+        urpm_root: Optional[str] = None,
+        erase_names: List[str] = None,
+        orphan_names: List[str] = None,
+        mode: str = "install",
+    ) -> "ResilientInstallResult":
+        """Install or upgrade packages with signature pre-check, retry, and exclusion.
+
+        This wraps :meth:`execute_install` or :meth:`execute_upgrade` with
+        the resilient pipeline:
+          1. Pre-verify GPG signatures on all RPMs
+          2. Retry failed downloads from alternate mirrors
+          3. Exclude unrecoverable packages and their dependents
+          4. Execute a (possibly reduced) transaction
+
+        When ``options.verify_signatures`` is False (``--nosignature``),
+        the pre-verification step is skipped entirely.
+
+        Args:
+            rpm_paths: RPM file paths to install/upgrade.
+            download_items: Original download items (for retry on failure).
+            options: Install options.
+            actions: Resolver actions (passed to execute_install).
+            progress_callback: Progress callback for install phase.
+            auth_context: Optional auth context for D-Bus path.
+            root: RPM root directory.
+            urpm_root: urpm state directory override.
+            erase_names: Package names to remove (upgrade mode: obsoleted).
+            orphan_names: Orphaned deps to remove in background (upgrade mode).
+            mode: ``"install"`` (default) or ``"upgrade"`` — selects which
+                execute method to call internally.
+
+        Returns:
+            :class:`ResilientInstallResult` with install outcome details.
+        """
+        if options is None:
+            options = InstallOptions()
+
+        path_objects = [Path(p) for p in rpm_paths]
+
+        # ── Step 1: Pre-verify signatures (skip if --nosignature) ──
+        if options.verify_signatures:
+            valid_paths, sig_failed = pre_verify_signatures(path_objects, root=root)
+        else:
+            valid_paths = path_objects
+            sig_failed = []
+
+        excluded: List[tuple] = []
+
+        # ── Step 2: Retry failed from alternate mirrors ──
+        if sig_failed:
+            failed_paths = [p for p, _reason in sig_failed]
+            purge_failed_from_cache(failed_paths, self.db)
+
+            recovered, still_failed = retry_failed_downloads(
+                failed_paths,
+                download_items,
+                ops=self,
+                options=options,
+                urpm_root=urpm_root,
+            )
+
+            # Add recovered files back to the valid set
+            valid_paths.extend(recovered)
+
+            if still_failed:
+                # ── Step 3: Exclude bad packages and their dependents ──
+                failed_names = {name for name, _reason in still_failed}
+                all_excluded = find_dependents(
+                    failed_names, valid_paths, root=root
+                )
+
+                # Filter valid_paths to remove excluded packages
+                filtered_paths: List[Path] = []
+                for p in valid_paths:
+                    pkg_name = _extract_name_from_path(p)
+                    if pkg_name not in all_excluded:
+                        filtered_paths.append(p)
+                valid_paths = filtered_paths
+
+                # Build excluded list with reasons
+                reason_map = dict(still_failed)
+                for name in all_excluded:
+                    reason = reason_map.get(
+                        name,
+                        "depends on excluded package",
+                    )
+                    excluded.append((name, reason))
+
+                logger.info(
+                    "Excluded %d package(s) from transaction: %s",
+                    len(excluded),
+                    ", ".join(n for n, _ in excluded),
+                )
+
+        # ── Step 4: Execute the (possibly reduced) transaction ──
+        if not valid_paths and not (erase_names or orphan_names):
+            return ResilientInstallResult(
+                success=False,
+                installed_count=0,
+                excluded_packages=excluded,
+                errors=["All packages failed verification"],
+            )
+
+        final_rpm_paths = [str(p) for p in valid_paths]
+
+        if mode == "upgrade":
+            queue_result = self.execute_upgrade(
+                final_rpm_paths,
+                erase_names=erase_names,
+                orphan_names=orphan_names,
+                options=options,
+                progress_callback=progress_callback,
+                auth_context=auth_context,
+            )
+        else:
+            queue_result = self.execute_install(
+                final_rpm_paths,
+                options=options,
+                progress_callback=progress_callback,
+                auth_context=auth_context,
+                actions=actions,
+            )
+
+        # Determine installed count from queue result
+        if queue_result is not None and queue_result.operations:
+            installed_count = queue_result.operations[0].count
+        elif queue_result is not None:
+            installed_count = len(final_rpm_paths)
+        else:
+            # execute_upgrade returns None when queue is empty
+            installed_count = 0
+
+        success = queue_result.success if queue_result is not None else True
+
+        return ResilientInstallResult(
+            success=success,
+            installed_count=installed_count,
+            excluded_packages=excluded,
+            errors=(
+                [queue_result.overall_error]
+                if queue_result and not queue_result.success and queue_result.overall_error
+                else []
+            ),
+            reduced_transaction=bool(excluded),
+            queue_result=queue_result,
+        )
 
     def execute_erase(
         self,
