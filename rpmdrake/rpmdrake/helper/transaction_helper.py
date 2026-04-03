@@ -299,8 +299,13 @@ class TransactionHelper:
         return without_release[:dash_pos]
 
     def _download_and_install(self, resolution, resolver, operation_id: str, requested_packages: List[str] = None):
-        """Download packages and run install/upgrade transaction."""
-        # Build download items
+        """Download packages and run install/upgrade transaction.
+
+        Uses the resilient install pipeline which pre-verifies GPG
+        signatures, retries failed downloads from alternate mirrors, and
+        excludes unrecoverable packages before executing the transaction.
+        """
+        # Build download items (kept for retry in resilient_install)
         download_items, local_paths = self.ops.build_download_items(
             resolution.actions, resolver, []
         )
@@ -398,7 +403,8 @@ class TransactionHelper:
         # Restart stdin watcher for cancel commands during install
         self._start_stdin_watcher()
 
-        # Run transaction
+        # Run transaction via resilient pipeline (signature pre-check,
+        # retry from alternate mirrors, exclusion of bad packages)
         self._status(f"Installing {len(rpm_paths)} package(s)...")
 
         def install_progress(op_id, name, current, total):
@@ -411,16 +417,17 @@ class TransactionHelper:
 
         options = InstallOptions()
         options.sync = True  # Wait for full rpmdb sync before returning
-        result = self.ops.execute_upgrade(
+        result = self.ops.resilient_install(
             rpm_paths,
-            erase_names=erase_names,
+            download_items=download_items,
             options=options,
-            progress_callback=install_progress
+            actions=resolution.actions,
+            progress_callback=install_progress,
+            erase_names=erase_names,
+            mode="upgrade" if operation_id == "upgrade" else "install",
         )
 
         if result.success:
-            total_count = sum(op.count for op in result.operations)
-
             # Mark dependency packages (not explicitly requested)
             if requested_packages:
                 # Extract names from NEVRAs for comparison (handles both names and NEVRAs)
@@ -436,19 +443,23 @@ class TransactionHelper:
                     except Exception:
                         pass  # Non-critical, don't fail the transaction
 
-            self._send({
+            done_msg = {
                 "type": "done",
                 "success": True,
-                "count": total_count,
+                "count": result.installed_count,
                 "readme_messages": readme_messages,
-            })
+            }
+            # Report excluded packages so the GUI can inform the user
+            if result.excluded_packages:
+                done_msg["excluded_packages"] = [
+                    {"name": name, "reason": reason}
+                    for name, reason in result.excluded_packages
+                ]
+                done_msg["reduced_transaction"] = True
+            self._send(done_msg)
         else:
-            errors = []
-            for op in result.operations:
-                errors.extend(op.errors)
-            if result.overall_error:
-                errors.append(result.overall_error)
-            self._error("\n".join(errors) if errors else "Transaction failed")
+            error_msg = "\n".join(result.errors) if result.errors else "Transaction failed"
+            self._error(error_msg)
 
     def _run_erase_transaction(self, resolution):
         """Run erase transaction."""

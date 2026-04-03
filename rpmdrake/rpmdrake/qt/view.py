@@ -628,6 +628,20 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         if success:
             count = summary.get('installed', 0) or summary.get('removed', 0)
             msg = f"Transaction terminée avec succès.\n{count} paquet(s) traité(s)."
+
+            # Warn about excluded packages (signature failures)
+            excluded = summary.get('excluded_packages')
+            if excluded:
+                msg += f"\n\n⚠️ {len(excluded)} paquet(s) exclu(s) "
+                msg += "(erreur de vérification) :\n"
+                for pkg in excluded[:10]:
+                    name = pkg.get('name', pkg[0]) if isinstance(pkg, dict) else pkg[0]
+                    reason = pkg.get('reason', pkg[1]) if isinstance(pkg, dict) else pkg[1]
+                    msg += f"  • {name} : {reason}\n"
+                if len(excluded) > 10:
+                    msg += f"  … et {len(excluded) - 10} autre(s)\n"
+                msg += "\nCes paquets seront retentés à la prochaine mise à jour."
+
             # Refresh caches while "Finalisation" is still visible
             self.window.controller.refresh_after_transaction()
             self.window.progress_widget.finish()
@@ -636,7 +650,8 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
             # Refresh detail panel if a package row is still selected
             self._refresh_detail_panel()
             # Show success dialog after everything is updated
-            self._show_styled_message("Terminé", msg, "info")
+            msg_type = "warning" if excluded else "info"
+            self._show_styled_message("Terminé", msg, msg_type)
         else:
             errors = summary.get('errors', [])
             # Cancel is not an error — silently ignore it

@@ -34,6 +34,8 @@ class TransactionResult:
     error: str = ""
     message: str = ""
     readme_messages: list = None  # List of {"package": str, "content": str}
+    excluded_packages: list = None  # List of {"name": str, "reason": str}
+    reduced_transaction: bool = False  # True if some packages were excluded
 
 
 class HelperClient:
@@ -202,6 +204,8 @@ class HelperClient:
                     count=msg.get("count", 0),
                     message=msg.get("message", ""),
                     readme_messages=msg.get("readme_messages"),
+                    excluded_packages=msg.get("excluded_packages"),
+                    reduced_transaction=msg.get("reduced_transaction", False),
                 ))
 
         elif msg_type == "readme":

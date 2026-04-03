@@ -1147,16 +1147,19 @@ class Controller:
             # finish_transaction() is called by the view after the refresh
             # completes, so the progress widget stays visible during the
             # potentially long _load_installed_cache() rebuild.
-            self.view.on_transaction_complete(
-                result.success,
-                {
-                    'installed': result.count if action in ('install', 'upgrade') else 0,
-                    'removed': result.count if action == 'erase' else 0,
-                    'message': result.message,
-                    'errors': [result.error] if result.error else [],
-                    'readme_messages': result.readme_messages or [],
-                }
-            )
+            details = {
+                'installed': result.count if action in ('install', 'upgrade') else 0,
+                'removed': result.count if action == 'erase' else 0,
+                'message': result.message,
+                'errors': [result.error] if result.error else [],
+                'readme_messages': result.readme_messages or [],
+            }
+            # Pass excluded packages info when the resilient pipeline
+            # dropped packages due to signature failures or missing deps
+            if result.excluded_packages:
+                details['excluded_packages'] = result.excluded_packages
+                details['reduced_transaction'] = result.reduced_transaction
+            self.view.on_transaction_complete(result.success, details)
 
         def on_readme(messages: list) -> bool:
             """Show README.urpmi dialog via the view (blocking)."""
