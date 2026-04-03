@@ -18,7 +18,7 @@ from .db import (
 )
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 22
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -155,9 +155,16 @@ CREATE TABLE IF NOT EXISTS media (
     -- Sync state
     last_sync INTEGER,
     synthesis_md5 TEXT,
+    synthesis_last_modified TEXT,
     hdlist_md5 TEXT,
 
     added_timestamp INTEGER,
+
+    -- Adaptive media update scheduling (v21+)
+    adaptive_period INTEGER,
+    adaptive_mu REAL,
+    adaptive_sigma REAL,
+    adaptive_last_changed INTEGER,
 
     -- Legacy (kept for migration, will be removed later)
     url TEXT,
@@ -351,6 +358,15 @@ CREATE TABLE IF NOT EXISTS files_xml_state (
     compressed_size INTEGER,     -- Size of files.xml.lzma in bytes (for progress estimation)
     FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS media_update_deltas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    changed_at INTEGER NOT NULL,
+    delta_seconds INTEGER,
+    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mud_media ON media_update_deltas(media_id);
 """
 
 # Migrations: dict of from_version -> (to_version, sql_script)
@@ -542,6 +558,25 @@ MIGRATIONS = {
             row_count INTEGER,
             is_current INTEGER DEFAULT 0
         );
+    """),
+    20: (21, """
+        -- Migration v20 -> v21: adaptive media update scheduling
+        CREATE TABLE IF NOT EXISTS media_update_deltas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_id INTEGER NOT NULL,
+            changed_at INTEGER NOT NULL,
+            delta_seconds INTEGER,
+            FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_mud_media ON media_update_deltas(media_id);
+        ALTER TABLE media ADD COLUMN adaptive_period INTEGER;
+        ALTER TABLE media ADD COLUMN adaptive_mu REAL;
+        ALTER TABLE media ADD COLUMN adaptive_sigma REAL;
+        ALTER TABLE media ADD COLUMN adaptive_last_changed INTEGER;
+    """),
+    21: (22, """
+        -- Migration v21 -> v22: store Last-Modified from synthesis HEAD check
+        ALTER TABLE media ADD COLUMN synthesis_last_modified TEXT;
     """),
 }
 

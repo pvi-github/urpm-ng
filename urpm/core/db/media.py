@@ -158,14 +158,17 @@ class MediaMixin:
         cursor = conn.execute("SELECT 1 FROM media WHERE sync_files = 1 LIMIT 1")
         return cursor.fetchone() is not None
 
-    def update_media_sync_info(self, media_id: int, synthesis_md5: str):
-        """Update media sync timestamp and MD5. Thread-safe."""
+    def update_media_sync_info(self, media_id: int, synthesis_md5: str,
+                              synthesis_last_modified: str = None):
+        """Update media sync timestamp, MD5, and Last-Modified. Thread-safe."""
         conn = self._get_connection()
         with self._lock:
             conn.execute("""
-                UPDATE media SET last_sync = ?, synthesis_md5 = ?
+                UPDATE media SET last_sync = ?, synthesis_md5 = ?,
+                    synthesis_last_modified = ?
                 WHERE id = ?
-            """, (int(time.time()), synthesis_md5, media_id))
+            """, (int(time.time()), synthesis_md5, synthesis_last_modified,
+                  media_id))
             conn.commit()
 
     def get_media_by_id(self, media_id: int) -> Optional[Dict]:
@@ -288,3 +291,82 @@ class MediaMixin:
                          if m['mageia_version'] not in disabled_versions]
 
         return media_list
+
+    def record_media_update_delta(self, media_id: int, changed_at: int,
+                                  delta_seconds: int | None):
+        """Record a content change timestamp and delta for adaptive scheduling.
+
+        Args:
+            media_id: Media ID.
+            changed_at: Unix timestamp when content change was detected.
+            delta_seconds: Seconds since previous content change, or None if first.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            conn.execute(
+                "INSERT INTO media_update_deltas (media_id, changed_at, delta_seconds) "
+                "VALUES (?, ?, ?)",
+                (media_id, changed_at, delta_seconds),
+            )
+            conn.commit()
+
+    def get_media_update_deltas(self, media_id: int, limit: int = 30) -> list[int]:
+        """Get recent delta_seconds for a media (newest first).
+
+        Only returns non-None deltas (skips the first-ever record).
+
+        Args:
+            media_id: Media ID.
+            limit: Maximum number of deltas to return.
+
+        Returns:
+            List of delta_seconds values (integers), newest first.
+        """
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT delta_seconds FROM media_update_deltas "
+            "WHERE media_id = ? AND delta_seconds IS NOT NULL "
+            "ORDER BY changed_at DESC LIMIT ?",
+            (media_id, limit),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+    def prune_media_update_deltas(self, media_id: int, keep: int = 30):
+        """Keep only the N most recent deltas for a media.
+
+        Args:
+            media_id: Media ID.
+            keep: Number of most recent records to keep.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            conn.execute(
+                "DELETE FROM media_update_deltas "
+                "WHERE media_id = ? AND id NOT IN ("
+                "  SELECT id FROM media_update_deltas "
+                "  WHERE media_id = ? ORDER BY changed_at DESC LIMIT ?"
+                ")",
+                (media_id, media_id, keep),
+            )
+            conn.commit()
+
+    def update_media_adaptive_state(self, media_id: int, period: int | None,
+                                    mu: float | None, sigma: float | None,
+                                    last_changed: int | None):
+        """Cache computed adaptive scheduling state on the media row.
+
+        Args:
+            media_id: Media ID.
+            period: Computed F(media) in seconds, or None to clear.
+            mu: Mean update interval in seconds.
+            sigma: Standard deviation of update intervals in seconds.
+            last_changed: Unix timestamp of last real content change.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            conn.execute(
+                "UPDATE media SET adaptive_period = ?, adaptive_mu = ?, "
+                "adaptive_sigma = ?, adaptive_last_changed = ? WHERE id = ?",
+                (period, mu, sigma, last_changed, media_id),
+            )
+            conn.commit()

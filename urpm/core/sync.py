@@ -300,11 +300,54 @@ def parse_md5sum_file(content: str) -> dict:
     return result
 
 
+def head_synthesis(synthesis_url: str, server: dict = None,
+                   timeout: int = 10) -> Optional[str]:
+    """HTTP HEAD on synthesis to retrieve Last-Modified header.
+
+    This is the lightest possible freshness check — no body is downloaded.
+    For local file:// servers, falls back to filesystem mtime.
+
+    Args:
+        synthesis_url: Full URL to synthesis.hdlist.cz.
+        server: Optional server dict (to detect file:// servers).
+        timeout: Connection timeout in seconds.
+
+    Returns:
+        Last-Modified header value as string, or None if HEAD fails
+        or the server doesn't provide the header.
+    """
+    if server and is_local_server(server):
+        # Local file — use mtime directly
+        from email.utils import formatdate
+        local_path = synthesis_url.replace('file://', '')
+        try:
+            mtime = Path(local_path).stat().st_mtime
+            return formatdate(mtime, usegmt=True)
+        except OSError:
+            return None
+
+    try:
+        req = urllib.request.Request(synthesis_url, method='HEAD')
+        req.add_header('User-Agent', 'urpm/0.1')
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.headers.get('Last-Modified')
+    except Exception:
+        return None
+
+
 def check_media_update_needed(db: PackageDatabase, media_id: int,
                               media_url: str,
                               server: dict = None,
                               media: dict = None) -> Tuple[bool, Optional[str]]:
-    """Check if a media needs to be updated by comparing MD5.
+    """Check if a media needs to be updated.
+
+    Two-tier freshness check, lightest first:
+
+    1. **HTTP HEAD** on synthesis.hdlist.cz → compare ``Last-Modified``
+       with stored value.  If unchanged, return immediately (no download).
+    2. **MD5SUM fallback** — download the small MD5SUM file and compare
+       the synthesis hash.  Used when HEAD fails (405, no header, etc.)
+       or when Last-Modified changed (to confirm with content hash).
 
     Args:
         db: Database instance
@@ -316,8 +359,25 @@ def check_media_update_needed(db: PackageDatabase, media_id: int,
     Returns:
         Tuple of (needs_update, new_md5)
     """
+    media_info = db.get_media_by_id(media_id)
+
+    # --- Tier 1: HTTP HEAD (cheapest) ---
+    if server and media:
+        synthesis_url = build_synthesis_url_v8(server, media)
+    else:
+        synthesis_url = build_synthesis_url(media_url)
+
+    remote_last_modified = head_synthesis(synthesis_url, server)
+
+    if remote_last_modified and media_info:
+        stored_last_modified = media_info.get('synthesis_last_modified')
+        if stored_last_modified and stored_last_modified == remote_last_modified:
+            logger.debug("Media %d: HEAD Last-Modified unchanged, skipping",
+                         media_id)
+            return False, media_info.get('synthesis_md5')
+
+    # --- Tier 2: MD5SUM download (fallback / confirmation) ---
     try:
-        # Build MD5SUM URL using new or legacy method
         if server and media:
             md5_url = build_md5sum_url_v8(server, media)
         else:
@@ -326,7 +386,6 @@ def check_media_update_needed(db: PackageDatabase, media_id: int,
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp_path = Path(tmp.name)
 
-        # Download using appropriate method
         if server:
             result = download_from_server(md5_url, tmp_path, server)
         else:
@@ -334,7 +393,7 @@ def check_media_update_needed(db: PackageDatabase, media_id: int,
 
         if not result.success:
             tmp_path.unlink(missing_ok=True)
-            return True, None  # Can't check, assume update needed
+            return True, None
 
         content = tmp_path.read_text()
         tmp_path.unlink()
@@ -345,10 +404,13 @@ def check_media_update_needed(db: PackageDatabase, media_id: int,
         if not synthesis_md5:
             return True, None
 
-        # Check against stored MD5
-        media_info = db.get_media_by_id(media_id)
         if media_info and media_info.get('synthesis_md5') == synthesis_md5:
-            return False, synthesis_md5  # No update needed
+            # MD5 identical — HEAD gave a false positive (or wasn't available).
+            # Update stored Last-Modified so next check skips via HEAD.
+            if remote_last_modified:
+                db.update_media_sync_info(media_id, synthesis_md5,
+                                          remote_last_modified)
+            return False, synthesis_md5
 
         return True, synthesis_md5
 
@@ -567,8 +629,22 @@ def sync_media(db: PackageDatabase, media_name: str,
         if md5_result.success:
             shutil.copy2(md5sum_path, cache_media_info / "MD5SUM")
 
+        # Retrieve Last-Modified from the server we just synced from
+        sync_synthesis_url = (
+            build_synthesis_url_v8(server, media) if server
+            else build_synthesis_url(media_url)
+        )
+        last_modified = head_synthesis(sync_synthesis_url, server)
+
         # Update media sync info (thread-safe)
-        db.update_media_sync_info(media_id, result.md5)
+        db.update_media_sync_info(media_id, result.md5, last_modified)
+
+        # Feed adaptive scheduling model with this content change
+        try:
+            from ..daemon.adaptive import record_content_change
+            record_content_change(db, media_id)
+        except Exception:
+            pass  # Adaptive scheduling is optional
 
         # Sync AppStream metadata
         appstream_synced = False
