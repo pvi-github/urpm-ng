@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from .daemon import UrpmDaemon
 
 from ..core.database import PackageDatabase
+from .wakeup import WakeupDetector, has_default_route
+from .adaptive import get_adaptive_interval, record_content_change
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +108,9 @@ class Scheduler:
         self._next_files_xml_check: Optional[float] = None
         self._next_cleanup: Optional[float] = None
 
+        # Wake-up detection (created in scheduler thread)
+        self._wakeup_pending = False
+
         # Pre-download settings
         self.predownload_enabled = True
         self.max_predownload_size = 500 * 1024 * 1024  # 500 MB default
@@ -141,6 +146,9 @@ class Scheduler:
         # Initial delay to let the daemon fully initialize
         time.sleep(10)
 
+        # Wake-up detector (must be created in this thread for accurate timing)
+        wakeup_detector = WakeupDetector()
+
         # Reconcile cache on startup (handles files deleted while daemon was stopped)
         try:
             from ..core.cache import CacheManager
@@ -166,6 +174,22 @@ class Scheduler:
         try:
             while self._running:
                 try:
+                    # Detect wake-up from suspend/hibernate
+                    if wakeup_detector.check():
+                        logger.info("Wake-up from suspend detected")
+                        if has_default_route():
+                            logger.info("Network available, running immediate metadata sync")
+                            self._run_metadata_check()
+                        else:
+                            logger.info("No network after wake-up, deferring sync")
+                            self._wakeup_pending = True
+
+                    # Handle deferred wake-up sync (waiting for network)
+                    if self._wakeup_pending and has_default_route():
+                        logger.info("Network restored after wake-up, running deferred sync")
+                        self._wakeup_pending = False
+                        self._run_metadata_check()
+
                     self._check_tasks()
                 except Exception as e:
                     logger.error(f"Scheduler error: {e}")
@@ -186,10 +210,14 @@ class Scheduler:
         """Check if any scheduled tasks should run."""
         now = time.time()
 
-        # Check metadata refresh
+        # Check metadata refresh (adaptive per-media interval)
         if self._should_run_task('metadata', now):
             self._run_metadata_check()
-            self._schedule_next('metadata', now, self.metadata_interval)
+            # Schedule next check using the minimum adaptive interval
+            # among all enabled media. This ensures we check at least as
+            # often as the most imminent media needs.
+            next_interval = self._get_min_adaptive_interval()
+            self._schedule_next('metadata', now, next_interval)
 
         # Check pre-download
         if self.predownload_enabled and self._should_run_task('predownload', now):
@@ -276,6 +304,37 @@ class Scheduler:
         next_time = now + actual_interval
         setattr(self, f'_next_{task_name}_check', next_time)
         logger.debug(f"Task {task_name}: next run in {actual_interval}s ({ticks} ticks)")
+
+    def _get_min_adaptive_interval(self) -> float:
+        """Get the minimum adaptive interval among all enabled media.
+
+        Returns the shortest polling interval needed by any media,
+        so the global metadata check fires often enough for the most
+        imminent media.  Falls back to metadata_interval if no media
+        exist or adaptive state is unavailable.
+        """
+        if not self.db:
+            return self.metadata_interval
+
+        try:
+            media_list = self.db.list_media()
+            if not media_list:
+                return self.metadata_interval
+
+            now = time.time()
+            min_interval = self.metadata_interval
+
+            for media in media_list:
+                if not media.get('enabled'):
+                    continue
+                interval = get_adaptive_interval(self.db, media['id'], now)
+                if interval < min_interval:
+                    min_interval = interval
+
+            return max(min_interval, self.tick_interval)
+        except Exception as e:
+            logger.warning("Failed to compute adaptive interval: %s", e)
+            return self.metadata_interval
 
     def _run_metadata_check(self):
         """Check if metadata needs refreshing using HTTP HEAD.
@@ -364,6 +423,8 @@ class Scheduler:
                 logger.info(f"Media {name}: synthesis changed, refreshing")
                 try:
                     self._refresh_media(name)
+                    # Record content change for adaptive scheduling
+                    record_content_change(self.db, media['id'])
                 except Exception as e:
                     logger.error(f"Failed to refresh {name}: {e}")
             else:
@@ -563,6 +624,22 @@ class Scheduler:
             errors = [r for r in results if not r.success]
             logger.info(f"Pre-download complete: {downloaded} downloaded, "
                        f"{cached} cached, {len(errors)} errors")
+
+            # Verify signatures on pre-downloaded RPMs.
+            # Corrupt files must be purged NOW so the user doesn't find them
+            # at upgrade time.
+            successful_paths = [r.path for r in results if r.success and r.path]
+            if successful_paths:
+                from ..core.resilient_install import pre_verify_signatures, purge_failed_from_cache
+                valid, sig_failed = pre_verify_signatures(successful_paths)
+                if sig_failed:
+                    logger.warning(
+                        "%d pre-downloaded RPMs failed signature check, purging",
+                        len(sig_failed),
+                    )
+                    purge_failed_from_cache([p for p, _ in sig_failed], self.db)
+                    for path, err in sig_failed:
+                        logger.warning("  %s: %s", path.name, err)
 
             # Reset the network sample so the next idle check measures external
             # traffic only — not the traffic generated by this download batch.
@@ -901,6 +978,20 @@ class Scheduler:
             total_cached += cached
             total_errors += len(errors)
 
+            # Verify signatures on replicated RPMs
+            successful_paths = [r.path for r in results if r.success and r.path]
+            if successful_paths:
+                from ..core.resilient_install import pre_verify_signatures, purge_failed_from_cache
+                valid, sig_failed = pre_verify_signatures(successful_paths)
+                if sig_failed:
+                    logger.warning(
+                        "%d replicated RPMs failed signature check, purging",
+                        len(sig_failed),
+                    )
+                    purge_failed_from_cache([p for p, _ in sig_failed], self.db)
+                    for path, err in sig_failed:
+                        logger.warning("  %s: %s", path.name, err)
+
             # Check if we should continue (system still idle?)
             if not self._is_system_idle():
                 logger.info(f"Media {media_name}: pausing replication (system busy)")
@@ -1075,8 +1166,8 @@ class Scheduler:
             results = sync_all_files_xml(self.db, progress_callback, force=False)
 
             # Log summary
-            synced = sum(1 for _, r in results if r.success and r.files_count > 0)
-            skipped = sum(1 for _, r in results if r.success and r.files_count == 0)
+            synced = sum(1 for _, r in results if r.success and r.file_count > 0)
+            skipped = sum(1 for _, r in results if r.success and r.file_count == 0)
             errors = sum(1 for _, r in results if not r.success)
 
             if synced > 0 or errors > 0:
