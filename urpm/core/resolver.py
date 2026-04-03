@@ -939,11 +939,20 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     continue
 
                 for obs_id in obs_ids:
+                    # Extract the package name from the obsolete dependency.
+                    # pool.dep2str gives e.g. "tex4ht <= 1:1.0.2008_02_28_2058"
+                    obs_dep_name = self.pool.dep2str(obs_id).split()[0]
                     for provider in self.pool.whatprovides(obs_id):
                         if provider.repo != self.pool.installed:
                             continue
                         # Self-obsoletes are normal upgrades, not replacements
                         if s.name == provider.name:
+                            continue
+                        # Only match if the provider's NAME matches the obsolete
+                        # target.  A package providing "tex4ht" as a virtual
+                        # provide (e.g. texlive provides tex4ht) should not be
+                        # treated as the actual tex4ht package being obsoleted.
+                        if provider.name != obs_dep_name:
                             continue
                         # Scope filter for selective upgrades
                         if only_names is not None and provider.name.lower() not in only_names:
