@@ -1478,7 +1478,7 @@ queue._child_process_standalone()
 
             _log_background(f"Transaction failed: {problems}")
             errors = [str(p) for p in problems]
-            return False, current[0], errors, new_rpmnew_files
+            return False, packages_done[0], errors, new_rpmnew_files
 
         _log_background(f"Transaction completed: {total} packages")
 
@@ -1645,6 +1645,6 @@ queue._child_process_standalone()
 
         if problems:
             errors = [str(p) for p in problems]
-            return False, current[0], errors
+            return False, completed[0], errors
 
         return True, total, []
