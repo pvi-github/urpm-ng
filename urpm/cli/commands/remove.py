@@ -262,6 +262,11 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             For ERASE phase:  [████░░░░░░] 3/10 firefox (30%)
             For SCRIPT phase: [██████████] 10/10 Running: shared-mime-info
             """
+            # Skip VERIFY/PREPARE — too fast to bother displaying
+            if progress.phase in (TransactionPhase.VERIFY,
+                                  TransactionPhase.PREPARE):
+                return
+
             done = progress.packages_done
             total = progress.packages_total
             name = progress.package_name

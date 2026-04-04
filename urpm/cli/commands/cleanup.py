@@ -283,6 +283,8 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
         # Progress callback
         def queue_progress(tp: TransactionProgress):
+            if tp.phase in (TransactionPhase.VERIFY, TransactionPhase.PREPARE):
+                return
             if tp.phase == TransactionPhase.SCRIPT:
                 print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] Running: {tp.script_name}", end='', flush=True)
             elif last_erase_shown[0] != tp.package_name:
@@ -651,6 +653,8 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
 
         # Progress callback
         def queue_progress(tp: TransactionProgress):
+            if tp.phase in (TransactionPhase.VERIFY, TransactionPhase.PREPARE):
+                return
             if tp.phase == TransactionPhase.SCRIPT:
                 print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] Running: {tp.script_name}", end='', flush=True)
             elif last_erase_shown[0] != tp.package_name:
