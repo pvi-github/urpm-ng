@@ -937,16 +937,31 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Check if any package provides should-restart:system — force full sync
     if not full_sync:
         from ...core.needs_restart import check_needs_restart_from_provides
-        restart_info = {}
+        import solv
+        pkg_provides: dict[str, list[str]] = {}
         for a in result.actions:
-            pkg_info = db.get_package(a.name)
-            if pkg_info and pkg_info.get('provides'):
-                restart_info[a.name] = pkg_info['provides']
-        if restart_info:
-            needs_restart = check_needs_restart_from_provides(restart_info)
-            if 'system' in needs_restart:
+            if a.action.value in ('install', 'upgrade'):
+                sel = resolver.pool.select(
+                    a.name, solv.Selection.SELECTION_NAME,
+                )
+                for s in sel.solvables():
+                    provides = [
+                        str(d) for d in
+                        s.lookup_deparray(solv.SOLVABLE_PROVIDES)
+                    ]
+                    if provides:
+                        pkg_provides[a.name] = provides
+                        break
+        if pkg_provides:
+            restart_info = check_needs_restart_from_provides(pkg_provides)
+            if 'system' in restart_info:
                 full_sync = True
-                print(colors.warning(_("Reboot required packages detected — using full sync")))
+                pkgs = ', '.join(restart_info['system'])
+                print(colors.warning(
+                    _("System restart required ({packages}) — forcing full sync.").format(
+                        packages=pkgs,
+                    )
+                ))
 
     print(colors.info("\n" + ngettext(
         "Installing {count} package...",
