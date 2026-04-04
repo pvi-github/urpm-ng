@@ -407,16 +407,30 @@ class TransactionHelper:
         # retry from alternate mirrors, exclusion of bad packages)
         self._status(f"Installing {len(rpm_paths)} package(s)...")
 
-        def install_progress(op_id, name, current, total):
-            self._send({
+        def install_progress(tp):
+            data = {
                 "type": "install_progress",
-                "name": name,
-                "current": current,
-                "total": total
-            })
+                "name": tp.package_name,
+                "current": tp.packages_done,
+                "total": tp.packages_total,
+                "phase": tp.phase.value,
+            }
+            if tp.script_name:
+                data["script"] = tp.script_name
+            self._send(data)
+
+        # Check if any package provides should-restart:system — force full sync
+        from urpm.core.needs_restart import check_needs_restart_from_provides
+        restart_info = {}
+        for a in resolution.actions:
+            if a.action.name in ('INSTALL', 'UPGRADE'):
+                pkg_info = self.db.get_package(a.name)
+                if pkg_info and pkg_info.get('provides'):
+                    restart_info[a.name] = pkg_info['provides']
+        needs_restart = check_needs_restart_from_provides(restart_info)
+        full_sync = 'system' in needs_restart
 
         options = InstallOptions()
-        options.sync = True  # Wait for full rpmdb sync before returning
         result = self.ops.resilient_install(
             rpm_paths,
             download_items=download_items,
@@ -425,6 +439,7 @@ class TransactionHelper:
             progress_callback=install_progress,
             erase_names=erase_names,
             mode="upgrade" if operation_id == "upgrade" else "install",
+            full_sync=full_sync,
         )
 
         if result.success:
@@ -449,6 +464,10 @@ class TransactionHelper:
                 "count": result.installed_count,
                 "readme_messages": readme_messages,
             }
+            # Report restart requirements to the GUI
+            if needs_restart:
+                from urpm.core.needs_restart import format_restart_messages
+                done_msg["restart_messages"] = format_restart_messages(needs_restart)
             # Report excluded packages so the GUI can inform the user
             if result.excluded_packages:
                 done_msg["excluded_packages"] = [
@@ -471,19 +490,20 @@ class TransactionHelper:
 
         self._status(f"Removing {len(erase_names)} package(s)...")
 
-        def progress_callback(op_id, name, current, total):
+        def progress_callback(tp):
             self._send({
                 "type": "erase_progress",
-                "name": name,
-                "current": current,
-                "total": total
+                "name": tp.package_name,
+                "current": tp.packages_done,
+                "total": tp.packages_total,
+                "phase": tp.phase.value,
             })
 
         options = InstallOptions()
-        options.sync = True  # Wait for full rpmdb sync before returning
         result = self.ops.execute_erase(
             erase_names,
             options=options,
+            full_sync=False,
             progress_callback=progress_callback
         )
 
