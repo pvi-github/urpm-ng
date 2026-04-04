@@ -703,6 +703,16 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     if nvr_match and nvr_match.group(1).lower() != n.lower():
                         explicit_names.add(nvr_match.group(1).lower())
 
+        # Resolve provides/aliases to real package names so that packages
+        # installed via a virtual provide (e.g. "nvim" → "neovim") are
+        # correctly marked as explicitly requested, not as dependencies.
+        for n in list(explicit_names):
+            sel = self.pool.select(n, solv.Selection.SELECTION_PROVIDES)
+            if not sel.isempty():
+                for s in sel.solvables():
+                    if s.repo and s.repo != self.pool.installed:
+                        explicit_names.add(s.name.lower())
+
         actions = []
         install_size = 0
         remove_size = 0
