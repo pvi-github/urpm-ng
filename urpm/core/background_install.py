@@ -146,7 +146,7 @@ class InstallLock:
     def _get_holder_pid(self) -> Optional[int]:
         """Get PID of current lock holder."""
         try:
-            with open(LOCK_FILE, 'r') as f:
+            with open(self.lock_file, 'r') as f:
                 return int(f.read().strip())
         except:
             return None
