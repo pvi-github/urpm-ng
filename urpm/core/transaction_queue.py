@@ -870,10 +870,21 @@ queue._child_process_standalone()
         if full_sync or not smart_released:
             # Wait for child process to fully exit
             try:
-                os.waitpid(child_pid, 0)
+                _, status = os.waitpid(child_pid, 0)
+                if os.WIFSIGNALED(status) or (
+                        os.WIFEXITED(status) and os.WEXITSTATUS(status) != 0):
+                    if not overall_error:
+                        overall_error = "Child process failed"
             except ChildProcessError:
                 pass
         # In smart sync, don't waitpid — child runs triggers in background
+
+        # Detect incomplete transaction (child crashed before sending results)
+        if current_op_result is not None and current_op_result not in results:
+            current_op_result.success = False
+            if not current_op_result.errors:
+                current_op_result.errors = ["Transaction interrupted"]
+            results.append(current_op_result)
 
         all_success = all(r.success for r in results) and not overall_error
         return QueueResult(
