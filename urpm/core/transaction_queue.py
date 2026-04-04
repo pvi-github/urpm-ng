@@ -114,9 +114,11 @@ def _update_async_progress(state: dict, **kwargs):
 def _write_progress_file(state: dict):
     """Write progress state to /run/urpm/transaction.json atomically."""
     try:
-        TRANSACTION_PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
+        TRANSACTION_PROGRESS_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = TRANSACTION_PROGRESS_FILE.with_suffix('.tmp')
-        tmp.write_text(json.dumps(state))
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.write(fd, json.dumps(state).encode())
+        os.close(fd)
         tmp.rename(TRANSACTION_PROGRESS_FILE)
     except OSError:
         pass  # Non-critical — progress display is best-effort
