@@ -423,12 +423,14 @@ class UrpmDBusService:
             # Install
             self._emit_progress(op_id, "installing", "", 0, len(rpm_paths))
 
-            def install_progress(op, name, current, total):
-                self._emit_progress(op_id, "installing", name, current, total)
+            def install_progress(tp):
+                self._emit_progress(op_id, "installing", tp.package_name,
+                                    tp.packages_done, tp.packages_total)
 
-            options = InstallOptions(sync=True)
+            options = InstallOptions()
             result = self._ops.execute_install(
                 rpm_paths, options=options,
+                full_sync=True,
                 progress_callback=install_progress,
                 auth_context=context
             )
@@ -520,12 +522,14 @@ class UrpmDBusService:
             # Execute removal
             self._emit_progress(op_id, "removing", "", 0, len(remove_names))
 
-            def erase_progress(op, name, current, total):
-                self._emit_progress(op_id, "removing", name, current, total)
+            def erase_progress(tp):
+                self._emit_progress(op_id, "removing", tp.package_name,
+                                    tp.packages_done, tp.packages_total)
 
-            options = InstallOptions(sync=True)
+            options = InstallOptions()
             result = self._ops.execute_erase(
                 remove_names, options=options,
+                full_sync=True,
                 progress_callback=erase_progress,
                 auth_context=context
             )
@@ -619,13 +623,15 @@ class UrpmDBusService:
             total = len(rpm_paths) + len(remove_names)
             self._emit_progress(op_id, "upgrading", "", 0, total)
 
-            def upgrade_progress(op, name, current, total_q):
-                self._emit_progress(op_id, "upgrading", name, current, total_q)
+            def upgrade_progress(tp):
+                self._emit_progress(op_id, "upgrading", tp.package_name,
+                                    tp.packages_done, tp.packages_total)
 
-            options = InstallOptions(sync=True)
+            options = InstallOptions()
             self._ops.execute_upgrade(
                 rpm_paths, erase_names=remove_names,
                 options=options,
+                full_sync=True,
                 progress_callback=upgrade_progress,
                 auth_context=context
             )
