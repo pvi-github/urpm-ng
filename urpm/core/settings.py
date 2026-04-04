@@ -73,11 +73,31 @@ class DownloadSettings:
 
 
 @dataclass
+class TransactionSettings:
+    """Transaction execution behaviour.
+
+    All commands use **smart sync** by default: the parent waits for package
+    extraction to complete, then returns immediately while post-install
+    triggers (file triggers, ``%posttrans``) continue in the background.
+
+    Passing ``--sync`` on the CLI forces **full sync**: the parent waits for
+    everything including triggers, displaying human-readable descriptions.
+    Full sync is also forced automatically when packages providing
+    ``should-restart:system`` are detected (kernel, glibc, systemd, …).
+
+    No per-command mode settings are needed — the ``--sync`` flag and
+    automatic should-restart detection handle all cases.
+    """
+    pass
+
+
+@dataclass
 class Settings:
     """Top-level urpm-ng settings, assembled from config files."""
 
     resolver: ResolverSettings = field(default_factory=ResolverSettings)
     download: DownloadSettings = field(default_factory=DownloadSettings)
+    transaction: TransactionSettings = field(default_factory=TransactionSettings)
 
     # Path that was actually loaded (for diagnostics / ``urpm config show``)
     _config_dir: Path = field(default=SYSTEM_CONFIG_DIR, repr=False)
@@ -212,6 +232,9 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
             except ValueError:
                 pass
 
+    # [transaction] — reserved for future settings; mode fields removed
+    # (smart sync is now the default, --sync forces full sync)
+
 
 # ─── Public API ─────────────────────────────────────────────────────────
 
@@ -280,5 +303,9 @@ def format_settings(settings: Settings = None) -> str:
     lines.append(f"parallel = {settings.download.parallel}")
     lines.append(f"timeout = {settings.download.timeout}")
     lines.append(f"min_servers = {settings.download.min_servers}")
+    lines.append("")
+
+    lines.append("[transaction]")
+    lines.append("# Smart sync is the default; use --sync for full sync")
 
     return "\n".join(lines)

@@ -25,7 +25,7 @@ from .resilient_install import (
     ResilientInstallResult, pre_verify_signatures, purge_failed_from_cache,
     find_dependents, retry_failed_downloads, _extract_name_from_path,
 )
-from .transaction_queue import TransactionQueue
+from .transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,6 @@ class InstallOptions:
     only_peers: bool = False
     root: str = "/"
     use_userns: bool = False
-    sync: bool = False
     config_policy: str = "keep"  # keep, replace, or ask
 
 
@@ -275,9 +274,10 @@ class PackageOperations:
         self,
         rpm_paths: List[str],
         options: InstallOptions = None,
-        progress_callback: Callable[[str, str, int, int], None] = None,
+        progress_callback: Callable[['TransactionProgress'], None] = None,
         auth_context=None,
-        actions: list = None
+        actions: list = None,
+        full_sync: bool = False,
     ) -> Any:
         """Execute RPM installation via TransactionQueue.
 
@@ -288,6 +288,9 @@ class PackageOperations:
             auth_context: Optional AuthContext for permission check + audit
             actions: PackageAction list from resolver (used for README.urpmi
                      display after transaction completes in the child process)
+            full_sync: If True, wait for the entire transaction including
+                triggers. If False (default), wait for extraction only and
+                run triggers in the background.
 
         Returns:
             TransactionQueue result
@@ -318,7 +321,7 @@ class PackageOperations:
 
         result = queue.execute(
             progress_callback=progress_callback,
-            sync=options.sync
+            full_sync=full_sync,
         )
         self._audit_complete(auth_context, "install", pkg_names, success=True)
         return result
@@ -329,13 +332,14 @@ class PackageOperations:
         download_items: list,
         options: "InstallOptions" = None,
         actions: list = None,
-        progress_callback: Callable[[str, str, int, int], None] = None,
+        progress_callback: Callable[['TransactionProgress'], None] = None,
         auth_context=None,
         root: str = "/",
         urpm_root: Optional[str] = None,
         erase_names: List[str] = None,
         orphan_names: List[str] = None,
         mode: str = "install",
+        full_sync: bool = False,
     ) -> "ResilientInstallResult":
         """Install or upgrade packages with signature pre-check, retry, and exclusion.
 
@@ -362,6 +366,9 @@ class PackageOperations:
             orphan_names: Orphaned deps to remove in background (upgrade mode).
             mode: ``"install"`` (default) or ``"upgrade"`` — selects which
                 execute method to call internally.
+            full_sync: If True, wait for the entire transaction including
+                triggers. If False (default), wait for extraction only and
+                run triggers in the background.
 
         Returns:
             :class:`ResilientInstallResult` with install outcome details.
@@ -445,6 +452,7 @@ class PackageOperations:
                 options=options,
                 progress_callback=progress_callback,
                 auth_context=auth_context,
+                full_sync=full_sync,
             )
         else:
             queue_result = self.execute_install(
@@ -453,6 +461,7 @@ class PackageOperations:
                 progress_callback=progress_callback,
                 auth_context=auth_context,
                 actions=actions,
+                full_sync=full_sync,
             )
 
         # Determine installed count from queue result
@@ -483,19 +492,23 @@ class PackageOperations:
         self,
         package_names: List[str],
         options: InstallOptions = None,
-        progress_callback: Callable[[str, str, int, int], None] = None,
-        auth_context=None
+        progress_callback: Callable[['TransactionProgress'], None] = None,
+        auth_context=None,
+        full_sync: bool = False,
     ) -> Any:
         """Execute RPM removal via TransactionQueue.
 
         Args:
-            package_names: Package names to remove
-            options: Install options
-            progress_callback: Called with (op_id, name, current, total)
-            auth_context: Optional AuthContext for permission check + audit
+            package_names: Package names to remove.
+            options: Install options.
+            progress_callback: Called with (op_id, name, current, total).
+            auth_context: Optional AuthContext for permission check + audit.
+            full_sync: If True, wait for the entire transaction including
+                triggers. If False (default), wait for extraction only and
+                run triggers in the background.
 
         Returns:
-            TransactionQueue result
+            TransactionQueue result.
         """
         if _HAS_AUTH:
             self._check_auth(auth_context, Permission.REMOVE, "remove")
@@ -518,7 +531,7 @@ class PackageOperations:
 
         result = queue.execute(
             progress_callback=progress_callback,
-            sync=options.sync
+            full_sync=full_sync,
         )
         self._audit_complete(auth_context, "remove", package_names, success=True)
         return result
@@ -529,8 +542,9 @@ class PackageOperations:
         erase_names: List[str] = None,
         orphan_names: List[str] = None,
         options: InstallOptions = None,
-        progress_callback: Callable[[str, str, int, int], None] = None,
-        auth_context=None
+        progress_callback: Callable[['TransactionProgress'], None] = None,
+        auth_context=None,
+        full_sync: bool = False,
     ) -> Any:
         """Execute upgrade via TransactionQueue.
 
@@ -544,6 +558,9 @@ class PackageOperations:
             options: Install options
             progress_callback: Called with (op_id, name, current, total)
             auth_context: Optional AuthContext for permission check + audit
+            full_sync: If True, wait for the entire transaction including
+                triggers. If False (default), wait for extraction only and
+                run triggers in the background.
 
         Returns:
             TransactionQueue result, or None if nothing to do
@@ -586,7 +603,7 @@ class PackageOperations:
 
         result = queue.execute(
             progress_callback=progress_callback,
-            sync=options.sync
+            full_sync=full_sync,
         )
         self._audit_complete(auth_context, "upgrade", pkg_names, success=True)
         return result

@@ -1,26 +1,40 @@
 """
-Transaction Queue for RPM operations
+Transaction Queue for RPM operations.
 
-Provides a generic queue system for executing multiple RPM operations
-(install, erase) sequentially in a single forked child process.
+Provides a queue system for executing RPM operations (install, erase)
+sequentially in a forked child process, with two execution modes:
 
-This solves the race condition where the parent would start a new operation
-while the previous one was still doing rpmdb sync in the background.
+**Sync mode** (default for ``urpm install``):
+    Parent waits for full ts.run() completion via pipe.  Progress is
+    displayed in real-time.  README shown in pager after completion.
 
-Architecture:
+**Async mode** (default for ``urpm upgrade``, ``urpm remove``):
+    Parent returns immediately after fork.  Child writes progress to
+    ``/run/urpm/transaction.json``.  User queries with ``urpm progress``.
+    README stored in DB, read later with ``urpm readme``.
+
+Architecture (sync)::
+
     urpm (parent)                    child process
-        |                                |
         |-- fork() -------------------->|
-        |                                |
-        | reads progress via pipe        | acquire lock ONCE
-        | for ALL operations             | for op in queue:
-        |                                |   execute op
-        |   "queue_done" received        |   send progress
-        |   exit(0)                      | release lock
-        |                                | sync rpmdb (once, at end)
-        |                                |
-        |<-------------------------------|
-                                         exit(0)
+        | reads progress via pipe        | acquire lock
+        |   progress / op_done           | for op in queue:
+        |   queue_done                   |   ts.run() with callbacks
+        |<-------------------------------|   send progress/results
+        | waitpid()                      | store README in DB
+                                         | exit(0)
+
+Architecture (async)::
+
+    urpm (parent)                    child process
+        |-- fork() -------------------->|
+        | close pipe, return             | acquire lock
+        | (prompt returns)               | redirect stdout/stderr
+                                         | for op in queue:
+                                         |   ts.run()
+                                         |   write transaction.json
+                                         | notify-send
+                                         | exit(0)
 """
 
 import json
@@ -44,6 +58,100 @@ DEBUG_USERNS = False
 
 logger = logging.getLogger(__name__)
 
+# Async progress file path
+TRANSACTION_PROGRESS_DIR = Path("/run/urpm")
+TRANSACTION_PROGRESS_FILE = TRANSACTION_PROGRESS_DIR / "transaction.json"
+
+
+def _clean_script_key(key) -> str:
+    """Extract a clean package name from an RPM callback key.
+
+    RPM passes the package name for repo packages (e.g. ``shared-mime-info``)
+    but the full file path for local RPMs (e.g.
+    ``/tmp/urpm-ng-core-0.6.19-1.mga10.x86_64.rpm``).  Strip the directory
+    and ``.rpm`` suffix to get a usable display name.
+    """
+    name = key if isinstance(key, str) else str(key or '')
+    if '/' in name:
+        name = name.rsplit('/', 1)[-1]
+    if name.endswith('.rpm'):
+        name = name[:-4]
+    return name
+
+
+def _init_async_progress(meta: dict = None) -> dict:
+    """Create the initial async progress file.
+
+    Returns a mutable state dict used by _update_async_progress().
+    """
+    import time as _time
+    meta = meta or {}
+    state = {
+        'transaction_id': meta.get('transaction_id'),
+        'type': meta.get('type', 'unknown'),
+        'total': meta.get('total', 0),
+        'current': 0,
+        'current_package': '',
+        'phase': 'verify',
+        'script': '',
+        'bytes_done': 0,
+        'bytes_total': 0,
+        'started_at': int(_time.time()),
+        'pid': os.getpid(),
+        'has_readmes': meta.get('has_readmes', False),
+        'error': None,
+    }
+    _write_progress_file(state)
+    return state
+
+
+def _update_async_progress(state: dict, **kwargs):
+    """Update the async progress file atomically."""
+    state.update(kwargs)
+    _write_progress_file(state)
+
+
+def _write_progress_file(state: dict):
+    """Write progress state to /run/urpm/transaction.json atomically."""
+    try:
+        TRANSACTION_PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = TRANSACTION_PROGRESS_FILE.with_suffix('.tmp')
+        tmp.write_text(json.dumps(state))
+        tmp.rename(TRANSACTION_PROGRESS_FILE)
+    except OSError:
+        pass  # Non-critical — progress display is best-effort
+
+
+def _cleanup_async_progress():
+    """Remove the async progress file after transaction completes."""
+    try:
+        TRANSACTION_PROGRESS_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _send_desktop_notification(total: int, meta: dict = None):
+    """Send a desktop notification via D-Bus (best-effort, no dependency).
+
+    Uses the freedesktop.org Notifications spec via subprocess to avoid
+    any hard dependency on dbus-python or gi.
+    """
+    import shutil
+    if not shutil.which('notify-send'):
+        return
+    try:
+        import subprocess
+        op_type = (meta or {}).get('type', 'transaction')
+        summary = f"urpm: {op_type} terminé"
+        body = f"{total} paquet(s) traité(s)."
+        subprocess.Popen(
+            ['notify-send', '-a', 'urpm', '-i', 'system-software-install',
+             summary, body],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
 
 def _list_rpmnew_files(root: str = "/") -> set:
     """List all .rpmnew files in /etc under the given root.
@@ -55,6 +163,65 @@ def _list_rpmnew_files(root: str = "/") -> set:
     if not etc_path.exists():
         return set()
     return {str(p) for p in etc_path.glob("**/*.rpmnew")}
+
+
+class TransactionPhase(str, Enum):
+    """Phase of an RPM transaction lifecycle.
+
+    The lifecycle follows this order::
+
+        VERIFY → PREPARE → INSTALL → SCRIPT → (done)
+                            ERASE  → SCRIPT → (done)
+
+    VERIFY:  Header signature verification (OPEN/CLOSE fire but are NOT real installs).
+    PREPARE: Transaction element ordering (TRANS_START/PROGRESS/STOP).
+    INSTALL: Package extraction — cpio payload written to disk.
+    SCRIPT:  Pre/post-install scriptlets and file triggers (often the slowest phase).
+    ERASE:   Package removal.
+    """
+    VERIFY = 'verify'
+    PREPARE = 'prepare'
+    INSTALL = 'install'
+    SCRIPT = 'script'
+    ERASE = 'erase'
+
+
+@dataclass(frozen=True)
+class TransactionProgress:
+    """Structured progress update from an RPM transaction.
+
+    Replaces the old ``(op_id, name, current, total)`` callback signature
+    with a single object that carries all relevant information.
+
+    Consumers should check ``phase`` to decide which fields are meaningful:
+
+    - **VERIFY/PREPARE**: ``packages_done`` / ``packages_total`` show
+      verification or preparation progress.
+    - **INSTALL**: ``packages_done`` / ``packages_total`` for package-level,
+      ``bytes_done`` / ``bytes_total`` for cpio extraction within a package.
+    - **SCRIPT**: ``script_name`` identifies which package's scriptlet is
+      running.  ``packages_done`` stays at the last package count.
+    - **ERASE**: ``packages_done`` / ``packages_total`` for removal progress.
+    """
+    phase: TransactionPhase
+
+    # Package being processed (current extraction target or script owner)
+    package_name: str = ""
+
+    # Package-level counters
+    packages_done: int = 0      # How many packages completed so far
+    packages_total: int = 0     # Total packages in this transaction
+
+    # Byte-level progress (INSTALL phase: cpio extraction within one package)
+    bytes_done: int = 0
+    bytes_total: int = 0
+
+    # Script info (SCRIPT phase only)
+    script_name: str = ""       # Package whose scriptlet is running
+    script_type: int = 0        # RPM script tag (1023=%pre, 1024=%post, etc.)
+
+    # Operation context (set by the parent, not the RPM callback)
+    operation_id: str = ""
 
 
 class OperationType(Enum):
@@ -102,11 +269,16 @@ class QueueResult:
 
 @dataclass
 class QueueProgressMessage:
-    """Message sent from child to parent for queue execution."""
-    # msg_type values:
-    # 'op_start', 'progress', 'op_done', 'op_error' - operation lifecycle
-    # 'parent_can_exit' - parent can exit, remaining ops run in background
-    # 'queue_done', 'queue_error' - queue lifecycle
+    """Message sent from child to parent via pipe.
+
+    Message types (lifecycle):
+        op_start     — new operation beginning
+        progress     — per-package progress update
+        op_done      — operation completed (count, rpmnew, readmes)
+        op_error     — operation failed
+        queue_done   — all operations complete
+        queue_error  — fatal queue-level error
+    """
     msg_type: str
     operation_id: str = ""
     op_type: str = ""  # 'install' or 'erase'
@@ -116,8 +288,13 @@ class QueueProgressMessage:
     count: int = 0
     error: str = ""
     errors: List[str] = field(default_factory=list)
-    rpmnew_files: List[str] = field(default_factory=list)  # Config files saved as .rpmnew
-    readme_messages: list = field(default_factory=list)  # README.urpmi [{package, content}]
+    rpmnew_files: List[str] = field(default_factory=list)
+    readme_messages: list = field(default_factory=list)
+    # Enriched progress fields
+    phase: str = ""          # 'prepare', 'install', 'erase', 'script'
+    bytes_done: int = 0      # Bytes processed for current package
+    bytes_total: int = 0     # Total bytes for current package
+    script: str = ""         # Scriptlet phase (e.g. 'post-install')
 
     def to_json(self) -> str:
         return json.dumps({
@@ -132,6 +309,10 @@ class QueueProgressMessage:
             'errors': self.errors,
             'rpmnew_files': self.rpmnew_files,
             'readme_messages': self.readme_messages,
+            'phase': self.phase,
+            'bytes_done': self.bytes_done,
+            'bytes_total': self.bytes_total,
+            'script': self.script,
         })
 
     @classmethod
@@ -149,7 +330,36 @@ class QueueProgressMessage:
             errors=d.get('errors', []),
             rpmnew_files=d.get('rpmnew_files', []),
             readme_messages=d.get('readme_messages', []),
+            phase=d.get('phase', ''),
+            bytes_done=d.get('bytes_done', 0),
+            bytes_total=d.get('bytes_total', 0),
+            script=d.get('script', ''),
         )
+
+
+_PHASE_MAP = {
+    'verify': TransactionPhase.VERIFY,
+    'prepare': TransactionPhase.PREPARE,
+    'install': TransactionPhase.INSTALL,
+    'script': TransactionPhase.SCRIPT,
+    'script_done': TransactionPhase.SCRIPT,
+    'erase': TransactionPhase.ERASE,
+}
+
+
+def _msg_to_progress(msg: QueueProgressMessage) -> TransactionProgress:
+    """Convert an internal pipe message to a public TransactionProgress."""
+    phase = _PHASE_MAP.get(msg.phase, TransactionPhase.INSTALL)
+    return TransactionProgress(
+        phase=phase,
+        package_name=msg.name,
+        packages_done=msg.current,
+        packages_total=msg.total,
+        bytes_done=msg.bytes_done,
+        bytes_total=msg.bytes_total,
+        script_name=msg.script,
+        operation_id=msg.operation_id,
+    )
 
 
 class TransactionQueue:
@@ -275,19 +485,35 @@ class TransactionQueue:
 
     def execute(
         self,
-        progress_callback: Callable[[str, str, int, int], None] = None,
-        sync: bool = False
+        progress_callback: Callable[['TransactionProgress'], None] = None,
+        full_sync: bool = False,
+        transaction_meta: dict = None,
     ) -> QueueResult:
         """Execute all queued operations sequentially.
 
         Forks a child process that executes all operations with a single lock.
         Parent receives progress for all operations via pipe.
 
+        **Smart sync** (default, ``full_sync=False``):
+            Parent waits for package extraction to complete, then returns.
+            Post-install triggers (file triggers, ``%posttrans``) run in
+            the background — they only rebuild caches (MIME, icons, etc.)
+            and are not critical.  The child writes trigger progress to
+            ``/run/urpm/transaction.json`` for ``urpm progress``.
+
+        **Full sync** (``full_sync=True``, via ``--sync``):
+            Parent waits for everything including post-install triggers.
+            Required when packages need a reboot (``should-restart:system``).
+
         Args:
-            progress_callback: Called with (operation_id, name, current, total)
-            sync: If True, wait for all operations to complete including
-                  background scriptlets. Use for chroot installs where the
-                  filesystem will be modified immediately after.
+            progress_callback: Called with a single :class:`TransactionProgress`
+                object for each progress update.  Check ``progress.phase`` to
+                determine the current transaction phase (verify, prepare,
+                install, script, erase).
+            full_sync: If True, wait for all operations to complete including
+                  post-install triggers.  Default is smart sync.
+            transaction_meta: Dict with metadata for async progress file
+                  (type, total, has_readmes).
 
         Returns:
             QueueResult with results for each operation
@@ -307,7 +533,7 @@ class TransactionQueue:
         # For non-root chroot installs, use user namespaces
         if self.use_userns and os.geteuid() != 0:
             if self._userns_available():
-                return self._execute_with_userns(read_fd, write_fd, progress_callback, sync)
+                return self._execute_with_userns(read_fd, write_fd, progress_callback, full_sync)
             else:
                 os.close(read_fd)
                 os.close(write_fd)
@@ -320,11 +546,12 @@ class TransactionQueue:
         pid = os.fork()
 
         if pid > 0:
-            # Parent process
-            return self._parent_process(read_fd, write_fd, progress_callback, sync, pid)
+            # Parent process — smart sync or full sync
+            return self._parent_process(read_fd, write_fd, progress_callback,
+                                        full_sync, pid)
         else:
             # Child process - never returns
-            self._child_process(read_fd, write_fd, sync)
+            self._child_process(read_fd, write_fd, transaction_meta)
 
     def _execute_with_userns(
         self,
@@ -409,10 +636,7 @@ queue._child_process_standalone()
                 elif msg.msg_type == 'progress':
                     if progress_callback:
                         progress_callback(
-                            msg.operation_id or '',
-                            msg.name or '',
-                            msg.current or 0,
-                            msg.total or 0
+                            _msg_to_progress(msg)
                         )
                 elif msg.msg_type == 'op_done':
                     if current_op_result:
@@ -506,12 +730,12 @@ queue._child_process_standalone()
                     if DEBUG_USERNS:
                         print(f"[userns child] executing install...", file=sys.stderr)
                         sys.stderr.flush()
-                    success, count, errors, rpmnew_files = self._execute_install(op, pipe_state, release_parent_after=False)
+                    success, count, errors, rpmnew_files = self._execute_install(op, pipe_state)
                     if DEBUG_USERNS:
                         print(f"[userns child] install result: success={success} count={count} errors={errors} rpmnew={len(rpmnew_files)}", file=sys.stderr)
                         sys.stderr.flush()
                 else:
-                    success, count, errors = self._execute_erase(op, pipe_state, release_parent_after=False)
+                    success, count, errors = self._execute_erase(op, pipe_state)
                     rpmnew_files = []
 
                 if success:
@@ -549,17 +773,33 @@ queue._child_process_standalone()
         self,
         read_fd: int,
         write_fd: int,
-        progress_callback: Callable[[str, str, int, int], None],
-        sync: bool,
+        progress_callback: Callable[['TransactionProgress'], None],
+        full_sync: bool,
         child_pid: int
     ) -> QueueResult:
-        """Parent: read progress messages and build result."""
+        """Parent: read progress messages from child and build result.
+
+        Two modes:
+
+        **Smart sync** (``full_sync=False``, the default):
+            Parent reads progress until all packages are extracted
+            (``phase=script`` with ``packages_done == packages_total``).
+            At that point, closes the pipe and returns — the child
+            continues running post-install triggers in the background.
+            The child switches to writing ``/run/urpm/transaction.json``
+            when the pipe breaks.
+
+        **Full sync** (``full_sync=True``, via ``--sync``):
+            Parent reads the full pipe until ``queue_done``, including
+            all script phases.  Waits for child to exit.
+        """
         os.close(write_fd)
         read_file = os.fdopen(read_fd, 'r')
 
         results: List[OperationResult] = []
         current_op_result: Optional[OperationResult] = None
         overall_error = ""
+        smart_released = False
 
         try:
             for line in read_file:
@@ -573,7 +813,6 @@ queue._child_process_standalone()
                     continue
 
                 if msg.msg_type == 'op_start':
-                    # New operation starting
                     current_op_result = OperationResult(
                         operation_id=msg.operation_id,
                         op_type=OperationType(msg.op_type),
@@ -583,14 +822,26 @@ queue._child_process_standalone()
                 elif msg.msg_type == 'progress':
                     if progress_callback:
                         progress_callback(
-                            msg.operation_id,
-                            msg.name,
-                            msg.current,
-                            msg.total
+                            _msg_to_progress(msg)
                         )
 
+                    # ── Smart sync release point ──
+                    # When all packages are extracted and we enter script
+                    # phase, the parent can release.  The child continues
+                    # running triggers in the background.
+                    if (not full_sync
+                            and not smart_released
+                            and msg.phase in ('script', 'script_done')
+                            and msg.total > 0
+                            and msg.current >= msg.total):
+                        smart_released = True
+                        # Build result from what we know
+                        if current_op_result:
+                            current_op_result.count = msg.total
+                            results.append(current_op_result)
+                        break
+
                 elif msg.msg_type == 'op_done':
-                    # Operation completed successfully
                     if current_op_result:
                         current_op_result.count = msg.count
                         current_op_result.rpmnew_files = msg.rpmnew_files or []
@@ -599,44 +850,30 @@ queue._child_process_standalone()
                     current_op_result = None
 
                 elif msg.msg_type == 'op_error':
-                    # Operation failed - stop immediately
                     if current_op_result:
                         current_op_result.success = False
                         current_op_result.errors = msg.errors or [msg.error]
                         results.append(current_op_result)
                     current_op_result = None
-                    # Stop on first error
                     break
 
-                elif msg.msg_type == 'parent_can_exit':
-                    # Parent can exit, child continues with background ops
-                    if not sync:
-                        break
-                    # In sync mode, keep waiting for queue_done
-
                 elif msg.msg_type == 'queue_done':
-                    # All operations complete
                     break
 
                 elif msg.msg_type == 'queue_error':
-                    # Fatal queue error
                     overall_error = msg.error
                     break
 
         finally:
             read_file.close()
 
-        # In sync mode, wait for child process and all its descendants
-        if sync:
-            # Orange color for waiting message
-            print("\033[33m  Waiting for scriptlets to complete...\033[0m", flush=True)
+        if full_sync or not smart_released:
+            # Wait for child process to fully exit
             try:
                 os.waitpid(child_pid, 0)
             except ChildProcessError:
                 pass
-            # Also wait for any grandchildren (scriptlets)
-            from .install import wait_rpm_children
-            wait_rpm_children()
+        # In smart sync, don't waitpid — child runs triggers in background
 
         all_success = all(r.success for r in results) and not overall_error
         return QueueResult(
@@ -645,111 +882,138 @@ queue._child_process_standalone()
             overall_error=overall_error
         )
 
-    def _child_process(self, read_fd: int, write_fd: int, sync: bool = False):
-        """Child: execute operations sequentially."""
+    def _child_process(self, read_fd: int, write_fd: int,
+                       transaction_meta: dict = None):
+        """Child: execute operations sequentially.
+
+        Starts by sending progress via pipe to the parent.  In smart
+        sync mode the parent closes the pipe once extraction is done —
+        the child catches BrokenPipeError in ``_send_progress`` and
+        gracefully switches to ``/run/urpm/transaction.json`` for the
+        remaining post-install triggers.
+        """
         import rpm
+        import signal as _signal
 
         os.close(read_fd)
-        write_file = os.fdopen(write_fd, 'w', buffering=1)  # Line buffered
+        write_file = os.fdopen(write_fd, 'w', buffering=1)
 
-        # Detach from parent's process group
+        # Detach from parent's process group so we survive parent exit
         os.setsid()
 
+        # Ignore SIGPIPE — we handle broken pipe in _send_progress
+        _signal.signal(_signal.SIGPIPE, _signal.SIG_IGN)
+
+        pipe_state = {'closed': False, 'file': write_file}
+
         # Acquire install lock ONCE for all operations
-        # Use root path for lock file when installing to chroot
         lock = InstallLock(root=self.root if self.root != "/" else None)
         try:
             lock.acquire(blocking=True)
         except Exception as e:
-            write_file.write(QueueProgressMessage(
-                msg_type='queue_error',
-                error=f"Failed to acquire lock: {e}"
-            ).to_json() + "\n")
-            write_file.close()
+            if not pipe_state['closed']:
+                write_file.write(QueueProgressMessage(
+                    msg_type='queue_error',
+                    error=f"Failed to acquire lock: {e}"
+                ).to_json() + "\n")
+                write_file.close()
             os._exit(1)
 
+        # Async progress file state — initialized lazily when pipe breaks
+        # (smart sync) or eagerly if transaction_meta is provided.
+        progress_file_state = None
+
+        # SIGTERM handler for clean shutdown (e.g. during system reboot)
+        import signal
+        def _sigterm_handler(signum, frame):
+            if progress_file_state:
+                _update_async_progress(progress_file_state,
+                                       error="Transaction interrupted (SIGTERM)")
+            _set_background_error("Transaction interrupted by signal")
+            lock.release()
+            os._exit(1)
+        signal.signal(signal.SIGTERM, _sigterm_handler)
+
+        def _pipe_write(msg_json: str):
+            """Write to pipe, catching BrokenPipeError (parent released)."""
+            if pipe_state['closed']:
+                return
+            try:
+                pipe_state['file'].write(msg_json + "\n")
+            except (BrokenPipeError, OSError):
+                pipe_state['closed'] = True
+
         try:
-            # Track pipe state in a mutable container so callbacks can modify it
-            pipe_state = {'closed': False, 'file': write_file}
-
-            # Check if there are background operations after foreground ones
-            has_background_after = any(op.background for op in self.operations)
-
             for i, op in enumerate(self.operations):
-                # Skip if this is a background op and we've already released parent
-                is_last_foreground = (
-                    has_background_after and
-                    not op.background and
-                    (i + 1 >= len(self.operations) or self.operations[i + 1].background)
-                )
-
-                # Signal operation start (only if parent still listening)
-                if not pipe_state['closed']:
-                    write_file.write(QueueProgressMessage(
-                        msg_type='op_start',
-                        operation_id=op.operation_id,
-                        op_type=op.op_type.value
-                    ).to_json() + "\n")
+                # Signal operation start
+                _pipe_write(QueueProgressMessage(
+                    msg_type='op_start',
+                    operation_id=op.operation_id,
+                    op_type=op.op_type.value
+                ).to_json())
 
                 if op.op_type == OperationType.INSTALL:
-                    is_last_install = (i + 1 >= len(self.operations) or
-                                       self.operations[i + 1].op_type != OperationType.INSTALL)
-                    # In non-sync mode (CLI), release the parent before rpmdb
-                    # sync so the CLI returns quickly while sync happens in
-                    # background.  In sync mode (GUI), keep the pipe open so
-                    # we can send "(updating rpmdb)" and op_done AFTER
-                    # ts.run() completes — the GUI needs to show progress
-                    # during the 30-60s rpmdb sync.
-                    release_early = (
-                        (is_last_foreground or is_last_install) and not sync
-                    )
                     success, count, errors, rpmnew_files = self._execute_install(
-                        op,
-                        pipe_state,
-                        release_parent_after=release_early
+                        op, pipe_state,
+                        async_progress=progress_file_state,
                     )
                 else:
-                    # For erase: release parent after if it's background OR if it's the last operation
-                    # BUT NOT in sync mode (we need to send progress and wait for completion)
-                    is_last_op = (i + 1 >= len(self.operations))
                     success, count, errors = self._execute_erase(
-                        op,
-                        pipe_state,
-                        release_parent_after=((op.background or is_last_op) and not pipe_state['closed'] and not sync)
+                        op, pipe_state,
+                        async_progress=progress_file_state,
                     )
                     rpmnew_files = []
 
-                if not pipe_state['closed']:
-                    if success:
-                        write_file.write(QueueProgressMessage(
-                            msg_type='op_done',
-                            operation_id=op.operation_id,
-                            count=count,
-                            rpmnew_files=rpmnew_files
-                        ).to_json() + "\n")
-                    else:
-                        write_file.write(QueueProgressMessage(
-                            msg_type='op_error',
-                            operation_id=op.operation_id,
-                            error=errors[0] if errors else "Unknown error",
-                            errors=errors
-                        ).to_json() + "\n")
-                        # Stop on first error (for foreground ops)
-                        break
+                if success:
+                    _pipe_write(QueueProgressMessage(
+                        msg_type='op_done',
+                        operation_id=op.operation_id,
+                        count=count,
+                        rpmnew_files=rpmnew_files
+                    ).to_json())
                 else:
-                    # Log background operation result
-                    if success:
-                        _log_background(f"Background op {op.operation_id}: {count} packages")
-                    else:
-                        _log_background(f"Background op {op.operation_id} failed: {errors}")
+                    error_msg = errors[0] if errors else "Unknown error"
+                    _pipe_write(QueueProgressMessage(
+                        msg_type='op_error',
+                        operation_id=op.operation_id,
+                        error=error_msg,
+                        errors=errors
+                    ).to_json())
+                    # If pipe is closed (smart sync), store error for next run
+                    if pipe_state['closed']:
+                        if progress_file_state:
+                            _update_async_progress(progress_file_state,
+                                                   error=error_msg)
+                        _set_background_error(error_msg)
+                    break
 
-            # Signal queue complete (if parent still listening)
+                # Store README in DB after each successful install operation
+                if success and op.op_type == OperationType.INSTALL:
+                    self._store_readmes_in_db(op)
+
+            # Signal queue complete
+            _pipe_write(QueueProgressMessage(msg_type='queue_done').to_json())
             if not pipe_state['closed']:
-                write_file.write(QueueProgressMessage(
-                    msg_type='queue_done'
-                ).to_json() + "\n")
-                write_file.flush()
-                write_file.close()
+                try:
+                    write_file.flush()
+                    write_file.close()
+                except (BrokenPipeError, OSError):
+                    pass
+
+            # Clean up async progress file
+            if progress_file_state:
+                _cleanup_async_progress()
+
+            # Redirect stdout/stderr now that triggers are done
+            # (terminal belongs to the user after smart sync release)
+            if pipe_state['closed']:
+                try:
+                    devnull = os.open(os.devnull, os.O_WRONLY)
+                    os.dup2(devnull, 1)
+                    os.dup2(devnull, 2)
+                    os.close(devnull)
+                except OSError:
+                    pass
 
             _log_background(f"Queue complete: {len(self.operations)} operations")
             lock.release()
@@ -757,16 +1021,57 @@ queue._child_process_standalone()
 
         except Exception as e:
             _set_background_error(f"Queue error: {e}")
+            if progress_file_state:
+                _update_async_progress(progress_file_state,
+                                       error=str(e))
+            _pipe_write(QueueProgressMessage(
+                msg_type='queue_error',
+                error=str(e)
+            ).to_json())
             try:
-                write_file.write(QueueProgressMessage(
-                    msg_type='queue_error',
-                    error=str(e)
-                ).to_json() + "\n")
-                write_file.close()
+                if not pipe_state['closed']:
+                    write_file.close()
             except Exception:
                 pass
             lock.release()
             os._exit(1)
+
+    def _store_readmes_in_db(self, op: QueuedOperation):
+        """Store README messages in the database for later retrieval.
+
+        Called from the child process after a successful install operation.
+        This enables ``urpm readme`` to display README messages from past
+        transactions, regardless of sync/async mode.
+        """
+        readme_data = self._collect_readme_messages(op)
+        if not readme_data:
+            return
+        try:
+            import time as _time
+            from .database import PackageDatabase
+            db = PackageDatabase()
+            conn = db._get_connection()
+            # Get the most recent transaction ID
+            cursor = conn.execute(
+                "SELECT id FROM history ORDER BY id DESC LIMIT 1"
+            )
+            row = cursor.fetchone()
+            if not row:
+                return
+            txn_id = row[0]
+            for msg in readme_data:
+                conn.execute(
+                    """INSERT INTO transaction_readmes
+                       (transaction_id, package_name, readme_type, content,
+                        created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (txn_id, msg['package'], 'generic', msg['content'],
+                     int(_time.time()))
+                )
+            conn.commit()
+            _log_background(f"Stored {len(readme_data)} README(s) in DB")
+        except Exception as e:
+            _log_background(f"README DB storage error: {e}")
 
     def _collect_readme_messages(self, op: QueuedOperation) -> list:
         """Collect README.urpmi messages after a successful transaction.
@@ -799,17 +1104,21 @@ queue._child_process_standalone()
         self,
         op: QueuedOperation,
         pipe_state: dict,
-        release_parent_after: bool = False
+        async_progress: dict = None,
     ) -> Tuple[bool, int, List[str], List[str]]:
         """Execute an install operation.
 
+        Sends enriched progress messages via pipe (sync mode) or writes
+        to the async progress file (async mode).  Handles all RPM callbacks
+        including INST_PROGRESS and SCRIPT_START.
+
         Args:
-            op: The operation to execute
-            pipe_state: Dict with 'closed' bool and 'file' write handle
-            release_parent_after: If True, send parent_can_exit after last package
+            op: The operation to execute.
+            pipe_state: Dict with 'closed' bool and 'file' write handle.
+            async_progress: Async progress file state (None in sync mode).
 
         Returns:
-            Tuple of (success, count, errors, rpmnew_files)
+            Tuple of (success, count, errors, rpmnew_files).
         """
         import rpm
         import sys
@@ -905,44 +1214,95 @@ queue._child_process_standalone()
         if op.test:
             return True, len(rpm_paths), [], []
 
-        # Set up callback
+        # RPM callback state machine
+        #
+        # ts.run() fires callbacks in four phases (from trace analysis):
+        #
+        #   1. VERIFY:  VERIFY_START → per-pkg [VERIFY_PROGRESS, OPEN, CLOSE] → VERIFY_STOP
+        #               OPEN/CLOSE here are for header verification — NOT real installs.
+        #               amount=0, total=0 on OPEN/CLOSE during this phase.
+        #
+        #   2. PREPARE: TRANS_START → TRANS_PROGRESS 0..N → TRANS_STOP
+        #               Transaction element ordering.
+        #
+        #   3. INSTALL: per-pkg [OPEN → ELEM_PROGRESS(index, total) → [SCRIPT %pre]
+        #                        → INST_START → INST_PROGRESS flood → INST_STOP → CLOSE]
+        #               ELEM_PROGRESS is the reliable package counter (0-based index).
+        #               This phase is fast (~1s for 10 packages).
+        #
+        #   4. SCRIPTS: SCRIPT_START/STOP pairs for posttrans and file triggers.
+        #               Fires AFTER all packages are extracted.
+        #               key = triggering package name (e.g. "shared-mime-info").
+        #               This is often the slowest phase (e.g. 39s for shared-mime-info).
+        #
         total = len(rpm_paths)
-        current = [0]
-        closed_count = [0]  # Track closed packages
-        seen_paths = set()  # Track already-counted packages
-        parent_released_early = [False]  # Track if we released parent optimistically
-        extraction_error = [False]  # Track CPIO/extraction errors
+        packages_done = [0]       # Packages with extraction complete
+        extraction_error = [False]
+        current_pkg_name = ['']
+        in_verify = [True]        # True until VERIFY_STOP fires
+
+        def _send_progress(**kwargs):
+            """Send progress via pipe or async progress file.
+
+            In smart sync mode the parent may close its pipe read-end
+            once extraction is done.  When that happens the next write
+            raises BrokenPipeError — we catch it, mark the pipe closed,
+            and fall through to the async progress file so the child
+            continues reporting via ``/run/urpm/transaction.json``.
+            """
+            nonlocal async_progress
+            if not pipe_state['closed']:
+                try:
+                    pipe_state['file'].write(QueueProgressMessage(
+                        msg_type='progress',
+                        operation_id=op.operation_id,
+                        **kwargs
+                    ).to_json() + "\n")
+                except (BrokenPipeError, OSError):
+                    # Parent released (smart sync) — switch to async file
+                    pipe_state['closed'] = True
+                    if not async_progress:
+                        async_progress = _init_async_progress({
+                            'type': op.op_type.value,
+                            'total': total,
+                        })
+            if async_progress:
+                _update_async_progress(async_progress,
+                                       current=kwargs.get('current', 0),
+                                       current_package=kwargs.get('name', ''),
+                                       phase=kwargs.get('phase', ''),
+                                       script=kwargs.get('script', ''),
+                                       bytes_done=kwargs.get('bytes_done', 0),
+                                       bytes_total=kwargs.get('bytes_total', 0))
 
         def callback(reason, amount, total_pkg, key, client_data):
+            # ── VERIFY phase: header signature checks ──
+            if reason == rpm.RPMCALLBACK_VERIFY_START:
+                in_verify[0] = True
+                _send_progress(name='', current=0, total=total,
+                               phase='verify')
+                return
+
+            if reason == rpm.RPMCALLBACK_VERIFY_STOP:
+                in_verify[0] = False
+                return
+
+            if reason == rpm.RPMCALLBACK_VERIFY_PROGRESS:
+                _send_progress(name='', current=amount, total=total_pkg,
+                               phase='verify')
+                return
+
+            # ── OPEN/CLOSE FILE: verify phase vs real install ──
             if reason == rpm.RPMCALLBACK_INST_OPEN_FILE:
                 path = key
-
-                # Only count each package once
-                if path and path not in seen_paths:
-                    seen_paths.add(path)
-                    current[0] += 1
-
-                    # Send progress (if parent still listening)
-                    if not pipe_state['closed']:
-                        name = Path(path).stem.rsplit('-', 2)[0] if path else ''
-                        pipe_state['file'].write(QueueProgressMessage(
-                            msg_type='progress',
-                            operation_id=op.operation_id,
-                            name=name,
-                            current=current[0],
-                            total=total
-                        ).to_json() + "\n")
-
                 fd = os.open(path, os.O_RDONLY)
                 open_fds[path] = fd
+                if not in_verify[0]:
+                    name = Path(path).stem.rsplit('-', 2)[0] if path else ''
+                    current_pkg_name[0] = name
                 return fd
 
-            elif reason == rpm.RPMCALLBACK_CPIO_ERROR:
-                # Extraction error (checksum, corruption, etc.)
-                extraction_error[0] = True
-                _log_background(f"CPIO extraction error: {key}")
-
-            elif reason == rpm.RPMCALLBACK_INST_CLOSE_FILE:
+            if reason == rpm.RPMCALLBACK_INST_CLOSE_FILE:
                 path = key
                 if path in open_fds:
                     try:
@@ -950,48 +1310,72 @@ queue._child_process_standalone()
                     except Exception:
                         pass
                     del open_fds[path]
+                if not in_verify[0]:
+                    # Package extraction complete — advance counter
+                    packages_done[0] += 1
+                    _send_progress(name=current_pkg_name[0],
+                                   current=packages_done[0], total=total,
+                                   phase='install')
+                return
 
-                # Track closed packages
-                closed_count[0] += 1
+            # ── ELEM_PROGRESS: reliable package index (fires at start of each pkg) ──
+            if reason == rpm.RPMCALLBACK_ELEM_PROGRESS:
+                name = Path(key).stem.rsplit('-', 2)[0] if key else ''
+                current_pkg_name[0] = name
+                _send_progress(name=name, current=amount, total=total_pkg,
+                               phase='install')
+                return
 
-                # All packages closed — RPM will now sync the database.
-                # Notify the UI before releasing the parent so it can
-                # switch from the install progress bar to "Finalisation".
-                if (closed_count[0] == total
-                        and not extraction_error[0] and not pipe_state['closed']):
-                    pipe_state['file'].write(QueueProgressMessage(
-                        msg_type='progress',
-                        operation_id=op.operation_id,
-                        name='(updating rpmdb)',
-                        current=total,
-                        total=total
-                    ).to_json() + "\n")
-                    pipe_state['file'].flush()
+            # ── INST_PROGRESS: byte-level extraction progress ──
+            if reason == rpm.RPMCALLBACK_INST_PROGRESS:
+                if not in_verify[0]:
+                    _send_progress(name=current_pkg_name[0],
+                                   current=packages_done[0], total=total,
+                                   phase='install',
+                                   bytes_done=amount,
+                                   bytes_total=total_pkg)
+                return
 
-                # Release parent early when all packages are closed AND no errors seen
-                # ts.run() will continue in background for rpmdb sync/scriptlets
-                if (closed_count[0] == total and release_parent_after
-                        and not extraction_error[0] and not pipe_state['closed']):
-                    # README collection deferred to after ts.run() — files
-                    # are not yet fully on disk at CLOSE_FILE callback time.
-                    pipe_state['file'].write(QueueProgressMessage(
-                        msg_type='op_done',
-                        operation_id=op.operation_id,
-                        count=total,
-                        rpmnew_files=[],  # Not available during early release
-                        readme_messages=[]  # Deferred to post-ts.run()
-                    ).to_json() + "\n")
-                    pipe_state['file'].write(QueueProgressMessage(
-                        msg_type='parent_can_exit'
-                    ).to_json() + "\n")
-                    pipe_state['file'].flush()
-                    pipe_state['file'].close()
-                    pipe_state['closed'] = True
-                    parent_released_early[0] = True
-                    _log_background("Parent released early (optimistic)")
+            # ── CPIO extraction error ──
+            if reason == rpm.RPMCALLBACK_CPIO_ERROR:
+                extraction_error[0] = True
+                _log_background(f"CPIO extraction error: {key}")
+                return
 
-            elif reason == rpm.RPMCALLBACK_TRANS_STOP:
-                _log_background(f"Install complete: {total} packages")
+            # ── TRANS_START/PROGRESS/STOP: transaction preparation ──
+            if reason == rpm.RPMCALLBACK_TRANS_START:
+                _send_progress(name='', current=0, total=total,
+                               phase='prepare')
+                return
+
+            if reason == rpm.RPMCALLBACK_TRANS_PROGRESS:
+                _send_progress(name='', current=amount, total=total_pkg,
+                               phase='prepare')
+                return
+
+            if reason == rpm.RPMCALLBACK_TRANS_STOP:
+                _log_background(f"Transaction preparation complete: {total} packages")
+                return
+
+            # ── SCRIPT_START/STOP: scriptlets and file triggers ──
+            if reason == rpm.RPMCALLBACK_SCRIPT_START:
+                script_name = _clean_script_key(key)
+                _send_progress(name=script_name,
+                               current=packages_done[0], total=total,
+                               phase='script', script=script_name)
+                return
+
+            if reason == rpm.RPMCALLBACK_SCRIPT_STOP:
+                script_name = _clean_script_key(key)
+                _send_progress(name=script_name,
+                               current=packages_done[0], total=total,
+                               phase='script_done', script=script_name)
+                return
+
+            if reason == rpm.RPMCALLBACK_SCRIPT_ERROR:
+                script_name = _clean_script_key(key)
+                _log_background(f"Scriptlet error: {script_name}")
+                return
 
         # Set problem filters
         # Always skip disk space check - RPM's check can be unreliable
@@ -1039,8 +1423,6 @@ queue._child_process_standalone()
 
         if problems:
             # For upgrade operations, "already installed" errors are benign
-            # They occur when the package is already at the target version
-            # (e.g., user clicked Update twice, or race between resolve and install)
             if op.operation_id == "upgrade":
                 real_problems = []
                 for p in problems:
@@ -1048,36 +1430,26 @@ queue._child_process_standalone()
                     if "is already installed" not in msg:
                         real_problems.append(p)
                     else:
-                        # Log but don't treat as error
                         _log_background(f"NOTE: {msg} (ignored for upgrade)")
                 if not real_problems:
-                    # All problems were benign "already installed"
                     _log_background(f"Upgrade completed: {total} packages (some already at target version)")
-                    if not pipe_state['closed']:
-                        readme_data = self._collect_readme_messages(op)
-                        pipe_state['file'].write(QueueProgressMessage(
-                            msg_type='op_done',
-                            operation_id=op.operation_id,
-                            count=total,
-                            rpmnew_files=new_rpmnew_files,
-                            readme_messages=readme_data
-                        ).to_json() + "\n")
-                        pipe_state['file'].flush()
-                        if release_parent_after:
+                    readme_data = self._collect_readme_messages(op)
+                    try:
+                        if not pipe_state['closed']:
                             pipe_state['file'].write(QueueProgressMessage(
-                                msg_type='parent_can_exit'
+                                msg_type='op_done',
+                                operation_id=op.operation_id,
+                                count=total,
+                                rpmnew_files=new_rpmnew_files,
+                                readme_messages=readme_data
                             ).to_json() + "\n")
                             pipe_state['file'].flush()
-                            pipe_state['file'].close()
-                            pipe_state['closed'] = True
+                    except (BrokenPipeError, OSError):
+                        pipe_state['closed'] = True
                     return True, total, [], new_rpmnew_files
                 problems = real_problems
 
-            # Filter "needed by (installed)" problems: these occur when
-            # upgrading a package removes a file that another installed
-            # package depends on (e.g., scriptlet interpreters).  In split
-            # transactions the dependent package will be upgraded later,
-            # so these are non-fatal warnings — same as urpmi --split-length.
+            # Filter "needed by (installed)" — safe for split transactions
             remaining = []
             for p in problems:
                 msg = str(p) if isinstance(p, str) else (
@@ -1087,92 +1459,44 @@ queue._child_process_standalone()
                 else:
                     remaining.append(p)
             if not remaining:
-                _log_background("All ts.run() problems were installed-dep warnings, continuing")
+                _log_background("All ts.run() problems were installed-dep warnings")
                 readme_data = self._collect_readme_messages(op)
-                if not pipe_state['closed']:
-                    pipe_state['file'].write(QueueProgressMessage(
-                        msg_type='op_done',
-                        operation_id=op.operation_id,
-                        count=total,
-                        rpmnew_files=new_rpmnew_files,
-                        readme_messages=readme_data
-                    ).to_json() + "\n")
-                    pipe_state['file'].flush()
-                    if release_parent_after:
+                try:
+                    if not pipe_state['closed']:
                         pipe_state['file'].write(QueueProgressMessage(
-                            msg_type='parent_can_exit'
+                            msg_type='op_done',
+                            operation_id=op.operation_id,
+                            count=total,
+                            rpmnew_files=new_rpmnew_files,
+                            readme_messages=readme_data
                         ).to_json() + "\n")
                         pipe_state['file'].flush()
-                        pipe_state['file'].close()
-                        pipe_state['closed'] = True
+                except (BrokenPipeError, OSError):
+                    pipe_state['closed'] = True
                 return True, total, [], new_rpmnew_files
             problems = remaining
 
             _log_background(f"Transaction failed: {problems}")
             errors = [str(p) for p in problems]
-
-            # If parent was already released (optimistic), alert on stderr
-            if parent_released_early[0]:
-                _log_background("ALERT: Installation failed after parent was released!")
-                try:
-                    print("\n" + "=" * 60, file=sys.stderr)
-                    print("⚠️  ALERTE URPM: Échec d'installation détecté!", file=sys.stderr)
-                    print("=" * 60, file=sys.stderr)
-                    for err in errors:
-                        print(f"  ✗ {err}", file=sys.stderr)
-                    print("\nLes paquets concernés n'ont PAS été installés.", file=sys.stderr)
-                    print("Relancez l'installation après vérification.", file=sys.stderr)
-                    print("=" * 60 + "\n", file=sys.stderr)
-                    sys.stderr.flush()
-                except OSError:
-                    pass  # stderr unavailable (pipe closed, terminal disconnected)
-                # Return success=True because parent already got op_done
-                # The alert on stderr is the notification
-                return True, current[0], [], new_rpmnew_files
-
             return False, current[0], errors, new_rpmnew_files
 
         _log_background(f"Transaction completed: {total} packages")
 
         readme_data = self._collect_readme_messages(op)
 
-        # If parent was released early (optimistic), the pipe is closed —
-        # print README messages directly to stdout from the child process.
-        # The child's stdout still points to the terminal after fork().
-        if parent_released_early[0] and readme_data:
-            try:
-                from .readme import format_readme_output, ReadmeMessage
-                messages = [ReadmeMessage(package=m['package'], content=m['content'])
-                            for m in readme_data]
-                output = format_readme_output(messages)
-                if output:
-                    print(output, file=sys.stdout, flush=True)
-            except Exception as e:
-                _log_background(f"README display error: {e}")
-
-        # Send op_done if pipe is still open (sync mode, or late release
-        # after extraction error).  In non-sync mode the early release
-        # already sent op_done + parent_can_exit and closed the pipe.
-        if not pipe_state['closed']:
-            pipe_state['file'].write(QueueProgressMessage(
-                msg_type='op_done',
-                operation_id=op.operation_id,
-                count=total,
-                rpmnew_files=new_rpmnew_files,
-                readme_messages=readme_data
-            ).to_json() + "\n")
-            pipe_state['file'].flush()
-            # Only close the pipe here if we were supposed to release
-            # the parent.  In sync mode, _child_process sends queue_done
-            # and closes the pipe after all operations complete.
-            if release_parent_after:
+        # Send results via pipe — may be closed in smart sync mode
+        try:
+            if not pipe_state['closed']:
                 pipe_state['file'].write(QueueProgressMessage(
-                    msg_type='parent_can_exit'
+                    msg_type='op_done',
+                    operation_id=op.operation_id,
+                    count=total,
+                    rpmnew_files=new_rpmnew_files,
+                    readme_messages=readme_data
                 ).to_json() + "\n")
                 pipe_state['file'].flush()
-                pipe_state['file'].close()
-                pipe_state['closed'] = True
-                _log_background("Parent released after transaction complete")
+        except (BrokenPipeError, OSError):
+            pipe_state['closed'] = True
 
         return True, total, [], new_rpmnew_files
 
@@ -1180,14 +1504,14 @@ queue._child_process_standalone()
         self,
         op: QueuedOperation,
         pipe_state: dict,
-        release_parent_after: bool = False
+        async_progress: dict = None,
     ) -> Tuple[bool, int, List[str]]:
         """Execute an erase operation.
 
         Args:
-            op: The operation to execute
-            pipe_state: Dict with 'closed' bool and 'file' write handle
-            release_parent_after: If True, send parent_can_exit before starting
+            op: The operation to execute.
+            pipe_state: Dict with 'closed' bool and 'file' write handle.
+            async_progress: Async progress file state (None in sync mode).
         """
         import rpm
 
@@ -1197,37 +1521,18 @@ queue._child_process_standalone()
         ts = rpm.TransactionSet(self.root or '/')
         ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
 
-        # Find installed packages FIRST (to know the count before releasing parent)
         found = []
         for name in package_names:
             mi = ts.dbMatch('name', name)
             for hdr in mi:
                 found.append((name, hdr))
                 ts.addErase(hdr)
-                break  # Only first match
+                break
 
         if not found:
             errors.append("No packages found to erase")
             return False, 0, errors
 
-        # For background erase, release parent after determining count
-        # Send op_done BEFORE parent_can_exit so parent gets the count
-        if release_parent_after and not pipe_state['closed']:
-            pipe_state['file'].write(QueueProgressMessage(
-                msg_type='op_done',
-                operation_id=op.operation_id,
-                count=len(found),
-                rpmnew_files=[]
-            ).to_json() + "\n")
-            pipe_state['file'].write(QueueProgressMessage(
-                msg_type='parent_can_exit'
-            ).to_json() + "\n")
-            pipe_state['file'].flush()
-            pipe_state['file'].close()
-            pipe_state['closed'] = True
-            _log_background("Parent released, starting background erase...")
-
-        # Check dependencies
         if not op.force:
             unresolved = ts.check()
             if unresolved:
@@ -1239,27 +1544,95 @@ queue._child_process_standalone()
         if op.test:
             return True, len(found), []
 
-        # Callback
         total = len(found)
-        current = [0]
-        seen_names = set()  # Track already-counted packages
+        completed = [0]
+        current_erase_name = ['']
+
+        def _erase_pipe_write(msg_json: str):
+            """Write to pipe, catching BrokenPipeError (parent released)."""
+            if pipe_state['closed']:
+                return
+            try:
+                pipe_state['file'].write(msg_json + "\n")
+            except (BrokenPipeError, OSError):
+                pipe_state['closed'] = True
 
         def callback(reason, amount, total_pkg, key, client_data):
             if reason == rpm.RPMCALLBACK_UNINST_START:
                 name = key if isinstance(key, str) else str(key)
-                # Only count each package once
-                if name and name not in seen_names:
-                    seen_names.add(name)
-                    current[0] += 1
-                    # Send progress (if parent still listening)
-                    if not pipe_state['closed']:
-                        pipe_state['file'].write(QueueProgressMessage(
-                            msg_type='progress',
-                            operation_id=op.operation_id,
-                            name=name,
-                            current=current[0],
-                            total=total
-                        ).to_json() + "\n")
+                current_erase_name[0] = name
+                _erase_pipe_write(QueueProgressMessage(
+                    msg_type='progress',
+                    operation_id=op.operation_id,
+                    name=name,
+                    current=completed[0],
+                    total=total,
+                    phase='erase',
+                ).to_json())
+                if async_progress:
+                    _update_async_progress(async_progress,
+                                           current=completed[0],
+                                           current_package=name,
+                                           phase='erase')
+
+            elif reason == rpm.RPMCALLBACK_UNINST_STOP:
+                completed[0] += 1
+                _erase_pipe_write(QueueProgressMessage(
+                    msg_type='progress',
+                    operation_id=op.operation_id,
+                    name=current_erase_name[0],
+                    current=completed[0],
+                    total=total,
+                    phase='erase',
+                ).to_json())
+                if async_progress:
+                    _update_async_progress(async_progress,
+                                           current=completed[0],
+                                           current_package=current_erase_name[0],
+                                           phase='erase')
+
+            elif reason == rpm.RPMCALLBACK_UNINST_PROGRESS:
+                if async_progress:
+                    _update_async_progress(async_progress,
+                                           current=completed[0],
+                                           bytes_done=amount,
+                                           bytes_total=total_pkg,
+                                           phase='erase')
+
+            elif reason == rpm.RPMCALLBACK_SCRIPT_START:
+                script_name = _clean_script_key(key)
+                _erase_pipe_write(QueueProgressMessage(
+                    msg_type='progress',
+                    operation_id=op.operation_id,
+                    name=script_name,
+                    current=completed[0],
+                    total=total,
+                    phase='script',
+                    script=script_name,
+                ).to_json())
+                if async_progress:
+                    _update_async_progress(async_progress,
+                                           current=completed[0],
+                                           current_package=script_name,
+                                           phase='script',
+                                           script=script_name)
+
+            elif reason == rpm.RPMCALLBACK_SCRIPT_STOP:
+                script_name = _clean_script_key(key)
+                _erase_pipe_write(QueueProgressMessage(
+                    msg_type='progress',
+                    operation_id=op.operation_id,
+                    name=script_name,
+                    current=completed[0],
+                    total=total,
+                    phase='script_done',
+                    script=script_name,
+                ).to_json())
+                if async_progress:
+                    _update_async_progress(async_progress,
+                                           current=completed[0],
+                                           phase='script_done',
+                                           script=script_name)
 
             elif reason == rpm.RPMCALLBACK_TRANS_STOP:
                 _log_background(f"Erase complete: {total} packages")
