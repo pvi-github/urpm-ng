@@ -557,8 +557,8 @@ class TransactionQueue:
         self,
         read_fd: int,
         write_fd: int,
-        progress_callback: Callable[[str, str, int, int], None],
-        sync: bool
+        progress_callback: Callable[['TransactionProgress'], None],
+        full_sync: bool
     ) -> QueueResult:
         """Execute operations in a user namespace (for non-root chroot installs)."""
         import pickle
@@ -659,7 +659,7 @@ queue._child_process_standalone()
             # Wait for subprocess to finish
             # In sync mode, show a message since scriptlets may take time.
             # Always wait — proc.returncode is None until wait() is called.
-            if sync:
+            if full_sync:
                 print("\033[33m  Waiting for scriptlets to complete...\033[0m", flush=True)
             proc.wait()
 
