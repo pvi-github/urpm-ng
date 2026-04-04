@@ -1,4 +1,4 @@
-# Bilan debug test_install.py — 2026-03-22
+# Bilan debug test_install.py — 2026-04-04
 
 ## Avant cette session (branche `test_install-cleanup` existante)
 - 20 tests `TestOrphans` **skippés** (erreur root privileges)
@@ -49,13 +49,52 @@
 - **BASSE** = limitation infra ou test incorrect, aucun impact sur urpm en production
 - **NULLE** = non pertinent
 
-### Score final : 50 passés, 5 échoués, 22 skippés (sur 77)
+### Score final : 231 passés, 6 skippés, 16 xfailed
 
-- **Gains nets** : +17 tests passants, -19 échecs (24→5), -12 skips inutiles retirés
-- **5 échecs restants** : tous bugs résolveur (f, o, gg_g, unorphan_v1, unorphan_v2)
-- **Note** : les 4 TestFileConflicts passent sur ext3 natif (échouent uniquement sur vboxsf)
+- **Gains nets depuis le 22 mars** : 50 → 231 passés (+181)
+- **5 échecs restants** : reclassés en xfail (bugs résolveur :
+  f, o, gg_g, unorphan_v1, unorphan_v2)
+- **6 skippés** : limitations infra (multi-arch, genhdlist2)
+- **Note** : les 4 TestFileConflicts passent sur ext3 natif
+  (échouent uniquement sur vboxsf)
 
-## Corrections apportées
+## Mise à jour 2026-04-04 : smart sync et should-restart
+
+### TODO `should-restart` résolu
+
+Le commentaire `# TODO or not ? should-restart, doesn't seem managed`
+a été remplacé par `TestShouldRestart` (9 tests, tous passants).
+
+Implémentation : `urpm.core.needs_restart` détecte les packages
+fournissant `should-restart:system` / `should-restart:session` via
+le mécanisme Mageia de virtual provides. Force le mode full sync
+et affiche un message de redémarrage quand nécessaire.
+
+### Tests ajoutés (TestShouldRestart — 9 tests)
+
+| Test | Vérifie |
+|------|---------|
+| `test_check_needs_restart_from_provides_system` | Détection should-restart:system |
+| `test_check_needs_restart_from_provides_session` | Détection should-restart:session |
+| `test_check_needs_restart_from_provides_none` | Pas de faux positifs |
+| `test_check_needs_restart_from_provides_mixed` | Mix system/session/rien |
+| `test_format_restart_messages_system` | Message reboot |
+| `test_format_restart_messages_session` | Message session |
+| `test_format_restart_messages_service` | Message service |
+| `test_describe_trigger_known` | Trigger connu → description |
+| `test_describe_trigger_unknown` | Trigger inconnu → "Running: xxx" |
+
+### Autres corrections (session du 04 avril)
+
+- Smart sync : nouveau modèle de transaction (extraction
+  synchrone, triggers en background)
+- `_clean_script_key()` : nettoyage des chemins RPM locaux
+  dans les callbacks SCRIPT
+- `fix(resolver)` : résolution des provides vers les vrais
+  noms de paquets pour le marquage explicite (fix orphelins
+  avec `urpm i nvim` → `neovim`)
+
+## Corrections apportées (session du 22 mars)
 
 ### Code
 - `urpm/core/resolution/orphans.py` — réécriture `find_upgrade_orphans` : simulation de l'état post-transaction complet (upgrades, installs, removes, obsoletes)
