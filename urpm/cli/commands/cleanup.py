@@ -27,7 +27,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         check_background_error, clear_background_error,
         InstallLock
     )
-    from ...core.transaction_queue import TransactionQueue
+    from ...core.transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
 
     # Check for previous background errors
     prev_error = check_background_error()
@@ -282,14 +282,16 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         queue.add_erase(package_names, operation_id="autoremove")
 
         # Progress callback
-        def queue_progress(op_id: str, name: str, current: int, total: int):
-            if last_erase_shown[0] != name:
-                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
-                last_erase_shown[0] = name
+        def queue_progress(tp: TransactionProgress):
+            if tp.phase == TransactionPhase.SCRIPT:
+                print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] Running: {tp.script_name}", end='', flush=True)
+            elif last_erase_shown[0] != tp.package_name:
+                print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] {tp.package_name}", end='', flush=True)
+                last_erase_shown[0] = tp.package_name
 
         # Execute the queue
         sync_mode = getattr(args, 'sync', False)
-        queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
+        queue_result = queue.execute(progress_callback=queue_progress, full_sync=sync_mode)
 
         # Print done
         print(f"\r\033[K  [{len(package_names)}/{len(package_names)}] " + _("done"))
@@ -542,7 +544,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
     import platform
     from ...core.install import check_root
     from ...core.resolver import Resolver
-    from ...core.transaction_queue import TransactionQueue
+    from ...core.transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
     from ...core.background_install import InstallLock
     from .. import colors
 
@@ -648,14 +650,16 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
         queue.add_erase(packages_to_erase, operation_id="cleandeps")
 
         # Progress callback
-        def queue_progress(op_id: str, name: str, current: int, total: int):
-            if last_erase_shown[0] != name:
-                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
-                last_erase_shown[0] = name
+        def queue_progress(tp: TransactionProgress):
+            if tp.phase == TransactionPhase.SCRIPT:
+                print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] Running: {tp.script_name}", end='', flush=True)
+            elif last_erase_shown[0] != tp.package_name:
+                print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] {tp.package_name}", end='', flush=True)
+                last_erase_shown[0] = tp.package_name
 
         # Execute the queue
         sync_mode = getattr(args, 'sync', False)
-        queue_result = queue.execute(progress_callback=queue_progress, sync=sync_mode)
+        queue_result = queue.execute(progress_callback=queue_progress, full_sync=sync_mode)
 
         # Print done
         print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] " + _("done"))

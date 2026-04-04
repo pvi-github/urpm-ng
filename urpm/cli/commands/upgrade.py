@@ -357,7 +357,6 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             test=getattr(args, 'test', False),
             root=rpm_root or "/",
             use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
-            sync=getattr(args, 'sync', False),
             config_policy=getattr(args, 'config_policy', 'keep'),
         )
 
@@ -377,22 +376,107 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             lock.acquire(blocking=True)
         lock.release()  # Release - child will acquire its own lock
 
-        # Progress tracking
-        last_shown = [None]
-        current_phase = [""]
+        # Determine transaction mode: smart sync (default) or full sync (--sync)
+        import os
+        full_sync = getattr(args, 'sync', False)
 
-        def queue_progress(op_id: str, name: str, current: int, total: int):
-            if current_phase[0] != op_id:
-                current_phase[0] = op_id
-                if op_id == "upgrade":
-                    print("\n" + ngettext(
-                        "Upgrading {count} package...",
-                        "Upgrading {count} packages...",
-                        total).format(count=total))
-                last_shown[0] = None
-            if last_shown[0] != name:
-                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
-                last_shown[0] = name
+        # Force full sync if any package provides should-restart:system
+        if not full_sync:
+            from ...core.needs_restart import check_needs_restart_from_provides
+            import solv
+            pkg_provides: dict[str, list[str]] = {}
+            for action in result.actions:
+                if action.action.value in ('install', 'upgrade'):
+                    sel = resolver.pool.select(
+                        action.name, solv.Selection.SELECTION_NAME,
+                    )
+                    for s in sel.solvables():
+                        provides = [
+                            str(d) for d in
+                            s.lookup_deparray(solv.SOLVABLE_PROVIDES)
+                        ]
+                        if provides:
+                            pkg_provides[action.name] = provides
+                            break
+            restart_info = check_needs_restart_from_provides(pkg_provides)
+            if 'system' in restart_info:
+                full_sync = True
+                pkgs = ', '.join(restart_info['system'])
+                print(colors.warning(
+                    _("System restart required ({packages}) — forcing full sync.").format(
+                        packages=pkgs,
+                    )
+                ))
+
+        from ...core.transaction_queue import TransactionProgress, TransactionPhase
+        from ...core.triggers import describe_trigger
+
+        header_printed = [False]
+        last_state = [None]  # (phase, packages_done, package_name, bytes_done)
+
+        def queue_progress(progress: TransactionProgress):
+            """Render a full-width terminal progress bar for the RPM transaction.
+
+            Ignores VERIFY/PREPARE phases (they complete in <0.5s).
+            During INSTALL/ERASE, shows package extraction progress.
+            During SCRIPT, the bar stays full and shows the scriptlet name.
+            """
+            # Skip fast phases that don't need visual feedback
+            if progress.phase in (TransactionPhase.VERIFY, TransactionPhase.PREPARE):
+                return
+
+            # Print the header once when we enter INSTALL/ERASE/SCRIPT
+            if not header_printed[0]:
+                header_printed[0] = True
+                print("\n" + ngettext(
+                    "Upgrading {count} package...",
+                    "Upgrading {count} packages...",
+                    progress.packages_total).format(count=progress.packages_total))
+
+            # Deduplicate identical progress updates
+            state = (progress.phase, progress.packages_done,
+                     progress.package_name, progress.bytes_done)
+            if state == last_state[0]:
+                return
+            last_state[0] = state
+
+            try:
+                width = os.get_terminal_size().columns
+            except OSError:
+                width = 80
+
+            done = progress.packages_done
+            total = progress.packages_total
+
+            if progress.phase == TransactionPhase.SCRIPT:
+                # Script phase: bar stays at 100%, show which scriptlet runs
+                pct = 100
+                if full_sync and progress.script_name:
+                    label = describe_trigger(progress.script_name)
+                else:
+                    label = progress.script_name or progress.package_name
+                suffix = f" {done}/{total} Running: {label}"
+            else:
+                # INSTALL or ERASE: show per-package byte progress
+                if progress.bytes_total > 0:
+                    pct = int(progress.bytes_done * 100 / progress.bytes_total)
+                elif total > 0:
+                    pct = int(done * 100 / total)
+                else:
+                    pct = 0
+                suffix = f" {done}/{total} {progress.package_name} ({pct}%)"
+
+            # Truncate suffix if it would overflow the terminal
+            max_suffix = width - 14  # leave room for bar brackets + min bar
+            if len(suffix) > max_suffix:
+                suffix = suffix[:max_suffix - 1] + "…"
+
+            bar_width = width - len(suffix) - 2  # 2 for [ and ]
+            if bar_width < 10:
+                bar_width = 10
+            filled = int(bar_width * pct / 100)
+            bar = f"[{'█' * filled}{'░' * (bar_width - filled)}]{suffix}"
+            print(f"\r\033[K{bar}", end='', flush=True)
 
         resilient_result = ops.resilient_install(
             rpm_paths,
@@ -404,6 +488,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             progress_callback=queue_progress,
             root=upgrade_opts.root,
             urpm_root=getattr(args, 'urpm_root', None),
+            full_sync=full_sync,
         )
 
         # Clear the line after last progress
@@ -429,7 +514,6 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                             msg_parts.append(f"{len(remove_names)} removed (obsoleted)")
                         if msg_parts:
                             print(colors.success(f"  {', '.join(msg_parts)}"))
-                        # Apply config policy for .rpmnew files
                         if op_result.rpmnew_files:
                             _apply_config_policy(op_result.rpmnew_files, upgrade_opts.config_policy)
                     else:
@@ -437,7 +521,6 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                         for err in op_result.errors[:3]:
                             print(f"  {colors.error(err)}")
 
-        # Show excluded packages from resilient pipeline
         if resilient_result.excluded_packages:
             excluded_count = len(resilient_result.excluded_packages)
             print(colors.warning("\n" + ngettext(
@@ -449,11 +532,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             print(colors.warning(
                 _("These packages will be retried on the next update.")))
 
-        # Orphan cleanup runs in background - just display status
         if orphan_names:
             print(colors.dim("  " + ngettext(
-                "{count} orphaned package being removed in background...",
-                "{count} orphaned packages being removed in background...",
+                "{count} orphaned package removed",
+                "{count} orphaned packages removed",
                 len(orphan_names)).format(count=len(orphan_names))))
             resolver.unmark_packages(orphan_names)
 
@@ -463,7 +545,6 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
         ops.complete_transaction(transaction_id)
 
-        # Update installed-through-deps.list for urpmi compatibility
         new_deps = [a.name for a in result.actions if a.action.value == 'install']
         if new_deps:
             resolver.mark_as_dependency(new_deps)
@@ -472,11 +553,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         if removed:
             resolver.unmark_packages(removed)
 
-        # Debug: write orphans that were removed
         if orphan_names:
             _write_debug_file(DEBUG_LAST_REMOVED_DEPS, orphan_names)
 
-        # Debug: copy the installed-through-deps.list for inspection
         _copy_installed_deps_list()
 
         return 0

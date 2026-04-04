@@ -924,39 +924,26 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
     signal.signal(signal.SIGINT, sigint_handler)
 
-    # Display README.urpmi messages extracted from cached RPMs (before fork)
-    try:
-        from ...core.readme import collect_readme_from_rpms, format_readme_output
-        readme_msgs = collect_readme_from_rpms(rpm_paths, result.actions)
-        readme_output = format_readme_output(readme_msgs)
-        if readme_output:
-            if not args.auto:
-                # Interactive: pager for long output, prompt to continue
-                import os, shutil
-                term_lines = shutil.get_terminal_size().lines
-                output_lines = readme_output.count('\n') + 1
-                if output_lines > term_lines - 5:
-                    pager_text = readme_output + _("\n\n(press q to quit pager, then Enter to install or Ctrl+C to abort)")
-                    import subprocess as _sp
-                    pager = os.environ.get('PAGER', 'less')
-                    try:
-                        _sp.run([pager, '-R'], input=pager_text,
-                                text=True, check=False)
-                    except FileNotFoundError:
-                        print(readme_output)
-                else:
-                    print(readme_output)
-                try:
-                    input(_("\nPress Enter to proceed or Ctrl+C to abort..."))
-                except (EOFError, KeyboardInterrupt):
-                    print(_("\nAborted"))
-                    ops.abort_transaction(transaction_id)
-                    return 1
-            else:
-                # Auto mode: print README but don't wait
-                print(readme_output)
-    except Exception:
-        pass  # Non-fatal — don't block install for README errors
+    # README is displayed AFTER install in sync mode (files must be on disk)
+    # Pre-fork README extraction is no longer needed.
+
+    # Smart sync (default): parent waits for extraction, triggers run in background.
+    # Full sync (--sync): parent waits for everything including triggers.
+    full_sync = getattr(args, 'sync', False)
+
+    # Check if any package provides should-restart:system — force full sync
+    if not full_sync:
+        from ...core.needs_restart import check_needs_restart_from_provides
+        restart_info = {}
+        for a in result.actions:
+            pkg_info = db.get_package(a.name)
+            if pkg_info and pkg_info.get('provides'):
+                restart_info[a.name] = pkg_info['provides']
+        if restart_info:
+            needs_restart = check_needs_restart_from_provides(restart_info)
+            if 'system' in needs_restart:
+                full_sync = True
+                print(colors.warning(_("Reboot required packages detected — using full sync")))
 
     print(colors.info("\n" + ngettext(
         "Installing {count} package...",
@@ -990,15 +977,69 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             noscripts=getattr(args, 'noscripts', False),
             root=rpm_root or "/",
             use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
-            sync=getattr(args, 'sync', False),
             config_policy=getattr(args, 'config_policy', 'keep'),
         )
 
-        # Progress callback
-        def queue_progress(op_id: str, name: str, current: int, total: int):
-            if last_shown[0] != name:
-                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
-                last_shown[0] = name
+        # Full-width progress bar using TransactionProgress API
+        from ...core.transaction_queue import TransactionProgress, TransactionPhase
+        from ...core.triggers import describe_trigger
+
+        last_progress_state = [None]  # (packages_done, phase, package_name)
+
+        def queue_progress(progress: TransactionProgress):
+            """Render a full-width terminal progress bar for RPM transactions.
+
+            Shows package extraction progress during INSTALL/ERASE phases and
+            scriptlet activity during the SCRIPT phase.  VERIFY and PREPARE
+            phases are ignored (they complete in <0.5 s).
+
+            In full sync mode, SCRIPT phase shows human-readable trigger
+            descriptions via :func:`describe_trigger`.
+            """
+            # Skip VERIFY/PREPARE — too fast to bother displaying
+            if progress.phase in (TransactionPhase.VERIFY,
+                                  TransactionPhase.PREPARE):
+                return
+
+            # Deduplicate: only redraw when something visible changed
+            state = (progress.packages_done, progress.phase,
+                     progress.package_name, progress.script_name)
+            if state == last_progress_state[0]:
+                return
+            last_progress_state[0] = state
+
+            try:
+                width = os.get_terminal_size().columns
+            except OSError:
+                width = 80
+
+            done = progress.packages_done
+            total = progress.packages_total
+
+            if progress.phase == TransactionPhase.SCRIPT:
+                # Scripts phase: bar stays full, show which scriptlet is running.
+                # In full sync mode, use describe_trigger() for human-readable
+                # descriptions (e.g., "Rebuilding MIME database" instead of
+                # "shared-mime-info").
+                if full_sync and progress.script_name:
+                    label = describe_trigger(progress.script_name)
+                else:
+                    label = progress.script_name or progress.package_name
+                suffix = f" {done}/{total} Running: {label}"
+                pct = 100
+            else:
+                # INSTALL or ERASE: show package-level extraction progress
+                pct = int(done * 100 / total) if total else 0
+                suffix = f" {done}/{total} {progress.package_name} ({pct}%)"
+
+            # Build the bar: [████░░░░] suffix
+            # 2 chars for brackets, 1 space before suffix
+            bar_width = width - len(suffix) - 2
+            if bar_width < 10:
+                bar_width = 10
+            filled = int(bar_width * pct / 100)
+            bar = f"[{'█' * filled}{'░' * (bar_width - filled)}]{suffix}"
+            print(f"\r\033[K{bar}", end='', flush=True)
 
         # Use resilient pipeline for signature pre-check + retry + exclusion
         resilient_result = ops.resilient_install(
@@ -1009,6 +1050,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             progress_callback=queue_progress,
             root=rpm_root or '/',
             urpm_root=getattr(args, 'urpm_root', None),
+            full_sync=full_sync,
         )
 
         # Print done
@@ -1052,6 +1094,45 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 _apply_config_policy(rpmnew_files, install_opts.config_policy)
 
         ops.complete_transaction(transaction_id)
+
+        # Display README messages (post-install, files now on disk)
+        if qr is not None and qr.operations:
+            readme_msgs = qr.operations[0].readme_messages
+            if readme_msgs:
+                if args.auto:
+                    # Non-interactive (-y): print README content, no pager
+                    try:
+                        from ...core.readme import format_readme_output, ReadmeMessage
+                        messages = [ReadmeMessage(package=m['package'],
+                                                  content=m['content'])
+                                    for m in readme_msgs]
+                        output = format_readme_output(messages)
+                        if output:
+                            print(output)
+                    except Exception:
+                        pass
+                else:
+                    # Interactive: display in pager for long output
+                    try:
+                        from ...core.readme import format_readme_output, ReadmeMessage
+                        messages = [ReadmeMessage(package=m['package'],
+                                                  content=m['content'])
+                                    for m in readme_msgs]
+                        output = format_readme_output(messages)
+                        if output:
+                            import shutil, subprocess as _sp
+                            term_lines = shutil.get_terminal_size().lines
+                            if output.count('\n') > term_lines - 5:
+                                pager = os.environ.get('PAGER', 'less')
+                                try:
+                                    _sp.run([pager, '-R'], input=output,
+                                            text=True, check=False)
+                                except FileNotFoundError:
+                                    print(output)
+                            else:
+                                print(output)
+                    except Exception:
+                        pass
 
         # Update installed-through-deps.list for urpmi compatibility
         ops.mark_dependencies(resolver, result.actions)

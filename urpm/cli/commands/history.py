@@ -177,7 +177,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
     """Handle undo command - undo last or specific transaction."""
     from ...core.install import check_root
     from ...core.resolver import Resolver
-    from ...core.transaction_queue import TransactionQueue
+    from ...core.transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
     from ...core.background_install import InstallLock
     from ...core.download import Downloader, DownloadItem
     from ...core.config import get_base_dir, get_rpm_root
@@ -303,10 +303,14 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
             queue.add_erase(to_remove, operation_id="undo_remove")
 
             # Progress callback
-            def queue_progress(op_id: str, name: str, current: int, total: int):
-                if last_erase_shown[0] != name:
-                    print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
-                    last_erase_shown[0] = name
+            def queue_progress(tp: TransactionProgress):
+                if tp.phase == TransactionPhase.SCRIPT:
+                    label = _("Running: {script_name}").format(script_name=tp.script_name)
+                else:
+                    label = tp.package_name
+                if last_erase_shown[0] != label:
+                    print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] {label}", end='', flush=True)
+                    last_erase_shown[0] = label
 
             # Execute the queue
             queue_result = queue.execute(progress_callback=queue_progress)
@@ -493,10 +497,14 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
 
                 last_install_shown = [None]
 
-                def install_progress(op_id: str, name: str, current: int, total: int):
-                    if last_install_shown[0] != name:
-                        print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
-                        last_install_shown[0] = name
+                def install_progress(tp: TransactionProgress):
+                    if tp.phase == TransactionPhase.SCRIPT:
+                        label = _("Running: {script_name}").format(script_name=tp.script_name)
+                    else:
+                        label = tp.package_name
+                    if last_install_shown[0] != label:
+                        print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] {label}", end='', flush=True)
+                        last_install_shown[0] = label
 
                 install_result = install_queue.execute(progress_callback=install_progress)
                 print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done"))
@@ -561,7 +569,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
     """
     from ...core.install import check_root
     from ...core.resolver import Resolver
-    from ...core.transaction_queue import TransactionQueue
+    from ...core.transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
     from ...core.background_install import InstallLock
     from ...core.config import get_rpm_root
     from .. import colors
@@ -758,10 +766,14 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             queue.add_erase(to_remove, operation_id="rollback_remove")
 
             # Progress callback
-            def queue_progress(op_id: str, name: str, current: int, total: int):
-                if last_erase_shown[0] != name:
-                    print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
-                    last_erase_shown[0] = name
+            def queue_progress(tp: TransactionProgress):
+                if tp.phase == TransactionPhase.SCRIPT:
+                    label = _("Running: {script_name}").format(script_name=tp.script_name)
+                else:
+                    label = tp.package_name
+                if last_erase_shown[0] != label:
+                    print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] {label}", end='', flush=True)
+                    last_erase_shown[0] = label
 
             # Execute the queue
             queue_result = queue.execute(progress_callback=queue_progress)

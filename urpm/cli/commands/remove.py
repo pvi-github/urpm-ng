@@ -19,6 +19,7 @@ from ..helpers.resolver import create_resolver as _create_resolver
 
 def cmd_erase(args, db: 'PackageDatabase') -> int:
     """Handle erase (remove) command."""
+    import os
     import platform
     import signal
 
@@ -244,17 +245,56 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             test=getattr(args, 'test', False),
             root=rpm_root or "/",
             use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
-            sync=getattr(args, 'sync', False),
         )
 
-        # Progress callback
-        def queue_progress(op_id: str, name: str, current: int, total: int):
-            if last_erase_shown[0] != name:
-                print(f"\r\033[K  [{current}/{total}] {name}", end='', flush=True)
-                last_erase_shown[0] = name
+        # Smart sync (default): parent returns when triggers start.
+        # Full sync (--sync): parent waits for everything including triggers.
+        full_sync = getattr(args, 'sync', False)
+
+        from ...core.transaction_queue import TransactionProgress, TransactionPhase
+        from ...core.triggers import describe_trigger
+
+        last_erase_current = [None]
+
+        def queue_progress(progress: TransactionProgress):
+            """Render a progress bar for erase/script phases.
+
+            For ERASE phase:  [████░░░░░░] 3/10 firefox (30%)
+            For SCRIPT phase: [██████████] 10/10 Running: shared-mime-info
+            """
+            done = progress.packages_done
+            total = progress.packages_total
+            name = progress.package_name
+
+            # Skip duplicate updates (same count and package)
+            if done == last_erase_current[0] and name == last_erase_shown[0]:
+                return
+            last_erase_current[0] = done
+            last_erase_shown[0] = name
+
+            try:
+                width = os.get_terminal_size().columns
+            except OSError:
+                width = 80
+
+            pct = int(done * 100 / total) if total else 0
+
+            if progress.phase == TransactionPhase.SCRIPT:
+                label = describe_trigger(progress.script_name) if progress.script_name else name
+                suffix = f" {done}/{total} Running: {label}"
+            else:
+                suffix = f" {done}/{total} {name} ({pct}%)"
+
+            bar_width = width - len(suffix) - 2
+            if bar_width < 10:
+                bar_width = 10
+            filled = int(bar_width * pct / 100)
+            bar = f"[{'█' * filled}{'░' * (bar_width - filled)}]{suffix}"
+            print(f"\r\033[K{bar}", end='', flush=True)
 
         queue_result = ops.execute_erase(
-            packages_to_erase, options=erase_opts, progress_callback=queue_progress
+            packages_to_erase, options=erase_opts,
+            full_sync=full_sync, progress_callback=queue_progress,
         )
 
         # Print done

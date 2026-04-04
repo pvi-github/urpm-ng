@@ -501,9 +501,8 @@ Examples:
         help=_('Allow additional architectures (e.g., --allow-arch i686 for wine/steam). Can be repeated.')
     )
     install_parser.add_argument(
-        '--sync',
-        action='store_true',
-        help=_('Wait for all scriptlets and triggers to complete before returning')
+        '--sync', action='store_true', default=False,
+        help=_('Wait for full completion including post-install triggers')
     )
     install_parser.add_argument(
         '--config-policy',
@@ -754,6 +753,10 @@ Examples:
         '--debug',
         choices=['solver', 'all'],
         help=_('Enable debug output (solver, all)')
+    )
+    erase_parser.add_argument(
+        '--sync', action='store_true', default=False,
+        help=_('Wait for full completion including post-install triggers')
     )
 
     # =========================================================================
@@ -1112,6 +1115,10 @@ Examples:
         choices=['keep', 'replace', 'ask'],
         default='keep',
         help=_('Config file conflict policy: keep existing (default), replace with package version, or ask')
+    )
+    upgrade_parser.add_argument(
+        '--sync', action='store_true', default=False,
+        help=_('Wait for full completion including post-install triggers')
     )
 
     # =========================================================================
@@ -2035,6 +2042,38 @@ Examples:
         help=_('Overwrite existing metainfo file')
     )
 
+    # =========================================================================
+    # progress
+    # =========================================================================
+    progress_parser = subparsers.add_parser(
+        'progress',
+        help=_('Show progress of background transaction'),
+    )
+    progress_parser.add_argument(
+        '--watch', '-w', action='store_true',
+        help=_('Continuously watch until completion'),
+    )
+
+    # =========================================================================
+    # readme
+    # =========================================================================
+    readme_parser = subparsers.add_parser(
+        'readme',
+        help=_('Show README messages from transactions'),
+    )
+    readme_parser.add_argument(
+        '--last', action='store_true', default=True,
+        help=_('Show README from the last transaction (default)'),
+    )
+    readme_parser.add_argument(
+        '--transaction', '-t', type=int, metavar='ID',
+        help=_('Show README from a specific transaction ID'),
+    )
+    readme_parser.add_argument(
+        '--list', '-l', action='store_true',
+        help=_('List transactions that have README messages'),
+    )
+
     return parser
 
 
@@ -2310,6 +2349,14 @@ def main(argv=None) -> int:
 
         elif args.command == 'appstream':
             return cmd_appstream(args, db)
+
+        elif args.command == 'progress':
+            from .commands.progress import cmd_progress
+            return cmd_progress(args, db)
+
+        elif args.command == 'readme':
+            from .commands.readme import cmd_readme
+            return cmd_readme(args, db)
 
         else:
             return cmd_not_implemented(args, db)
