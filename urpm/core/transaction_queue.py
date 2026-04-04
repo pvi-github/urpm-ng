@@ -565,8 +565,10 @@ class TransactionQueue:
         import subprocess
         import tempfile
 
-        # Serialize queue state to temp file
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pkl') as f:
+        # Serialize queue state to temp file (mode 0o600 to prevent TOCTOU)
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pkl',
+                                         prefix='urpm-') as f:
+            os.fchmod(f.fileno(), 0o600)
             state_file = f.name
             pickle.dump({
                 'root': self.root,
