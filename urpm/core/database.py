@@ -18,7 +18,7 @@ from .db import (
 )
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -367,6 +367,17 @@ CREATE TABLE IF NOT EXISTS media_update_deltas (
     FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_mud_media ON media_update_deltas(media_id);
+
+CREATE TABLE IF NOT EXISTS transaction_readmes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL,
+    package_name TEXT NOT NULL,
+    readme_type TEXT NOT NULL DEFAULT 'generic',
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (transaction_id) REFERENCES history(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tr_transaction ON transaction_readmes(transaction_id);
 """
 
 # Migrations: dict of from_version -> (to_version, sql_script)
@@ -577,6 +588,20 @@ MIGRATIONS = {
     21: (22, """
         -- Migration v21 -> v22: store Last-Modified from synthesis HEAD check
         ALTER TABLE media ADD COLUMN synthesis_last_modified TEXT;
+    """),
+    22: (23, """
+        -- Migration v22 -> v23: transaction README storage
+        CREATE TABLE IF NOT EXISTS transaction_readmes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER NOT NULL,
+            package_name TEXT NOT NULL,
+            readme_type TEXT NOT NULL DEFAULT 'generic',
+            content TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (transaction_id) REFERENCES history(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_tr_transaction
+            ON transaction_readmes(transaction_id);
     """),
 }
 
