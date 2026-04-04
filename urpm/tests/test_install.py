@@ -2224,7 +2224,116 @@ class TestReadmeUrpmi(BaseUrpmiTest):
 
 # TODO or not ? rpm-query-in-scriptlet
 # TODO or not ? rpmnew, tests for rpm ?
-# TODO or not ? should-restart, doesn't seem managed'
+class TestShouldRestart:
+    """Tests for should-restart detection and trigger descriptions.
+
+    These test pure functions from ``urpm.core.needs_restart`` and
+    ``urpm.core.triggers`` that operate on dicts/strings without
+    needing RPM or chroot.
+    """
+
+    @pytest.mark.stable
+    def test_check_needs_restart_from_provides_system(self):
+        """Package providing should-restart:system is detected."""
+        from urpm.core.needs_restart import check_needs_restart_from_provides
+
+        provides = {'kernel-desktop': ['should-restart:system', 'kernel']}
+        result = check_needs_restart_from_provides(provides)
+
+        assert 'system' in result
+        assert 'kernel-desktop' in result['system']
+
+    @pytest.mark.stable
+    def test_check_needs_restart_from_provides_session(self):
+        """Package providing should-restart:session is detected."""
+        from urpm.core.needs_restart import check_needs_restart_from_provides
+
+        provides = {'polkit': ['should-restart:session', 'polkit-libs']}
+        result = check_needs_restart_from_provides(provides)
+
+        assert 'session' in result
+        assert 'polkit' in result['session']
+
+    @pytest.mark.stable
+    def test_check_needs_restart_from_provides_none(self):
+        """Package without should-restart is not flagged."""
+        from urpm.core.needs_restart import check_needs_restart_from_provides
+
+        provides = {'vim': ['vim-common', 'vim-enhanced']}
+        result = check_needs_restart_from_provides(provides)
+
+        assert result == {}
+
+    @pytest.mark.stable
+    def test_check_needs_restart_from_provides_mixed(self):
+        """Mix of system/session/none packages is correctly categorised."""
+        from urpm.core.needs_restart import check_needs_restart_from_provides
+
+        provides = {
+            'kernel-desktop': ['should-restart:system'],
+            'polkit': ['should-restart:session'],
+            'vim': ['vim-common'],
+            'sshd': ['should-restart:sshd'],
+        }
+        result = check_needs_restart_from_provides(provides)
+
+        assert sorted(result.keys()) == ['session', 'sshd', 'system']
+        assert result['system'] == ['kernel-desktop']
+        assert result['session'] == ['polkit']
+        assert result['sshd'] == ['sshd']
+        assert 'vim' not in str(result)
+
+    @pytest.mark.stable
+    def test_format_restart_messages_system(self):
+        """System restart message is formatted correctly."""
+        from urpm.core.needs_restart import format_restart_messages
+
+        messages = format_restart_messages({'system': ['kernel-desktop']})
+
+        assert len(messages) == 1
+        assert 'kernel-desktop' in messages[0]
+        assert 'computer' in messages[0].lower() or 'restart' in messages[0].lower()
+
+    @pytest.mark.stable
+    def test_format_restart_messages_session(self):
+        """Session restart message is formatted correctly."""
+        from urpm.core.needs_restart import format_restart_messages
+
+        messages = format_restart_messages({'session': ['polkit']})
+
+        assert len(messages) == 1
+        assert 'polkit' in messages[0]
+        assert 'session' in messages[0].lower()
+
+    @pytest.mark.stable
+    def test_format_restart_messages_service(self):
+        """Service restart message includes service name and packages."""
+        from urpm.core.needs_restart import format_restart_messages
+
+        messages = format_restart_messages({'sshd': ['openssh-server']})
+
+        assert len(messages) == 1
+        assert 'sshd' in messages[0]
+        assert 'openssh-server' in messages[0]
+
+    @pytest.mark.stable
+    def test_describe_trigger_known(self):
+        """Known trigger (shared-mime-info) returns its description."""
+        from urpm.core.triggers import describe_trigger
+
+        desc = describe_trigger('shared-mime-info')
+
+        assert 'MIME' in desc
+
+    @pytest.mark.stable
+    def test_describe_trigger_unknown(self):
+        """Unknown trigger returns generic 'Running: xxx' message."""
+        from urpm.core.triggers import describe_trigger
+
+        desc = describe_trigger('some-unknown-trigger')
+
+        assert 'some-unknown-trigger' in desc
+        assert 'Running' in desc or 'running' in desc.lower()
 
 
 class TestSpecifyMedia(BaseUrpmiTest):
