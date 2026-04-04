@@ -243,9 +243,19 @@ class UrpmDBusService:
         """DownloadPackages(packages: as, directory: s) -> s (JSON)
 
         Download packages to a specific directory.
+        Requires INSTALL permission (downloads are a prerequisite to install).
         """
+        from ..auth.context import Permission
         self._init_core()
         import json
+
+        context = self._authorize(bus, sender, Permission.INSTALL)
+        if context is None:
+            return json.dumps({
+                'success': False,
+                'paths': [],
+                'error': 'Authorization denied'
+            })
 
         success, paths, error = self._ops.download_to_directory(
             list(package_names), directory
@@ -271,9 +281,18 @@ class UrpmDBusService:
         """InstallFiles(paths: as) -> s (JSON)
 
         Install local RPM files.
+        Requires INSTALL permission via PolicyKit.
         """
+        from ..auth.context import Permission
         self._init_core()
         import json
+
+        context = self._authorize(bus, sender, Permission.INSTALL)
+        if context is None:
+            return json.dumps({
+                'success': False,
+                'error': 'Authorization denied'
+            })
 
         success, error = self._ops.install_local_files(list(rpm_paths))
         return json.dumps({
