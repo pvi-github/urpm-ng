@@ -377,8 +377,11 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         lock.release()  # Release - child will acquire its own lock
 
         # Determine transaction mode: smart sync (default) or full sync (--sync)
+        # Full sync also required for --config-policy (needs rpmnew_files from ts.run).
         import os
         full_sync = getattr(args, 'sync', False)
+        if getattr(args, 'config_policy', 'keep') != 'keep':
+            full_sync = True
 
         # Force full sync if any package provides should-restart:system
         if not full_sync:

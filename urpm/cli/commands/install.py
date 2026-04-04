@@ -929,7 +929,10 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
     # Smart sync (default): parent waits for extraction, triggers run in background.
     # Full sync (--sync): parent waits for everything including triggers.
+    # Full sync also required for --config-policy (needs rpmnew_files from ts.run).
     full_sync = getattr(args, 'sync', False)
+    if getattr(args, 'config_policy', 'keep') != 'keep':
+        full_sync = True
 
     # Check if any package provides should-restart:system — force full sync
     if not full_sync:
