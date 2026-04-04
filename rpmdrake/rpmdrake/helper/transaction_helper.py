@@ -428,8 +428,9 @@ class TransactionHelper:
                 if pkg_info and pkg_info.get('provides'):
                     restart_info[a.name] = pkg_info['provides']
         needs_restart = check_needs_restart_from_provides(restart_info)
-        full_sync = 'system' in needs_restart
 
+        # GUI must always use full sync — it reports "done" to the user
+        # and allows new operations, so triggers must complete first.
         options = InstallOptions()
         result = self.ops.resilient_install(
             rpm_paths,
@@ -439,7 +440,7 @@ class TransactionHelper:
             progress_callback=install_progress,
             erase_names=erase_names,
             mode="upgrade" if operation_id == "upgrade" else "install",
-            full_sync=full_sync,
+            full_sync=True,
         )
 
         if result.success:
@@ -503,7 +504,7 @@ class TransactionHelper:
         result = self.ops.execute_erase(
             erase_names,
             options=options,
-            full_sync=False,
+            full_sync=True,
             progress_callback=progress_callback
         )
 
