@@ -284,7 +284,7 @@ class PackageOperations:
         Args:
             rpm_paths: List of RPM file paths to install
             options: Install options
-            progress_callback: Called with (op_id, name, current, total)
+            progress_callback: Called with a TransactionProgress object
             auth_context: Optional AuthContext for permission check + audit
             actions: PackageAction list from resolver (used for README.urpmi
                      display after transaction completes in the child process)
@@ -323,7 +323,7 @@ class PackageOperations:
             progress_callback=progress_callback,
             full_sync=full_sync,
         )
-        self._audit_complete(auth_context, "install", pkg_names, success=True)
+        self._audit_complete(auth_context, "install", pkg_names, success=result.success)
         return result
 
     def resilient_install(
@@ -501,7 +501,7 @@ class PackageOperations:
         Args:
             package_names: Package names to remove.
             options: Install options.
-            progress_callback: Called with (op_id, name, current, total).
+            progress_callback: Called with a TransactionProgress object.
             auth_context: Optional AuthContext for permission check + audit.
             full_sync: If True, wait for the entire transaction including
                 triggers. If False (default), wait for extraction only and
@@ -533,7 +533,7 @@ class PackageOperations:
             progress_callback=progress_callback,
             full_sync=full_sync,
         )
-        self._audit_complete(auth_context, "remove", package_names, success=True)
+        self._audit_complete(auth_context, "remove", package_names, success=result.success)
         return result
 
     def execute_upgrade(
@@ -556,7 +556,7 @@ class PackageOperations:
             erase_names: Package names to remove (obsoleted)
             orphan_names: Orphaned deps to remove in background
             options: Install options
-            progress_callback: Called with (op_id, name, current, total)
+            progress_callback: Called with a TransactionProgress object
             auth_context: Optional AuthContext for permission check + audit
             full_sync: If True, wait for the entire transaction including
                 triggers. If False (default), wait for extraction only and
@@ -605,7 +605,7 @@ class PackageOperations:
             progress_callback=progress_callback,
             full_sync=full_sync,
         )
-        self._audit_complete(auth_context, "upgrade", pkg_names, success=True)
+        self._audit_complete(auth_context, "upgrade", pkg_names, success=result.success)
         return result
 
     # =========================================================================
