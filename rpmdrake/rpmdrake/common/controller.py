@@ -1151,7 +1151,8 @@ class Controller:
             self.view.on_download_progress(current, total, bytes_done, bytes_total, slot_dicts)
 
         def on_install_progress(name: str, current: int, total: int,
-                                phase: str = "install", script: str = None):
+                                phase: str = "install", script: str = None,
+                                bytes_done: int = 0, bytes_total: int = 0):
             # rpmdb sync detection
             if name.startswith("(updating rpmdb)") or name.startswith("(rpmdb progress)"):
                 self.view.start_rpmdb_sync()
@@ -1165,7 +1166,7 @@ class Controller:
             if action == 'erase':
                 self.view.on_erase_progress(name, current, total)
             else:
-                self.view.on_install_progress(name, current, total)
+                self.view.on_install_progress(name, current, total, bytes_done, bytes_total)
 
         def on_error(message: str):
             self._current_helper = None
@@ -1191,6 +1192,8 @@ class Controller:
             if result.excluded_packages:
                 details['excluded_packages'] = result.excluded_packages
                 details['reduced_transaction'] = result.reduced_transaction
+            if result.restart_messages:
+                details['restart_messages'] = result.restart_messages
             self.view.on_transaction_complete(result.success, details)
 
         def on_readme(messages: list) -> bool:

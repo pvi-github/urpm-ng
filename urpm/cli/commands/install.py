@@ -935,6 +935,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         full_sync = True
 
     # Check if any package provides should-restart:system — force full sync
+    restart_info = {}
     if not full_sync:
         from ...core.needs_restart import check_needs_restart_from_provides
         import solv
@@ -963,10 +964,11 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     )
                 ))
 
-    print(colors.info("\n" + ngettext(
+    _header_text = ngettext(
         "Installing {count} package...",
         "Installing {count} packages...",
-        len(rpm_paths)).format(count=len(rpm_paths))))
+        len(rpm_paths)).format(count=len(rpm_paths))
+    print(colors.info("\n" + _header_text))
 
     # Check if another install is in progress
     # Use root path for lock file when installing to chroot
@@ -1002,62 +1004,87 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         from ...core.transaction_queue import TransactionProgress, TransactionPhase
         from ...core.triggers import describe_trigger
 
-        last_progress_state = [None]  # (packages_done, phase, package_name)
+        last_progress_state = [None]
+        _trace_file = open('/tmp/progress_trace.log', 'w')
+        _progress_started = [False]
+
+        try:
+            _term_width = os.get_terminal_size().columns
+        except OSError:
+            _term_width = 80
+
+        # Bar occupies full width minus the fixed-width count suffix " XX/XX 100%"
+        _total = len(rpm_paths)
+        _dw = len(str(_total))
+        _count_suffix_width = 1 + _dw + 1 + _dw + 1 + 4  # " X/X 100%"
+        _bar_width = max(_term_width - _count_suffix_width - 2, 10)
 
         def queue_progress(progress: TransactionProgress):
-            """Render a full-width terminal progress bar for RPM transactions.
+            """Two-line progress display:
 
-            Shows package extraction progress during INSTALL/ERASE phases and
-            scriptlet activity during the SCRIPT phase.  VERIFY and PREPARE
-            phases are ignored (they complete in <0.5 s).
-
-            In full sync mode, SCRIPT phase shows human-readable trigger
-            descriptions via :func:`describe_trigger`.
+            Line 1: header (left) + package/trigger info (right-aligned)
+            Line 2: [████░░░░░░░░░░░░░░░░░░░░░░░] XX/XX 100%
             """
-            # Skip VERIFY/PREPARE — too fast to bother displaying
+            _trace_file.write(
+                f"phase={progress.phase.value} pkg={progress.package_name} "
+                f"done={progress.packages_done}/{progress.packages_total} "
+                f"bytes={progress.bytes_done}/{progress.bytes_total} "
+                f"script={progress.script_name}\n"
+            )
+            _trace_file.flush()
+
             if progress.phase in (TransactionPhase.VERIFY,
                                   TransactionPhase.PREPARE):
                 return
 
-            # Deduplicate: only redraw when something visible changed
             state = (progress.packages_done, progress.phase,
                      progress.package_name, progress.script_name)
             if state == last_progress_state[0]:
                 return
             last_progress_state[0] = state
 
-            try:
-                width = os.get_terminal_size().columns
-            except OSError:
-                width = 80
-
             done = progress.packages_done
             total = progress.packages_total
 
+            # --- Info text (right-aligned on header line) ---
             if progress.phase == TransactionPhase.SCRIPT:
-                # Scripts phase: bar stays full, show which scriptlet is running.
-                # In full sync mode, use describe_trigger() for human-readable
-                # descriptions (e.g., "Rebuilding MIME database" instead of
-                # "shared-mime-info").
+                pct = int(done * 100 / total) if total else 100
                 if full_sync and progress.script_name:
-                    label = describe_trigger(progress.script_name)
+                    info = f"Running: {describe_trigger(progress.script_name)}"
                 else:
-                    label = progress.script_name or progress.package_name
-                suffix = f" {done}/{total} Running: {label}"
-                pct = 100
+                    info = f"Running: {progress.script_name or progress.package_name}"
             else:
-                # INSTALL or ERASE: show package-level extraction progress
-                pct = int(done * 100 / total) if total else 0
-                suffix = f" {done}/{total} {progress.package_name} ({pct}%)"
+                if total > 0:
+                    pkg_frac = done / total
+                    if progress.bytes_total > 0:
+                        pkg_frac += (progress.bytes_done / progress.bytes_total) / total
+                    pct = int(pkg_frac * 100)
+                else:
+                    pct = 0
+                info = progress.package_name
 
-            # Build the bar: [████░░░░] suffix
-            # 2 chars for brackets, 1 space before suffix
-            bar_width = width - len(suffix) - 2
-            if bar_width < 10:
-                bar_width = 10
-            filled = int(bar_width * pct / 100)
-            bar = f"[{'█' * filled}{'░' * (bar_width - filled)}]{suffix}"
-            print(f"\r\033[K{bar}", end='', flush=True)
+            # Truncate info if it won't fit beside the header
+            max_info = _term_width - len(_header_text) - 1
+            if len(info) > max_info:
+                info = info[:max_info - 1] + "…"
+
+            # --- Header line: title left, info right ---
+            padding = _term_width - len(_header_text) - len(info)
+            header_line = f"{_header_text}{' ' * max(padding, 1)}{info}"
+
+            # --- Bar line: full-width bar + fixed-width count ---
+            filled = int(_bar_width * pct / 100)
+            count_suffix = f" {done:>{_dw}}/{total} {pct:>3}%"
+            bar_line = f"[{'█' * filled}{'░' * (_bar_width - filled)}]{count_suffix}"
+
+            if not _progress_started[0]:
+                _progress_started[0] = True
+                # Cursor is on blank line after header; move up, rewrite both
+                print(f"\033[A\r\033[K{header_line}\n\033[K{bar_line}",
+                      end='', flush=True)
+            else:
+                print(f"\033[A\r\033[K{header_line}\n\033[K{bar_line}",
+                      end='', flush=True)
 
         # Use resilient pipeline for signature pre-check + retry + exclusion
         resilient_result = ops.resilient_install(
@@ -1071,8 +1098,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             full_sync=full_sync,
         )
 
-        # Print done
-        print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done"))
+        # Clear 2-line progress and print done
+        print(f"\033[A\r\033[K{_header_text}\n\033[K  [{_total}/{_total}] " + _("done"))
 
         # Show excluded packages warning
         if resilient_result.excluded_packages:
@@ -1151,6 +1178,12 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                                 print(output)
                     except Exception:
                         pass
+
+        # Display restart recommendations
+        if restart_info:
+            from ...core.needs_restart import format_restart_messages
+            for msg in format_restart_messages(restart_info):
+                print(colors.warning(f"  ⚠ {msg}"))
 
         # Update installed-through-deps.list for urpmi compatibility
         ops.mark_dependencies(resolver, result.actions)

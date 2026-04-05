@@ -36,6 +36,7 @@ class TransactionResult:
     readme_messages: list = None  # List of {"package": str, "content": str}
     excluded_packages: list = None  # List of {"name": str, "reason": str}
     reduced_transaction: bool = False  # True if some packages were excluded
+    restart_messages: list = None  # List of str (human-readable restart recommendations)
 
 
 class HelperClient:
@@ -45,7 +46,7 @@ class HelperClient:
         self,
         on_status: Callable[[str], None] = None,
         on_download_progress: Callable[[str, int, int, int, int, List[DownloadSlotInfo]], None] = None,
-        on_install_progress: Callable[[str, int, int, str, Optional[str]], None] = None,
+        on_install_progress: Callable[[str, int, int, str, Optional[str], int, int], None] = None,
         on_error: Callable[[str], None] = None,
         on_done: Callable[[TransactionResult], None] = None,
         on_readme: Callable[[list], bool] = None,
@@ -56,9 +57,10 @@ class HelperClient:
             on_status: Called with status messages.
             on_download_progress: Called with (name, current, total, bytes_done, bytes_total, slots)
                                   during download. slots is a list of DownloadSlotInfo.
-            on_install_progress: Called with (name, current, total, phase, script).
+            on_install_progress: Called with (name, current, total, phase, script, bytes_done, bytes_total).
                                   phase: 'install', 'script', 'script_done', etc.
                                   script: trigger/scriptlet name or None.
+                                  bytes_done/bytes_total: cpio extraction progress within current package.
             on_error: Called with error messages.
             on_done: Called when transaction completes.
             on_readme: Called with README.urpmi messages before install.
@@ -189,6 +191,8 @@ class HelperClient:
                     msg.get("total", 0),
                     msg.get("phase", "install"),
                     msg.get("script"),
+                    msg.get("bytes_done", 0),
+                    msg.get("bytes_total", 0),
                 )
 
         elif msg_type == "error":
@@ -210,6 +214,7 @@ class HelperClient:
                     readme_messages=msg.get("readme_messages"),
                     excluded_packages=msg.get("excluded_packages"),
                     reduced_transaction=msg.get("reduced_transaction", False),
+                    restart_messages=msg.get("restart_messages"),
                 ))
 
         elif msg_type == "readme":

@@ -382,8 +382,13 @@ class CollapsibleProgressWidget(QWidget):
             if i not in updated:
                 slot_widget.set_progress(SlotInfo(slot=i))
 
-    def update_install(self, name: str, current: int, total: int):
-        """Update install progress."""
+    def update_install(self, name: str, current: int, total: int,
+                       bytes_done: int = 0, bytes_total: int = 0):
+        """Update install progress.
+
+        Smooth progress combining completed packages + byte-level
+        extraction of the current package (same formula as CLI).
+        """
         if self._phase != ProgressPhase.INSTALL:
             self.set_phase(ProgressPhase.INSTALL)
             # Clear slots when switching to install
@@ -393,7 +398,10 @@ class CollapsibleProgressWidget(QWidget):
         self.count_label.setText(f"[{current}/{total}]")
 
         if total > 0:
-            pct = int(current * 100 / total)
+            pkg_frac = current / total
+            if bytes_total > 0:
+                pkg_frac += (bytes_done / bytes_total) / total
+            pct = int(pkg_frac * 100)
             self.main_progress.setRange(0, 100)
             self.main_progress.setValue(pct)
             self.pct_label.setText(f"{pct}%")

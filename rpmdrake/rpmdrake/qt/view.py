@@ -34,7 +34,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
     _show_loading = Signal(bool)
     _show_progress = Signal(str, str, int, int, float)
     _show_download_progress = Signal(int, int, int, int, list)  # pkg_cur, pkg_tot, bytes, bytes_tot, slots
-    _show_install_progress = Signal(str, int, int)  # name, current, total
+    _show_install_progress = Signal(str, int, int, int, int)  # name, current, total, bytes_done, bytes_total
     _show_erase_progress = Signal(str, int, int)  # name, current, total
     _show_trigger_progress = Signal(str, int, int)  # trigger_name, current, total
     _start_transaction = Signal(str)  # action: install, upgrade, erase
@@ -159,9 +159,10 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         """Update download progress with slot details."""
         self._show_download_progress.emit(pkg_current, pkg_total, bytes_done, bytes_total, slots)
 
-    def on_install_progress(self, name: str, current: int, total: int) -> None:
+    def on_install_progress(self, name: str, current: int, total: int,
+                            bytes_done: int = 0, bytes_total: int = 0) -> None:
         """Update install progress."""
-        self._show_install_progress.emit(name, current, total)
+        self._show_install_progress.emit(name, current, total, bytes_done, bytes_total)
 
     def on_trigger_progress(self, name: str, current: int, total: int) -> None:
         """Update post-install trigger progress."""
@@ -536,10 +537,11 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
             pkg_current, pkg_total, bytes_done, bytes_total, slot_infos
         )
 
-    @Slot(str, int, int)
-    def _do_show_install_progress(self, name: str, current: int, total: int) -> None:
+    @Slot(str, int, int, int, int)
+    def _do_show_install_progress(self, name: str, current: int, total: int,
+                                  bytes_done: int = 0, bytes_total: int = 0) -> None:
         """Show install progress."""
-        self.window.progress_widget.update_install(name, current, total)
+        self.window.progress_widget.update_install(name, current, total, bytes_done, bytes_total)
 
     @Slot(str, int, int)
     def _do_show_erase_progress(self, name: str, current: int, total: int) -> None:
@@ -663,9 +665,16 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
                     content = rm.get('content', '') if isinstance(rm, dict) else getattr(rm, 'content', '')
                     msg += f"\n── {pkg} ──\n{content}\n"
 
+            # Show restart recommendations if needed
+            restart_msgs = summary.get('restart_messages') or []
+            if restart_msgs:
+                msg += "\n\n⚠ Redémarrage recommandé :\n"
+                for rm in restart_msgs:
+                    msg += f"  • {rm}\n"
+
             # Show the result dialog immediately — don't block on cache refresh.
             self.window.progress_widget.finish()
-            msg_type = "warning" if (excluded or readme_msgs) else "info"
+            msg_type = "warning" if (excluded or readme_msgs or restart_msgs) else "info"
             self._show_styled_message("Terminé", msg, msg_type)
 
             # Synchronous refresh after the dialog is dismissed.

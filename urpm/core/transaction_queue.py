@@ -1357,12 +1357,16 @@ queue._child_process_standalone()
                                 pipe_state['closed'] = True
                 return
 
-            # ── ELEM_PROGRESS: reliable package index (fires at start of each pkg) ──
+            # ── ELEM_PROGRESS: fires at start of each pkg (install + erase) ──
+            # RPM's amount/total_pkg here count ALL elements (installs + erases),
+            # which conflicts with our install-only packages_done/total counters.
+            # Only use this to track the current package name.
             if reason == rpm.RPMCALLBACK_ELEM_PROGRESS:
-                name = Path(key).stem.rsplit('-', 2)[0] if key else ''
-                current_pkg_name[0] = name
-                _send_progress(name=name, current=amount, total=total_pkg,
-                               phase='install')
+                if not in_verify[0]:
+                    name = Path(key).stem.rsplit('-', 2)[0] if key else ''
+                    current_pkg_name[0] = name
+                    _send_progress(name=name, current=packages_done[0],
+                                   total=total, phase='install')
                 return
 
             # ── INST_PROGRESS: byte-level extraction progress ──

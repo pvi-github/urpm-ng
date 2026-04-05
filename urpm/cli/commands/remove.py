@@ -219,11 +219,12 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
     signal.signal(signal.SIGINT, sigint_handler)
 
     # Erase packages (all from resolution, including reverse deps and orphans)
-    print(colors.info("\n" + ngettext(
+    packages_to_erase = [action.name for action in all_actions]
+    _header_text = ngettext(
         "Erasing {count} package...",
         "Erasing {count} packages...",
-        len(all_actions)).format(count=len(all_actions))))
-    packages_to_erase = [action.name for action in all_actions]
+        len(all_actions)).format(count=len(all_actions))
+    print(colors.info("\n" + _header_text))
 
     # Check if another operation is in progress
     # Use root path for lock file when operating on chroot
@@ -254,15 +255,25 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         from ...core.transaction_queue import TransactionProgress, TransactionPhase
         from ...core.triggers import describe_trigger
 
+        try:
+            _term_width = os.get_terminal_size().columns
+        except OSError:
+            _term_width = 80
+
+        _total = len(packages_to_erase)
+        _dw = len(str(_total))
+        _count_suffix_width = 1 + _dw + 1 + _dw + 1 + 4
+        _bar_width = max(_term_width - _count_suffix_width - 2, 10)
+        _progress_started = [False]
+
         last_erase_current = [None]
 
         def queue_progress(progress: TransactionProgress):
-            """Render a progress bar for erase/script phases.
+            """Two-line progress display for erase.
 
-            For ERASE phase:  [████░░░░░░] 3/10 firefox (30%)
-            For SCRIPT phase: [██████████] 10/10 Running: shared-mime-info
+            Line 1: header (left) + package/trigger info (right-aligned)
+            Line 2: [████░░░░░░░░░░░░░░░░░░░░░░░] XX/XX 100%
             """
-            # Skip VERIFY/PREPARE — too fast to bother displaying
             if progress.phase in (TransactionPhase.VERIFY,
                                   TransactionPhase.PREPARE):
                 return
@@ -271,39 +282,42 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             total = progress.packages_total
             name = progress.package_name
 
-            # Skip duplicate updates (same count and package)
             if done == last_erase_current[0] and name == last_erase_shown[0]:
                 return
             last_erase_current[0] = done
             last_erase_shown[0] = name
 
-            try:
-                width = os.get_terminal_size().columns
-            except OSError:
-                width = 80
-
             pct = int(done * 100 / total) if total else 0
 
             if progress.phase == TransactionPhase.SCRIPT:
                 label = describe_trigger(progress.script_name) if progress.script_name else name
-                suffix = f" {done}/{total} Running: {label}"
+                info = f"Running: {label}"
             else:
-                suffix = f" {done}/{total} {name} ({pct}%)"
+                info = name
 
-            bar_width = width - len(suffix) - 2
-            if bar_width < 10:
-                bar_width = 10
-            filled = int(bar_width * pct / 100)
-            bar = f"[{'█' * filled}{'░' * (bar_width - filled)}]{suffix}"
-            print(f"\r\033[K{bar}", end='', flush=True)
+            max_info = _term_width - len(_header_text) - 1
+            if len(info) > max_info:
+                info = info[:max_info - 1] + "…"
+
+            padding = _term_width - len(_header_text) - len(info)
+            header_line = f"{_header_text}{' ' * max(padding, 1)}{info}"
+
+            filled = int(_bar_width * pct / 100)
+            count_suffix = f" {done:>{_dw}}/{total} {pct:>3}%"
+            bar_line = f"[{'█' * filled}{'░' * (_bar_width - filled)}]{count_suffix}"
+
+            if not _progress_started[0]:
+                _progress_started[0] = True
+            print(f"\033[A\r\033[K{header_line}\n\033[K{bar_line}",
+                  end='', flush=True)
 
         queue_result = ops.execute_erase(
             packages_to_erase, options=erase_opts,
             full_sync=full_sync, progress_callback=queue_progress,
         )
 
-        # Print done
-        print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] " + _("done"))
+        # Clear 2-line progress and print done
+        print(f"\033[A\r\033[K{_header_text}\n\033[K  [{_total}/{_total}] " + _("done"))
 
         if not queue_result.success:
             print(colors.error("\n" + _("Erase failed:")))

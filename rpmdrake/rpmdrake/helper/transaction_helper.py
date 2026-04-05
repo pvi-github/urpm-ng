@@ -393,6 +393,8 @@ class TransactionHelper:
                 "current": tp.packages_done,
                 "total": tp.packages_total,
                 "phase": tp.phase.value,
+                "bytes_done": tp.bytes_done,
+                "bytes_total": tp.bytes_total,
             }
             if tp.script_name:
                 data["script"] = tp.script_name
@@ -492,7 +494,7 @@ class TransactionHelper:
         result = self.ops.execute_erase(
             erase_names,
             options=options,
-            full_sync=True,
+            full_sync=False,
             progress_callback=progress_callback
         )
 
