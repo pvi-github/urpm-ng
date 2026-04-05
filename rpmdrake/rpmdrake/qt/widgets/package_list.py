@@ -807,6 +807,7 @@ class PackageList(QTableView):
         self.setShowGrid(False)
         self.setWordWrap(False)
 
+        self.setTabKeyNavigation(False)  # Tab moves to next widget, not next cell
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.verticalHeader().hide()
         self.verticalHeader().setDefaultSectionSize(40)

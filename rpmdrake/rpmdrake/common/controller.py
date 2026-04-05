@@ -783,6 +783,7 @@ class Controller:
                 version=p.get('version', ''),
                 release=p.get('release', ''),
                 arch=p.get('arch', 'x86_64'),
+                epoch=int(p.get('epoch', 0) or 0),
                 summary=p.get('summary', ''),
                 installed=is_installed,
                 installed_version=installed_version,

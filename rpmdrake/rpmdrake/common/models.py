@@ -59,6 +59,7 @@ class PackageDisplayInfo:
     version: str
     release: str
     arch: str
+    epoch: int
 
     # Display
     summary: str
@@ -83,8 +84,13 @@ class PackageDisplayInfo:
 
     @property
     def nevra(self) -> str:
-        """Full name-epoch:version-release.arch string."""
-        return f"{self.name}-{self.version}-{self.release}.{self.arch}"
+        """Full name-[epoch:]version-release.arch string.
+
+        The epoch prefix is included only when epoch > 0, matching the
+        standard RPM convention (e.g. ``vim-2:9.1.0-1.mga10.x86_64``).
+        """
+        evr = f"{self.epoch}:{self.version}" if self.epoch else self.version
+        return f"{self.name}-{evr}-{self.release}.{self.arch}"
 
     @property
     def display_version(self) -> str:
