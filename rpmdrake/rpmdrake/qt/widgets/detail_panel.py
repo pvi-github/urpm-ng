@@ -251,6 +251,7 @@ class PackageDetailPanel(QWidget):
         # --- Back button (always visible, above scroll area) ---
         self._btn_back = QPushButton("← Catégories")
         self._btn_back.setFlat(True)
+        self._btn_back.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_back.setStyleSheet(
             "QPushButton { text-align: left; color: palette(link);"
@@ -274,6 +275,7 @@ class PackageDetailPanel(QWidget):
 
         # --- Scrollable content ---
         scroll = QScrollArea()
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -317,6 +319,7 @@ class PackageDetailPanel(QWidget):
 
         # Description (primary content — takes all available space)
         self._description = QTextBrowser()
+        self._description.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._description.setOpenExternalLinks(True)
         self._description.setFrameShape(QFrame.Shape.NoFrame)
         self._description.setStyleSheet("background: transparent;")

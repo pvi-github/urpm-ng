@@ -768,6 +768,8 @@ class PackageList(QTableView):
     selection_changed = Signal(str, bool)    # package nevra, selected
     section_check_toggled = Signal(str, bool)  # section title, checked
     package_activated = Signal(str)          # package_name (double-click)
+    focus_search_requested = Signal()        # Arrow Up at row 0
+    focus_categories_requested = Signal()    # Arrow Right → category tree
 
     # Row index of the currently highlighted row, -1 if none.
     # Updated on currentChanged and stored here so delegates can read it
@@ -891,8 +893,26 @@ class PackageList(QTableView):
     # -----------------------------------------------------------------------
 
     def keyPressEvent(self, event) -> None:
-        """Space toggles the checkbox for the current row."""
+        """Handle keyboard navigation in the package list.
+
+        Space toggles the checkbox.  Arrow Up at row 0 returns to search.
+        """
         key = event.key()
+
+        # Arrow Up at top row → back to search bar
+        is_up = (key == Qt.Key.Key_Up or (hasattr(key, 'value') and key.value == Qt.Key.Key_Up.value))
+        if is_up:
+            idx = self.currentIndex()
+            if not idx.isValid() or idx.row() == 0:
+                self.focus_search_requested.emit()
+                return
+
+        # Arrow Right → jump to category tree
+        is_right = (key == Qt.Key.Key_Right or (hasattr(key, 'value') and key.value == Qt.Key.Key_Right.value))
+        if is_right:
+            self.focus_categories_requested.emit()
+            return
+
         is_space = (
             key == 32
             or key == Qt.Key.Key_Space

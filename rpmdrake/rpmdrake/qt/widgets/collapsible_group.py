@@ -23,6 +23,7 @@ class CollapsibleGroup(QWidget):
 
         self._header = QPushButton(f"▼ {title}")
         self._header.setFlat(True)
+        self._header.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         sc = get_secondary_colors()
         self._header.setStyleSheet(f"""
             QPushButton {{

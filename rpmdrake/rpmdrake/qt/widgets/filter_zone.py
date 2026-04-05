@@ -77,6 +77,14 @@ class FilterZone(QWidget):
         for box in all_boxes:
             box.blockSignals(False)
 
+    def checkboxes(self) -> list:
+        """Return all filter checkboxes (state + display)."""
+        return [
+            self.chk_upgrades, self.chk_installed, self.chk_available,
+            self.chk_libs, self.chk_devel, self.chk_debug,
+            self.chk_i586, self.chk_tasks,
+        ]
+
     # ------------------------------------------------------------------
     # Private
     # ------------------------------------------------------------------
@@ -113,6 +121,10 @@ class FilterZone(QWidget):
         for box in (self.chk_libs, self.chk_devel, self.chk_debug,
                     self.chk_i586, self.chk_tasks):
             layout.addWidget(box)
+
+        # Checkboxes excluded from main Tab chain — accessible via Shift+Ctrl+F
+        for chk in self.checkboxes():
+            chk.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
         layout.addStretch()
 

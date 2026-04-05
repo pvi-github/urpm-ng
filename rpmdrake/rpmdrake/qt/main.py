@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         │   vim       9.1     mga10  x86  Ⓘ │                          │
         ├────────────────────────────────────┴──────────────────────────┤
         │ [CollapsibleProgressWidget]                                   │
-        │ [📥 Installer][🗑 Supprimer][⬆ Mettre à jour (N)][🔄] N pkgs│
+        │ [📥 Installer][🗑 Enlever][⬆ Mettre à jour (N)][🔄]  N pkgs │
         └───────────────────────────────────────────────────────────────┘
     """
 
@@ -207,9 +207,9 @@ class MainWindow(QMainWindow):
             button_stylesheet("#4caf50", "#45a049", "#3d8b40", disabled="#9e9e9e")
         )
 
-        self.btn_remove = QPushButton("🗑 Supprimer")
-        self.btn_remove.setEnabled(False)
-        self.btn_remove.setStyleSheet(
+        self.btn_erase = QPushButton("🗑 Enlever")
+        self.btn_erase.setEnabled(False)
+        self.btn_erase.setStyleSheet(
             button_stylesheet("#f44336", "#da190b", "#c1170a", disabled="#9e9e9e")
         )
 
@@ -237,6 +237,19 @@ class MainWindow(QMainWindow):
         status_layout.setContentsMargins(8, 4, 8, 4)
         self.status_label = QLabel("Prêt")
         status_layout.addWidget(self.status_label)
+
+        # --- Focus policies ---
+        # Only the primary workflow widgets participate in Tab navigation:
+        # SearchBar → PackageList → Install → Erase → Upgrade → Refresh
+        # Everything else is NoFocus (mouse only) or ClickFocus.
+        self.btn_filter_toggle.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_cat_toggle.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.right_stack.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.category_panel.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.detail_panel.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.progress_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.progress_widget.cancel_btn.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.lbl_count.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def _create_layout(self) -> None:
         """Assemble the layout."""
@@ -281,7 +294,7 @@ class MainWindow(QMainWindow):
         # Action bar
         action_bar = QHBoxLayout()
         action_bar.addWidget(self.btn_install)
-        action_bar.addWidget(self.btn_remove)
+        action_bar.addWidget(self.btn_erase)
         action_bar.addWidget(self.btn_upgrade)
         action_bar.addStretch()
         action_bar.addWidget(self.lbl_count)
@@ -289,26 +302,101 @@ class MainWindow(QMainWindow):
         action_bar.addWidget(self.btn_refresh)
         main_layout.addLayout(action_bar)
 
+        # Explicit Tab order: primary workflow chain only
+        self.setTabOrder(self.search_bar, self.package_list)
+        self.setTabOrder(self.package_list, self.btn_install)
+        self.setTabOrder(self.btn_install, self.btn_erase)
+        self.setTabOrder(self.btn_erase, self.btn_upgrade)
+        self.setTabOrder(self.btn_upgrade, self.btn_refresh)
+        self.setTabOrder(self.btn_refresh, self.search_bar)
+
     def _create_shortcuts(self) -> None:
-        """Register keyboard shortcuts."""
+        """Register keyboard shortcuts.
+
+        Primary workflow:
+            Ctrl+F          Focus search bar
+            ↓ (in search)   Jump to package list
+            Space (in list) Toggle package selection
+            Ctrl+Enter      Contextual action (install/erase/upgrade)
+            Ctrl+I          Install selected
+            Ctrl+E          Erase selected
+            Ctrl+U          Upgrade selected
+            Ctrl+R          Refresh package list
+            Shift+Ctrl+F    Toggle filter zone with keyboard focus
+            Ctrl+G          Toggle category tree focus
+            → (in list)     Jump to category tree
+            → (in tree)     Expand node
+            Ctrl+← (tree)  Collapse node
+            ← / Esc (tree)  Return to package list
+            Enter (tree)    Apply category and return to list
+
+        Selection:
+            Ctrl+A          Select all visible packages
+            Escape          Clear selection
+
+        Zoom:
+            Ctrl++/=        Zoom in
+            Ctrl+-          Zoom out
+            Ctrl+0          Reset zoom
+        """
+        # Search & navigation
         QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(
             self.search_bar.focus_search
         )
+        # Selection
         QShortcut(QKeySequence("Ctrl+A"), self).activated.connect(
             self.controller.select_all
         )
         QShortcut(QKeySequence("Escape"), self).activated.connect(
             self._on_clear_selection
         )
+
+        # Actions
+        QShortcut(QKeySequence("Ctrl+Return"), self).activated.connect(
+            self._contextual_action
+        )
+        QShortcut(QKeySequence("Ctrl+I"), self).activated.connect(
+            self.controller.install_selection
+        )
+        QShortcut(QKeySequence("Ctrl+E"), self).activated.connect(
+            self.controller.erase_selection
+        )
+        QShortcut(QKeySequence("Ctrl+U"), self).activated.connect(
+            self.controller.upgrade_selection
+        )
+        QShortcut(QKeySequence("Ctrl+R"), self).activated.connect(self._on_refresh)
+        QShortcut(QKeySequence("F5"), self).activated.connect(self._on_refresh)
+
+        # Filter zone toggle
+        QShortcut(QKeySequence("Ctrl+Shift+F"), self).activated.connect(
+            self._toggle_filter_zone_shortcut
+        )
+
+        # Category tree
+        QShortcut(QKeySequence("Ctrl+G"), self).activated.connect(
+            self._toggle_category_tree
+        )
+
+        # Help
+        QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(
+            self._show_keyboard_help
+        )
+
+        # Zoom
         QShortcut(QKeySequence("Ctrl++"), self).activated.connect(self.zoom_in)
         QShortcut(QKeySequence("Ctrl+="), self).activated.connect(self.zoom_in)
         QShortcut(QKeySequence("Ctrl+-"), self).activated.connect(self.zoom_out)
         QShortcut(QKeySequence("Ctrl+0"), self).activated.connect(self.zoom_reset)
-        QShortcut(QKeySequence("F5"), self).activated.connect(self._on_refresh)
 
     def _connect_signals(self) -> None:
         """Wire widget signals to controller and slots."""
         self.search_bar.search_changed.connect(self.controller.set_search_term)
+        self.search_bar.focus_list_requested.connect(self._focus_package_list)
+        self.package_list.focus_search_requested.connect(self.search_bar.focus_search)
+        self.package_list.focus_categories_requested.connect(self._focus_category_tree)
+        self.category_panel.focus_list_requested.connect(
+            lambda: self.package_list.setFocus()
+        )
 
         # Checkbox-column selection change
         self.package_list.selection_changed.connect(self._on_checkbox_changed)
@@ -322,7 +410,7 @@ class MainWindow(QMainWindow):
 
         # Action buttons
         self.btn_install.clicked.connect(self.controller.install_selection)
-        self.btn_remove.clicked.connect(self.controller.erase_selection)
+        self.btn_erase.clicked.connect(self.controller.erase_selection)
         self.btn_upgrade.clicked.connect(self.controller.upgrade_selection)
         self.btn_refresh.clicked.connect(self._on_refresh)
 
@@ -478,6 +566,155 @@ class MainWindow(QMainWindow):
         self.controller.clear_selection()
         self._update_button_states()
 
+    def _focus_package_list(self) -> None:
+        """Move focus to the package list and select first row if needed."""
+        self.package_list.setFocus()
+        if not self.package_list.currentIndex().isValid():
+            self.package_list.selectRow(0)
+
+    def _contextual_action(self) -> None:
+        """Execute the appropriate action based on selected packages.
+
+        Install if all selected are available, erase if all installed,
+        upgrade if all upgradable.  Do nothing on mixed selections.
+        """
+        model = self.package_list._model
+        categories: set[str] = set()
+
+        for row in range(model.rowCount()):
+            pkg = model.get_package(row)
+            if pkg is None or not pkg.selected:
+                continue
+            if pkg.has_update:
+                categories.add('upgrade')
+            elif pkg.installed:
+                categories.add('erase')
+            else:
+                categories.add('install')
+
+        if len(categories) != 1:
+            return
+
+        action = categories.pop()
+        if action == 'install':
+            self.controller.install_selection()
+        elif action == 'erase':
+            self.controller.erase_selection()
+        elif action == 'upgrade':
+            self.controller.upgrade_selection()
+
+    def _focus_category_tree(self) -> None:
+        """Focus the category tree, ensuring the right panel is visible."""
+        if not self.right_stack.isVisible():
+            self.btn_cat_toggle.setChecked(True)
+        if self.right_stack.currentWidget() is not self.category_panel:
+            self.right_stack.setCurrentWidget(self.category_panel)
+        self.category_panel.focus_tree()
+
+    def _toggle_category_tree(self) -> None:
+        """Toggle focus between category tree and package list (Ctrl+G)."""
+        if self.category_panel._tree.hasFocus():
+            self.package_list.setFocus()
+        else:
+            self._focus_category_tree()
+
+    def _show_keyboard_help(self) -> None:
+        """Show a dialog listing all keyboard shortcuts."""
+        from .compat import QDialog, QVBoxLayout, QTextBrowser, QPushButton
+        from .palette import button_stylesheet
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Raccourcis clavier")
+        dialog.setMinimumSize(480, 420)
+
+        layout = QVBoxLayout(dialog)
+        text = QTextBrowser()
+        text.setOpenExternalLinks(False)
+        text.setHtml("""
+        <style>
+            table { border-collapse: collapse; width: 100%; }
+            th { text-align: left; padding: 6px 8px; border-bottom: 2px solid gray; }
+            td { padding: 4px 8px; }
+            kbd { background: #e0e0e0; border: 1px solid #999; border-radius: 3px;
+                  padding: 1px 5px; font-family: monospace; font-size: 10pt; }
+        </style>
+        <h3>Navigation</h3>
+        <table>
+        <tr><td><kbd>Ctrl+F</kbd></td><td>Recherche</td></tr>
+        <tr><td><kbd>↓</kbd> (recherche)</td><td>Aller à la liste</td></tr>
+        <tr><td><kbd>↑</kbd> (1ère ligne)</td><td>Retour à la recherche</td></tr>
+        <tr><td><kbd>→</kbd> (liste)</td><td>Aller aux catégories</td></tr>
+        <tr><td><kbd>←</kbd> / <kbd>Esc</kbd> (arbre)</td><td>Retour à la liste</td></tr>
+        <tr><td><kbd>Ctrl+G</kbd></td><td>Basculer catégories / liste</td></tr>
+        <tr><td><kbd>Ctrl+Shift+F</kbd></td><td>Ouvrir/fermer les filtres</td></tr>
+        <tr><td><kbd>Tab</kbd> / <kbd>Shift+Tab</kbd></td>
+            <td>Recherche → Liste → Installer → Enlever → Upgrade → Refresh</td></tr>
+        </table>
+
+        <h3>Arbre des catégories</h3>
+        <table>
+        <tr><td><kbd>→</kbd></td><td>Ouvrir un nœud</td></tr>
+        <tr><td><kbd>Ctrl+←</kbd></td><td>Fermer un nœud</td></tr>
+        <tr><td><kbd>Entrée</kbd></td><td>Appliquer la catégorie et retour</td></tr>
+        </table>
+
+        <h3>Sélection</h3>
+        <table>
+        <tr><td><kbd>Espace</kbd></td><td>Sélectionner / désélectionner le paquet</td></tr>
+        <tr><td><kbd>Ctrl+A</kbd></td><td>Tout sélectionner</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Tout désélectionner</td></tr>
+        </table>
+
+        <h3>Actions</h3>
+        <table>
+        <tr><td><kbd>Ctrl+Entrée</kbd></td><td>Action contextuelle (installer/enlever/upgrade)</td></tr>
+        <tr><td><kbd>Ctrl+I</kbd></td><td>Installer</td></tr>
+        <tr><td><kbd>Ctrl+E</kbd></td><td>Enlever</td></tr>
+        <tr><td><kbd>Ctrl+U</kbd></td><td>Mettre à jour</td></tr>
+        <tr><td><kbd>Ctrl+R</kbd> / <kbd>F5</kbd></td><td>Rafraîchir</td></tr>
+        </table>
+
+        <h3>Affichage</h3>
+        <table>
+        <tr><td><kbd>Ctrl++</kbd></td><td>Zoom +</td></tr>
+        <tr><td><kbd>Ctrl+-</kbd></td><td>Zoom −</td></tr>
+        <tr><td><kbd>Ctrl+0</kbd></td><td>Zoom par défaut</td></tr>
+        <tr><td><kbd>Ctrl+H</kbd></td><td>Cette aide</td></tr>
+        </table>
+        """)
+        layout.addWidget(text)
+
+        btn = QPushButton("Fermer")
+        btn.setStyleSheet(button_stylesheet("#607d8b", "#546e7a", "#455a64"))
+        btn.clicked.connect(dialog.accept)
+        btn.setFocus()
+        layout.addWidget(btn)
+
+        dialog.exec()
+
+    def _toggle_filter_zone_shortcut(self) -> None:
+        """Toggle filter zone visibility with keyboard focus management.
+
+        - If focus is on a filter checkbox: close zone, return to search.
+        - Otherwise: open/show zone and focus first checkbox.
+        """
+        focused = QApplication.focusWidget()
+        in_filters = focused in self.filter_zone.checkboxes()
+
+        if in_filters:
+            # Leave filter zone
+            self.btn_filter_toggle.setChecked(False)
+            for chk in self.filter_zone.checkboxes():
+                chk.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+            self.search_bar.setFocus()
+        else:
+            # Enter filter zone
+            if not self.filter_zone.isVisible():
+                self.btn_filter_toggle.setChecked(True)
+            for chk in self.filter_zone.checkboxes():
+                chk.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            self.filter_zone.checkboxes()[0].setFocus()
+
     def _on_refresh(self) -> None:
         """Refresh package list: reload caches in background, update UI on main thread."""
         self.set_loading(True)
@@ -533,7 +770,7 @@ class MainWindow(QMainWindow):
                 can_install = True
 
         self.btn_install.setEnabled(can_install)
-        self.btn_remove.setEnabled(can_remove)
+        self.btn_erase.setEnabled(can_remove)
 
         if can_upgrade:
             self.btn_upgrade.setText(f"⬆ Mettre à jour ({n_upgrades})")
@@ -692,6 +929,7 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
+    window.search_bar.setFocus()
 
     # Defer heavy loading so the window appears immediately
     from .compat import QTimer

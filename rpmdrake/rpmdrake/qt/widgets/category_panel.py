@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from ..compat import (
     Qt,
     Signal,
+    QEvent,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -85,6 +86,7 @@ class CategoryPanel(QWidget):
     """
 
     category_changed = Signal(object)   # str | None
+    focus_list_requested = Signal()    # Left/Esc → back to package list
 
     def __init__(self, controller: 'Controller', parent=None):
         super().__init__(parent)
@@ -167,6 +169,8 @@ class CategoryPanel(QWidget):
 
         # Category tree (takes all available vertical space)
         self._tree = QTreeWidget()
+        self._tree.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._tree.installEventFilter(self)
         self._tree.setHeaderHidden(True)
         self._tree.setIndentation(12)
         self._tree.setRootIsDecorated(True)
@@ -247,6 +251,49 @@ class CategoryPanel(QWidget):
                 " font-weight: bold;"
                 " border-radius: 3px;"
             )
+
+    def focus_tree(self) -> None:
+        """Give keyboard focus to the category tree."""
+        self._tree.setFocus()
+        if self._tree.currentItem() is None:
+            top = self._tree.topLevelItem(0)
+            if top:
+                self._tree.setCurrentItem(top)
+
+    def eventFilter(self, obj, event) -> bool:
+        """Handle keyboard navigation in the category tree.
+
+        Left:       return to package list.
+        Ctrl+Left:  collapse current node.
+        Right:      expand current node (native QTreeWidget).
+        Escape:     return to package list.
+        Return:     apply selected category and return to package list.
+        """
+        if obj is self._tree and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            is_left = (key == Qt.Key.Key_Left or (hasattr(key, 'value') and key.value == Qt.Key.Key_Left.value))
+            is_esc = (key == Qt.Key.Key_Escape or (hasattr(key, 'value') and key.value == Qt.Key.Key_Escape.value))
+            is_enter = (key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter
+                        or (hasattr(key, 'value') and key.value in (Qt.Key.Key_Return.value, Qt.Key.Key_Enter.value)))
+
+            if is_left:
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    # Ctrl+Left: collapse current node
+                    item = self._tree.currentItem()
+                    if item and item.isExpanded():
+                        self._tree.collapseItem(item)
+                    return True
+                # Left without Ctrl: back to package list
+                self.focus_list_requested.emit()
+                return True
+            if is_esc:
+                self.focus_list_requested.emit()
+                return True
+            if is_enter:
+                # Category already applied via currentItemChanged; go back
+                self.focus_list_requested.emit()
+                return True
+        return super().eventFilter(obj, event)
 
     def _on_category_changed(
         self, current: QTreeWidgetItem, previous: QTreeWidgetItem
