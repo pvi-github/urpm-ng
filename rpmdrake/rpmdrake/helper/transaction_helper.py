@@ -408,8 +408,12 @@ class TransactionHelper:
                     restart_info[a.name] = pkg_info['provides']
         needs_restart = check_needs_restart_from_provides(restart_info)
 
-        # GUI must always use full sync — it reports "done" to the user
-        # and allows new operations, so triggers must complete first.
+        # Smart sync (default): return after extraction + per-package scripts.
+        # Generic triggers (shared-mime-info, ldconfig, etc.) run in background.
+        # READMEs are collected and sent before triggers (phase='install_done').
+        # Full sync only when a system restart is required.
+        full_sync = 'system' in needs_restart if needs_restart else False
+
         options = InstallOptions()
         result = self.ops.resilient_install(
             rpm_paths,
@@ -419,7 +423,7 @@ class TransactionHelper:
             progress_callback=install_progress,
             erase_names=erase_names,
             mode="upgrade" if operation_id == "upgrade" else "install",
-            full_sync=True,
+            full_sync=full_sync,
         )
 
         if result.success:

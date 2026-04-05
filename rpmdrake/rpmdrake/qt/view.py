@@ -36,6 +36,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
     _show_download_progress = Signal(int, int, int, int, list)  # pkg_cur, pkg_tot, bytes, bytes_tot, slots
     _show_install_progress = Signal(str, int, int)  # name, current, total
     _show_erase_progress = Signal(str, int, int)  # name, current, total
+    _show_trigger_progress = Signal(str, int, int)  # trigger_name, current, total
     _start_transaction = Signal(str)  # action: install, upgrade, erase
     _finish_transaction = Signal()
     _start_rpmdb_sync = Signal()
@@ -59,6 +60,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         self._show_download_progress.connect(self._do_show_download_progress)
         self._show_install_progress.connect(self._do_show_install_progress)
         self._show_erase_progress.connect(self._do_show_erase_progress)
+        self._show_trigger_progress.connect(self._do_show_trigger_progress)
         self._start_transaction.connect(self._do_start_transaction)
         self._finish_transaction.connect(self._do_finish_transaction)
         self._start_rpmdb_sync.connect(self._do_start_rpmdb_sync)
@@ -86,6 +88,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
     def refresh_package_states(self) -> None:
         """Repaint the package list without rebuilding the list structure."""
+        self.window.package_list._model.sync_section_checks()
         self.window.package_list.viewport().update()
 
     def show_loading(self, loading: bool) -> None:
@@ -159,6 +162,10 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
     def on_install_progress(self, name: str, current: int, total: int) -> None:
         """Update install progress."""
         self._show_install_progress.emit(name, current, total)
+
+    def on_trigger_progress(self, name: str, current: int, total: int) -> None:
+        """Update post-install trigger progress."""
+        self._show_trigger_progress.emit(name, current, total)
 
     def start_rpmdb_sync(self) -> None:
         """Signal start of rpmdb sync phase."""
@@ -539,6 +546,11 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         """Show erase progress."""
         self.window.progress_widget.update_erase(name, current, total)
 
+    @Slot(str, int, int)
+    def _do_show_trigger_progress(self, name: str, current: int, total: int) -> None:
+        """Show trigger/scriptlet progress."""
+        self.window.progress_widget.update_triggers(name, current, total)
+
     @Slot()
     def _do_start_rpmdb_sync(self) -> None:
         """Start rpmdb sync display."""
@@ -651,16 +663,21 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
                     content = rm.get('content', '') if isinstance(rm, dict) else getattr(rm, 'content', '')
                     msg += f"\n── {pkg} ──\n{content}\n"
 
-            # Refresh caches while "Finalisation" is still visible
-            self.window.controller.refresh_after_transaction()
+            # Show the result dialog immediately — don't block on cache refresh.
             self.window.progress_widget.finish()
-            # Reset action buttons (selection was cleared)
-            self.window._update_button_states()
-            # Refresh detail panel if a package row is still selected
-            self._refresh_detail_panel()
-            # Show success dialog after everything is updated
             msg_type = "warning" if (excluded or readme_msgs) else "info"
             self._show_styled_message("Terminé", msg, msg_type)
+
+            # Synchronous refresh after the dialog is dismissed.
+            # _on_refresh (async) caused stale display — packages stayed
+            # selected/marked installed after erase, or not marked after install.
+            self.window.set_loading(True)
+            self.window.status_label.setText("Rafraîchissement...")
+            from .compat import QApplication
+            QApplication.processEvents()
+            self.window.controller.refresh_after_transaction()
+            self.window.category_panel.populate_categories()
+            self.window.set_loading(False)
         else:
             errors = summary.get('errors', [])
             # Cancel is not an error — silently ignore it

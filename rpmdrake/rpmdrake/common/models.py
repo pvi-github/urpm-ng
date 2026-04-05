@@ -11,6 +11,7 @@ __all__ = [
     "PackageState",
     "InstallReason",
     "PackageDisplayInfo",
+    "SectionHeader",
     "FilterState",
 ]
 
@@ -29,6 +30,21 @@ class InstallReason(Enum):
     DEPENDENCY = "dep"       # Installed as dependency
     ORPHAN = "orphan"        # No longer needed
     UNKNOWN = "unknown"      # Unknown reason
+
+
+@dataclass
+class SectionHeader:
+    """Section separator in the package list.
+
+    By default purely decorative.  When *checkable* is ``True``, the
+    checkbox column displays a toggle that selects / deselects every
+    package in the section at once (used for the "Mises à jour" section).
+
+    Example title: ``"══ Mises à jour (3) ══"``
+    """
+    title: str
+    checkable: bool = False
+    checked: bool = False
 
 
 @dataclass

@@ -1,6 +1,5 @@
 """Package list widget for rpmdrake-ng."""
 
-from dataclasses import dataclass
 from typing import List, Optional, Union
 
 from ..compat import (
@@ -27,7 +26,7 @@ from ..compat import (
     QFontMetrics,
 )
 
-from ...common.models import PackageDisplayInfo, InstallReason
+from ...common.models import PackageDisplayInfo, SectionHeader, InstallReason
 from ..palette import get_state_colors
 
 __all__ = ["PackageList", "PackageTableModel", "SectionHeader"]
@@ -52,20 +51,6 @@ _SEL_BG_LIGHT = QColor("#bbdefb")      # Blue 100
 _SEL_FG_LIGHT = QColor("#000000")
 _SEL_BG_DARK  = QColor("#1565c0")      # Blue 800
 _SEL_FG_DARK  = QColor("#ffffff")
-
-
-# ---------------------------------------------------------------------------
-# Section header row
-# ---------------------------------------------------------------------------
-
-@dataclass
-class SectionHeader:
-    """Visual section separator row in the package table.
-
-    Not selectable, not interactive — purely decorative/informational.
-    Example title: "══ Mises à jour (3) ══"
-    """
-    title: str
 
 
 # Type alias for model rows
@@ -137,6 +122,7 @@ class PackageTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows: List[_Row] = []
+        self._syncing_sections = False
 
     # -----------------------------------------------------------------------
     # QAbstractTableModel interface
@@ -176,6 +162,9 @@ class PackageTableModel(QAbstractTableModel):
                 font = QFont()
                 font.setBold(True)
                 return font
+            if role == Qt.ItemDataRole.CheckStateRole and col == self.COL_CHECKBOX:
+                if item.checkable:
+                    return Qt.CheckState.Checked if item.checked else Qt.CheckState.Unchecked
             return None
 
         # --- Normal package rows ---
@@ -234,8 +223,10 @@ class PackageTableModel(QAbstractTableModel):
         item = self._rows[index.row()] if 0 <= index.row() < len(self._rows) else None
 
         if isinstance(item, SectionHeader):
-            # Section headers are visible but not interactive
-            return Qt.ItemFlag.ItemIsEnabled
+            flags = Qt.ItemFlag.ItemIsEnabled
+            if item.checkable and index.column() == self.COL_CHECKBOX:
+                flags |= Qt.ItemFlag.ItemIsUserCheckable
+            return flags
 
         flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         if index.column() == self.COL_CHECKBOX:
@@ -249,10 +240,17 @@ class PackageTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.CheckStateRole and index.column() == self.COL_CHECKBOX:
             row = index.row()
             item = self._rows[row] if 0 <= row < len(self._rows) else None
+            # Accept both Qt.CheckState enum and raw int (PySide6 compatibility)
+            value_int = getattr(value, 'value', value)
+            is_checked = (value_int == 2)  # 2 == Qt.CheckState.Checked
+
             if isinstance(item, PackageDisplayInfo):
-                # Accept both Qt.CheckState enum and raw int (PySide6 compatibility)
-                value_int = getattr(value, 'value', value)
-                item.selected = (value_int == 2)  # 2 == Qt.CheckState.Checked
+                item.selected = is_checked
+                self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
+                return True
+
+            if isinstance(item, SectionHeader) and item.checkable:
+                item.checked = is_checked
                 self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
                 return True
 
@@ -292,9 +290,12 @@ class PackageTableModel(QAbstractTableModel):
         """
         self.beginResetModel()
         self._rows = []
-        for title, packages in sections:
-            if title:
-                self._rows.append(SectionHeader(title))
+        for header, packages in sections:
+            if header:
+                if isinstance(header, SectionHeader):
+                    self._rows.append(header)
+                else:
+                    self._rows.append(SectionHeader(header))
             self._rows.extend(packages)
         self.endResetModel()
 
@@ -309,6 +310,53 @@ class PackageTableModel(QAbstractTableModel):
             if isinstance(item, PackageDisplayInfo) and item.name == name:
                 return item
         return None
+
+    def sync_section_checks(self) -> None:
+        """Update checkable section headers based on their packages' state.
+
+        A section header is checked when **all** its packages are selected,
+        and unchecked otherwise.  Called after individual checkbox changes
+        so the header stays consistent.
+
+        Uses ``_syncing_sections`` guard to prevent re-entrant signals.
+        """
+        self._syncing_sections = True
+        current_header: Optional[SectionHeader] = None
+        header_row = -1
+        section_packages: list[PackageDisplayInfo] = []
+
+        for i, item in enumerate(self._rows):
+            if isinstance(item, SectionHeader):
+                # Flush previous section
+                if current_header is not None and current_header.checkable:
+                    self._apply_section_check(
+                        current_header, header_row, section_packages,
+                    )
+                current_header = item
+                header_row = i
+                section_packages = []
+            elif isinstance(item, PackageDisplayInfo):
+                section_packages.append(item)
+
+        # Flush last section
+        if current_header is not None and current_header.checkable:
+            self._apply_section_check(
+                current_header, header_row, section_packages,
+            )
+        self._syncing_sections = False
+
+    def _apply_section_check(
+        self,
+        header: SectionHeader,
+        header_row: int,
+        packages: list,
+    ) -> None:
+        """Set header.checked = all packages selected, emit dataChanged."""
+        all_selected = bool(packages) and all(p.selected for p in packages)
+        if header.checked != all_selected:
+            header.checked = all_selected
+            idx = self.index(header_row, self.COL_CHECKBOX)
+            self.dataChanged.emit(idx, idx, [Qt.ItemDataRole.CheckStateRole])
 
     # -----------------------------------------------------------------------
     # Display helpers
@@ -352,21 +400,43 @@ class PackageTableModel(QAbstractTableModel):
 # Background drawing helpers
 # ---------------------------------------------------------------------------
 
+# Cached dark-mode flag — avoids calling QApplication.palette() on every cell
+# paint (~180 times per repaint).  Invalidated by _refresh_dark_mode_cache()
+# which is connected to QApplication.paletteChanged in PackageList.__init__.
+_dark_mode_cache: Optional[bool] = None
+
+
+def _refresh_dark_mode_cache() -> None:
+    """Recompute and cache the dark-mode flag (call on palette change)."""
+    global _dark_mode_cache
+    _dark_mode_cache = QApplication.palette().color(
+        QPalette.ColorRole.Window
+    ).lightness() < 128
+
+
 def _is_dark() -> bool:
-    """Return True when the application is running in dark mode."""
-    return QApplication.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    """Return True when the application is running in dark mode (cached)."""
+    global _dark_mode_cache
+    if _dark_mode_cache is None:
+        _refresh_dark_mode_cache()
+    return _dark_mode_cache
+
+
+# Pre-computed color tuples — avoids tuple construction per cell
+_ACTIVE_COLORS_LIGHT = (_ACTIVE_BG_LIGHT, _ACTIVE_FG_LIGHT)
+_ACTIVE_COLORS_DARK  = (_ACTIVE_BG_DARK, _ACTIVE_FG_DARK)
+_SEL_COLORS_LIGHT    = (_SEL_BG_LIGHT, _SEL_FG_LIGHT)
+_SEL_COLORS_DARK     = (_SEL_BG_DARK, _SEL_FG_DARK)
 
 
 def _active_colors() -> tuple:
     """(bg, fg) for the active/current row (navigation cursor, no checkbox)."""
-    return (_ACTIVE_BG_DARK, _ACTIVE_FG_DARK) if _is_dark() \
-        else (_ACTIVE_BG_LIGHT, _ACTIVE_FG_LIGHT)
+    return _ACTIVE_COLORS_DARK if _is_dark() else _ACTIVE_COLORS_LIGHT
 
 
 def _sel_colors() -> tuple:
     """(bg, fg) for a checkbox-selected row."""
-    return (_SEL_BG_DARK, _SEL_FG_DARK) if _is_dark() \
-        else (_SEL_BG_LIGHT, _SEL_FG_LIGHT)
+    return _SEL_COLORS_DARK if _is_dark() else _SEL_COLORS_LIGHT
 
 
 def _is_row_selected(option, index) -> bool:
@@ -422,16 +492,38 @@ class PackageDelegate(QStyledItemDelegate):
 
     The row height is set externally via QHeaderView.setDefaultSectionSize()
     to accommodate two lines.
+
+    Font and metrics objects are cached and only rebuilt when the base font
+    changes (zoom in/out or style change).
     """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cached_base_font: Optional[QFont] = None
+        self._name_font: Optional[QFont] = None
+        self._name_metrics: Optional[QFontMetrics] = None
+        self._summary_font: Optional[QFont] = None
+        self._summary_metrics: Optional[QFontMetrics] = None
+
+    def _ensure_fonts(self, base_font: QFont) -> None:
+        """Rebuild cached fonts if the base font changed."""
+        if self._cached_base_font is not None and self._cached_base_font == base_font:
+            return
+        self._cached_base_font = QFont(base_font)
+        self._name_font = QFont(base_font)
+        self._name_font.setBold(True)
+        self._name_metrics = QFontMetrics(self._name_font)
+        self._summary_font = QFont(base_font)
+        self._summary_metrics = QFontMetrics(self._summary_font)
 
     def paint(self, painter, option, index):
         pkg = index.data(Qt.ItemDataRole.UserRole)
         if not isinstance(pkg, PackageDisplayInfo):
-            # Fall back for section headers — drawn via BackgroundRole/FontRole
             super().paint(painter, option, index)
             return
 
         self.initStyleOption(option, index)
+        self._ensure_fonts(option.font)
 
         painter.save()
 
@@ -443,13 +535,10 @@ class PackageDelegate(QStyledItemDelegate):
         w = rect.width() - 2 * padding
 
         # --- Line 1: package name (bold) ---
-        name_font = QFont(option.font)
-        name_font.setBold(True)
-        painter.setFont(name_font)
+        painter.setFont(self._name_font)
         painter.setPen(fg if fg is not None else option.palette.text().color())
 
-        name_metrics = QFontMetrics(name_font)
-        name_h = name_metrics.height()
+        name_h = self._name_metrics.height()
         name_y = rect.y() + padding
 
         painter.drawText(
@@ -461,19 +550,17 @@ class PackageDelegate(QStyledItemDelegate):
         # --- Line 2: summary (normal, dimmed) ---
         summary = pkg.summary
         if summary:
-            summary_font = QFont(option.font)
-            painter.setFont(summary_font)
+            painter.setFont(self._summary_font)
 
             if fg is not None:
                 painter.setPen(fg)
             else:
                 painter.setPen(option.palette.placeholderText().color())
 
-            summary_metrics = QFontMetrics(summary_font)
-            summary_h = summary_metrics.height()
+            summary_h = self._summary_metrics.height()
             summary_y = name_y + name_h + 2
 
-            elided = summary_metrics.elidedText(
+            elided = self._summary_metrics.elidedText(
                 summary, Qt.TextElideMode.ElideRight, w
             )
             painter.drawText(
@@ -511,13 +598,30 @@ class StateBadgeDelegate(QStyledItemDelegate):
         'available': '',
     }
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cached_base_font: Optional[QFont] = None
+        self._cached_side: int = 0
+        self._badge_font: Optional[QFont] = None
+
+    def _ensure_badge_font(self, base_font: QFont, side: int) -> None:
+        """Rebuild cached badge font if base font or badge size changed."""
+        if (self._cached_base_font is not None
+                and self._cached_base_font == base_font
+                and self._cached_side == side):
+            return
+        self._cached_base_font = QFont(base_font)
+        self._cached_side = side
+        self._badge_font = QFont(base_font)
+        self._badge_font.setBold(True)
+        self._badge_font.setPixelSize(max(side - 7, 8))
+
     def paint(self, painter, option, index):
         pkg = index.data(Qt.ItemDataRole.UserRole)
         self.initStyleOption(option, index)
-        _draw_background(painter, option, index)   # return value unused (badge always white)
+        _draw_background(painter, option, index)
 
         if not isinstance(pkg, PackageDisplayInfo):
-            # Section header: background already drawn, nothing more to do.
             return
 
         state_key = _pkg_state_key(pkg)
@@ -530,23 +634,18 @@ class StateBadgeDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Badge: centred in the cell with a small top/bottom margin
         margin = 3
         side = min(option.rect.height() - 2 * margin, 22)
         cx = option.rect.center().x()
         cy = option.rect.center().y()
         badge_rect = QRect(cx - side // 2, cy - side // 2, side, side)
 
-        # Filled rounded rectangle in the state color
         painter.setBrush(QBrush(color))
         painter.setPen(QPen(Qt.PenStyle.NoPen))
         painter.drawRoundedRect(badge_rect, 4, 4)
 
-        # White bold letter centered inside the badge
-        font = QFont(option.font)
-        font.setBold(True)
-        font.setPixelSize(max(side - 7, 8))
-        painter.setFont(font)
+        self._ensure_badge_font(option.font, side)
+        painter.setFont(self._badge_font)
         painter.setPen(QColor('white'))
         painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, letter)
 
@@ -589,15 +688,15 @@ class CheckboxDelegate(QStyledItemDelegate):
         self.initStyleOption(option, index)
         _draw_background(painter, option, index)   # return value unused
 
-        # Skip checkboxes on section header rows (no UserRole data)
-        if index.data(Qt.ItemDataRole.UserRole) is None:
+        # Only draw checkbox for package rows and checkable section headers
+        check_state = index.data(Qt.ItemDataRole.CheckStateRole)
+        if check_state is None:
             return
 
-        current = index.data(Qt.ItemDataRole.CheckStateRole)
         checked = (
-            current == Qt.CheckState.Checked
-            or getattr(current, 'value', current) == 2
-            or current == 2
+            check_state == Qt.CheckState.Checked
+            or getattr(check_state, 'value', check_state) == 2
+            or check_state == 2
         )
 
         # Draw the checkbox manually so it works correctly in both
@@ -633,17 +732,17 @@ class CheckboxDelegate(QStyledItemDelegate):
         painter.restore()
 
     def editorEvent(self, event, model, option, index):
-        # Skip section header rows
-        if index.data(Qt.ItemDataRole.UserRole) is None:
+        # Only handle rows that have a checkbox (packages + checkable headers)
+        check_state = index.data(Qt.ItemDataRole.CheckStateRole)
+        if check_state is None:
             return False
 
         event_type = getattr(event.type(), 'value', event.type())
         if event_type == 3:  # MouseButtonRelease
-            current = index.data(Qt.ItemDataRole.CheckStateRole)
             is_checked = (
-                current == Qt.CheckState.Checked
-                or getattr(current, 'value', current) == 2
-                or current == 2
+                check_state == Qt.CheckState.Checked
+                or getattr(check_state, 'value', check_state) == 2
+                or check_state == 2
             )
             new_value = Qt.CheckState.Unchecked if is_checked else Qt.CheckState.Checked
             model.setData(index, new_value, Qt.ItemDataRole.CheckStateRole)
@@ -666,8 +765,9 @@ class PackageList(QTableView):
     - Virtual scrolling for performance
     """
 
-    selection_changed = Signal(str, bool)   # package nevra, selected
-    package_activated = Signal(str)         # package_name (double-click)
+    selection_changed = Signal(str, bool)    # package nevra, selected
+    section_check_toggled = Signal(str, bool)  # section title, checked
+    package_activated = Signal(str)          # package_name (double-click)
 
     # Row index of the currently highlighted row, -1 if none.
     # Updated on currentChanged and stored here so delegates can read it
@@ -734,6 +834,9 @@ class PackageList(QTableView):
         self.doubleClicked.connect(self._on_double_click)
         self._model.dataChanged.connect(self._on_data_changed)
         self.selectionModel().currentChanged.connect(self._on_current_changed)
+
+        # Invalidate the dark-mode cache when the system theme changes
+        QApplication.instance().paletteChanged.connect(_refresh_dark_mode_cache)
 
     # -----------------------------------------------------------------------
     # Public API
@@ -815,9 +918,26 @@ class PackageList(QTableView):
     # -----------------------------------------------------------------------
 
     def _on_current_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
-        """Cache the highlighted row index so delegates can read it during repaint."""
+        """Cache the highlighted row index so delegates can read it during repaint.
+
+        Only repaints the two affected rows (previous + current) instead of
+        the entire viewport, which avoids repainting hundreds of cells on
+        every arrow-key press.
+        """
         self.highlighted_row = current.row() if current.isValid() else -1
-        self.viewport().update()
+        # Repaint only the rows that changed highlight state
+        if previous.isValid():
+            self._repaint_row(previous.row())
+        if current.isValid():
+            self._repaint_row(current.row())
+
+    def _repaint_row(self, row: int) -> None:
+        """Repaint a single row by its row number."""
+        first_col = self._model.index(row, 0)
+        last_col = self._model.index(row, self._model.columnCount() - 1)
+        rect = self.visualRect(first_col) | self.visualRect(last_col)
+        if not rect.isEmpty():
+            self.viewport().update(rect)
 
     def _on_double_click(self, index: QModelIndex) -> None:
         pkg = self._model.get_package(index.row())
@@ -833,6 +953,9 @@ class PackageList(QTableView):
         # Avoid the enum-vs-int comparison pitfall in PySide6: our model only
         # calls setData for checkboxes, so any dataChanged means a checkbox changed.
         for row in range(top_left.row(), bottom_right.row() + 1):
-            pkg = self._model.get_package(row)
-            if pkg:
-                self.selection_changed.emit(pkg.nevra, pkg.selected)
+            item = self._model._rows[row] if 0 <= row < len(self._model._rows) else None
+            if isinstance(item, PackageDisplayInfo):
+                self.selection_changed.emit(item.nevra, item.selected)
+            elif isinstance(item, SectionHeader) and item.checkable:
+                if not self._model._syncing_sections:
+                    self.section_check_toggled.emit(item.title, item.checked)

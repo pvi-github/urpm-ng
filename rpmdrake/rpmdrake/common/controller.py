@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from urpm.core.operations import PackageOperations
     from .interfaces import ViewInterface
 
-from .models import PackageDisplayInfo, FilterState, PackageState
+from .models import PackageDisplayInfo, SectionHeader, FilterState, PackageState
 
 __all__ = ["Controller", "ControllerConfig"]
 
@@ -69,6 +69,7 @@ class Controller:
         self.filter_state = FilterState()
         self.selection: Set[str] = set()  # Selected package NEVRAs
         self._packages: List[PackageDisplayInfo] = []
+        self._nevra_index: Dict[str, PackageDisplayInfo] = {}  # O(1) lookup by NEVRA
         self._installed_cache: Dict[str, str] = {}  # name -> version
         self._installed_packages: List[dict] = []  # Full list for filtering
         self._dependency_packages: Set[str] = set()  # Packages installed as deps
@@ -96,6 +97,11 @@ class Controller:
     # =========================================================================
     # Package List Management
     # =========================================================================
+
+    def _set_packages(self, packages: List[PackageDisplayInfo]) -> None:
+        """Update the package list and rebuild the NEVRA index."""
+        self._packages = packages
+        self._nevra_index = {pkg.nevra: pkg for pkg in packages}
 
     def load_initial(self) -> None:
         """Load initial package list based on filter state (synchronous)."""
@@ -643,12 +649,12 @@ class Controller:
             if self.filter_state.search_term or self.filter_state.category:
                 # Flat list — search results or category view.
                 packages = self._convert_to_display_info(results)
-                self._packages = packages
+                self._set_packages(packages)
                 self.view.on_package_list_update(packages)
             else:
                 # Sectioned view — upgrades above installed.
                 sections = self._build_display_sections(results)
-                self._packages = [pkg for _t, pkgs in sections for pkg in pkgs]
+                self._set_packages([pkg for _t, pkgs in sections for pkg in pkgs])
                 self.view.on_sections_update(sections)
 
         except Exception as e:
@@ -685,24 +691,34 @@ class Controller:
             upgrade_pkgs = self._get_upgrade_packages()
             upgrade_display = self._convert_to_display_info(upgrade_pkgs)
             if upgrade_display:
-                sections.append(
-                    (f"══ Mises à jour ({len(upgrade_display)}) ══", upgrade_display)
+                header = SectionHeader(
+                    title=f"══ Mises à jour ({len(upgrade_display)}) ══",
+                    checkable=True,
+                    checked=True,
                 )
+                sections.append((header, upgrade_display))
 
         if PackageState.INSTALLED not in states:
             return sections
 
-        # Packages not already shown in the updates section
-        non_upgrade = [
-            p for p in installed_results
-            if p['name'].lower() not in upgradeable_names
-        ]
+        # Single-pass partition into explicit / dependency / orphan buckets.
+        # Packages already shown in the updates section are skipped.
+        explicit: List[dict] = []
+        deps: List[dict] = []
+        orphans: List[dict] = []
+
+        for p in installed_results:
+            if p['name'].lower() in upgradeable_names:
+                continue
+            reason = p.get('install_reason')
+            if reason == 'dependency':
+                deps.append(p)
+            elif reason == 'orphan':
+                orphans.append(p)
+            else:
+                explicit.append(p)
 
         # --- 2. Explicitly installed ---
-        explicit = [
-            p for p in non_upgrade
-            if p.get('install_reason') not in ('dependency', 'orphan')
-        ]
         explicit_display = self._convert_to_display_info(explicit)
         if explicit_display:
             sections.append(
@@ -710,7 +726,6 @@ class Controller:
             )
 
         # --- 3. Dependencies ---
-        deps = [p for p in non_upgrade if p.get('install_reason') == 'dependency']
         deps_display = self._convert_to_display_info(deps)
         if deps_display:
             sections.append(
@@ -718,7 +733,6 @@ class Controller:
             )
 
         # --- 4. Orphans ---
-        orphans = [p for p in non_upgrade if p.get('install_reason') == 'orphan']
         orphans_display = self._convert_to_display_info(orphans)
         if orphans_display:
             sections.append(
@@ -971,6 +985,20 @@ class Controller:
         self.selection.clear()
         self._update_selection_display()
 
+    def select_all_updates(self) -> None:
+        """Select all packages that have an available update."""
+        for pkg in self._packages:
+            if pkg.has_update:
+                self.selection.add(pkg.nevra)
+        self._update_selection_display()
+
+    def deselect_all_updates(self) -> None:
+        """Deselect all packages that have an available update."""
+        for pkg in self._packages:
+            if pkg.has_update:
+                self.selection.discard(pkg.nevra)
+        self._update_selection_display()
+
     def _update_selection_display(self) -> None:
         """Update package selected state in-place and repaint without rebuilding."""
         for pkg in self._packages:
@@ -1122,12 +1150,16 @@ class Controller:
                     slot_dicts.append(s)
             self.view.on_download_progress(current, total, bytes_done, bytes_total, slot_dicts)
 
-        def on_install_progress(name: str, current: int, total: int):
-            # The RPM callback sends "(updating rpmdb)" / "(rpmdb progress)"
-            # when the transaction is complete and RPM is syncing its database.
-            # Switch the progress widget to the rpmdb_sync phase.
+        def on_install_progress(name: str, current: int, total: int,
+                                phase: str = "install", script: str = None):
+            # rpmdb sync detection
             if name.startswith("(updating rpmdb)") or name.startswith("(rpmdb progress)"):
                 self.view.start_rpmdb_sync()
+                return
+            # Trigger/scriptlet phases
+            if phase in ('script', 'script_done'):
+                display_name = script or name or "triggers"
+                self.view.on_trigger_progress(display_name, current, total)
                 return
             # Use appropriate method based on action type
             if action == 'erase':

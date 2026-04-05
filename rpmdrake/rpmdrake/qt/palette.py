@@ -112,6 +112,7 @@ PHASE_COLORS: dict[str, str] = {
     "download":   "#2196f3",  # Blue
     "install":    "#e67c00",  # Orange
     "erase":      "#f44336",  # Red
+    "triggers":   "#8e24aa",  # Purple
     "rpmdb_sync": "#757575",  # Gray
 }
 

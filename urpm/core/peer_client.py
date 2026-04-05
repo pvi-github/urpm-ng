@@ -8,6 +8,7 @@ Used by the Downloader to distribute downloads across peers + upstream mirrors.
 import json
 import logging
 import socket
+import time as _time
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,6 +25,10 @@ DISCOVERY_MAGIC = b'URPMD1'
 DEFAULT_URPMD_PORT = PROD_PORT
 DEV_URPMD_PORT = DEV_PORT
 DEFAULT_DISCOVERY_PORT = PROD_DISCOVERY_PORT
+
+# Cache TTL: avoid hitting the daemon for every single download_all() call.
+# Peer lists change slowly (broadcast every 15–60s), so 30s is safe.
+PEER_CACHE_TTL = 30  # seconds
 
 
 @dataclass
@@ -75,22 +80,28 @@ class PeerClient:
         self.dev_mode = dev_mode
         self.discovery_port = DEV_DISCOVERY_PORT if dev_mode else PROD_DISCOVERY_PORT
         self._peers: List[Peer] = []
+        self._peers_ts: float = 0.0  # monotonic timestamp of last discovery
 
     def discover_peers(self) -> List[Peer]:
         """Discover peers on the LAN.
 
-        First tries local urpmd (which maintains a peer list),
-        then falls back to direct UDP broadcast scan,
-        then tries container host fallback.
+        Returns a cached result if the previous discovery was less than
+        :data:`PEER_CACHE_TTL` seconds ago.  Otherwise queries local urpmd,
+        falls back to UDP broadcast scan, then container host fallback.
 
         Returns:
             List of discovered peers
         """
+        # Return cached result if still fresh
+        if self._peers and (_time.monotonic() - self._peers_ts) < PEER_CACHE_TTL:
+            return self._peers
+
         # Try local urpmd first (already has peer list from discovery)
         peers = self._query_local_urpmd()
         if peers:
             logger.info(f"Got {len(peers)} peers from local urpmd")
             self._peers = peers
+            self._peers_ts = _time.monotonic()
             return peers
 
         # Fallback: direct UDP scan
@@ -98,6 +109,7 @@ class PeerClient:
         if peers:
             logger.info(f"Found {len(peers)} peers via UDP scan")
             self._peers = peers
+            self._peers_ts = _time.monotonic()
             return peers
 
         # Container fallback: try to reach host urpmd
@@ -107,6 +119,7 @@ class PeerClient:
         else:
             logger.debug("No peers found")
         self._peers = peers
+        self._peers_ts = _time.monotonic()
         return peers
 
     def filter_peers_for_version(self, peers: List[Peer], version: str, arch: str = None) -> List[Peer]:

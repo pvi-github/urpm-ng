@@ -17,6 +17,7 @@ class ProgressPhase(Enum):
     DOWNLOAD = "download"
     INSTALL = "install"
     ERASE = "erase"
+    TRIGGERS = "triggers"
     RPMDB_SYNC = "rpmdb_sync"
 
 
@@ -295,6 +296,12 @@ class CollapsibleProgressWidget(QWidget):
             elif phase == ProgressPhase.ERASE:
                 self.phase_label.setText("Suppression")
                 self._collapse_details()
+            elif phase == ProgressPhase.TRIGGERS:
+                self.phase_label.setText("Triggers")
+                self.main_progress.setRange(0, 0)  # Indeterminate
+                self.pct_label.setText("")
+                self.info_label.setText("")
+                self._collapse_details()
             elif phase == ProgressPhase.RPMDB_SYNC:
                 self.phase_label.setText("Waiting for rpmdb update")
                 self.main_progress.setRange(0, 0)  # Indeterminate
@@ -417,6 +424,20 @@ class CollapsibleProgressWidget(QWidget):
             self.pct_label.setText("")
 
         # Show package name
+        self.info_label.setText(name)
+
+    def update_triggers(self, name: str, current: int, total: int):
+        """Update trigger/scriptlet progress.
+
+        Shows the trigger name (e.g. 'shared-mime-info', 'ldconfig') with
+        an indeterminate progress bar — triggers have no byte-level progress.
+        """
+        if self._phase != ProgressPhase.TRIGGERS:
+            self.set_phase(ProgressPhase.TRIGGERS)
+            for slot in self._slots:
+                slot.set_progress(SlotInfo(slot=slot.slot_num))
+
+        self.count_label.setText(f"[{current}/{total}]")
         self.info_label.setText(name)
 
     def start_rpmdb_sync(self):

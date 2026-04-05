@@ -45,7 +45,7 @@ class HelperClient:
         self,
         on_status: Callable[[str], None] = None,
         on_download_progress: Callable[[str, int, int, int, int, List[DownloadSlotInfo]], None] = None,
-        on_install_progress: Callable[[str, int, int], None] = None,
+        on_install_progress: Callable[[str, int, int, str, Optional[str]], None] = None,
         on_error: Callable[[str], None] = None,
         on_done: Callable[[TransactionResult], None] = None,
         on_readme: Callable[[list], bool] = None,
@@ -56,7 +56,9 @@ class HelperClient:
             on_status: Called with status messages.
             on_download_progress: Called with (name, current, total, bytes_done, bytes_total, slots)
                                   during download. slots is a list of DownloadSlotInfo.
-            on_install_progress: Called with (name, current, total) during install.
+            on_install_progress: Called with (name, current, total, phase, script).
+                                  phase: 'install', 'script', 'script_done', etc.
+                                  script: trigger/scriptlet name or None.
             on_error: Called with error messages.
             on_done: Called when transaction completes.
             on_readme: Called with README.urpmi messages before install.
@@ -184,7 +186,9 @@ class HelperClient:
                 self.on_install_progress(
                     msg.get("name", ""),
                     msg.get("current", 0),
-                    msg.get("total", 0)
+                    msg.get("total", 0),
+                    msg.get("phase", "install"),
+                    msg.get("script"),
                 )
 
         elif msg_type == "error":

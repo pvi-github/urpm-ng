@@ -1,6 +1,7 @@
 """Main window for rpmdrake-ng Qt frontend."""
 
 import sys
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Optional
 
 from .compat import (
@@ -21,6 +22,7 @@ from .compat import (
     QStackedWidget,
     QColor,
     QPalette,
+    QTimer,
 )
 
 from urpm.core.database import PackageDatabase
@@ -103,6 +105,20 @@ class MainWindow(QMainWindow):
         # Signal for thread-safe load completion
         self._load_finished.connect(self._finish_load)
 
+        # Async detail loading: debounce rapid arrow-key navigation so we
+        # don't spawn 4 rpm subprocesses per keystroke.
+        self._detail_timer = QTimer(self)
+        self._detail_timer.setSingleShot(True)
+        self._detail_timer.setInterval(150)  # ms
+        self._detail_timer.timeout.connect(self._fetch_detail_now)
+        self._detail_pending_name: Optional[str] = None
+        # Single-worker executor shared by detail fetches and refresh.
+        # max_workers=1 ensures they never overlap, which avoids data races
+        # on the controller's cache dicts (get_package_details reads them,
+        # _load_installed_cache writes them).
+        self._detail_executor = ThreadPoolExecutor(max_workers=1)
+        self._detail_future: Optional[Future] = None
+
         # Package loading is deferred to _deferred_load() so the window
         # is visible immediately.  See main() which calls singleShot(0).
 
@@ -132,7 +148,7 @@ class MainWindow(QMainWindow):
         """Complete initialization on the main thread after background loading."""
         self.controller._finish_load_initial()
         self.category_panel.populate_categories()
-        self._update_upgrade_button()
+        self._update_button_states()
 
     # ------------------------------------------------------------------
     # Widget creation
@@ -296,6 +312,7 @@ class MainWindow(QMainWindow):
 
         # Checkbox-column selection change
         self.package_list.selection_changed.connect(self._on_checkbox_changed)
+        self.package_list.section_check_toggled.connect(self._on_section_check_toggled)
 
         # Row selection → detail panel (keyboard and mouse)
         self.package_list.selectionModel().currentChanged.connect(
@@ -349,27 +366,74 @@ class MainWindow(QMainWindow):
         else:
             self.controller.unselect_package(nevra)
         self._update_button_states()
-        self._update_upgrade_button()
+
+    def _on_section_check_toggled(self, title: str, checked: bool) -> None:
+        """Handle section header checkbox toggle (select/deselect all in section)."""
+        # Currently only the "Mises à jour" section is checkable
+        if "Mises à jour" in title:
+            if checked:
+                self.controller.select_all_updates()
+            else:
+                self.controller.deselect_all_updates()
+            self._update_button_states()
 
     def _find_package_by_nevra(self, nevra: str):
-        """Find a PackageDisplayInfo by its NEVRA in the current package list."""
-        for pkg in self.controller._packages:
-            if pkg.nevra == nevra:
-                return pkg
-        return None
+        """Find a PackageDisplayInfo by its NEVRA in the current package list.
+
+        Uses the controller's NEVRA index for O(1) lookup.
+        """
+        return self.controller._nevra_index.get(nevra)
 
     def _on_current_row_changed(self, current, previous) -> None:
-        """Load and display details for the newly selected row."""
+        """Schedule async detail fetch for the newly selected row.
+
+        Uses a 150ms debounce timer so rapid arrow-key navigation doesn't
+        spawn subprocesses for every intermediate row.
+        """
         if not current.isValid():
             return
-        # Checkbox clicks change currentIndex to COL_CHECKBOX — ignore them
-        # so that ticking a checkbox doesn't unexpectedly open the detail panel.
         if current.column() == PackageTableModel.COL_CHECKBOX:
             return
         pkg = self.package_list._model.get_package(current.row())
         if pkg is None:
             return  # Section header row — skip
-        details = self.controller.get_package_details(pkg.name)
+        self._detail_pending_name = pkg.name
+        self._detail_timer.start()  # (re)start the debounce timer
+
+    def _fetch_detail_now(self) -> None:
+        """Called when the debounce timer fires — launch background fetch."""
+        name = self._detail_pending_name
+        if not name:
+            return
+        # Cancel any in-flight fetch (result will be ignored)
+        if self._detail_future and not self._detail_future.done():
+            self._detail_future.cancel()
+        self._detail_future = self._detail_executor.submit(
+            self.controller.get_package_details, name
+        )
+        self._detail_future.add_done_callback(
+            lambda f: self._on_detail_ready(f, name)
+        )
+
+    def _on_detail_ready(self, future: Future, name: str) -> None:
+        """Receive detail result from background thread and display it.
+
+        Runs on the executor thread.  Marshals the result to the main
+        thread via QTimer.singleShot(0); the stale-check is done there
+        (in _apply_detail) where it is safe to read _detail_pending_name.
+        """
+        if future.cancelled():
+            return
+        try:
+            details = future.result()
+        except Exception:
+            return
+        QTimer.singleShot(0, lambda: self._apply_detail(details, name))
+
+    def _apply_detail(self, details: dict, name: str) -> None:
+        """Apply fetched details to the detail panel (main thread)."""
+        if self._detail_pending_name != name:
+            return  # User navigated away while callback was queued
         self.detail_panel.show_package(details)
         self._show_detail_panel()
 
@@ -415,11 +479,30 @@ class MainWindow(QMainWindow):
         self._update_button_states()
 
     def _on_refresh(self) -> None:
-        """Refresh package list."""
+        """Refresh package list: reload caches in background, update UI on main thread."""
         self.set_loading(True)
         self.status_label.setText("Rafraîchissement...")
-        QApplication.processEvents()
-        self.controller.refresh_after_transaction()
+
+        def _reload_caches():
+            self.controller._load_installed_cache()
+            self.controller._invalidate_cache()
+
+        self._refresh_future = self._detail_executor.submit(_reload_caches)
+        self._refresh_future.add_done_callback(
+            lambda f: QTimer.singleShot(0, lambda: self._finish_refresh(f))
+        )
+
+    def _finish_refresh(self, future: Future) -> None:
+        """Finalize refresh on the main thread (view updates must be here)."""
+        try:
+            future.result()  # Propagate any exception from the background thread
+        except Exception as e:
+            self.set_loading(False)
+            from .compat import QMessageBox
+            QMessageBox.warning(self, "Erreur", f"Échec du rafraîchissement : {e}")
+            return
+        self.controller._refresh_packages()
+        self.controller.clear_selection()
         self.category_panel.populate_categories()
         self.set_loading(False)
         self.show_status_message("Liste rafraîchie", 2000)
@@ -464,10 +547,6 @@ class MainWindow(QMainWindow):
             self.btn_upgrade.setStyleSheet(
                 button_stylesheet("#9e9e9e", "#757575", "#616161", disabled="#bdbdbd")
             )
-
-    def _update_upgrade_button(self) -> None:
-        """Kept for compatibility — delegates to _update_button_states."""
-        self._update_button_states()
 
     def set_loading(self, loading: bool) -> None:
         """Show or hide loading indicator."""
@@ -521,6 +600,8 @@ class MainWindow(QMainWindow):
             super().wheelEvent(event)
 
     def closeEvent(self, event) -> None:
+        self._detail_timer.stop()
+        self._detail_executor.shutdown(wait=False)
         self.controller.shutdown()
         super().closeEvent(event)
 
