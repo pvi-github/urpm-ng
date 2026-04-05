@@ -194,6 +194,7 @@ Les utilisateurs comparent défavorablement à GNOME Software sur d'autres distr
 - [ ] Gestion médias/peers/config
 
 #### Améliorations futures rpmdrake-ng
+- [ ] Dialogue README post-install : rendre le texte redimensionnable (QTextEdit dans dialogue dédié, pas dans le message de succès)
 - [ ] Screenshots AppStream dans panneau détails
 - [ ] Indicateur mises à jour sécurité (MGASA) : badge ou icône
 - [ ] Changelog preview (tooltip ou ligne dépliable)

@@ -642,6 +642,15 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
                     msg += f"  … et {len(excluded) - 10} autre(s)\n"
                 msg += "\nCes paquets seront retentés à la prochaine mise à jour."
 
+            # Show README.urpmi messages (post-install, like the CLI)
+            readme_msgs = summary.get('readme_messages') or []
+            if readme_msgs:
+                msg += "\n\n📄 Notes d'installation :\n"
+                for rm in readme_msgs:
+                    pkg = rm.get('package', '') if isinstance(rm, dict) else getattr(rm, 'package', '')
+                    content = rm.get('content', '') if isinstance(rm, dict) else getattr(rm, 'content', '')
+                    msg += f"\n── {pkg} ──\n{content}\n"
+
             # Refresh caches while "Finalisation" is still visible
             self.window.controller.refresh_after_transaction()
             self.window.progress_widget.finish()
@@ -650,7 +659,7 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
             # Refresh detail panel if a package row is still selected
             self._refresh_detail_panel()
             # Show success dialog after everything is updated
-            msg_type = "warning" if excluded else "info"
+            msg_type = "warning" if (excluded or readme_msgs) else "info"
             self._show_styled_message("Terminé", msg, msg_type)
         else:
             errors = summary.get('errors', [])

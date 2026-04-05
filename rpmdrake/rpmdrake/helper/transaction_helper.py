@@ -378,30 +378,9 @@ class TransactionHelper:
         # Get packages to erase (for obsoletes)
         erase_names = [a.name for a in resolution.actions if a.action.name == 'REMOVE']
 
-        # Collect README.urpmi messages from cached RPMs (before install)
-        readme_messages = []
-        try:
-            from urpm.core.readme import collect_readme_from_rpms
-            readme_messages = [
-                {"package": m.package, "content": m.content}
-                for m in collect_readme_from_rpms(rpm_paths, resolution.actions)
-            ]
-        except Exception:
-            pass  # Non-critical
-
-        if readme_messages:
-            self._send({
-                "type": "readme",
-                "readme_messages": readme_messages,
-            })
-            # Wait for GUI confirmation (or cancellation)
-            response = self._wait_response()
-            if not response or response.get("action") == "cancel":
-                self._send({"type": "cancelled"})
-                return
-
-        # Restart stdin watcher for cancel commands during install
-        self._start_stdin_watcher()
+        # README.urpmi messages are collected post-install from the filesystem
+        # by the child process (same approach as the CLI).  They are available
+        # in result.queue_result.operations[0].readme_messages after full_sync.
 
         # Run transaction via resilient pipeline (signature pre-check,
         # retry from alternate mirrors, exclusion of bad packages)
@@ -458,6 +437,11 @@ class TransactionHelper:
                         resolver.mark_as_dependency(dep_packages)
                     except Exception:
                         pass  # Non-critical, don't fail the transaction
+
+            # Collect post-install README messages from the transaction result
+            readme_messages = []
+            if result.queue_result and result.queue_result.operations:
+                readme_messages = result.queue_result.operations[0].readme_messages or []
 
             done_msg = {
                 "type": "done",
