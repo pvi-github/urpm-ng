@@ -770,6 +770,7 @@ class PackageList(QTableView):
     package_activated = Signal(str)          # package_name (double-click)
     focus_search_requested = Signal()        # Arrow Up at row 0
     focus_categories_requested = Signal()    # Arrow Right → category tree
+    back_requested = Signal()               # Arrow Left → context-dependent back
 
     # Row index of the currently highlighted row, -1 if none.
     # Updated on currentChanged and stored here so delegates can read it
@@ -833,7 +834,8 @@ class PackageList(QTableView):
         header.setStretchLastSection(False)
 
         # Signals
-        self.doubleClicked.connect(self._on_double_click)
+        # Double-click disabled — Enter opens details instead
+        # self.doubleClicked.connect(self._on_double_click)
         self._model.dataChanged.connect(self._on_data_changed)
         self.selectionModel().currentChanged.connect(self._on_current_changed)
 
@@ -907,10 +909,27 @@ class PackageList(QTableView):
                 self.focus_search_requested.emit()
                 return
 
+        # Arrow Left → back (detail→categories, handled by main window)
+        is_left = (key == Qt.Key.Key_Left or (hasattr(key, 'value') and key.value == Qt.Key.Key_Left.value))
+        if is_left:
+            self.back_requested.emit()
+            return
+
         # Arrow Right → jump to category tree
         is_right = (key == Qt.Key.Key_Right or (hasattr(key, 'value') and key.value == Qt.Key.Key_Right.value))
         if is_right:
             self.focus_categories_requested.emit()
+            return
+
+        # Enter → show package details
+        is_enter = (key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter
+                     or (hasattr(key, 'value') and key.value in (Qt.Key.Key_Return.value, Qt.Key.Key_Enter.value)))
+        if is_enter:
+            index = self.currentIndex()
+            if index.isValid():
+                pkg = self._model.get_package(index.row())
+                if pkg:
+                    self.package_activated.emit(pkg.name)
             return
 
         is_space = (

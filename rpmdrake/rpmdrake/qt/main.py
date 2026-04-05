@@ -64,6 +64,8 @@ class MainWindow(QMainWindow):
 
     # Signal emitted from background thread to finish loading on main thread
     _load_finished = Signal()
+    # Signal emitted from executor thread when package details are ready
+    _detail_ready = Signal(dict, str)  # (details, name)
 
     MIN_FONT_SIZE = 8
     MAX_FONT_SIZE = 24
@@ -104,6 +106,7 @@ class MainWindow(QMainWindow):
 
         # Signal for thread-safe load completion
         self._load_finished.connect(self._finish_load)
+        self._detail_ready.connect(self._apply_detail)
 
         # Async detail loading: debounce rapid arrow-key navigation so we
         # don't spawn 4 rpm subprocesses per keystroke.
@@ -112,6 +115,7 @@ class MainWindow(QMainWindow):
         self._detail_timer.setInterval(150)  # ms
         self._detail_timer.timeout.connect(self._fetch_detail_now)
         self._detail_pending_name: Optional[str] = None
+        self._show_detail_on_ready = False
         # Single-worker executor shared by detail fetches and refresh.
         # max_workers=1 ensures they never overlap, which avoids data races
         # on the controller's cache dicts (get_package_details reads them,
@@ -323,6 +327,7 @@ class MainWindow(QMainWindow):
             Ctrl+U          Upgrade selected
             Ctrl+R          Refresh package list
             Shift+Ctrl+F    Toggle filter zone with keyboard focus
+            Ctrl+T          Toggle right panel (categories/details)
             Ctrl+G          Toggle category tree focus
             → (in list)     Jump to category tree
             → (in tree)     Expand node
@@ -372,15 +377,19 @@ class MainWindow(QMainWindow):
             self._toggle_filter_zone_shortcut
         )
 
-        # Category tree
+        # Category tree / right panel
         QShortcut(QKeySequence("Ctrl+G"), self).activated.connect(
             self._toggle_category_tree
         )
+        QShortcut(QKeySequence("Ctrl+T"), self).activated.connect(
+            self._toggle_right_panel
+        )
 
-        # Help
+        # Help & quit
         QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(
             self._show_keyboard_help
         )
+        QShortcut(QKeySequence("Ctrl+Q"), self).activated.connect(self.close)
 
         # Zoom
         QShortcut(QKeySequence("Ctrl++"), self).activated.connect(self.zoom_in)
@@ -394,6 +403,8 @@ class MainWindow(QMainWindow):
         self.search_bar.focus_list_requested.connect(self._focus_package_list)
         self.package_list.focus_search_requested.connect(self.search_bar.focus_search)
         self.package_list.focus_categories_requested.connect(self._focus_category_tree)
+        self.package_list.back_requested.connect(self._on_list_back)
+        self.package_list.clicked.connect(self._on_package_clicked)
         self.category_panel.focus_list_requested.connect(
             lambda: self.package_list.setFocus()
         )
@@ -516,21 +527,38 @@ class MainWindow(QMainWindow):
             details = future.result()
         except Exception:
             return
-        QTimer.singleShot(0, lambda: self._apply_detail(details, name))
+        self._detail_ready.emit(details, name)
 
     def _apply_detail(self, details: dict, name: str) -> None:
-        """Apply fetched details to the detail panel (main thread)."""
+        """Apply fetched details to the detail panel (main thread).
+
+        Populates the detail panel but does NOT switch to it —
+        the user must press Enter or double-click to show it.
+        If the detail panel is already visible, update it in place.
+        """
         if self._detail_pending_name != name:
             return  # User navigated away while callback was queued
         self.detail_panel.show_package(details)
-        self._show_detail_panel()
+        # Show panel if user explicitly requested (Enter/double-click)
+        # or if it's already visible (live update during navigation)
+        if getattr(self, '_show_detail_on_ready', False):
+            self._show_detail_on_ready = False
+            self._show_detail_panel()
+        elif self.right_stack.currentWidget() is self.detail_panel:
+            self._show_detail_panel()
 
     def _on_package_activated(self, name: str) -> None:
-        """Handle double-click: ensure detail panel is visible."""
-        self._show_detail_panel()
+        """Handle double-click or Enter: fetch details and show panel."""
+        self._detail_pending_name = name
+        self._show_detail_on_ready = True
+        self._detail_timer.stop()
+        self._fetch_detail_now()
 
     def _show_detail_panel(self) -> None:
         """Switch right stack to the detail panel, restoring its preferred width."""
+        if not self.right_stack.isVisible():
+            self.right_stack.setVisible(True)
+            self.btn_cat_toggle.setChecked(True)
         self.right_stack.setCurrentIndex(1)
         sizes = self._splitter.sizes()
         total = sizes[0] + sizes[1]
@@ -603,6 +631,27 @@ class MainWindow(QMainWindow):
         elif action == 'upgrade':
             self.controller.upgrade_selection()
 
+    def _on_package_clicked(self, index) -> None:
+        """Handle single click on a package row — show detail panel.
+
+        Skips checkbox column clicks (those toggle selection instead).
+        """
+        from .widgets.package_list import PackageTableModel
+        if index.column() == PackageTableModel.COL_CHECKBOX:
+            return
+        pkg = self.package_list._model.get_package(index.row())
+        if pkg:
+            self._on_package_activated(pkg.name)
+
+    def _on_list_back(self) -> None:
+        """Handle ← in the package list.
+
+        If detail panel is showing → switch back to categories.
+        Otherwise → no-op (focus already on list).
+        """
+        if self.right_stack.currentWidget() is self.detail_panel:
+            self._show_category_panel()
+
     def _focus_category_tree(self) -> None:
         """Focus the category tree, ensuring the right panel is visible."""
         if not self.right_stack.isVisible():
@@ -610,6 +659,12 @@ class MainWindow(QMainWindow):
         if self.right_stack.currentWidget() is not self.category_panel:
             self.right_stack.setCurrentWidget(self.category_panel)
         self.category_panel.focus_tree()
+
+    def _toggle_right_panel(self) -> None:
+        """Toggle the right panel (categories/details) visibility (Ctrl+T)."""
+        self.btn_cat_toggle.setChecked(not self.btn_cat_toggle.isChecked())
+        if not self.right_stack.isVisible():
+            self.package_list.setFocus()
 
     def _toggle_category_tree(self) -> None:
         """Toggle focus between category tree and package list (Ctrl+G)."""
@@ -646,6 +701,7 @@ class MainWindow(QMainWindow):
         <tr><td><kbd>→</kbd> (liste)</td><td>Aller aux catégories</td></tr>
         <tr><td><kbd>←</kbd> / <kbd>Esc</kbd> (arbre)</td><td>Retour à la liste</td></tr>
         <tr><td><kbd>Ctrl+G</kbd></td><td>Basculer catégories / liste</td></tr>
+        <tr><td><kbd>Ctrl+T</kbd></td><td>Afficher/masquer le panneau droit</td></tr>
         <tr><td><kbd>Ctrl+Shift+F</kbd></td><td>Ouvrir/fermer les filtres</td></tr>
         <tr><td><kbd>Tab</kbd> / <kbd>Shift+Tab</kbd></td>
             <td>Recherche → Liste → Installer → Enlever → Upgrade → Refresh</td></tr>
@@ -680,6 +736,7 @@ class MainWindow(QMainWindow):
         <tr><td><kbd>Ctrl+-</kbd></td><td>Zoom −</td></tr>
         <tr><td><kbd>Ctrl+0</kbd></td><td>Zoom par défaut</td></tr>
         <tr><td><kbd>Ctrl+H</kbd></td><td>Cette aide</td></tr>
+        <tr><td><kbd>Ctrl+Q</kbd></td><td>Quitter</td></tr>
         </table>
         """)
         layout.addWidget(text)
