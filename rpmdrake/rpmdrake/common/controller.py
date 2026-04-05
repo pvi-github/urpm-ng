@@ -1153,17 +1153,28 @@ class Controller:
         def on_install_progress(name: str, current: int, total: int,
                                 phase: str = "install", script: str = None,
                                 bytes_done: int = 0, bytes_total: int = 0):
+            # Skip verify/prepare — too fast to display, and their
+            # separate current/total would reset the install bar.
+            if phase in ('verify', 'prepare'):
+                return
             # rpmdb sync detection
             if name.startswith("(updating rpmdb)") or name.startswith("(rpmdb progress)"):
                 self.view.start_rpmdb_sync()
                 return
-            # Trigger/scriptlet phases
+            # Script phases: in smart sync, the pipe closes before generic
+            # triggers start, so all scripts we receive here are per-package
+            # %post scriptlets.  Show them in the install bar.
             if phase in ('script', 'script_done'):
-                display_name = script or name or "triggers"
-                self.view.on_trigger_progress(display_name, current, total)
+                display_name = script or name or ""
+                self.view.on_install_progress(display_name, current, total, 0, 0)
                 return
-            # Use appropriate method based on action type
-            if action == 'erase':
+            # Route based on phase, not top-level action.
+            # During install/upgrade, RPM also erases old packages (obsoletes);
+            # those erase callbacks have different current/total and would reset
+            # the install bar.  Ignore them — the erase is fast.
+            if phase == 'erase' and action != 'erase':
+                return
+            if phase == 'erase' or action == 'erase':
                 self.view.on_erase_progress(name, current, total)
             else:
                 self.view.on_install_progress(name, current, total, bytes_done, bytes_total)
