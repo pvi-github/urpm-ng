@@ -829,6 +829,12 @@ queue._child_process_standalone()
                             _msg_to_progress(msg)
                         )
 
+                    # Capture README messages sent after all packages are
+                    # extracted (phase='install_done').  This arrives before
+                    # the first SCRIPT_START, so smart sync gets them.
+                    if msg.readme_messages and current_op_result:
+                        current_op_result.readme_messages = msg.readme_messages
+
                     # ── Smart sync release point ──
                     # When all packages are extracted and we enter script
                     # phase, the parent can release.  The child continues
@@ -1331,6 +1337,24 @@ queue._child_process_standalone()
                     _send_progress(name=current_pkg_name[0],
                                    current=packages_done[0], total=total,
                                    phase='install')
+                    # All packages extracted — collect READMEs now, before
+                    # triggers start.  In smart sync the parent releases at
+                    # the first SCRIPT_START; sending readmes here ensures
+                    # the parent has them before breaking out of the loop.
+                    if packages_done[0] == total:
+                        readme_data_early = self._collect_readme_messages(op)
+                        if readme_data_early and not pipe_state['closed']:
+                            try:
+                                pipe_state['file'].write(QueueProgressMessage(
+                                    msg_type='progress',
+                                    operation_id=op.operation_id,
+                                    name='',
+                                    current=total, total=total,
+                                    phase='install_done',
+                                    readme_messages=readme_data_early,
+                                ).to_json() + "\n")
+                            except (BrokenPipeError, OSError):
+                                pipe_state['closed'] = True
                 return
 
             # ── ELEM_PROGRESS: reliable package index (fires at start of each pkg) ──
