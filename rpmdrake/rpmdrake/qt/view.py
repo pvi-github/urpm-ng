@@ -12,7 +12,7 @@ from .compat import (
 )
 
 from ..common.models import PackageDisplayInfo
-from .palette import DIALOG_COLORS, get_secondary_colors
+from .palette import DIALOG_COLORS, get_secondary_colors, button_stylesheet, darken
 
 if TYPE_CHECKING:
     from .main import MainWindow
@@ -244,34 +244,11 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         # Buttons
         btn_layout = QHBoxLayout()
         btn_cancel = QPushButton("Annuler")
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #757575;
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #616161; }
-            QPushButton:pressed { background-color: #424242; }
-        """)
+        btn_cancel.setStyleSheet(button_stylesheet("#757575", "#616161", "#424242"))
 
         btn_ok = QPushButton("Choisir")
         btn_ok.setEnabled(False)
-        btn_ok.setStyleSheet("""
-            QPushButton {
-                background-color: #2196f3;
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #1976d2; }
-            QPushButton:pressed { background-color: #1565c0; }
-            QPushButton:disabled { background-color: #90caf9; }
-        """)
+        btn_ok.setStyleSheet(button_stylesheet("#2196f3", "#1976d2", "#1565c0", disabled="#90caf9"))
 
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
@@ -287,6 +264,9 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
         btn_ok.clicked.connect(dialog.accept)
         btn_cancel.clicked.connect(dialog.reject)
+
+        # Focus on cancel (safer default)
+        btn_cancel.setFocus()
 
         # Show dialog
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -417,48 +397,15 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
         btn_cancel = QPushButton("Annuler")
         btn_cancel.setMinimumWidth(100)
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #757575;
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #616161; }
-            QPushButton:pressed { background-color: #424242; }
-        """)
+        btn_cancel.setStyleSheet(button_stylesheet("#757575", "#616161", "#424242"))
 
         btn_confirm = QPushButton(f"Confirmer {title}")
         btn_confirm.setMinimumWidth(140)
         # Red for erase, green for install/upgrade
         if action == 'erase':
-            btn_confirm.setStyleSheet("""
-                QPushButton {
-                    background-color: #f44336;
-                    color: white;
-                    font-weight: bold;
-                    padding: 6px 16px;
-                    border: none;
-                    border-radius: 4px;
-                }
-                QPushButton:hover { background-color: #d32f2f; }
-                QPushButton:pressed { background-color: #b71c1c; }
-            """)
+            btn_confirm.setStyleSheet(button_stylesheet("#f44336", "#d32f2f", "#b71c1c"))
         else:
-            btn_confirm.setStyleSheet("""
-                QPushButton {
-                    background-color: #4caf50;
-                    color: white;
-                    font-weight: bold;
-                    padding: 6px 16px;
-                    border: none;
-                    border-radius: 4px;
-                }
-                QPushButton:hover { background-color: #45a049; }
-                QPushButton:pressed { background-color: #3d8b40; }
-            """)
+            btn_confirm.setStyleSheet(button_stylesheet("#4caf50", "#45a049", "#3d8b40"))
 
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_confirm)
@@ -466,6 +413,9 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
         btn_cancel.clicked.connect(dialog.reject)
         btn_confirm.clicked.connect(dialog.accept)
+
+        # Focus on cancel (safer default for destructive operations)
+        btn_cancel.setFocus()
 
         return dialog.exec() == QDialog.DialogCode.Accepted
 
@@ -625,6 +575,8 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
         btn_ok.clicked.connect(dialog.accept)
         btn_cancel.clicked.connect(dialog.reject)
 
+        btn_ok.setFocus()
+
         result = dialog.exec()
         self._readme_result = (result == QDialog.DialogCode.Accepted)
         self._readme_event.set()  # Unblock the helper thread
@@ -752,22 +704,13 @@ class QtView(QObject):  # Implements ViewInterface (no formal inheritance due to
 
         btn_ok = QPushButton("OK")
         btn_ok.setMinimumWidth(100)
-        btn_ok.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {color};
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{ background-color: {color}; opacity: 0.9; }}
-            QPushButton:pressed {{ background-color: {color}; opacity: 0.8; }}
-        """)
+        btn_ok.setStyleSheet(button_stylesheet(color, darken(color, 0.85), darken(color, 0.7)))
         btn_ok.clicked.connect(dialog.accept)
 
         btn_layout.addWidget(btn_ok)
         layout.addLayout(btn_layout)
+
+        btn_ok.setFocus()
 
         dialog.exec()
 

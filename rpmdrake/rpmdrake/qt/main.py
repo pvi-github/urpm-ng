@@ -677,6 +677,16 @@ def main() -> int:
 
     _apply_system_dark_mode(app)
 
+    # Global focus indicator for keyboard navigation
+    app.setStyleSheet(
+        "QPushButton:focus {"
+        "  border: 4px solid palette(shadow);"
+        "  border-radius: 4px;"
+        "}"
+        "\nQLineEdit:focus { border: 2px solid palette(highlight); }"
+        "\nQListView:focus { border: 2px solid palette(highlight); }"
+    )
+
     from rpmdrake.i18n import init_qt_translation
     init_qt_translation(app)
 

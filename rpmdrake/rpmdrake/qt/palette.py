@@ -13,6 +13,7 @@ __all__ = [
     "PHASE_COLORS",
     "DIALOG_COLORS",
     "button_stylesheet",
+    "darken",
 ]
 
 
@@ -130,6 +131,14 @@ DIALOG_COLORS: dict[str, str] = {
 
 # --- Button stylesheet helper -------------------------------------------------
 
+def darken(hex_color: str, factor: float = 0.5) -> str:
+    """Darken a hex color by the given factor (0 = black, 1 = unchanged)."""
+    h = hex_color.lstrip('#')
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    r, g, b = int(r * factor), int(g * factor), int(b * factor)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def button_stylesheet(
     base: str,
     hover: str,
@@ -147,6 +156,7 @@ def button_stylesheet(
     Returns:
         CSS stylesheet string ready for QPushButton.setStyleSheet().
     """
+    focus_border = darken(base, 0.5)
     disabled_rule = (
         f"\nQPushButton:disabled {{ background-color: {disabled}; }}"
         if disabled
@@ -158,10 +168,11 @@ def button_stylesheet(
         f" color: white;"
         f" font-weight: bold;"
         f" padding: 6px 16px;"
-        f" border: none;"
+        f" border: 3px solid transparent;"
         f" border-radius: 4px;"
         f" }}"
         f"\nQPushButton:hover {{ background-color: {hover}; }}"
+        f"\nQPushButton:focus {{ border-color: {focus_border}; }}"
         f"\nQPushButton:pressed {{ background-color: {pressed}; }}"
         f"{disabled_rule}"
     )

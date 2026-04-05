@@ -1005,7 +1005,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         from ...core.triggers import describe_trigger
 
         last_progress_state = [None]
-        _trace_file = open('/tmp/progress_trace.log', 'w')
         _progress_started = [False]
 
         try:
@@ -1025,14 +1024,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             Line 1: header (left) + package/trigger info (right-aligned)
             Line 2: [████░░░░░░░░░░░░░░░░░░░░░░░] XX/XX 100%
             """
-            _trace_file.write(
-                f"phase={progress.phase.value} pkg={progress.package_name} "
-                f"done={progress.packages_done}/{progress.packages_total} "
-                f"bytes={progress.bytes_done}/{progress.bytes_total} "
-                f"script={progress.script_name}\n"
-            )
-            _trace_file.flush()
-
             if progress.phase in (TransactionPhase.VERIFY,
                                   TransactionPhase.PREPARE):
                 return

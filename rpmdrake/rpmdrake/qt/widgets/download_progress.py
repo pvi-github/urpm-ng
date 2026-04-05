@@ -8,7 +8,7 @@ from ..compat import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
     QFrame, Qt, QPushButton, Signal
 )
-from ..palette import PHASE_COLORS, get_secondary_colors
+from ..palette import PHASE_COLORS, get_secondary_colors, button_stylesheet
 
 
 class ProgressPhase(Enum):
@@ -204,18 +204,7 @@ class CollapsibleProgressWidget(QWidget):
 
         # Cancel button
         self.cancel_btn = QPushButton("Annuler")
-        self.cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                padding: 4px 12px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #d32f2f; }
-            QPushButton:pressed { background-color: #b71c1c; }
-        """)
+        self.cancel_btn.setStyleSheet(button_stylesheet("#f44336", "#d32f2f", "#b71c1c"))
         self.cancel_btn.clicked.connect(self._on_cancel_click)
         header_layout.addWidget(self.cancel_btn)
 
