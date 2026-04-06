@@ -54,13 +54,20 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     from ...core.rpm import is_local_rpm, read_rpm_header
     from ...core.download import verify_rpm_signature
 
-    # Set up solver debug if requested
-    debug_solver = getattr(args, 'debug', None) in ('solver', 'all')
+    # Set up debug if requested
+    _debug = getattr(args, 'debug', None) or ''
+    _debug_parts = {d.strip() for d in _debug.split(',')} if _debug else set()
+    if 'all' in _debug_parts:
+        _debug_parts.update(('solver', 'tsrun'))
+    debug_solver = 'solver' in _debug_parts
     watched_pkgs = getattr(args, 'watched', None)
     if watched_pkgs:
         watched_pkgs = [p.strip() for p in watched_pkgs.split(',')]
     if debug_solver or watched_pkgs:
         set_solver_debug(enabled=debug_solver, watched=watched_pkgs)
+    if 'tsrun' in _debug_parts:
+        from ...core.transaction_queue import set_tsrun_debug
+        set_tsrun_debug(enabled=True)
 
     # Determine what to upgrade
     packages = getattr(args, 'packages', []) or []
@@ -420,9 +427,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         last_state = [None]
 
         try:
-            _term_width = os.get_terminal_size().columns
+            _term_width = os.get_terminal_size().columns - 1
         except OSError:
-            _term_width = 80
+            _term_width = 79
 
         # Placeholders — set once we know total from first callback
         _bar_width = [0]
@@ -462,9 +469,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             if progress.phase == TransactionPhase.SCRIPT:
                 pct = int(done * 100 / total) if total else 100
                 if full_sync and progress.script_name:
-                    info = f"Running: {describe_trigger(progress.script_name)}"
+                    info = describe_trigger(progress.script_name)
                 else:
-                    info = f"Running: {progress.script_name or progress.package_name}"
+                    info = progress.script_name or progress.package_name
             else:
                 if total > 0:
                     pkg_frac = done / total
@@ -475,16 +482,22 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                     pct = 0
                 info = progress.package_name
 
-            max_info = _term_width - len(_header_text[0]) - 1
+            # Truncate info so header + space + info fits in terminal width
+            max_info = _term_width - len(_header_text[0]) - 2
             if len(info) > max_info:
                 info = info[:max_info - 1] + "…"
 
             padding = _term_width - len(_header_text[0]) - len(info)
             header_line = f"{_header_text[0]}{' ' * max(padding, 1)}{info}"
+            # Hard clip: never exceed terminal width (prevents line wrap)
+            if len(header_line) > _term_width:
+                header_line = header_line[:_term_width]
 
             filled = int(_bar_width[0] * pct / 100)
             count_suffix = f" {done:>{_dw[0]}}/{total} {pct:>3}%"
             bar_line = f"[{'█' * filled}{'░' * (_bar_width[0] - filled)}]{count_suffix}"
+            if len(bar_line) > _term_width:
+                bar_line = bar_line[:_term_width]
 
             if not _progress_started[0]:
                 _progress_started[0] = True
@@ -548,6 +561,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             print(colors.warning(
                 _("These packages will be retried on the next update.")))
 
+        if not upgrade_success:
+            ops.abort_transaction(transaction_id)
+            return 1
+
         if orphan_names:
             print(colors.dim("  " + ngettext(
                 "{count} orphaned package removed",
@@ -555,9 +572,11 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                 len(orphan_names)).format(count=len(orphan_names))))
             resolver.unmark_packages(orphan_names)
 
-        if not upgrade_success:
-            ops.abort_transaction(transaction_id)
-            return 1
+        # Display captured scriptlet output (ldconfig, mime-db rebuild, etc.)
+        if queue_result and queue_result.scriptlet_output:
+            print(colors.dim("\n  " + _("Scriptlet output:")))
+            for line in queue_result.scriptlet_output.splitlines():
+                print(colors.dim(f"    {line}"))
 
         # Display restart recommendations
         if restart_info:

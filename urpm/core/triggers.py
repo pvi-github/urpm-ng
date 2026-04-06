@@ -58,6 +58,10 @@ def describe_trigger(package_name: str) -> str:
         Translated description string.
     """
     desc = _TRIGGER_DESCRIPTIONS.get(package_name)
+    if not desc:
+        # Try short name: "glibc-2.42-7.mga10.x86_64" → "glibc"
+        short = package_name.rsplit('-', 2)[0] if '-' in package_name else package_name
+        desc = _TRIGGER_DESCRIPTIONS.get(short)
     if desc:
         return _(desc)
     return _("Running: {package}").format(package=package_name)

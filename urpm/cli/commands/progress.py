@@ -96,9 +96,9 @@ def _display_once(state: dict) -> None:
     pkg = state.get('current_package', '')
 
     try:
-        width = os.get_terminal_size().columns
+        width = os.get_terminal_size().columns - 1
     except OSError:
-        width = 80
+        width = 79
 
     # Preparation phases — no meaningful counter yet
     if phase in ('verify', 'prepare'):

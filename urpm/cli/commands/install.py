@@ -115,13 +115,20 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     )
     from .. import colors
 
-    # Set up solver debug if requested
-    debug_solver = getattr(args, 'debug', None) in ('solver', 'all')
+    # Set up debug if requested
+    _debug = getattr(args, 'debug', None) or ''
+    _debug_parts = {d.strip() for d in _debug.split(',')} if _debug else set()
+    if 'all' in _debug_parts:
+        _debug_parts.update(('solver', 'tsrun'))
+    debug_solver = 'solver' in _debug_parts
     watched_pkgs = getattr(args, 'watched', None)
     if watched_pkgs:
         watched_pkgs = [p.strip() for p in watched_pkgs.split(',')]
     if debug_solver or watched_pkgs:
         set_solver_debug(enabled=debug_solver, watched=watched_pkgs)
+    if 'tsrun' in _debug_parts:
+        from ...core.transaction_queue import set_tsrun_debug
+        set_tsrun_debug(enabled=True)
 
     # Check for previous background install errors
     prev_error = check_background_error()
@@ -1008,9 +1015,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         _progress_started = [False]
 
         try:
-            _term_width = os.get_terminal_size().columns
+            _term_width = os.get_terminal_size().columns - 1
         except OSError:
-            _term_width = 80
+            _term_width = 79
 
         # Bar occupies full width minus the fixed-width count suffix " XX/XX 100%"
         _total = len(rpm_paths)
@@ -1041,9 +1048,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             if progress.phase == TransactionPhase.SCRIPT:
                 pct = int(done * 100 / total) if total else 100
                 if full_sync and progress.script_name:
-                    info = f"Running: {describe_trigger(progress.script_name)}"
+                    info = describe_trigger(progress.script_name)
                 else:
-                    info = f"Running: {progress.script_name or progress.package_name}"
+                    info = progress.script_name or progress.package_name
             else:
                 if total > 0:
                     pkg_frac = done / total
@@ -1054,19 +1061,23 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     pct = 0
                 info = progress.package_name
 
-            # Truncate info if it won't fit beside the header
-            max_info = _term_width - len(_header_text) - 1
+            # Truncate info so header + space + info fits in terminal width
+            max_info = _term_width - len(_header_text) - 2
             if len(info) > max_info:
                 info = info[:max_info - 1] + "…"
 
             # --- Header line: title left, info right ---
             padding = _term_width - len(_header_text) - len(info)
             header_line = f"{_header_text}{' ' * max(padding, 1)}{info}"
+            if len(header_line) > _term_width:
+                header_line = header_line[:_term_width]
 
             # --- Bar line: full-width bar + fixed-width count ---
             filled = int(_bar_width * pct / 100)
             count_suffix = f" {done:>{_dw}}/{total} {pct:>3}%"
             bar_line = f"[{'█' * filled}{'░' * (_bar_width - filled)}]{count_suffix}"
+            if len(bar_line) > _term_width:
+                bar_line = bar_line[:_term_width]
 
             if not _progress_started[0]:
                 _progress_started[0] = True
@@ -1170,6 +1181,12 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     except Exception:
                         pass
 
+        # Display captured scriptlet output (ldconfig, mime-db rebuild, etc.)
+        if qr and qr.scriptlet_output:
+            print(colors.dim("\n  " + _("Scriptlet output:")))
+            for line in qr.scriptlet_output.splitlines():
+                print(colors.dim(f"    {line}"))
+
         # Display restart recommendations
         if restart_info:
             from ...core.needs_restart import format_restart_messages
@@ -1223,13 +1240,20 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     from ...core.config import get_base_dir
     from .. import colors
 
-    # Set up solver debug if requested
-    debug_solver = getattr(args, 'debug', None) in ('solver', 'all')
+    # Set up debug if requested
+    _debug = getattr(args, 'debug', None) or ''
+    _debug_parts = {d.strip() for d in _debug.split(',')} if _debug else set()
+    if 'all' in _debug_parts:
+        _debug_parts.update(('solver', 'tsrun'))
+    debug_solver = 'solver' in _debug_parts
     watched_pkgs = getattr(args, 'watched', None)
     if watched_pkgs:
         watched_pkgs = [p.strip() for p in watched_pkgs.split(',')]
     if debug_solver or watched_pkgs:
         set_solver_debug(enabled=debug_solver, watched=watched_pkgs)
+    if 'tsrun' in _debug_parts:
+        from ...core.transaction_queue import set_tsrun_debug
+        set_tsrun_debug(enabled=True)
 
     # Collect packages to download
     packages = list(args.packages) if args.packages else []

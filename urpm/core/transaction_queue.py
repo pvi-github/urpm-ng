@@ -54,7 +54,39 @@ from .background_install import (
 )
 
 DEBUG_EXECINSTALL = False
+DEBUG_TSRUN = False
 DEBUG_USERNS = False
+
+# Per-process debug file handle (opened once, shared across callbacks)
+_debug_file = None
+
+
+def set_tsrun_debug(enabled: bool = False):
+    """Enable/disable ts.run() callback debug logging.
+
+    Activated via ``--debug tsrun`` or ``--debug all``.
+    Logs every RPM callback (except INST_PROGRESS flood) with full
+    state to ``/tmp/debug-urpm-<pid>.txt``.
+    """
+    global DEBUG_TSRUN, DEBUG_EXECINSTALL
+    DEBUG_TSRUN = enabled
+    if enabled:
+        DEBUG_EXECINSTALL = True
+
+
+def _debug_write(message: str):
+    """Write a timestamped line to the per-process debug file.
+
+    The file is created lazily on first call at
+    ``/tmp/debug-urpm-<pid>.txt``.  Writes are flushed immediately
+    so the file is readable even if the process crashes.
+    """
+    global _debug_file
+    if _debug_file is None:
+        _debug_file = open(f"/tmp/debug-urpm-{os.getpid()}.txt", 'a')
+    import time
+    _debug_file.write(f"{time.strftime('%H:%M:%S')} {message}\n")
+    _debug_file.flush()
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +299,7 @@ class QueueResult:
     success: bool
     operations: List[OperationResult] = field(default_factory=list)
     overall_error: str = ""
+    scriptlet_output: str = ""  # Captured stdout from RPM scriptlets
 
 
 @dataclass
@@ -297,9 +330,10 @@ class QueueProgressMessage:
     bytes_done: int = 0      # Bytes processed for current package
     bytes_total: int = 0     # Total bytes for current package
     script: str = ""         # Scriptlet phase (e.g. 'post-install')
+    scriptlet_output: str = ""  # Captured stdout from RPM scriptlets
 
     def to_json(self) -> str:
-        return json.dumps({
+        d = {
             'type': self.msg_type,
             'operation_id': self.operation_id,
             'op_type': self.op_type,
@@ -315,7 +349,10 @@ class QueueProgressMessage:
             'bytes_done': self.bytes_done,
             'bytes_total': self.bytes_total,
             'script': self.script,
-        })
+        }
+        if self.scriptlet_output:
+            d['scriptlet_output'] = self.scriptlet_output
+        return json.dumps(d)
 
     @classmethod
     def from_json(cls, data: str) -> 'QueueProgressMessage':
@@ -336,6 +373,7 @@ class QueueProgressMessage:
             bytes_done=d.get('bytes_done', 0),
             bytes_total=d.get('bytes_total', 0),
             script=d.get('script', ''),
+            scriptlet_output=d.get('scriptlet_output', ''),
         )
 
 
@@ -803,6 +841,7 @@ queue._child_process_standalone()
         results: List[OperationResult] = []
         current_op_result: Optional[OperationResult] = None
         overall_error = ""
+        scriptlet_output = ""
         smart_released = False
 
         try:
@@ -867,6 +906,9 @@ queue._child_process_standalone()
                     current_op_result = None
                     break
 
+                elif msg.msg_type == 'scriptlet_output':
+                    scriptlet_output = msg.scriptlet_output
+
                 elif msg.msg_type == 'queue_done':
                     break
 
@@ -900,7 +942,8 @@ queue._child_process_standalone()
         return QueueResult(
             success=all_success,
             operations=results,
-            overall_error=overall_error
+            overall_error=overall_error,
+            scriptlet_output=scriptlet_output,
         )
 
     def _child_process(self, read_fd: int, write_fd: int,
@@ -921,6 +964,25 @@ queue._child_process_standalone()
 
         # Detach from parent's process group so we survive parent exit
         os.setsid()
+
+        # Redirect stdout to a temp file so RPM scriptlet output (ldconfig,
+        # update-mime-database, etc.) doesn't leak to the terminal and
+        # corrupt the parent's progress bar.  The captured output is sent
+        # back to the parent via the pipe for post-progress display.
+        # stderr is kept for debug prints.
+        import tempfile as _tempfile
+        _stdout_capture = _tempfile.NamedTemporaryFile(
+            mode='w+', prefix='urpm-scripts-', suffix='.log', delete=False,
+        )
+        _stdout_capture_path = _stdout_capture.name
+        _capture_fd = _stdout_capture.fileno()
+        os.dup2(_capture_fd, 1)  # stdout → temp file
+        os.dup2(_capture_fd, 2)  # stderr → temp file
+        # Update Python-level objects so print(..., file=sys.stderr) also
+        # goes to the capture file instead of the terminal.
+        import sys as _sys
+        _sys.stdout = os.fdopen(1, 'w', buffering=1)
+        _sys.stderr = os.fdopen(2, 'w', buffering=1)
 
         # Ignore SIGPIPE — we handle broken pipe in _send_progress
         _signal.signal(_signal.SIGPIPE, _signal.SIG_IGN)
@@ -1012,6 +1074,24 @@ queue._child_process_standalone()
                 if success and op.op_type == OperationType.INSTALL:
                     self._store_readmes_in_db(op)
 
+            # Send captured scriptlet output to parent
+            try:
+                os.fsync(1)  # Flush stdout (redirected to temp file)
+                with open(_stdout_capture_path, 'r') as _cap:
+                    _captured = _cap.read().strip()
+                if _captured:
+                    _pipe_write(QueueProgressMessage(
+                        msg_type='scriptlet_output',
+                        scriptlet_output=_captured,
+                    ).to_json())
+            except OSError:
+                pass
+            finally:
+                try:
+                    os.unlink(_stdout_capture_path)
+                except OSError:
+                    pass
+
             # Signal queue complete
             _pipe_write(QueueProgressMessage(msg_type='queue_done').to_json())
             if not pipe_state['closed']:
@@ -1025,12 +1105,11 @@ queue._child_process_standalone()
             if progress_file_state:
                 _cleanup_async_progress()
 
-            # Redirect stdout/stderr now that triggers are done
-            # (terminal belongs to the user after smart sync release)
+            # Redirect stderr now that triggers are done
+            # (stdout was already redirected at child start)
             if pipe_state['closed']:
                 try:
                     devnull = os.open(os.devnull, os.O_WRONLY)
-                    os.dup2(devnull, 1)
                     os.dup2(devnull, 2)
                     os.close(devnull)
                 except OSError:
@@ -1149,8 +1228,7 @@ queue._child_process_standalone()
         errors = []
 
         if DEBUG_EXECINSTALL:
-            print(f"[_execute_install] root={self.root} paths={len(rpm_paths)} noscripts={op.noscripts}", file=sys.stderr)
-            sys.stderr.flush()
+            _debug_write(f"[install] root={self.root} paths={len(rpm_paths)} noscripts={op.noscripts}")
 
         ts = rpm.TransactionSet(self.root or '/')
 
@@ -1170,7 +1248,7 @@ queue._child_process_standalone()
                     ts.addInstall(hdr, str(path), 'u')
                     added_count += 1
                     if DEBUG_EXECINSTALL:
-                        print(f"[_execute_install] added: {Path(path).name}", file=sys.stderr)
+                        _debug_write(f"[install] added: {Path(path).name}")
                 finally:
                     os.close(fd)
             except rpm.error as e:
@@ -1180,8 +1258,7 @@ queue._child_process_standalone()
                 return False, 0, errors, []
 
         if DEBUG_EXECINSTALL:
-            print(f"[_execute_install] added {added_count} packages to transaction", file=sys.stderr)
-            sys.stderr.flush()
+            _debug_write(f"[install] added {added_count} packages to transaction")
 
         # Add packages to erase in the SAME transaction (for obsoleted packages)
         erased_count = 0
@@ -1196,8 +1273,7 @@ queue._child_process_standalone()
         # Check dependencies
         if not op.force:
             if DEBUG_EXECINSTALL:
-                print(f"[_execute_install] checking dependencies...", file=sys.stderr)
-                sys.stderr.flush()
+                _debug_write("[install] checking dependencies...")
             unresolved = ts.check()
             if unresolved:
                 # Separate deps from OLD packages being replaced (scriptlet
@@ -1223,14 +1299,12 @@ queue._child_process_standalone()
                     errors = [f"Dependency: {prob}" for prob in fatal]
                     return False, 0, errors, []
             if DEBUG_EXECINSTALL:
-                print(f"[_execute_install] dependencies OK", file=sys.stderr)
-                sys.stderr.flush()
+                _debug_write("[install] dependencies OK")
 
         # Order transaction
         ts.order()
         if DEBUG_EXECINSTALL:
-            print(f"[_execute_install] transaction ordered", file=sys.stderr)
-            sys.stderr.flush()
+            _debug_write("[install] transaction ordered")
 
         if op.test:
             return True, len(rpm_paths), [], []
@@ -1256,8 +1330,9 @@ queue._child_process_standalone()
         #               key = triggering package name (e.g. "shared-mime-info").
         #               This is often the slowest phase (e.g. 39s for shared-mime-info).
         #
-        total = len(rpm_paths)
-        packages_done = [0]       # Packages with extraction complete
+        total = len(rpm_paths) + erased_count
+        packages_done = [0]       # Unique packages with extraction complete
+        seen_paths = set()        # Paths already counted (dedup multi-installed)
         extraction_error = [False]
         current_pkg_name = ['']
         in_verify = [True]        # True until VERIFY_STOP fires
@@ -1296,7 +1371,24 @@ queue._child_process_standalone()
                                        bytes_done=kwargs.get('bytes_done', 0),
                                        bytes_total=kwargs.get('bytes_total', 0))
 
+        # ── Debug: reverse map RPM callback reason int → name ──
+        if DEBUG_TSRUN:
+            _CB_NAMES = {}
+            for _attr in dir(rpm):
+                if _attr.startswith('RPMCALLBACK_'):
+                    _CB_NAMES[getattr(rpm, _attr)] = _attr[12:]
+
         def callback(reason, amount, total_pkg, key, client_data):
+            # ── Debug logging (--debug tsrun) ──
+            if DEBUG_TSRUN and reason != rpm.RPMCALLBACK_INST_PROGRESS:
+                cb_name = _CB_NAMES.get(reason, f'UNKNOWN({reason})')
+                pname = Path(key).name if key and '/' in str(key) else (str(key) if key else '')
+                _debug_write(
+                    f"CB {cb_name}: amount={amount} total_pkg={total_pkg} "
+                    f"key={pname} in_verify={in_verify[0]} "
+                    f"done={packages_done[0]} total={total}"
+                )
+
             # ── VERIFY phase: header signature checks ──
             if reason == rpm.RPMCALLBACK_VERIFY_START:
                 in_verify[0] = True
@@ -1331,8 +1423,10 @@ queue._child_process_standalone()
                     except Exception:
                         pass
                     del open_fds[path]
-                if not in_verify[0]:
-                    # Package extraction complete — advance counter
+                if not in_verify[0] and path not in seen_paths:
+                    # Count each unique path once — multi-installed packages
+                    # trigger OPEN/CLOSE multiple times for the same file.
+                    seen_paths.add(path)
                     packages_done[0] += 1
                     _send_progress(name=current_pkg_name[0],
                                    current=packages_done[0], total=total,
@@ -1441,8 +1535,7 @@ queue._child_process_standalone()
 
         # Run transaction
         if DEBUG_EXECINSTALL:
-            print(f"[_execute_install] calling ts.run() with {total} packages", file=sys.stderr)
-            sys.stderr.flush()
+            _debug_write(f"[install] calling ts.run() with {total} packages")
         _log_background(f"Starting install: {total} packages")
 
         # Track .rpmnew files created during this transaction
@@ -1452,10 +1545,9 @@ queue._child_process_standalone()
         new_rpmnew_files = list(rpmnew_after - rpmnew_before)
 
         if DEBUG_EXECINSTALL:
-            print(f"[_execute_install] ts.run() returned: problems={problems}", file=sys.stderr)
+            _debug_write(f"[install] ts.run() returned: problems={problems}")
             if new_rpmnew_files:
-                print(f"[_execute_install] new .rpmnew files: {new_rpmnew_files}", file=sys.stderr)
-            sys.stderr.flush()
+                _debug_write(f"[install] new .rpmnew files: {new_rpmnew_files}")
 
         # Clean up any remaining FDs
         for fd in open_fds.values():

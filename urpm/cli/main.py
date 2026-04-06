@@ -320,7 +320,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--debug',
         type=str,
         metavar='COMPONENT',
-        help=_('Enable debug output (solver, download, all)')
+        help=_('Enable debug output (solver, tsrun, download, all)')
     )
     debug_parent.add_argument(
         '--watched',
@@ -751,8 +751,8 @@ Examples:
     )
     erase_parser.add_argument(
         '--debug',
-        choices=['solver', 'all'],
-        help=_('Enable debug output (solver, all)')
+        choices=['solver', 'tsrun', 'all'],
+        help=_('Enable debug output (solver, tsrun, all)')
     )
     erase_parser.add_argument(
         '--sync', action='store_true', default=False,

@@ -62,10 +62,16 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         print(colors.error(_("Error: erase requires root privileges")))
         return 1
 
-    # Set up solver debug if requested
-    debug_solver = getattr(args, 'debug', None) in ('solver', 'all')
-    if debug_solver:
+    # Set up debug if requested
+    _debug = getattr(args, 'debug', None) or ''
+    _debug_parts = {d.strip() for d in _debug.split(',')} if _debug else set()
+    if 'all' in _debug_parts:
+        _debug_parts.update(('solver', 'tsrun'))
+    if 'solver' in _debug_parts:
         set_solver_debug(enabled=True)
+    if 'tsrun' in _debug_parts:
+        from ...core.transaction_queue import set_tsrun_debug
+        set_tsrun_debug(enabled=True)
 
     # Resolve what to remove
     resolver = _create_resolver(db, args)
@@ -256,9 +262,9 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         from ...core.triggers import describe_trigger
 
         try:
-            _term_width = os.get_terminal_size().columns
+            _term_width = os.get_terminal_size().columns - 1
         except OSError:
-            _term_width = 80
+            _term_width = 79
 
         _total = len(packages_to_erase)
         _dw = len(str(_total))
@@ -290,21 +296,25 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             pct = int(done * 100 / total) if total else 0
 
             if progress.phase == TransactionPhase.SCRIPT:
-                label = describe_trigger(progress.script_name) if progress.script_name else name
-                info = f"Running: {label}"
+                info = describe_trigger(progress.script_name) if progress.script_name else name
             else:
                 info = name
 
-            max_info = _term_width - len(_header_text) - 1
+            # Truncate info so header + space + info fits in terminal width
+            max_info = _term_width - len(_header_text) - 2
             if len(info) > max_info:
                 info = info[:max_info - 1] + "…"
 
             padding = _term_width - len(_header_text) - len(info)
             header_line = f"{_header_text}{' ' * max(padding, 1)}{info}"
+            if len(header_line) > _term_width:
+                header_line = header_line[:_term_width]
 
             filled = int(_bar_width * pct / 100)
             count_suffix = f" {done:>{_dw}}/{total} {pct:>3}%"
             bar_line = f"[{'█' * filled}{'░' * (_bar_width - filled)}]{count_suffix}"
+            if len(bar_line) > _term_width:
+                bar_line = bar_line[:_term_width]
 
             if not _progress_started[0]:
                 _progress_started[0] = True
@@ -341,6 +351,13 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             "{count} package erased",
             "{count} packages erased",
             erased_count).format(count=erased_count)))
+
+        # Display captured scriptlet output
+        if queue_result.scriptlet_output:
+            print(colors.dim("\n  " + _("Scriptlet output:")))
+            for line in queue_result.scriptlet_output.splitlines():
+                print(colors.dim(f"    {line}"))
+
         ops.complete_transaction(transaction_id)
 
         # Update installed-through-deps.list for urpmi compatibility
