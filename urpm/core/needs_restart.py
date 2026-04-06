@@ -170,9 +170,13 @@ def check_needs_restart_from_provides(
     have the provides list from the resolver (avoids an extra RPM query
     after install).
 
+    Supports both the Fedora format (``should-restart:system``) and the
+    Mageia/RPM versioned provide format (``should-restart = system``) as
+    returned by libsolv's ``lookup_deparray(SOLVABLE_PROVIDES)``.
+
     Args:
         package_provides: Dict mapping package names to their provides
-            list.  Example: ``{'kernel-desktop': ['should-restart:system', ...]}``.
+            list.  Example: ``{'glibc': ['should-restart = system', ...]}``.
 
     Returns:
         Same format as :func:`check_needs_restart`.
@@ -181,8 +185,14 @@ def check_needs_restart_from_provides(
 
     for name, provides in package_provides.items():
         for prov in provides:
+            # Fedora format: "should-restart:system"
             if prov.startswith('should-restart:'):
                 component = prov.split(':', 1)[1].strip()
+                if component:
+                    result.setdefault(component, []).append(name)
+            # Mageia/RPM versioned format: "should-restart = system"
+            elif prov.startswith('should-restart '):
+                component = prov.split('=', 1)[1].strip() if '=' in prov else ''
                 if component:
                     result.setdefault(component, []).append(name)
 
