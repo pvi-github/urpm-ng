@@ -1,5 +1,5 @@
 %define name urpm-ng
-%define version 0.6.0
+%define version 0.6.59
 %define release 1
 
 Name:           %{name}
@@ -228,6 +228,13 @@ install -Dm644 data/urpm-dbus.service %{buildroot}%{_unitdir}/urpm-dbus.service
 install -Dm644 data/org.mageia.Urpm.v1.service %{buildroot}%{_datadir}/dbus-1/system-services/org.mageia.Urpm.v1.service
 install -Dm644 data/org.mageia.Urpm.v1.conf %{buildroot}%{_sysconfdir}/dbus-1/system.d/org.mageia.Urpm.v1.conf
 
+# Install configuration files
+install -dm755 %{buildroot}%{_sysconfdir}/urpm/conf.d
+install -Dm644 data/etc/urpm/urpm.cfg %{buildroot}%{_sysconfdir}/urpm/urpm.cfg
+if [ -d data/etc/urpm/conf.d ]; then
+    install -m644 data/etc/urpm/conf.d/*.cfg %{buildroot}%{_sysconfdir}/urpm/conf.d/ 2>/dev/null || :
+fi
+
 # Install PolicyKit policy
 install -Dm644 data/org.mageia.urpm.policy %{buildroot}%{_datadir}/polkit-1/actions/org.mageia.urpm.policy
 
@@ -328,6 +335,11 @@ fi
 # Scripts for urpm-ng-core (first install message)
 # ============================================================================
 %post core
+# Enforce auto-upgrade policy: disable unattended upgrades from
+# gnome-software, KDE Discover, PackageKit offline, and dnf-automatic.
+# This runs on every install/upgrade to catch newly installed components.
+/usr/bin/python3 -c "from urpm.core.auto_upgrade_policy import enforce_all; enforce_all()" 2>/dev/null || :
+
 if [ $1 -eq 1 ]; then
     # First install: import media from urpmi and auto-configure servers
     echo ""
@@ -405,6 +417,10 @@ fi
 %doc %{_docdir}/%{name}
 %{_bindir}/urpm
 %{_sysconfdir}/bash_completion.d/urpm
+%dir %{_sysconfdir}/urpm
+%dir %{_sysconfdir}/urpm/conf.d
+%config(noreplace) %{_sysconfdir}/urpm/urpm.cfg
+%{_sysconfdir}/urpm/conf.d/*.cfg
 %{_mandir}/man1/urpm.1*
 %{_mandir}/fr/man1/urpm.1*
 %dir %{_datadir}/urpm

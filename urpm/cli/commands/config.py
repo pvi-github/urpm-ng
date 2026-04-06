@@ -22,13 +22,24 @@ def cmd_config(args) -> int:
     if not hasattr(args, 'config_cmd') or not args.config_cmd:
         print(_("Usage: urpm config <subcommand> ..."))
         print(_("\nSubcommands:"))
-        print(_("  show          Show effective configuration"))
-        print(_("  edit [file]   Edit config file with $EDITOR"))
-        print(_("  blacklist     Manage blacklist (critical packages)"))
-        print(_("  redlist       Manage redlist (packages requiring confirmation)"))
-        print(_("  kernel-keep   Number of kernels to keep"))
-        print(_("  version-mode  Choose between system version and cauldron"))
+        print(_("  show                    Show effective configuration"))
+        print(_("  edit [file]             Edit config file with $EDITOR"))
+        print(_("  blacklist               Manage blacklist (critical packages)"))
+        print(_("  redlist                 Manage redlist (packages requiring confirmation)"))
+        print(_("  kernel-keep             Number of kernels to keep"))
+        print(_("  version-mode            Choose between system version and cauldron"))
+        print(_("  gnome-auto-upgrades     Control GNOME Software auto-updates"))
+        print(_("  discover-auto-upgrades  Control KDE Discover auto-updates"))
+        print(_("  packagekit-auto-upgrades  Control PackageKit offline auto-updates"))
         return 1
+
+    # Handle auto-upgrade policy commands
+    if args.config_cmd in ('gnome-auto-upgrades', 'gau'):
+        return _cmd_auto_upgrade_policy(args, 'gnome')
+    if args.config_cmd in ('discover-auto-upgrades', 'dau'):
+        return _cmd_auto_upgrade_policy(args, 'discover')
+    if args.config_cmd in ('packagekit-auto-upgrades', 'pau'):
+        return _cmd_auto_upgrade_policy(args, 'packagekit')
 
     # Handle version-mode (uses database, not config file)
     if args.config_cmd in ('version-mode', 'vm'):
@@ -198,6 +209,61 @@ def _cmd_config_edit(args) -> int:
         return 1
 
     return subprocess.call([editor, str(target)])
+
+
+def _cmd_auto_upgrade_policy(args, target: str) -> int:
+    """Handle gnome-auto-upgrades / discover-auto-upgrades / packagekit-auto-upgrades."""
+    from ...core.auto_upgrade_policy import (
+        get_gnome_auto_upgrades, set_gnome_auto_upgrades,
+        get_discover_auto_upgrades, set_discover_auto_upgrades,
+        get_packagekit_auto_upgrades, set_packagekit_auto_upgrades,
+    )
+    from ...core.install import check_root
+
+    getters = {
+        'gnome': get_gnome_auto_upgrades,
+        'discover': get_discover_auto_upgrades,
+        'packagekit': get_packagekit_auto_upgrades,
+    }
+    setters = {
+        'gnome': set_gnome_auto_upgrades,
+        'discover': set_discover_auto_upgrades,
+        'packagekit': set_packagekit_auto_upgrades,
+    }
+    labels = {
+        'gnome': 'GNOME Software',
+        'discover': 'KDE Discover',
+        'packagekit': 'PackageKit offline updates',
+    }
+
+    value = getattr(args, 'auto_upgrade_value', None)
+    label = labels[target]
+
+    if value is None:
+        # Show current state
+        current = getters[target]()
+        if current is None:
+            print(_("{label}: not installed").format(label=label))
+        elif current:
+            print(_("{label}: auto-upgrades enabled").format(label=label))
+        else:
+            print(_("{label}: auto-upgrades disabled").format(label=label))
+        return 0
+
+    # Set value
+    if not check_root():
+        print(_("Error: this operation requires root privileges"))
+        return 1
+
+    enabled = value in ('yes', 'true', 'on', '1')
+    ok = setters[target](enabled)
+    if not ok:
+        print(_("{label}: not installed, nothing to configure").format(label=label))
+        return 1
+
+    state = _("enabled") if enabled else _("disabled")
+    print(_("{label}: auto-upgrades {state}").format(label=label, state=state))
+    return 0
 
 
 def cmd_key(args) -> int:

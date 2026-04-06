@@ -1881,6 +1881,39 @@ Examples:
         'show', help=_('Show effective configuration from config files')
     )
 
+    # config gnome-auto-upgrades
+    gnome_au_parser = config_subparsers.add_parser(
+        'gnome-auto-upgrades', aliases=['gau'],
+        help=_('Control GNOME Software automatic updates')
+    )
+    gnome_au_parser.add_argument(
+        'auto_upgrade_value', nargs='?',
+        choices=['yes', 'no', 'true', 'false', 'on', 'off'],
+        help=_('yes/no (show current if omitted)')
+    )
+
+    # config discover-auto-upgrades
+    discover_au_parser = config_subparsers.add_parser(
+        'discover-auto-upgrades', aliases=['dau'],
+        help=_('Control KDE Discover automatic updates')
+    )
+    discover_au_parser.add_argument(
+        'auto_upgrade_value', nargs='?',
+        choices=['yes', 'no', 'true', 'false', 'on', 'off'],
+        help=_('yes/no (show current if omitted)')
+    )
+
+    # config packagekit-auto-upgrades
+    pk_au_parser = config_subparsers.add_parser(
+        'packagekit-auto-upgrades', aliases=['pau'],
+        help=_('Control PackageKit offline automatic updates')
+    )
+    pk_au_parser.add_argument(
+        'auto_upgrade_value', nargs='?',
+        choices=['yes', 'no', 'true', 'false', 'on', 'off'],
+        help=_('yes/no (show current if omitted)')
+    )
+
     edit_parser = config_subparsers.add_parser(
         'edit', help=_('Edit config file with $EDITOR')
     )
