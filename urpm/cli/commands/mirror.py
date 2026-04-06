@@ -444,7 +444,9 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
 
     # Multi-line progress display using DownloadProgressDisplay
     from .. import display
-    progress_display = display.DownloadProgressDisplay(num_workers=4)
+    from ...core.settings import get_settings
+    progress_display = display.DownloadProgressDisplay(
+        num_workers=get_settings().download.parallel)
 
     def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
                  item_bytes=None, item_total=None, slots_status=None):

@@ -647,7 +647,8 @@ class Downloader:
         """
         self.cache_dir = cache_dir or get_base_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.max_workers = max_workers
+        from .settings import get_settings
+        self.max_workers = get_settings().download.parallel
         self.use_peers = use_peers or only_peers  # only_peers implies use_peers
         self.only_peers = only_peers
         self.db = db
