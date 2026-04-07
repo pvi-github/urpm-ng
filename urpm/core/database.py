@@ -1529,7 +1529,12 @@ class PackageDatabase(
         return join_clause, where_clause, tuple(accepted)
 
     def search(self, pattern: str, limit: int = None, search_provides: bool = False) -> List[Dict]:
-        """Search packages by name pattern, optionally also in provides.
+        """Search packages by name, summary, and optionally provides.
+
+        Search order (results are deduplicated):
+            1. Package name (substring match)
+            2. Provides capabilities (if search_provides=True)
+            3. Summary/description text
 
         Filters by system version to avoid returning packages from other
         Mageia versions (e.g., mga9 packages on a mga10 system).
@@ -1540,7 +1545,8 @@ class PackageDatabase(
             search_provides: If True, also search in provides capabilities
 
         Returns:
-            List of package dicts. If found via provides, includes 'matched_provide' key.
+            List of package dicts. May include 'matched_provide' or
+            'matched_summary' keys indicating how the package was found.
         """
         pattern_lower = f'%{pattern.lower()}%'
         results = []
@@ -1603,6 +1609,38 @@ class PackageDatabase(
                 pkg = dict(row)
                 if pkg['id'] not in seen_ids:
                     seen_ids.add(pkg['id'])
+                    results.append(pkg)
+                    if limit and len(results) >= limit:
+                        break
+
+        # Search in summary/description
+        if limit is None or len(results) < limit:
+            if limit:
+                remaining = limit - len(results)
+                cursor = self.conn.execute(f"""
+                    SELECT p.id, p.name, p.version, p.release, p.arch,
+                           p.nevra, p.summary, p.size
+                    FROM packages p
+                    {version_join}
+                    WHERE LOWER(p.summary) LIKE ? {version_filter}
+                    ORDER BY p.name_lower
+                    LIMIT ?
+                """, base_params + (remaining + len(seen_ids),))
+            else:
+                cursor = self.conn.execute(f"""
+                    SELECT p.id, p.name, p.version, p.release, p.arch,
+                           p.nevra, p.summary, p.size
+                    FROM packages p
+                    {version_join}
+                    WHERE LOWER(p.summary) LIKE ? {version_filter}
+                    ORDER BY p.name_lower
+                """, base_params)
+
+            for row in cursor:
+                pkg = dict(row)
+                if pkg['id'] not in seen_ids:
+                    seen_ids.add(pkg['id'])
+                    pkg['matched_summary'] = True
                     results.append(pkg)
                     if limit and len(results) >= limit:
                         break

@@ -108,8 +108,11 @@ def cmd_search(args, db: 'PackageDatabase') -> int:
     # ANSI codes without reset for proper nesting
     GREEN = '\033[92m'
     BOLD = '\033[1m'
-    DIM = '\033[2m'
+    DIM = '\033[90m'
     RESET = '\033[0m'
+
+    import shutil
+    term_width = shutil.get_terminal_size().columns
 
     def highlight_with_base(text, pattern, base_code):
         """Highlight pattern in green, rest in base color (using raw ANSI codes)."""
@@ -179,17 +182,27 @@ def cmd_search(args, db: 'PackageDatabase') -> int:
         release_arch = f"{DIM}{pkg['release']}.{pkg['arch']}{RESET}"
         nevra_display = f"{name}-{version}-{release_arch}"
 
-        summary = pkg.get('summary', '')[:60]
-        summary = highlight_with_base(summary, pattern, '')
+        summary = pkg.get('summary', '')
+        summary_display = highlight_with_base(summary, pattern, '')
 
         # Show which provide matched if found via provides
         if pkg.get('matched_provide'):
-            # Entire "(provides: xxx)" in dim, with matches in green
-            provide_text = f"(provides: {pkg['matched_provide']})"
-            provide_display = highlight_with_base(provide_text, pattern, DIM)
-            print(f"{nevra_display}  {provide_display}")
+            # Strip version info like [== 0.29.0] from provides
+            provide_name = re.sub(r'\[.*?\]', '', pkg['matched_provide']).strip()
+            provide_text = f"(provides: {provide_name})"
+            provide_display = f"{DIM}{highlight_with_base(provide_text, pattern, DIM)}{RESET}"
+            # Right-align provides on terminal width
+            nevra_plain = f"{display_name}-{display_version}-{pkg['release']}.{pkg['arch']}"
+            provide_plain = f"(provides: {provide_name})"
+            padding = max(2, term_width - len(nevra_plain) - len(provide_plain))
+            print(f"{nevra_display}{' ' * padding}{provide_display}")
         else:
-            print(f"{nevra_display}  {summary}")
+            print(nevra_display)
+
+        # Summary below, indented
+        if summary:
+            print(f"  {summary_display}")
+        print()
 
     print(colors.dim("\n" + ngettext(
         "{count} package found",
