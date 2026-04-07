@@ -408,90 +408,13 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                     )
                 ))
 
-        from ...core.transaction_queue import TransactionProgress, TransactionPhase
-        from ...core.triggers import describe_trigger
+        from ..helpers.progress import make_progress_callback
 
-        _header_text = [None]  # Set on first progress callback
-        _progress_started = [False]
-        last_state = [None]
-
-        try:
-            _term_width = os.get_terminal_size().columns - 1
-        except OSError:
-            _term_width = 79
-
-        # Placeholders — set once we know total from first callback
-        _bar_width = [0]
-        _dw = [0]
-
-        def queue_progress(progress: TransactionProgress):
-            """Two-line progress display:
-
-            Line 1: header (left) + package/trigger info (right-aligned)
-            Line 2: [████░░░░░░░░░░░░░░░░░░░░░░░] XX/XX 100%
-            """
-            if progress.phase in (TransactionPhase.VERIFY, TransactionPhase.PREPARE):
-                return
-
-            total = progress.packages_total
-
-            # Print header once, compute bar width from total
-            if _header_text[0] is None:
-                _header_text[0] = ngettext(
-                    "Upgrading {count} package...",
-                    "Upgrading {count} packages...",
-                    total).format(count=total)
-                _dw[0] = len(str(total))
-                _count_w = 1 + _dw[0] + 1 + _dw[0] + 1 + 4
-                _bar_width[0] = max(_term_width - _count_w - 2, 10)
-                print("\n" + _header_text[0])
-
-            state = (progress.phase, progress.packages_done,
-                     progress.package_name, progress.bytes_done)
-            if state == last_state[0]:
-                return
-            last_state[0] = state
-
-            done = progress.packages_done
-
-            # --- Info text (right-aligned on header line) ---
-            if progress.phase == TransactionPhase.SCRIPT:
-                pct = int(done * 100 / total) if total else 100
-                if full_sync and progress.script_name:
-                    info = describe_trigger(progress.script_name)
-                else:
-                    info = progress.script_name or progress.package_name
-            else:
-                if total > 0:
-                    pkg_frac = done / total
-                    if progress.bytes_total > 0:
-                        pkg_frac += (progress.bytes_done / progress.bytes_total) / total
-                    pct = int(pkg_frac * 100)
-                else:
-                    pct = 0
-                info = progress.package_name
-
-            # Truncate info so header + space + info fits in terminal width
-            max_info = _term_width - len(_header_text[0]) - 2
-            if len(info) > max_info:
-                info = info[:max_info - 1] + "…"
-
-            padding = _term_width - len(_header_text[0]) - len(info)
-            header_line = f"{_header_text[0]}{' ' * max(padding, 1)}{info}"
-            # Hard clip: never exceed terminal width (prevents line wrap)
-            if len(header_line) > _term_width:
-                header_line = header_line[:_term_width]
-
-            filled = int(_bar_width[0] * pct / 100)
-            count_suffix = f" {done:>{_dw[0]}}/{total} {pct:>3}%"
-            bar_line = f"[{'█' * filled}{'░' * (_bar_width[0] - filled)}]{count_suffix}"
-            if len(bar_line) > _term_width:
-                bar_line = bar_line[:_term_width]
-
-            if not _progress_started[0]:
-                _progress_started[0] = True
-            print(f"\033[A\r\033[K{header_line}\n\033[K{bar_line}",
-                  end='', flush=True)
+        queue_progress = make_progress_callback(
+            header_template="Upgrading {count} package...",
+            total=None,  # discovered from first callback
+            full_sync=full_sync,
+        )
 
         resilient_result = ops.resilient_install(
             rpm_paths,
@@ -507,8 +430,8 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         )
 
         # Clear 2-line progress and print done
-        if _header_text[0]:
-            print(f"\033[A\r\033[K{_header_text[0]}\n\033[K  " + _("done"))
+        if queue_progress.state['header']:
+            print(f"\033[A\r\033[K{queue_progress.state['header']}\n\033[K  " + _("done"))
         else:
             print()
 
