@@ -1,5 +1,6 @@
 NAME = rpmdrake-ng
 VERSION = $(shell /usr/bin/cat VERSION)
+RELEASE ?= 1
 
 CAT = /usr/bin/cat
 SED = /usr/bin/sed
@@ -13,9 +14,11 @@ version:
 	$(SED) -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' rpmdrake/__init__.py
 	$(SED) -i 's/^version = .*/version = "$(VERSION)"/' pyproject.toml
 	$(SED) -i 's/^%define version .*/%define version $(VERSION)/' rpmbuild/SPECS/rpmdrake-ng.spec
+	$(SED) -i 's/^%define release .*/%define release $(RELEASE)/' rpmbuild/SPECS/rpmdrake-ng.spec
 
 tarball: version
 	$(SED) -i 's/^%define version.*/%define version $(VERSION)/' rpmbuild/SPECS/$(NAME).spec
+	$(SED) -i 's/^%define release.*/%define release $(RELEASE)/' rpmbuild/SPECS/$(NAME).spec
 	$(MKDIR) -p rpmbuild/SOURCES
 	# Copy LICENSE from parent if not present
 	@if [ ! -f LICENSE ]; then $(CP) ../LICENSE . 2>/dev/null || true; fi

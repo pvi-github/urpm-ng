@@ -1,5 +1,6 @@
 NAME = urpm-ng
 VERSION = $(shell /usr/bin/cat VERSION)
+RELEASE = $(shell /usr/bin/cat RELEASE)
 
 CAT = /usr/bin/cat
 SED = /usr/bin/sed
@@ -12,11 +13,13 @@ version:
 	$(SED) -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' urpm/__init__.py
 	$(SED) -i 's/^version = .*/version = "$(VERSION)"/' pyproject.toml
 	$(SED) -i 's/^%define version .*/%define version $(VERSION)/' rpmbuild/SPECS/urpm-ng.spec
+	$(SED) -i 's/^%define release .*/%define release $(RELEASE)/' rpmbuild/SPECS/urpm-ng.spec
 	echo $(VERSION) > rpmdrake/VERSION
-	$(MAKE) -C rpmdrake version
+	$(MAKE) -C rpmdrake version RELEASE=$(RELEASE)
 
 tarball: version
 	$(SED) -i 's/^%define version.*/%define version $(VERSION)/' rpmbuild/SPECS/$(NAME).spec
+	$(SED) -i 's/^%define release.*/%define release $(RELEASE)/' rpmbuild/SPECS/$(NAME).spec
 	$(MKDIR) -p rpmbuild/SOURCES
 	# Main tarball (Python package)
 	$(TAR) czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
@@ -39,7 +42,7 @@ rpm: tarball
 	cd rpmbuild && $(BM) -l SPECS/$(NAME).spec
 
 rpm-rpmdrake:
-	$(MAKE) -C rpmdrake rpm
+	$(MAKE) -C rpmdrake rpm RELEASE=$(RELEASE)
 
 rpm-all: rpm rpm-rpmdrake
 
