@@ -28,13 +28,6 @@ from .helpers.package import (
     resolve_virtual_package as _resolve_virtual_package,
 )
 from .helpers.debug import (
-    DEBUG_LAST_INSTALLED_DEPS,
-    DEBUG_LAST_REMOVED_DEPS,
-    DEBUG_INSTALLED_DEPS_COPY,
-    DEBUG_PREV_INSTALLED_DEPS,
-    write_debug_file as _write_debug_file,
-    clear_debug_file as _clear_debug_file,
-    copy_installed_deps_list as _copy_installed_deps_list,
     notify_urpmd_cache_invalidate as _notify_urpmd_cache_invalidate,
 )
 from .helpers.kernel import (

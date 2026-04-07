@@ -6,14 +6,6 @@ from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
-from ..helpers.debug import (
-    DEBUG_LAST_INSTALLED_DEPS,
-    DEBUG_LAST_REMOVED_DEPS,
-    DEBUG_PREV_INSTALLED_DEPS,
-    write_debug_file as _write_debug_file,
-    clear_debug_file as _clear_debug_file,
-    copy_installed_deps_list as _copy_installed_deps_list,
-)
 from ..helpers.resolver import create_resolver as _create_resolver
 from ..helpers.alternatives import (
     PreferencesMatcher,
@@ -42,11 +34,6 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         print(colors.warning(f"  {prev_error}"))
         print(colors.dim(_("  (This message will not appear again)")))
         clear_background_error()
-
-    # Debug: save previous state and clear debug files at start
-    _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
-    _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
-    _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
     from ...core.resolver import Resolver, format_size, set_solver_debug
     from ...core.install import check_root
@@ -591,15 +578,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         new_deps = [a.name for a in result.actions if a.action.value == 'install']
         if new_deps:
             resolver.mark_as_dependency(new_deps)
-            _write_debug_file(DEBUG_LAST_INSTALLED_DEPS, new_deps)
         removed = [a.name for a in result.actions if a.action.value == 'remove']
         if removed:
             resolver.unmark_packages(removed)
-
-        if orphan_names:
-            _write_debug_file(DEBUG_LAST_REMOVED_DEPS, orphan_names)
-
-        _copy_installed_deps_list()
 
         return 0
 

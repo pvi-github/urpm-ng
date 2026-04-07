@@ -7,13 +7,6 @@ if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
 from ..helpers.package import extract_pkg_name as _extract_pkg_name
-from ..helpers.debug import (
-    DEBUG_LAST_REMOVED_DEPS,
-    DEBUG_PREV_INSTALLED_DEPS,
-    write_debug_file as _write_debug_file,
-    clear_debug_file as _clear_debug_file,
-    copy_installed_deps_list as _copy_installed_deps_list,
-)
 from ..helpers.resolver import create_resolver as _create_resolver
 
 
@@ -51,10 +44,6 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         print(colors.error(_("Error: no packages specified")))
         print(colors.dim(_("  Use --auto-orphans to remove orphan dependencies")))
         return 1
-
-    # Debug: save previous state and clear debug files at start
-    _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
-    _clear_debug_file(DEBUG_LAST_REMOVED_DEPS)
 
     # Check root (not required for chroot operations)
     allow_no_root = getattr(args, 'allow_no_root', False)
@@ -363,14 +352,6 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         # Update installed-through-deps.list for urpmi compatibility
         erased_packages = [action.name for action in all_actions]
         resolver.unmark_packages(erased_packages)
-
-        # Debug: write orphans that were removed
-        orphan_names = [o.name for o in orphans]
-        if orphan_names:
-            _write_debug_file(DEBUG_LAST_REMOVED_DEPS, orphan_names)
-
-        # Debug: copy the installed-through-deps.list for inspection
-        _copy_installed_deps_list()
 
         return 0
 

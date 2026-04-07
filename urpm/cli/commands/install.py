@@ -17,11 +17,6 @@ from ..helpers.package import (
     extract_pkg_name as _extract_pkg_name,
 )
 from ..helpers.debug import (
-    DEBUG_LAST_INSTALLED_DEPS,
-    DEBUG_PREV_INSTALLED_DEPS,
-    write_debug_file as _write_debug_file,
-    clear_debug_file as _clear_debug_file,
-    copy_installed_deps_list as _copy_installed_deps_list,
     notify_urpmd_cache_invalidate as _notify_urpmd_cache_invalidate,
 )
 from ..helpers.resolver import (
@@ -137,10 +132,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         print(colors.warning(f"  {prev_error}"))
         print(colors.dim(_("  (This message will not appear again)")))
         clear_background_error()
-
-    # Debug: save previous state and clear debug files at start
-    _copy_installed_deps_list(dest=DEBUG_PREV_INSTALLED_DEPS)
-    _clear_debug_file(DEBUG_LAST_INSTALLED_DEPS)
 
     # Check --nodeps flag
     nodeps = getattr(args, 'nodeps', False)
@@ -1199,12 +1190,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         ops.mark_dependencies(resolver, result.actions)
         dep_packages = [a.name for a in result.actions
                         if a.reason != InstallReason.EXPLICIT]
-        if dep_packages:
-            _write_debug_file(DEBUG_LAST_INSTALLED_DEPS, dep_packages)
-
-        # Debug: copy the installed-through-deps.list for inspection
-        _copy_installed_deps_list()
-
         # Track build dependencies for selective cleanup
         if builddeps:
             source_name = Path(builddeps).name if builddeps != 'AUTO' else source
