@@ -6223,3 +6223,23 @@ msgstr "Doorgaan met downloaden? [j/N] "
 #: urpm/cli/commands/upgrade.py
 msgid "Packages downloaded to cache. Use 'urpm upgrade' to install them later."
 msgstr "Pakketten gedownload naar cache. Gebruik 'urpm upgrade' om ze later te installeren."
+
+#: urpm/cli/commands/upgrade.py
+#, python-brace-format
+msgid "System restart required ({packages}) — forcing full sync."
+msgstr "Herstart van het systeem vereist ({packages}) — volledige synchronisatie afgedwongen."
+
+#: urpm/core/needs_restart.py
+#, python-brace-format
+msgid "You should restart your computer for {packages}"
+msgstr "U zou uw computer opnieuw moeten opstarten voor {packages}"
+
+#: urpm/core/needs_restart.py
+#, python-brace-format
+msgid "You should restart your session for {packages}"
+msgstr "U zou uw sessie opnieuw moeten opstarten voor {packages}"
+
+#: urpm/core/needs_restart.py
+#, python-brace-format
+msgid "You should restart {service} for {packages}"
+msgstr "U zou {service} opnieuw moeten opstarten voor {packages}"

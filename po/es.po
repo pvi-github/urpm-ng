@@ -6241,3 +6241,23 @@ msgstr "¿Proceder con la descarga? [s/N] "
 #: urpm/cli/commands/upgrade.py
 msgid "Packages downloaded to cache. Use 'urpm upgrade' to install them later."
 msgstr "Paquetes descargados en la caché. Use 'urpm upgrade' para instalarlos más tarde."
+
+#: urpm/cli/commands/upgrade.py
+#, python-brace-format
+msgid "System restart required ({packages}) — forcing full sync."
+msgstr "Reinicio del sistema requerido ({packages}) — forzando sincronización completa."
+
+#: urpm/core/needs_restart.py
+#, python-brace-format
+msgid "You should restart your computer for {packages}"
+msgstr "Debería reiniciar su ordenador para {packages}"
+
+#: urpm/core/needs_restart.py
+#, python-brace-format
+msgid "You should restart your session for {packages}"
+msgstr "Debería reiniciar su sesión para {packages}"
+
+#: urpm/core/needs_restart.py
+#, python-brace-format
+msgid "You should restart {service} for {packages}"
+msgstr "Debería reiniciar {service} para {packages}"
