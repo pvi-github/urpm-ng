@@ -1020,9 +1020,10 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             full_sync=full_sync,
         )
 
-        # Clear 2-line progress and print done
+        # Stop animation thread and clear 3-line progress
+        queue_progress.cleanup()
         _hdr = queue_progress.state['header'] or _header_text
-        print(f"\033[A\r\033[K{_hdr}\n\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done"))
+        print(f"\033[2A\r\033[K{_hdr}\n\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done") + "\n\033[K", end='', flush=True)
 
         # Show excluded packages warning
         if resilient_result.excluded_packages:

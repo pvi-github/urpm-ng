@@ -429,9 +429,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             full_sync=full_sync,
         )
 
-        # Clear 2-line progress and print done
+        # Stop animation thread and clear 3-line progress
+        queue_progress.cleanup()
         if queue_progress.state['header']:
-            print(f"\033[A\r\033[K{queue_progress.state['header']}\n\033[K  " + _("done"))
+            print(f"\033[2A\r\033[K{queue_progress.state['header']}\n\033[K  " + _("done") + "\n\033[K", end='', flush=True)
         else:
             print()
 

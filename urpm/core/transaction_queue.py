@@ -1320,13 +1320,14 @@ queue._child_process_standalone()
         #   2. PREPARE: TRANS_START → TRANS_PROGRESS 0..N → TRANS_STOP
         #               Transaction element ordering.
         #
-        #   3. INSTALL: per-pkg [OPEN → ELEM_PROGRESS(index, total) → [SCRIPT %pre]
-        #                        → INST_START → INST_PROGRESS flood → INST_STOP → CLOSE]
+        #   3. INSTALL: per-pkg [OPEN → ELEM_PROGRESS(index, total)
+        #                        → INST_START → INST_PROGRESS flood → INST_STOP → CLOSE
+        #                        → SCRIPT_START %post → SCRIPT_STOP]
         #               ELEM_PROGRESS is the reliable package counter (0-based index).
-        #               This phase is fast (~1s for 10 packages).
+        #               %post scripts run INTERLEAVED with extractions (after each pkg).
         #
-        #   4. SCRIPTS: SCRIPT_START/STOP pairs for posttrans and file triggers.
-        #               Fires AFTER all packages are extracted.
+        #   4. POSTTRANS + FILE TRIGGERS: SCRIPT_START/STOP pairs.
+        #               Fires AFTER all packages are extracted and their %post ran.
         #               key = triggering package name (e.g. "shared-mime-info").
         #               This is often the slowest phase (e.g. 39s for shared-mime-info).
         #

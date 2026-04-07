@@ -1,17 +1,41 @@
 """Transaction progress display for install/upgrade commands.
 
 Provides a factory that returns a callback compatible with
-TransactionQueue.progress_callback.  The two-line display shows:
+TransactionQueue.progress_callback.  The three-line display shows:
 
-    Line 1: header (left-aligned) + package/trigger info (right-aligned)
-    Line 2: [████░░░░░░░░░░░░░░░░░░░░░░░] XX/XX 100%
+Install phase (extraction):
+    Installing 15 packages...                    shared-mime-info
+    [████████████████████░░░░░░░░░░░░░░░] 12/15  80%
+    [██████████████░░░░░░░░░░░░░░░░░░░░░] extracting
+
+Per-package %post scriptlet (interleaved with extractions):
+    Installing 15 packages...                    shared-mime-info
+    [████████████████████░░░░░░░░░░░░░░░] 12/15  80%
+    [░░░░████░░░░░░░░░░░░░░░░░░░░░░░░░░] running %post
+
+File triggers (after all extractions):
+    Running triggers...                 Rebuilding MIME database
+    [████████████████████████████████████] 15/15 100%
+    [░░░░░░░████░░░░░░░░░░░░░░░░░░░░░░░] 3 triggers
 """
 
 import os
-from gettext import ngettext
+import threading
+import time
+from gettext import ngettext, gettext as _
 
 from ...core.transaction_queue import TransactionProgress, TransactionPhase
 from ...core.triggers import describe_trigger
+
+# ANSI
+_ORANGE = '\033[33m'
+_RESET = '\033[0m'
+_CLR = '\033[K'  # clear to end of line
+
+# Bouncing segment width
+_BOUNCE_WIDTH = 6
+# Animation interval (seconds)
+_ANIM_INTERVAL = 0.15
 
 
 def make_progress_callback(
@@ -22,31 +46,39 @@ def make_progress_callback(
     """Create a transaction progress callback.
 
     Args:
-        header_template: ngettext template with ``{count}`` placeholder,
-            e.g. ``"Installing {count} packages..."``.
-            If *total* is None the template is formatted on the first
-            callback invocation; otherwise it is formatted immediately.
-        total: Number of packages.  When known upfront (install), pass it
-            directly.  When discovered at runtime (upgrade), pass None and
-            the callback will read ``progress.packages_total`` on first call.
+        header_template: ngettext template with ``{count}`` placeholder.
+        total: Number of packages (None = deferred to first callback).
         full_sync: If True, use human-readable trigger descriptions.
 
     Returns:
-        A callable ``(TransactionProgress) -> None`` suitable for
-        ``TransactionQueue(progress_callback=...)``.
+        A callable ``(TransactionProgress) -> None``.
     """
     try:
         term_width = os.get_terminal_size().columns - 1
     except OSError:
         term_width = 79
 
-    # Mutable state shared with the inner closure
     _state = {
         'header': None,
         'bar_width': 0,
         'dw': 0,
         'started': False,
         'last': None,
+        # Current display values (shared with animator thread)
+        'header_line': '',
+        'bar_line': '',
+        'sub_line': '',
+        # Trigger/script tracking
+        'all_extracted': False,
+        'trigger_count': 0,
+        'bounce_pos': 0,
+        'bounce_dir': 1,
+        'in_script': False,
+        'script_label': '',
+        # Animation thread
+        'lock': threading.Lock(),
+        'animator': None,
+        'stop_anim': threading.Event(),
     }
 
     # Pre-compute if total is known
@@ -60,78 +92,180 @@ def make_progress_callback(
         count_w = 1 + _state['dw'] + 1 + _state['dw'] + 1 + 4
         _state['bar_width'] = max(term_width - count_w - 2, 10)
 
+    def _clip(text, maxw):
+        """Clip visible text (ignoring ANSI codes) to maxw chars."""
+        if len(text) <= maxw:
+            return text
+        return text[:maxw - 1] + "…"
+
+    def _advance_bounce():
+        bw = _state['bar_width']
+        seg = min(_BOUNCE_WIDTH, bw)
+        _state['bounce_pos'] += _state['bounce_dir']
+        max_pos = bw - seg
+        if _state['bounce_pos'] >= max_pos:
+            _state['bounce_pos'] = max_pos
+            _state['bounce_dir'] = -1
+        elif _state['bounce_pos'] <= 0:
+            _state['bounce_pos'] = 0
+            _state['bounce_dir'] = 1
+
+    def _bounce_bar(label):
+        bw = _state['bar_width']
+        seg = min(_BOUNCE_WIDTH, bw)
+        pos = _state['bounce_pos']
+        bar = '░' * pos + '█' * seg + '░' * (bw - pos - seg)
+        return f"{_ORANGE}[{bar}] {label}{_RESET}"
+
+    def _progress_sub_bar(bytes_done, bytes_total, label):
+        bw = _state['bar_width']
+        if bytes_total > 0:
+            pct = min(int(bytes_done * 100 / bytes_total), 100)
+        else:
+            pct = 0
+        filled = int(bw * pct / 100)
+        bar = '█' * filled + '░' * (bw - filled)
+        return f"[{bar}] {label}"
+
+    def _render():
+        """Write 3 lines to terminal. Must hold _state['lock']."""
+        h = _state['header_line']
+        b = _state['bar_line']
+        s = _state['sub_line']
+        if not _state['started']:
+            _state['started'] = True
+            print(f"\033[A\r{_CLR}{h}\n{_CLR}{b}\n{_CLR}{s}",
+                  end='', flush=True)
+        else:
+            print(f"\033[2A\r{_CLR}{h}\n{_CLR}{b}\n{_CLR}{s}",
+                  end='', flush=True)
+
+    def _animator():
+        """Background thread: animate bounce during script phases."""
+        while not _state['stop_anim'].is_set():
+            time.sleep(_ANIM_INTERVAL)
+            with _state['lock']:
+                if _state['in_script']:
+                    _advance_bounce()
+                    _state['sub_line'] = _bounce_bar(_state['script_label'])
+                    _render()
+
+    def _start_animator():
+        if _state['animator'] is None:
+            _state['stop_anim'].clear()
+            t = threading.Thread(target=_animator, daemon=True)
+            t.start()
+            _state['animator'] = t
+
+    def _stop_animator():
+        _state['stop_anim'].set()
+        if _state['animator'] is not None:
+            _state['animator'].join(timeout=0.5)
+            _state['animator'] = None
+
+    def _build_header_line(header_text, info_text):
+        """Build header line: title left, info right, clipped to term_width."""
+        info_clipped = _clip(info_text, term_width - len(header_text) - 2)
+        padding = term_width - len(header_text) - len(info_clipped)
+        line = f"{header_text}{' ' * max(padding, 1)}{info_clipped}"
+        return line[:term_width]
+
+    def _build_main_bar(done, pkg_total, pct):
+        bw = _state['bar_width']
+        dw = _state['dw']
+        filled = int(bw * pct / 100)
+        count_suffix = f" {done:>{dw}}/{pkg_total} {pct:>3}%"
+        return f"[{'█' * filled}{'░' * (bw - filled)}]{count_suffix}"
+
     def _callback(progress: TransactionProgress):
         if progress.phase in (TransactionPhase.VERIFY, TransactionPhase.PREPARE):
             return
 
         pkg_total = progress.packages_total
 
-        # Deferred init (upgrade path: total unknown until first callback)
-        if _state['header'] is None:
-            _state['header'] = ngettext(
-                header_template.replace('{count}', '{0}'),
-                header_template.replace('{count}', '{0}'),
-                pkg_total,
-            ).format(pkg_total)
-            _state['dw'] = len(str(pkg_total))
-            count_w = 1 + _state['dw'] + 1 + _state['dw'] + 1 + 4
-            _state['bar_width'] = max(term_width - count_w - 2, 10)
-            print("\n" + _state['header'])
+        with _state['lock']:
+            # Deferred init
+            if _state['header'] is None:
+                _state['header'] = ngettext(
+                    header_template.replace('{count}', '{0}'),
+                    header_template.replace('{count}', '{0}'),
+                    pkg_total,
+                ).format(pkg_total)
+                _state['dw'] = len(str(pkg_total))
+                count_w = 1 + _state['dw'] + 1 + _state['dw'] + 1 + 4
+                _state['bar_width'] = max(term_width - count_w - 2, 10)
+                print("\n" + _state['header'])
 
-        # Dedup: skip if state unchanged
-        state_key = (progress.phase, progress.packages_done,
-                     progress.package_name, progress.script_name,
-                     progress.bytes_done)
-        if state_key == _state['last']:
-            return
-        _state['last'] = state_key
+            # Dedup
+            state_key = (progress.phase, progress.packages_done,
+                         progress.package_name, progress.script_name,
+                         progress.bytes_done)
+            if state_key == _state['last']:
+                return
+            _state['last'] = state_key
 
-        done = progress.packages_done
-        header = _state['header']
-        dw = _state['dw']
-        bar_width = _state['bar_width']
+            done = progress.packages_done
 
-        # --- Info text (right-aligned on header line) ---
-        if progress.phase == TransactionPhase.SCRIPT:
-            pct = int(done * 100 / pkg_total) if pkg_total else 100
-            if full_sync and progress.script_name:
-                info = describe_trigger(progress.script_name)
+            if done >= pkg_total and not _state['all_extracted']:
+                _state['all_extracted'] = True
+
+            # ── SCRIPT phase ──
+            if progress.phase == TransactionPhase.SCRIPT:
+                _state['trigger_count'] += 1
+                _state['in_script'] = True
+
+                if _state['all_extracted']:
+                    # File triggers / posttrans
+                    header_text = _("Running triggers...")
+                    if full_sync and progress.script_name:
+                        info_text = describe_trigger(progress.script_name)
+                    else:
+                        info_text = progress.script_name or progress.package_name
+                    label = ngettext(
+                        "{n} trigger", "{n} triggers",
+                        _state['trigger_count']).format(n=_state['trigger_count'])
+                    _state['header_line'] = f"{_ORANGE}{_build_header_line(header_text, info_text)}{_RESET}"
+                else:
+                    # Per-package %post
+                    header_text = _state['header']
+                    info_text = progress.script_name or progress.package_name
+                    label = _("running %post")
+                    _state['header_line'] = _build_header_line(header_text, info_text)
+
+                _state['script_label'] = label
+                pct = int(done * 100 / pkg_total) if pkg_total else 100
+                _state['bar_line'] = _build_main_bar(done, pkg_total, pct)
+                _advance_bounce()
+                _state['sub_line'] = _bounce_bar(label)
+                _render()
+                _start_animator()
+
+            # ── INSTALL phase ──
             else:
-                info = progress.script_name or progress.package_name
-        else:
-            if pkg_total > 0:
-                pkg_frac = done / pkg_total
-                if progress.bytes_total > 0:
-                    pkg_frac += (progress.bytes_done / progress.bytes_total) / pkg_total
-                pct = int(pkg_frac * 100)
-            else:
-                pct = 0
-            info = progress.package_name
+                _state['in_script'] = False
 
-        # Truncate info so header + space + info fits in terminal width
-        max_info = term_width - len(header) - 2
-        if len(info) > max_info:
-            info = info[:max_info - 1] + "…"
+                header_text = _state['header']
+                info_text = progress.package_name or ""
 
-        # --- Header line: title left, info right ---
-        padding = term_width - len(header) - len(info)
-        header_line = f"{header}{' ' * max(padding, 1)}{info}"
-        if len(header_line) > term_width:
-            header_line = header_line[:term_width]
+                if pkg_total > 0:
+                    pkg_frac = done / pkg_total
+                    if progress.bytes_total > 0:
+                        pkg_frac += (progress.bytes_done / progress.bytes_total) / pkg_total
+                    pct = int(pkg_frac * 100)
+                else:
+                    pct = 0
 
-        # --- Bar line: full-width bar + fixed-width count ---
-        filled = int(bar_width * pct / 100)
-        count_suffix = f" {done:>{dw}}/{pkg_total} {pct:>3}%"
-        bar_line = f"[{'█' * filled}{'░' * (bar_width - filled)}]{count_suffix}"
-        if len(bar_line) > term_width:
-            bar_line = bar_line[:term_width]
+                _state['header_line'] = _build_header_line(header_text, info_text)
+                _state['bar_line'] = _build_main_bar(done, pkg_total, pct)
+                _state['sub_line'] = _progress_sub_bar(
+                    progress.bytes_done, progress.bytes_total, _("extracting"))
+                _render()
 
-        if not _state['started']:
-            _state['started'] = True
-        print(f"\033[A\r\033[K{header_line}\n\033[K{bar_line}",
-              end='', flush=True)
+    def _cleanup():
+        """Stop animator thread. Call after transaction completes."""
+        _stop_animator()
 
-    # Expose state for callers that need post-transaction "done" line
     _callback.state = _state
+    _callback.cleanup = _cleanup
 
     return _callback
