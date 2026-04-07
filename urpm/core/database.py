@@ -628,8 +628,8 @@ class PackageDatabase(
     - FilesMixin: Package files and FTS index
     """
 
-    # Timeout for waiting on locked database (5 seconds)
-    BUSY_TIMEOUT_MS = 5000
+    # Timeout for waiting on locked database (30 seconds)
+    BUSY_TIMEOUT_MS = 30000
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize database connection.

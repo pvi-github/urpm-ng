@@ -920,14 +920,25 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
     if not acquired:
         if holder_pid:
             print(colors.warning(
-                _("Media update already in progress (PID {pid})").format(pid=holder_pid)
+                _("Media update already in progress (PID {pid}).").format(pid=holder_pid)
             ))
         else:
-            print(colors.warning(_("Media update already in progress")))
-        return 0
+            print(colors.warning(_("Media update already in progress.")))
+        print(colors.dim(_("Waiting for lock... (Ctrl+C to cancel)")))
+        # Block until lock is released, retrying every second
+        import time
+        while not acquired:
+            time.sleep(1)
+            acquired, holder_pid = sync_lock.try_acquire()
 
     try:
         return _do_media_update(args, db, sync_lock)
+    except Exception as e:
+        if 'database is locked' in str(e):
+            print(colors.error(_("Database is busy. Another operation may be in progress.")))
+            print(colors.dim(_("Please retry in a few moments.")))
+            return 1
+        raise
     finally:
         sync_lock.release()
 
@@ -1065,11 +1076,16 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
             if not f_acquired:
                 if f_holder:
                     print(colors.warning(
-                        _("files.xml sync already in progress (PID {pid})").format(pid=f_holder)
+                        _("files.xml sync already in progress (PID {pid}).").format(pid=f_holder)
                     ))
                 else:
-                    print(colors.warning(_("files.xml sync already in progress")))
-                return 1 if errors else 0
+                    print(colors.warning(_("files.xml sync already in progress.")))
+                print(colors.dim(_("Waiting for lock... (Ctrl+C to cancel)")))
+                # Block until lock is released, retrying every second
+                import time
+                while not f_acquired:
+                    time.sleep(1)
+                    f_acquired, f_holder = files_sync_lock.try_acquire()
 
             print(_("\nSyncing files.xml..."))
 
