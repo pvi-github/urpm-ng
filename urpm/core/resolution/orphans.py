@@ -875,7 +875,7 @@ class OrphansMixin:
                 continue  # Already orphaned before — skip
             orphan_candidates.add(name)
 
-        logger.warning(
+        logger.debug(
             "[orphan-diag] pre_state=%d, post_state=%d, unrequested=%d, "
             "orphan_candidates=%d: %s",
             len(pre_state), len(post_state), len(effective_unrequested),
