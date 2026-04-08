@@ -403,7 +403,9 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     import re
     import time
 
-    TARGET_SERVERS = 5  # Target number of enabled servers
+    from ...core.settings import get_settings
+    from ...core.server_pool import minimum_servers_for
+    TARGET_SERVERS = minimum_servers_for(get_settings().download.parallel)
 
     # Get system version and arch
     version = getattr(args, 'release', None)
@@ -562,9 +564,13 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
             server_id = db.add_server(
                 shortname, candidate['scheme'], candidate['host'], candidate['base_path']
             )
-            # Persist the latency measured during autoconfig so it immediately
-            # influences server ordering on the first real download.
-            db.update_server_stats(server_id, latency_ms=int(latency))
+            # Persist latency + seed bandwidth with the average of existing
+            # servers so the download planner gives new mirrors a fair share
+            # immediately.  The EWMA will converge after the first downloads.
+            from ...core.server_pool import _average_bandwidth
+            avg_kbps = _average_bandwidth(all_servers)
+            db.update_server_stats(server_id, latency_ms=int(latency),
+                                   bandwidth_kbps=avg_kbps)
             print(colors.success("  " + _("Added: {name} ({latency}ms)").format(name=shortname, latency=f"{latency:.0f}")))
             existing_names.add(shortname)
             added_servers.append((server_id, shortname))

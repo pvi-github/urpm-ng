@@ -810,6 +810,25 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         print(_("\n(dry run - no changes made)"))
         return 0
 
+    # Ensure server pool is large enough for parallel downloads
+    # (must run BEFORE build_download_items so new servers appear in items)
+    from ...core.settings import get_settings
+    from ...core.server_pool import ensure_minimum_servers
+    _pool = ensure_minimum_servers(db, get_settings().download.parallel)
+    if _pool.added:
+        print(colors.dim("\n  " + ngettext(
+            "Auto-added {count} mirror for parallel downloads:",
+            "Auto-added {count} mirrors for parallel downloads:",
+            len(_pool.added)).format(count=len(_pool.added))))
+        for name, latency in _pool.added:
+            print(colors.dim(f"    {name} ({latency}ms)"))
+    elif not _pool.sufficient:
+        print(colors.warning("\n  " + _(
+            "Not enough mirrors for {n} parallel downloads "
+            "(have {had}, need {needed})").format(
+            n=get_settings().download.parallel,
+            had=_pool.had, needed=_pool.needed)))
+
     # Build download items (skip local RPMs - we already have them)
     ops = PackageOperations(db)
     download_items, local_action_paths = ops.build_download_items(
@@ -831,7 +850,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
         # Multi-line progress display using DownloadProgressDisplay
         from .. import display
-        from ...core.settings import get_settings
         progress_display = display.DownloadProgressDisplay(
             num_workers=get_settings().download.parallel)
 
