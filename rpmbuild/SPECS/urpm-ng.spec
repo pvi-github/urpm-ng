@@ -1,6 +1,6 @@
 %define name urpm-ng
-%define version 0.7.0
-%define release 1
+%define version 0.7.1
+%define release 2
 
 Name:           %{name}
 Version:        %{version}
@@ -60,6 +60,7 @@ Requires:       python3-solv
 Requires:       python3-rpm
 Requires:       python3-zstandard
 Requires:       python3-pyyaml
+Requires:       python3-curl
 Requires:       gnupg2
 
 %description core

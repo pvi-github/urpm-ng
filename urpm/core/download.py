@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Callable, Tuple, Dict, Set
 
+import pycurl
+
 from .database import PackageDatabase
 from .config import get_base_dir, is_dev_mode
 from .peer_client import (
@@ -25,6 +27,15 @@ from .peer_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+
+
+
+# 1 MB read chunks for large files — minimises syscall count and GIL
+# re-acquisition overhead that otherwise throttle TCP throughput.
+# Small files still finish in one or two reads.
+_CHUNK_SIZE = 1048576
 
 # RPM magic bytes: 0xED 0xAB 0xEE 0xDB
 RPM_MAGIC = b'\xed\xab\xee\xdb'
@@ -819,6 +830,7 @@ class Downloader:
         self._server_active_slots: Dict[int, int] = {}
         self._server_slots_lock = threading.Lock()
 
+
     def get_cache_path(self, item: DownloadItem) -> Path:
         """Get cache path for a download item.
 
@@ -907,69 +919,80 @@ class Downloader:
                             ip_mode: str = 'auto') -> Tuple[bool, Optional[str]]:
         """Download a file from URL to cache path.
 
+        Uses **pycurl** (libcurl C bindings) so the entire transfer runs
+        in native code without holding the GIL.  This matches wget/curl
+        throughput even under heavy multithreading.
+
         Args:
             url: URL to download
             cache_path: Where to save the file
-            progress_callback: Optional progress callback
+            progress_callback: Optional callback(downloaded, total)
             timeout: Connection timeout in seconds
-            ip_mode: 'auto', 'ipv4', 'ipv6', or 'dual' (dual prefers ipv4)
+            ip_mode: 'auto', 'ipv4', 'ipv6', or 'dual'
 
         Returns:
             Tuple of (success, error_message or None)
         """
-        import socket
-        from .config import get_socket_family_for_ip_mode
-
-        # Determine socket family based on ip_mode
-        family = get_socket_family_for_ip_mode(ip_mode)
-
-        # Patch getaddrinfo if we need to force a specific IP version
-        original_getaddrinfo = None
-        if family != 0:
-            original_getaddrinfo = socket.getaddrinfo
-            def patched_getaddrinfo(host, port, fam=0, type=0, proto=0, flags=0):
-                # Force the specified family if caller didn't specify one
-                if fam == 0:
-                    fam = family
-                return original_getaddrinfo(host, port, fam, type, proto, flags)
-            socket.getaddrinfo = patched_getaddrinfo
-
+        temp_path = cache_path.with_suffix('.tmp')
+        c = pycurl.Curl()
+        f = None
         try:
-            req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'urpm/0.1')
+            f = open(temp_path, 'wb')
 
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
-                downloaded = 0
+            c.setopt(pycurl.URL, url)
+            c.setopt(pycurl.WRITEDATA, f)
+            c.setopt(pycurl.FOLLOWLOCATION, 1)
+            c.setopt(pycurl.MAXREDIRS, 5)
+            c.setopt(pycurl.CONNECTTIMEOUT, timeout)
+            c.setopt(pycurl.LOW_SPEED_LIMIT, 1024)   # 1 KB/s minimum
+            c.setopt(pycurl.LOW_SPEED_TIME, timeout)  # abort if below min
+            c.setopt(pycurl.USERAGENT, 'urpm/0.7')
+            c.setopt(pycurl.HTTPHEADER, ['Accept-Encoding: identity'])
+            # 1 MB receive buffer — keeps TCP window open
+            c.setopt(pycurl.BUFFERSIZE, _CHUNK_SIZE)
+            c.setopt(pycurl.NOSIGNAL, 1)  # thread-safe
 
-                # Download to temp file first
-                temp_path = cache_path.with_suffix('.tmp')
+            # IP version preference
+            if ip_mode == 'ipv6':
+                c.setopt(pycurl.IPRESOLVE, pycurl.IPRESOLVE_V6)
+            elif ip_mode in ('ipv4', 'auto', 'dual'):
+                c.setopt(pycurl.IPRESOLVE, pycurl.IPRESOLVE_V4)
 
-                with open(temp_path, 'wb') as f:
-                    while True:
-                        chunk = response.read(65536)  # 64KB chunks
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        downloaded += len(chunk)
+            # Progress callback — called by libcurl from C, lightweight
+            if progress_callback:
+                c.setopt(pycurl.NOPROGRESS, 0)
+                def _progress(dl_total, dl_now, _ul_total, _ul_now):
+                    progress_callback(int(dl_now), int(dl_total))
+                c.setopt(pycurl.XFERINFOFUNCTION, _progress)
+            else:
+                c.setopt(pycurl.NOPROGRESS, 1)
 
-                        if progress_callback:
-                            progress_callback(downloaded, total_size)
+            c.perform()
 
-                # Move to final path
-                temp_path.rename(cache_path)
-                return True, None
+            http_code = c.getinfo(pycurl.HTTP_CODE)
+            if http_code >= 400:
+                return False, f"HTTP {http_code}"
 
-        except urllib.error.HTTPError as e:
-            return False, f"HTTP {e.code}: {e.reason}"
-        except urllib.error.URLError as e:
-            return False, f"URL error: {e.reason}"
+            f.close()
+            f = None
+            temp_path.rename(cache_path)
+            return True, None
+
+        except pycurl.error as e:
+            code, msg = e.args
+            return False, f"HTTP error: {msg}"
         except Exception as e:
             return False, str(e)
         finally:
-            # Restore original getaddrinfo
-            if original_getaddrinfo is not None:
-                socket.getaddrinfo = original_getaddrinfo
+            c.close()
+            if f is not None:
+                f.close()
+            # Clean up temp on failure
+            if temp_path.exists() and not cache_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
 
     def _build_package_url(self, server: dict, relative_path: str, filename: str) -> str:
         """Build full package URL from server info."""
@@ -1240,97 +1263,112 @@ class Downloader:
         encoded_path = quote(peer_path, safe='/')
         url = f"{peer.base_url}/media/{encoded_path}"
 
+        temp_path = cache_path.with_suffix('.tmp')
+        c = pycurl.Curl()
+        f = None
         try:
-            req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'urpm/0.1')
+            f = open(temp_path, 'wb')
 
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
-                downloaded = 0
+            c.setopt(pycurl.URL, url)
+            c.setopt(pycurl.WRITEDATA, f)
+            c.setopt(pycurl.FOLLOWLOCATION, 1)
+            c.setopt(pycurl.MAXREDIRS, 5)
+            c.setopt(pycurl.CONNECTTIMEOUT, timeout)
+            c.setopt(pycurl.LOW_SPEED_LIMIT, 1024)
+            c.setopt(pycurl.LOW_SPEED_TIME, timeout)
+            c.setopt(pycurl.USERAGENT, 'urpm/0.7')
+            c.setopt(pycurl.BUFFERSIZE, _CHUNK_SIZE)
+            c.setopt(pycurl.NOSIGNAL, 1)
 
-                temp_path = cache_path.with_suffix('.tmp')
-                sha256 = hashlib.sha256()
+            if progress_callback:
+                c.setopt(pycurl.NOPROGRESS, 0)
+                def _progress(dl_total, dl_now, _ut, _un):
+                    progress_callback(int(dl_now), int(dl_total))
+                c.setopt(pycurl.XFERINFOFUNCTION, _progress)
+            else:
+                c.setopt(pycurl.NOPROGRESS, 1)
 
-                with open(temp_path, 'wb') as f:
-                    while True:
-                        chunk = response.read(65536)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        sha256.update(chunk)
-                        downloaded += len(chunk)
+            c.perform()
 
-                        if progress_callback:
-                            progress_callback(downloaded, total_size)
-
-                checksum = sha256.hexdigest()
-
-                # GPG signature is verified after download to prevent caching
-                # tampered RPMs.  Peers serving bad signatures are blacklisted.
-
-                # Move to final location
-                temp_path.rename(cache_path)
-
-                # Verify the downloaded file is actually an RPM
-                is_rpm, rpm_error = is_valid_rpm(cache_path)
-                if not is_rpm:
-                    logger.warning(f"Peer {peer.host} served invalid RPM: {rpm_error}")
-                    try:
-                        cache_path.unlink()
-                    except OSError:
-                        pass
-                    return DownloadResult(
-                        item=item,
-                        success=False,
-                        error=f"Peer served invalid file: {rpm_error}"
-                    )
-
-                # Verify GPG signature — don't cache tampered RPMs from peers
-                sig_ok = verify_rpm_signature(cache_path)
-                if not sig_ok:
-                    logger.warning("P2P download %s: signature verification failed, discarding", item.name)
-                    try:
-                        cache_path.unlink()
-                    except OSError:
-                        pass
-                    return DownloadResult(
-                        item=item,
-                        success=False,
-                        error="signature verification failed (from peer)",
-                        blacklist_peer=PeerToBlacklist(
-                            host=peer.host,
-                            port=peer.port,
-                            reason="bad signature",
-                        ),
-                    )
-
-                # Register in cache for quota tracking
-                self._register_cache_file(item, cache_path)
-
-                # Return result with provenance info (DB write happens in main thread)
+            http_code = c.getinfo(pycurl.HTTP_CODE)
+            if http_code >= 400:
                 return DownloadResult(
-                    item=item,
-                    success=True,
-                    path=cache_path,
-                    peer_info=PeerProvenance(
-                        peer_host=peer.host,
-                        peer_port=peer.port,
-                        checksum_sha256=checksum,
-                        file_size=downloaded,
-                        verified=True  # GPG signature verified after download
-                    )
-                )
+                    item=item, success=False,
+                    error=f"Peer HTTP {http_code}")
 
-        except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
-            # Clean up temp file
-            temp_path = cache_path.with_suffix('.tmp')
-            if temp_path.exists():
-                temp_path.unlink()
+            f.close()
+            f = None
+
+            # SHA256 checksum — computed after download (fast on SSD)
+            sha256 = hashlib.sha256()
+            with open(temp_path, 'rb') as hf:
+                while True:
+                    block = hf.read(_CHUNK_SIZE)
+                    if not block:
+                        break
+                    sha256.update(block)
+            checksum = sha256.hexdigest()
+            downloaded = temp_path.stat().st_size
+
+            temp_path.rename(cache_path)
+
+            # Verify the downloaded file is actually an RPM
+            is_rpm, rpm_error = is_valid_rpm(cache_path)
+            if not is_rpm:
+                logger.warning(
+                    f"Peer {peer.host} served invalid RPM: {rpm_error}")
+                try:
+                    cache_path.unlink()
+                except OSError:
+                    pass
+                return DownloadResult(
+                    item=item, success=False,
+                    error=f"Peer served invalid file: {rpm_error}")
+
+            # Verify GPG signature — don't cache tampered RPMs from peers
+            sig_ok = verify_rpm_signature(cache_path)
+            if not sig_ok:
+                logger.warning(
+                    "P2P download %s: signature verification failed, "
+                    "discarding", item.name)
+                try:
+                    cache_path.unlink()
+                except OSError:
+                    pass
+                return DownloadResult(
+                    item=item, success=False,
+                    error="signature verification failed (from peer)",
+                    blacklist_peer=PeerToBlacklist(
+                        host=peer.host, port=peer.port,
+                        reason="bad signature"))
+
+            self._register_cache_file(item, cache_path)
+
             return DownloadResult(
-                item=item,
-                success=False,
-                error=f"Peer download failed: {e}"
-            )
+                item=item, success=True, path=cache_path,
+                peer_info=PeerProvenance(
+                    peer_host=peer.host, peer_port=peer.port,
+                    checksum_sha256=checksum, file_size=downloaded,
+                    verified=True))
+
+        except pycurl.error as e:
+            code, msg = e.args
+            return DownloadResult(
+                item=item, success=False,
+                error=f"Peer download failed: {msg}")
+        except Exception as e:
+            return DownloadResult(
+                item=item, success=False,
+                error=f"Peer download failed: {e}")
+        finally:
+            c.close()
+            if f is not None:
+                f.close()
+            if temp_path.exists() and not cache_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
 
     def download_all(self, items: List[DownloadItem],
                      progress_callback: Callable[[str, int, int, int, int], None] = None
