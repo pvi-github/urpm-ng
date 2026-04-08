@@ -202,7 +202,9 @@ class MainWindow(QMainWindow):
         self.right_stack.addWidget(self.detail_panel)     # page 1
 
         # --- Progress widget ---
-        self.progress_widget = CollapsibleProgressWidget(num_slots=4)
+        from urpm.core.settings import get_settings
+        self.progress_widget = CollapsibleProgressWidget(
+            num_slots=get_settings().download.parallel)
 
         # --- Action buttons ---
         self.btn_install = QPushButton("📥 Installer")

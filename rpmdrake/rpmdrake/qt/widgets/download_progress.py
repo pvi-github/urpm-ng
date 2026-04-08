@@ -226,6 +226,13 @@ class CollapsibleProgressWidget(QWidget):
             self._slots.append(slot)
             detail_layout.addWidget(slot)
 
+        # Sub-progress bar (extraction / triggers bounce)
+        self.sub_progress = QProgressBar()
+        self.sub_progress.setTextVisible(False)
+        self.sub_progress.setFixedHeight(6)
+        self.sub_progress.hide()
+        layout.addWidget(self.sub_progress)
+
         self.detail_panel.hide()
         layout.addWidget(self.detail_panel)
 
@@ -279,25 +286,58 @@ class CollapsibleProgressWidget(QWidget):
                 self.phase_label.setText("Téléchargement")
                 self.expand_label.show()
                 self.header.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.sub_progress.hide()
             elif phase == ProgressPhase.INSTALL:
                 self.phase_label.setText("Installation")
                 self._collapse_details()
+                # Show sub-bar for extraction progress
+                color = PHASE_COLORS["install"]
+                self.sub_progress.setStyleSheet(f"""
+                    QProgressBar {{
+                        background: rgba(0,0,0,0.1);
+                        border: none; border-radius: 2px;
+                    }}
+                    QProgressBar::chunk {{
+                        background: {color};
+                        border-radius: 2px;
+                    }}
+                """)
+                self.sub_progress.setRange(0, 100)
+                self.sub_progress.setValue(0)
+                self.sub_progress.show()
             elif phase == ProgressPhase.ERASE:
                 self.phase_label.setText("Suppression")
                 self._collapse_details()
+                self.sub_progress.hide()
             elif phase == ProgressPhase.TRIGGERS:
                 self.phase_label.setText("Triggers")
                 self.main_progress.setRange(0, 0)  # Indeterminate
                 self.pct_label.setText("")
                 self.info_label.setText("")
                 self._collapse_details()
+                # Show sub-bar as indeterminate bounce (purple)
+                color = PHASE_COLORS["triggers"]
+                self.sub_progress.setStyleSheet(f"""
+                    QProgressBar {{
+                        background: rgba(0,0,0,0.1);
+                        border: none; border-radius: 2px;
+                    }}
+                    QProgressBar::chunk {{
+                        background: {color};
+                        border-radius: 2px;
+                    }}
+                """)
+                self.sub_progress.setRange(0, 0)  # Indeterminate bounce
+                self.sub_progress.show()
             elif phase == ProgressPhase.RPMDB_SYNC:
                 self.phase_label.setText("Waiting for rpmdb update")
                 self.main_progress.setRange(0, 0)  # Indeterminate
                 self.pct_label.setText("")
                 self.info_label.setText("")
                 self._collapse_details()
+                self.sub_progress.hide()
             elif phase == ProgressPhase.IDLE:
+                self.sub_progress.hide()
                 self.hide()
 
     def start_transaction(self, action: str = "install"):
@@ -398,6 +438,14 @@ class CollapsibleProgressWidget(QWidget):
             self.main_progress.setRange(0, 0)
             self.pct_label.setText("")
 
+        # Sub-bar: byte-level extraction of current package
+        if bytes_total > 0:
+            sub_pct = min(int(bytes_done * 100 / bytes_total), 100)
+            self.sub_progress.setRange(0, 100)
+            self.sub_progress.setValue(sub_pct)
+        else:
+            self.sub_progress.setValue(0)
+
         # Show package name
         self.info_label.setText(name)
 
@@ -451,6 +499,7 @@ class CollapsibleProgressWidget(QWidget):
         self._expanded = False
         self.expand_label.setText("▶")
         self.detail_panel.hide()
+        self.sub_progress.hide()
         self.hide()
         # Show status frame again
         if hasattr(self.parent(), 'parent') and hasattr(self.parent().parent(), 'status_frame'):

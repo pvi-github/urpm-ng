@@ -1121,6 +1121,20 @@ class Controller:
 
         from .helper_client import HelperClient, TransactionResult, DownloadSlotInfo
 
+        # Warn if server pool is too small for parallel downloads
+        if action in ('install', 'upgrade'):
+            from urpm.core.settings import get_settings
+            from urpm.core.server_pool import minimum_servers_for
+            _parallel = get_settings().download.parallel
+            _min = minimum_servers_for(_parallel)
+            _have = len(self.db.list_servers(enabled_only=True))
+            if _have < _min:
+                self.view.on_progress('status',
+                    f"Seulement {_have} serveurs pour {_parallel} "
+                    f"téléchargements parallèles (recommandé : {_min}). "
+                    f"Utilisez « urpm server autoconf » pour en ajouter.",
+                    0, 0)
+
         self.view.show_loading(True)
         self.view.start_transaction(action)
 
