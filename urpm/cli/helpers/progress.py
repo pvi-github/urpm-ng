@@ -90,7 +90,7 @@ def make_progress_callback(
         ).format(total)
         _state['dw'] = len(str(total))
         count_w = 1 + _state['dw'] + 1 + _state['dw'] + 1 + 4
-        _state['bar_width'] = max(term_width - count_w - 2, 10)
+        _state['bar_width'] = max(int(term_width * 0.8), 20)
 
     def _clip(text, maxw):
         """Clip visible text (ignoring ANSI codes) to maxw chars."""
@@ -110,12 +110,18 @@ def make_progress_callback(
             _state['bounce_pos'] = 0
             _state['bounce_dir'] = 1
 
+    def _sub_label(label):
+        """Clip label so sub-line fits in term_width with same bar as main."""
+        # Sub-line: [████░░░] label  →  2 + bar_width + 1 + 1 + len(label)
+        max_label = term_width - _state['bar_width'] - 4
+        return _clip(label, max(max_label, 3))
+
     def _bounce_bar(label):
         bw = _state['bar_width']
         seg = min(_BOUNCE_WIDTH, bw)
-        pos = _state['bounce_pos']
+        pos = min(_state['bounce_pos'], bw - seg)
         bar = '░' * pos + '█' * seg + '░' * (bw - pos - seg)
-        return f"{_ORANGE}[{bar}] {label}{_RESET}"
+        return f"{_ORANGE}[{bar}] {_sub_label(label)}{_RESET}"
 
     def _progress_sub_bar(bytes_done, bytes_total, label):
         bw = _state['bar_width']
@@ -125,7 +131,7 @@ def make_progress_callback(
             pct = 0
         filled = int(bw * pct / 100)
         bar = '█' * filled + '░' * (bw - filled)
-        return f"[{bar}] {label}"
+        return f"[{bar}] {_sub_label(label)}"
 
     def _render():
         """Write 3 lines to terminal. Must hold _state['lock']."""
@@ -134,9 +140,12 @@ def make_progress_callback(
         s = _state['sub_line']
         if not _state['started']:
             _state['started'] = True
-            print(f"\033[A\r{_CLR}{h}\n{_CLR}{b}\n{_CLR}{s}",
+            # First render: print blank line for spacing, then 3 display lines.
+            # No cursor-up — we're establishing the 3-line region.
+            print(f"\n{_CLR}{h}\n{_CLR}{b}\n{_CLR}{s}",
                   end='', flush=True)
         else:
+            # Subsequent renders: go up 2 lines to rewrite all 3 in place.
             print(f"\033[2A\r{_CLR}{h}\n{_CLR}{b}\n{_CLR}{s}",
                   end='', flush=True)
 
@@ -193,8 +202,7 @@ def make_progress_callback(
                 ).format(pkg_total)
                 _state['dw'] = len(str(pkg_total))
                 count_w = 1 + _state['dw'] + 1 + _state['dw'] + 1 + 4
-                _state['bar_width'] = max(term_width - count_w - 2, 10)
-                print("\n" + _state['header'])
+                _state['bar_width'] = max(int(term_width * 0.8), 20)
 
             # Dedup
             state_key = (progress.phase, progress.packages_done,
@@ -241,7 +249,7 @@ def make_progress_callback(
                 _start_animator()
 
             # ── INSTALL phase ──
-            else:
+            elif not _state['all_extracted']:
                 _state['in_script'] = False
 
                 header_text = _state['header']

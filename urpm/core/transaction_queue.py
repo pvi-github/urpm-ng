@@ -381,6 +381,7 @@ _PHASE_MAP = {
     'verify': TransactionPhase.VERIFY,
     'prepare': TransactionPhase.PREPARE,
     'install': TransactionPhase.INSTALL,
+    'install_done': TransactionPhase.INSTALL,
     'script': TransactionPhase.SCRIPT,
     'script_done': TransactionPhase.SCRIPT,
     'erase': TransactionPhase.ERASE,
