@@ -71,6 +71,9 @@ class DownloadSettings:
     min_servers: int = 2
     """Minimum number of servers to retrieve per media during setup."""
 
+    max_per_server: int = 2
+    """Maximum simultaneous downloads from a single server (guard-rail)."""
+
 
 @dataclass
 class TransactionSettings:
@@ -229,6 +232,10 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
                     val = _as_int(raw)
                     if val >= 1:
                         settings.download.min_servers = val
+                elif key == "max_per_server":
+                    val = _as_int(raw)
+                    if 1 <= val <= 16:
+                        settings.download.max_per_server = val
             except ValueError:
                 pass
 

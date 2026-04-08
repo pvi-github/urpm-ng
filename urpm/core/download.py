@@ -517,8 +517,22 @@ class DownloadCoordinator:
         # Map filename to assignment
         assignments = {a.filename: a for a in assignments_list}
 
-        # Queue all work
-        for item in items:
+        # Queue work: pre-assigned to servers by proportional bandwidth
+        # allocation, then interleaved so consecutive items hit different
+        # servers — workers naturally spread across mirrors.
+        sorted_items = sorted(items, key=lambda it: it.size or 0, reverse=True)
+
+        # Build speed map from session EWMA + DB fallback
+        with self.downloader._session_stats_lock:
+            speed_snapshot = dict(self.downloader._session_server_kbps)
+        _plan_server_assignments(sorted_items, speed_snapshot)
+
+        # Interleave items by assigned server (round-robin across server
+        # queues) so that N workers picking items sequentially each hit a
+        # different server.
+        interleaved = _interleave_by_server(sorted_items)
+
+        for item in interleaved:
             assignment = assignments.get(item.filename)
             self._work_queue.put((item, assignment))
 
@@ -627,6 +641,144 @@ class DownloadCoordinator:
         return results, stats
 
 
+def _plan_server_assignments(items: List['DownloadItem'],
+                             server_speeds: Dict[int, float]) -> None:
+    """Pre-assign items to servers using proportional bandwidth allocation.
+
+    Computes a theoretical download time *t_target* assuming all servers
+    work in parallel at their measured speed, then assigns each server a
+    byte budget proportional to its speed.  Items (expected biggest-first)
+    are greedily placed into the fastest server that still has budget,
+    ensuring fast servers handle the bulk of the volume while slow ones
+    only get small packages.
+
+    The result is applied by **reordering each item's** ``servers`` list
+    so the assigned server appears first — ``download_one`` simply tries
+    servers in list order, giving natural failover to the next-best.
+
+    Args:
+        items: Download items, ideally sorted by size descending.
+        server_speeds: ``{server_id: KB/s}`` from session EWMA or DB.
+    """
+    # Collect all unique servers with their best speed estimate
+    speed_map: Dict[int, float] = {}  # server_id → KB/s
+    for item in items:
+        for s in item.servers:
+            sid = s.get('id')
+            if sid is not None and sid not in speed_map:
+                speed = server_speeds.get(sid, s.get('bandwidth_kbps') or 1)
+                speed_map[sid] = max(speed, 1)
+
+    if len(speed_map) < 2:
+        return  # Single server or none — nothing to plan
+
+    # Servers sorted by speed descending
+    sorted_sids = sorted(speed_map, key=speed_map.get, reverse=True)
+
+    # Target time = total_bytes / total_throughput
+    total_bytes = sum(item.size or 0 for item in items)
+    total_kbps = sum(speed_map[sid] for sid in sorted_sids)
+    if total_kbps <= 0 or total_bytes <= 0:
+        return
+
+    t_target = total_bytes / (total_kbps * 1024)  # seconds
+
+    # Byte budget per server: V(i) = t_target × D(i)
+    remaining: Dict[int, float] = {
+        sid: t_target * speed_map[sid] * 1024
+        for sid in sorted_sids
+    }
+
+    # First pass — assign each item to the fastest server with budget
+    assigned: Dict[int, int] = {}   # item_index → server_id
+    unassigned: List[int] = []
+
+    for i, item in enumerate(items):
+        item_sids = {s.get('id') for s in item.servers if s.get('id') is not None}
+        placed = False
+        for sid in sorted_sids:
+            if sid in item_sids and remaining[sid] > 0:
+                assigned[i] = sid
+                remaining[sid] -= (item.size or 0)
+                placed = True
+                break
+        if not placed:
+            unassigned.append(i)
+
+    # Second pass — leftovers go to the server with the most remaining budget
+    for i in unassigned:
+        item_sids = {s.get('id') for s in items[i].servers
+                     if s.get('id') is not None}
+        best_sid = max(
+            (sid for sid in sorted_sids if sid in item_sids),
+            key=lambda sid: remaining[sid],
+            default=None,
+        )
+        if best_sid is not None:
+            assigned[i] = best_sid
+            remaining[best_sid] -= (items[i].size or 0)
+
+    # Apply — reorder each item's servers list so the assigned one is first
+    for i, item in enumerate(items):
+        preferred = assigned.get(i)
+        if preferred is not None:
+            item.servers.sort(
+                key=lambda s, _pref=preferred: 0 if s.get('id') == _pref else 1
+            )
+
+    logger.info(
+        "Download plan: %d items across %d servers, target %.1fs "
+        "(budgets: %s)",
+        len(items), len(speed_map), t_target,
+        ", ".join(f"{sid}={b / 1048576:.0f}MB"
+                  for sid, b in zip(sorted_sids,
+                                    (t_target * speed_map[s] * 1024
+                                     for s in sorted_sids)))
+    )
+
+
+def _interleave_by_server(items: List['DownloadItem']) -> List['DownloadItem']:
+    """Reorder items so consecutive entries hit different servers.
+
+    Groups items by their first (preferred) server, then yields one item
+    from each group in round-robin order.  Within each group the original
+    order (biggest-first) is preserved so each server starts with its
+    heaviest file.
+
+    This ensures that *N* workers pulling items from the queue each hit
+    a different server, naturally avoiding connection storms on a single
+    mirror.
+    """
+    from collections import defaultdict, deque
+
+    buckets: Dict[int, deque] = defaultdict(deque)
+    no_server: List['DownloadItem'] = []
+
+    for item in items:
+        # First server in the list is the planned preferred one
+        if item.servers:
+            sid = item.servers[0].get('id')
+            if sid is not None:
+                buckets[sid].append(item)
+                continue
+        no_server.append(item)
+
+    # Round-robin across server buckets
+    result: List['DownloadItem'] = []
+    active = list(buckets.values())
+    while active:
+        next_round = []
+        for bucket in active:
+            result.append(bucket.popleft())
+            if bucket:
+                next_round.append(bucket)
+        active = next_round
+
+    # Items without a server go at the end
+    result.extend(no_server)
+    return result
+
+
 class Downloader:
     """Download manager for RPM packages."""
 
@@ -662,6 +814,10 @@ class Downloader:
         # without waiting for the next session.
         self._session_server_kbps: Dict[int, float] = {}
         self._session_stats_lock = threading.Lock()
+
+        # Active download slots per server (guard-rail for max_per_server).
+        self._server_active_slots: Dict[int, int] = {}
+        self._server_slots_lock = threading.Lock()
 
     def get_cache_path(self, item: DownloadItem) -> Path:
         """Get cache path for a download item.
@@ -837,10 +993,8 @@ class Downloader:
             progress_callback: Optional callback(downloaded, total)
             timeout: Connection timeout in seconds
             max_retries: Max retry attempts per server for transient errors
-            worker_slot: Worker slot number for load balancing across servers.
-                         Workers are distributed across servers (slot 0,1 -> server 0 first,
-                         slot 2,3 -> server 1 first, etc.) to avoid all workers hitting
-                         the same server simultaneously.
+            worker_slot: Worker slot number (kept for API compat, no longer
+                         used for server selection — see _plan_server_assignments).
             start_callback: Optional callback(source_name) called when starting download
 
         Returns:
@@ -869,24 +1023,20 @@ class Downloader:
                     error="No servers configured for this media"
                 )
 
-            # Blend static DB order with in-session measurements: servers with a
-            # known session speed are sorted fastest-first within each priority
-            # tier, so a slow server identified earlier in this run is pushed back.
-            if len(servers) > 1:
-                with self._session_stats_lock:
-                    session_kbps = dict(self._session_server_kbps)
-                if session_kbps:
-                    servers = sorted(
-                        servers,
-                        key=lambda s: (
-                            -s.get('priority', 50),
-                            -session_kbps.get(s['id'], s.get('bandwidth_kbps') or 0),
-                        )
-                    )
-                # Load-balance across workers by rotating the sorted list so
-                # consecutive workers don't all hammer the same server.
-                start_idx = worker_slot % len(servers)
-                servers = servers[start_idx:] + servers[:start_idx]
+            # Server order is pre-planned by _plan_server_assignments()
+            # (proportional bandwidth allocation).  Here we only apply the
+            # max_per_server guard-rail: skip servers that already have too
+            # many active downloads, preserving the planned fallback order.
+            from .settings import get_settings
+            max_per = get_settings().download.max_per_server
+            with self._server_slots_lock:
+                available = [
+                    s for s in servers
+                    if self._server_active_slots.get(s.get('id'), 0) < max_per
+                ]
+            if available:
+                servers = available
+            # else: all saturated — keep original order as fallback
 
             # Filter out excluded servers (used on retry to skip failing servers)
             if item.exclude_server_ids:
@@ -909,76 +1059,100 @@ class Downloader:
                 if start_callback:
                     start_callback(server['name'])
 
-                # Try this server with retries
-                for attempt in range(max_retries):
-                    t_start = time.time()
-                    success, error = self._download_from_url(
-                        url, cache_path, progress_callback, timeout, ip_mode=ip_mode
-                    )
-                    elapsed = time.time() - t_start
-
-                    if success:
-                        # Verify the downloaded file is actually an RPM
-                        is_rpm, rpm_error = is_valid_rpm(cache_path)
-                        if not is_rpm:
-                            logger.warning(f"Downloaded file is not a valid RPM: {rpm_error}")
-                            try:
-                                cache_path.unlink()
-                            except OSError:
-                                pass
-                            all_errors.append(f"{server['name']}: {rpm_error}")
-                            if server_id and self.db:
-                                self.db.update_server_stats(server_id, success=False)
-                            break  # Try next server
-
-                        # Compute bandwidth from file size and wall-clock time.
-                        # Only record if elapsed >= 0.5s to avoid noise from
-                        # tiny/cached files where timing is not meaningful.
-                        if server_id and elapsed >= 0.5:
-                            try:
-                                file_size = cache_path.stat().st_size
-                                kbps = int(file_size / elapsed / 1024)
-                            except OSError:
-                                kbps = None
-
-                            if kbps and kbps > 0:
-                                with self._session_stats_lock:
-                                    prev = self._session_server_kbps.get(server_id)
-                                    self._session_server_kbps[server_id] = (
-                                        kbps if prev is None
-                                        else int(0.3 * kbps + 0.7 * prev)
-                                    )
-                                if self.db:
-                                    self.db.update_server_stats(
-                                        server_id, bandwidth_kbps=kbps, success=True
-                                    )
-                        elif server_id and self.db:
-                            self.db.update_server_stats(server_id, success=True)
-
-                        logger.info(f"Downloaded {item.filename} from {server['name']}")
-                        self._register_cache_file(item, cache_path)
-                        return DownloadResult(
-                            item=item,
-                            success=True,
-                            path=cache_path,
-                            source_server_id=server_id
+                # Track active slots for this server (guard-rail accounting)
+                if server_id:
+                    with self._server_slots_lock:
+                        self._server_active_slots[server_id] = (
+                            self._server_active_slots.get(server_id, 0) + 1)
+                try:
+                    # Try this server with retries
+                    for attempt in range(max_retries):
+                        t_start = time.time()
+                        success, error = self._download_from_url(
+                            url, cache_path, progress_callback, timeout,
+                            ip_mode=ip_mode
                         )
+                        elapsed = time.time() - t_start
 
-                    # Download failed on this attempt
-                    all_errors.append(f"{server['name']}: {error}")
-                    if error and error.startswith("HTTP"):
-                        # Hard HTTP error — no point retrying this server
-                        if server_id and self.db:
-                            self.db.update_server_stats(server_id, success=False)
-                        break
+                        if success:
+                            # Verify the downloaded file is actually an RPM
+                            is_rpm, rpm_error = is_valid_rpm(cache_path)
+                            if not is_rpm:
+                                logger.warning(
+                                    f"Downloaded file is not a valid RPM: "
+                                    f"{rpm_error}")
+                                try:
+                                    cache_path.unlink()
+                                except OSError:
+                                    pass
+                                all_errors.append(
+                                    f"{server['name']}: {rpm_error}")
+                                if server_id and self.db:
+                                    self.db.update_server_stats(
+                                        server_id, success=False)
+                                break  # Try next server
+
+                            # Compute bandwidth from file size and wall-clock
+                            # time.  Only record if elapsed >= 0.5s to avoid
+                            # noise from tiny/cached files.
+                            if server_id and elapsed >= 0.5:
+                                try:
+                                    file_size = cache_path.stat().st_size
+                                    kbps = int(file_size / elapsed / 1024)
+                                except OSError:
+                                    kbps = None
+
+                                if kbps and kbps > 0:
+                                    with self._session_stats_lock:
+                                        prev = self._session_server_kbps.get(
+                                            server_id)
+                                        self._session_server_kbps[server_id] = (
+                                            kbps if prev is None
+                                            else int(0.3 * kbps + 0.7 * prev)
+                                        )
+                                    if self.db:
+                                        self.db.update_server_stats(
+                                            server_id, bandwidth_kbps=kbps,
+                                            success=True)
+                            elif server_id and self.db:
+                                self.db.update_server_stats(
+                                    server_id, success=True)
+
+                            logger.info(
+                                f"Downloaded {item.filename} from "
+                                f"{server['name']}")
+                            self._register_cache_file(item, cache_path)
+                            return DownloadResult(
+                                item=item,
+                                success=True,
+                                path=cache_path,
+                                source_server_id=server_id
+                            )
+
+                        # Download failed on this attempt
+                        all_errors.append(f"{server['name']}: {error}")
+                        if error and error.startswith("HTTP"):
+                            # Hard HTTP error — no point retrying this server
+                            if server_id and self.db:
+                                self.db.update_server_stats(
+                                    server_id, success=False)
+                            break
+                        else:
+                            # Transient error — retry with backoff
+                            if attempt < max_retries - 1:
+                                time.sleep(1 * (attempt + 1))
                     else:
-                        # Transient error — retry with backoff
-                        if attempt < max_retries - 1:
-                            time.sleep(1 * (attempt + 1))
-                else:
-                    # Exhausted retries on this server
-                    if server_id and self.db:
-                        self.db.update_server_stats(server_id, success=False)
+                        # Exhausted retries on this server
+                        if server_id and self.db:
+                            self.db.update_server_stats(
+                                server_id, success=False)
+                finally:
+                    # Release active slot for this server
+                    if server_id:
+                        with self._server_slots_lock:
+                            cur = self._server_active_slots.get(server_id, 1)
+                            self._server_active_slots[server_id] = max(
+                                0, cur - 1)
 
             # All servers failed
             return DownloadResult(
