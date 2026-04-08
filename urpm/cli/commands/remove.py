@@ -343,9 +343,21 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
 
         # Display captured scriptlet output
         if queue_result.scriptlet_output:
+            import json
             print(colors.dim("\n  " + _("Scriptlet output:")))
-            for line in queue_result.scriptlet_output.splitlines():
-                print(colors.dim(f"    {line}"))
+            try:
+                script_dict = json.loads(queue_result.scriptlet_output)
+                for pkg, output in script_dict.items():
+                    if pkg:
+                        print(colors.dim(f"    {pkg}:"))
+                        for line in output.splitlines():
+                            print(colors.dim(f"      {line}"))
+                    else:
+                        for line in output.splitlines():
+                            print(colors.dim(f"    {line}"))
+            except (json.JSONDecodeError, TypeError):
+                for line in queue_result.scriptlet_output.splitlines():
+                    print(colors.dim(f"    {line}"))
 
         ops.complete_transaction(transaction_id)
 

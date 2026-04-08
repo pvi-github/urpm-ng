@@ -977,6 +977,7 @@ queue._child_process_standalone()
         )
         _stdout_capture_path = _stdout_capture.name
         _capture_fd = _stdout_capture.fileno()
+        self._capture_fd = _capture_fd  # accessible from install/erase callbacks
         os.dup2(_capture_fd, 1)  # stdout → temp file
         os.dup2(_capture_fd, 2)  # stderr → temp file
         # Update Python-level objects so print(..., file=sys.stderr) also
@@ -1075,16 +1076,46 @@ queue._child_process_standalone()
                 if success and op.op_type == OperationType.INSTALL:
                     self._store_readmes_in_db(op)
 
-            # Send captured scriptlet output to parent
+            # Send captured scriptlet output to parent, grouped by package.
+            # Markers injected during SCRIPT_START delimit each section.
+            _MARKER_PREFIX = '__URPM_SCRIPT:'
             try:
-                os.fsync(1)  # Flush stdout (redirected to temp file)
-                with open(_stdout_capture_path, 'r') as _cap:
-                    _captured = _cap.read().strip()
-                if _captured:
-                    _pipe_write(QueueProgressMessage(
-                        msg_type='scriptlet_output',
-                        scriptlet_output=_captured,
-                    ).to_json())
+                _sys.stdout.flush()
+                _sys.stderr.flush()
+                with open(_stdout_capture_path, 'r',
+                          errors='replace') as _cap:
+                    _captured = _cap.read()
+                if _captured.strip():
+                    import json as _json
+                    import re as _re
+                    _script_outputs = {}
+                    # Split on markers, keeping the marker content as keys
+                    _parts = _re.split(
+                        r'^' + _re.escape(_MARKER_PREFIX)
+                        + r'(.+?)__$',
+                        _captured, flags=_re.MULTILINE)
+                    # _parts = [pre, name1, body1, name2, body2, ...]
+                    # Pre-marker output (index 0)
+                    _pre = _parts[0].strip()
+                    if _pre:
+                        _script_outputs[''] = _pre
+                    # Paired (name, body) from index 1 onward
+                    for _i in range(1, len(_parts) - 1, 2):
+                        _pkg = _parts[_i]
+                        _body = _parts[_i + 1].strip()
+                        if _body:
+                            if _pkg in _script_outputs:
+                                _script_outputs[_pkg] += '\n' + _body
+                            else:
+                                _script_outputs[_pkg] = _body
+                    if _script_outputs:
+                        _pipe_write(QueueProgressMessage(
+                            msg_type='scriptlet_output',
+                            scriptlet_output=_json.dumps(_script_outputs),
+                        ).to_json())
+                    else:
+                        # Markers only, no actual output — skip
+                        pass
             except OSError:
                 pass
             finally:
@@ -1499,6 +1530,13 @@ queue._child_process_standalone()
             # ── SCRIPT_START/STOP: scriptlets and file triggers ──
             if reason == rpm.RPMCALLBACK_SCRIPT_START:
                 script_name = _clean_script_key(key)
+                # Inject marker for per-package output grouping (direct fd write,
+                # no sys.stdout interaction, no interference with RPM).
+                try:
+                    os.write(self._capture_fd,
+                             f"__URPM_SCRIPT:{script_name}__\n".encode())
+                except OSError:
+                    pass
                 _send_progress(name=script_name,
                                current=packages_done[0], total=total,
                                phase='script', script=script_name)
@@ -1738,6 +1776,11 @@ queue._child_process_standalone()
 
             elif reason == rpm.RPMCALLBACK_SCRIPT_START:
                 script_name = _clean_script_key(key)
+                try:
+                    os.write(self._capture_fd,
+                             f"__URPM_SCRIPT:{script_name}__\n".encode())
+                except OSError:
+                    pass
                 _erase_pipe_write(QueueProgressMessage(
                     msg_type='progress',
                     operation_id=op.operation_id,

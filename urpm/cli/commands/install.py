@@ -1105,9 +1105,21 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
         # Display captured scriptlet output (ldconfig, mime-db rebuild, etc.)
         if qr and qr.scriptlet_output:
+            import json
             print(colors.dim("\n  " + _("Scriptlet output:")))
-            for line in qr.scriptlet_output.splitlines():
-                print(colors.dim(f"    {line}"))
+            try:
+                script_dict = json.loads(qr.scriptlet_output)
+                for pkg, output in script_dict.items():
+                    if pkg:
+                        print(colors.dim(f"    {pkg}:"))
+                        for line in output.splitlines():
+                            print(colors.dim(f"      {line}"))
+                    else:
+                        for line in output.splitlines():
+                            print(colors.dim(f"    {line}"))
+            except (json.JSONDecodeError, TypeError):
+                for line in qr.scriptlet_output.splitlines():
+                    print(colors.dim(f"    {line}"))
 
         # Display restart recommendations
         if restart_info:
