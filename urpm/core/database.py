@@ -1906,19 +1906,28 @@ class PackageDatabase(
 
         return pkg
 
+    _installed_cache: Optional[set] = None
+
+    def _get_installed_names(self) -> set:
+        """Get the set of all installed package names (cached)."""
+        if self._installed_cache is None:
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['rpm', '-qa', '--qf', '%{NAME}\n'],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0:
+                    self._installed_cache = set(result.stdout.splitlines())
+                else:
+                    self._installed_cache = set()
+            except Exception:
+                self._installed_cache = set()
+        return self._installed_cache
+
     def _is_installed(self, name: str) -> bool:
         """Check if a package is installed in the RPM database."""
-        try:
-            import subprocess
-            # Use rpm -q directly to avoid any Python rpm module caching issues
-            result = subprocess.run(
-                ['rpm', '-q', name],
-                capture_output=True,
-                timeout=5
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        return name in self._get_installed_names()
 
     def find_package_by_nevra(self, name: str, evr: str, arch: str) -> Optional[Dict]:
         """Find a package by name, evr (epoch:version-release), and arch.
