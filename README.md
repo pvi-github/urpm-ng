@@ -386,7 +386,24 @@ urpm media import <file>      # Import from urpmi.cfg
 urpm media link <name> +srv -srv  # Link/unlink servers to a media
 urpm media set <name> [opts]  # Modify media settings (sharing, replication, quota...)
 urpm media autoconfig -r 10   # Auto-add official Mageia media for release 10
+urpm media discover <url>     # Discover media from a repo's media.cfg
 ```
+
+### Discover media from a repository
+
+Discover all available media from any Mageia-compatible repository
+(official mirrors, community repos like MLO, corporate mirrors):
+
+```bash
+urpm media discover https://repo.example.org/9/x86_64/media/       # Add all media
+urpm media discover --dry-run https://repo.example.org/9/x86_64/media/  # Preview only
+urpm media discover --sources --debug https://...                   # Include SRPMS and debug
+urpm media discover --enable https://...                            # Enable all (even noauto)
+```
+
+The command fetches `media.cfg` from the repository, discovers all media,
+and links existing servers that host the same content (verified by MD5
+checksum of `synthesis.hdlist.cz`).
 
 ### Server-Media linking
 
@@ -399,7 +416,7 @@ urpm media link "Core Release" +all                # Add all available servers
 urpm media link "Core Release" -all +preferred     # Reset and add one
 ```
 
-Note: When adding servers, urpm checks if the media is actually available on the server before linking.
+Note: When adding servers, urpm verifies the media content matches by comparing MD5 checksums of `synthesis.hdlist.cz` with existing reference servers.
 
 ### Auto-configure media
 

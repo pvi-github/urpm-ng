@@ -1,0 +1,126 @@
+.\" Manpagina voor urpmd
+.TH URPMD 8 "Januari 2025" "urpm-ng" "Systeembeheer"
+.SH NAAM
+urpmd \- urpm-daemon voor intelligent cachebeheer en P2P-deling
+.SH SAMENVATTING
+.B urpmd
+.RI [ opties ]
+.SH BESCHRIJVING
+.B urpmd
+is de achtergronddaemon voor urpm-ng. Het biedt:
+.IP \(bu 2
+Intelligente pakketcaching met voorspellende downloads
+.IP \(bu 2
+P2P-pakketdeling tussen machines op het lokale netwerk
+.IP \(bu 2
+HTTP-server om pakketten aan peers te leveren
+.IP \(bu 2
+Automatische peerontdekking via UDP-broadcast
+.IP \(bu 2
+Bijwerken van metadata op de achtergrond
+.PP
+De daemon wordt beheerd via systemd en start automatisch na installatie.
+.SH OPTIES
+.TP
+.BR \-h ", " \-\-help
+Toon hulpbericht en sluit af.
+.TP
+.BR \-f ", " \-\-foreground
+Draai op de voorgrond (niet als daemon). Handig voor foutopsporing.
+.TP
+.BR \-p ", " \-\-port " " \fIPOORT\fR
+HTTP-serverpoort. Standaard: 9876 (productie), 9877 (ontwikkeling).
+.TP
+.BR \-H ", " \-\-host " " \fIHOST\fR
+Luisteradres van de HTTP-server. Standaard: 0.0.0.0 (alle interfaces).
+.TP
+.BR \-v ", " \-\-verbose
+Uitgebreide logboekregistratie inschakelen.
+.TP
+.B \-\-dev
+Forceer ontwikkelmodus. De ontwikkelmodus wordt automatisch gedetecteerd
+bij uitvoering vanuit de broncodeboom of als .urpm.local bestaat.
+.TP
+.B \-\-prod
+Forceer productiemodus, .urpm.local-detectie wordt genegeerd.
+.SH NETWERKPOORTEN
+.TP
+.B TCP 9876
+HTTP-server voor pakketdownloads en API.
+.TP
+.B UDP 9878
+P2P-ontdekking via broadcast/multicast.
+.PP
+Deze poorten moeten open staan in de firewall om P2P-deling te laten
+werken. Het urpm-ng-pakket configureert automatisch shorewall indien aanwezig.
+.SH P2P-DELING
+Wanneer urpmd op meerdere machines op hetzelfde lokale netwerk draait:
+.IP \(bu 2
+Machines ontdekken elkaar via UDP-broadcast op poort 9878
+.IP \(bu 2
+Wanneer een pakket nodig is, controleert urpm eerst de lokale peers
+.IP \(bu 2
+Pakketten worden van peers gedownload indien beschikbaar (sneller dan mirrors)
+.IP \(bu 2
+Terugval op geconfigureerde servers als peers het pakket niet hebben
+.PP
+P2P-deling respecteert pakkethandtekeningen - alleen ondertekende pakketten
+van vertrouwde peers worden gebruikt.
+.SH VOORSPELLENDE DOWNLOADS
+De daemon bewaakt pakket-toegangspatronen en kan pakketten vooraf downloaden
+die waarschijnlijk binnenkort nodig zijn, op basis van:
+.IP \(bu 2
+Afhankelijkheden van recent geinstalleerde pakketten
+.IP \(bu 2
+Updatepatronen van geconfigureerde media
+.IP \(bu 2
+Detectie van netwerkinactiviteit om gebruikersactiviteiten niet te hinderen
+.SH BESTANDEN
+.TP
+.I /var/lib/urpm/packages.db
+SQLite-database met pakketmetadata, peerinformatie
+en downloadgeschiedenis.
+.TP
+.I /var/lib/urpm/medias/
+Map met gecachte pakketten, georganiseerd per medium.
+.TP
+.I /run/urpmd.pid
+PID-bestand (productiemodus).
+.TP
+.I /var/log/urpmd.log
+Logbestand (als systemd journal niet wordt gebruikt).
+.SH SYSTEMD
+De daemon wordt bestuurd via systemd:
+.TP
+De daemon starten:
+.B systemctl start urpmd
+.TP
+De daemon stoppen:
+.B systemctl stop urpmd
+.TP
+Inschakelen bij opstarten:
+.B systemctl enable urpmd
+.TP
+Status controleren:
+.B systemctl status urpmd
+.TP
+Logs bekijken:
+.B journalctl -u urpmd
+.SH VOORBEELDEN
+.TP
+Op de voorgrond draaien voor foutopsporing:
+.B urpmd -f -v
+.TP
+Op een alternatieve poort draaien:
+.B urpmd -p 8080
+.SH ZIE OOK
+.BR urpm (1),
+.BR systemctl (1),
+.BR journalctl (1)
+.SH FOUTEN
+Meld fouten op https://github.com/pvi-github/urpm-ng/issues
+.SH AUTEURS
+Pascal Vilarem (Maat) en medewerkers.
+.SH COPYRIGHT
+Copyright (C) 2024-2025 Pascal Vilarem (Maat).
+Gelicentieerd onder GPLv3+.

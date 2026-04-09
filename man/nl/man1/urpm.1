@@ -1,0 +1,538 @@
+.\" Manpagina voor urpm
+.TH URPM 1 "January 2025" "urpm-ng" "Gebruikerscommando's"
+.SH NAAM
+urpm \- moderne pakketbeheerder voor Mageia Linux
+.SH SAMENVATTING
+.B urpm
+.RI [ opties ]
+.I commando
+.RI [ argumenten ]
+.SH BESCHRIJVING
+.B urpm
+is een moderne pakketbeheerder voor Mageia Linux, met snelle
+afhankelijkheidsresolutie via libsolv, P2P-pakketdeling tussen
+LAN-machines en een intuïtieve opdrachtregelinterface.
+.PP
+Het is ontworpen als een volledige herschrijving van de klassieke urpmi-toolset.
+.SH OPTIES
+.TP
+.BR \-h ", " \-\-help
+Toon hulpbericht en sluit af.
+.TP
+.BR \-V ", " \-\-version
+Toon versienummer en sluit af.
+.TP
+.BR \-v ", " \-\-verbose
+Uitgebreide uitvoer.
+.TP
+.BR \-q ", " \-\-quiet
+Stille uitvoer.
+.TP
+.B \-\-nocolor
+Schakel gekleurde uitvoer uit.
+.SH COMMANDO'S
+.SS Pakketinstallatie en -verwijdering
+.TP
+.B i|install \fIpakket\fR ...
+Installeer een of meer pakketten.
+.RS
+.TP
+.BR \-y ", " \-\-auto
+Geen bevestigingsvraag.
+.TP
+.B \-\-download\-only
+Download pakketten zonder te installeren.
+.TP
+.B \-\-without\-recommends
+Installeer geen aanbevolen pakketten.
+.TP
+.B \-\-with\-suggests
+Installeer ook voorgestelde pakketten.
+.TP
+.B \-\-only\-peers
+Download alleen van LAN-peers, geen upstream-mirrors.
+.TP
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
+Installeer build-afhankelijkheden van spec-bestand of SRPM. Automatische detectie indien niet opgegeven.
+.TP
+.B \-\-sync
+Wacht tot alle scriptlets en triggers voltooid zijn voordat wordt teruggekeerd.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Sta extra architecturen toe naast de systeemarchitectuur en noarch.
+Kan herhaald worden. Standaard worden alleen pakketten voor de systeemarchitectuur
+(bijv. x86_64) en noarch meegenomen. Gebruik deze optie om 32-bits pakketten op een
+64-bits systeem te installeren (bijv. \fB\-\-allow\-arch i686\fR voor wine of steam).
+.RE
+.TP
+.B e|erase \fIpakket\fR ...
+Verwijder een of meer pakketten. Alias: \fBremove\fR.
+.RS
+.TP
+.BR \-y ", " \-\-auto
+Geen bevestigingsvraag.
+.TP
+.B \-\-auto\-orphans
+Verwijder ook verweesde afhankelijkheden.
+.RE
+.TP
+.B autoremove
+Verwijder verweesde pakketten, oude kernels, mislukte afhankelijkheden of build-afhankelijkheden.
+Alias: \fBar\fR.
+.RS
+.TP
+.BR \-o ", " \-\-orphans
+Verwijder verweesde pakketten (standaard als geen selector opgegeven).
+.TP
+.BR \-k ", " \-\-kernels
+Verwijder oude kernels (behoudt de actieve + N recente, zie \fBurpm config kernel\-keep\fR).
+.TP
+.BR \-f ", " \-\-faildeps
+Verwijder verweesde afhankelijkheden van onderbroken transacties.
+.TP
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br
+Verwijder pakketten die als build-afhankelijkheden zijn geïnstalleerd (bijgehouden in
+.IR /var/lib/rpm/installed\-through\-builddeps.list ")."
+.TP
+.BR \-a ", " \-\-all
+Alle bovenstaande selectoren.
+.TP
+.BR \-y ", " \-\-auto
+Geen bevestigingsvraag.
+.RE
+.SS Metadata en pakketupdates
+.TP
+.B update \fR[\fImedia\fR]
+Werk alleen mediametadata bij (apt-stijl). Werkt geen pakketten bij.
+.RS
+.TP
+.B \-\-files
+Synchroniseer ook files.xml voor media met sync_files ingeschakeld.
+.RE
+.TP
+.B u|upgrade \fR[\fIpakket\fR ...]
+Werk pakketten bij (systeemupgrade als geen pakket opgegeven).
+.RS
+.TP
+.BR \-y ", " \-\-auto
+Geen bevestigingsvraag.
+.TP
+.B \-\-with\-recommends
+Installeer aanbevolen pakketten.
+.TP
+.B \-\-only\-peers
+Download alleen van LAN-peers, geen upstream-mirrors.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Sta extra architecturen toe (bijv. \fB\-\-allow\-arch i686\fR).
+.RE
+.SS Pakketinformatie
+.TP
+.B q|query \fIpatroon\fR
+Zoek pakketten op naam of beschrijving. Aliassen: \fBs\fR, \fBsearch\fR.
+.TP
+.B show \fIpakket\fR
+Toon gedetailleerde pakketinformatie.
+.TP
+.B list \fR[\fIpatroon\fR]
+Lijst pakketten. Gebruik \fB\-\-installed\fR voor alleen geïnstalleerde pakketten.
+.TP
+.B provides \fIpakket\fR
+Toon welke mogelijkheden een pakket biedt.
+.TP
+.B whatprovides \fImogelijkheid\fR
+Zoek pakketten die een mogelijkheid bieden.
+.TP
+.B find \fIpatroon\fR
+Zoek welk pakket een bestand bevat dat overeenkomt met het patroon.
+.RS
+.TP
+.BR \-i ", " \-\-installed
+Zoek alleen in geïnstalleerde pakketten.
+.TP
+.BR \-a ", " \-\-available
+Zoek alleen in beschikbare pakketten (vereist files.xml-synchronisatie).
+.TP
+.BR \-l ", " \-\-limit " " \fIN\fR
+Beperk resultaten tot N overeenkomsten.
+.PP
+Standaard wordt gezocht in zowel geïnstalleerde als beschikbare pakketten.
+Zoeken in beschikbare pakketten vereist het inschakelen van files.xml-synchronisatie via
+\fBurpm media set \-\-all \-\-sync-files\fR gevolgd door
+\fBurpm media update \-\-files\fR.
+.RE
+.TP
+.B depends \fIpakket\fR
+Toon pakketafhankelijkheden.
+.TP
+.B rdepends \fIpakket\fR
+Toon omgekeerde afhankelijkheden.
+.TP
+.B why \fIpakket\fR
+Leg uit waarom een pakket is geïnstalleerd.
+.SS Media- en serverbeheer
+.TP
+.B media \fR[\fIsubcommando\fR]
+Beheer mediabronnen. Zonder subcommando worden media weergegeven.
+.RS
+.TP
+.B list
+Lijst geconfigureerde media.
+.TP
+.B add \fInaam\fR \fIurl\fR
+Voeg een nieuw medium toe.
+.TP
+.B remove \fInaam\fR
+Verwijder een medium.
+.TP
+.B enable \fInaam\fR
+Schakel een medium in.
+.TP
+.B disable \fInaam\fR
+Schakel een medium uit.
+.TP
+.B update \fR[\fInaam\fR]
+Werk mediametadata bij (parallel).
+.RS
+.TP
+.B \-\-files
+Synchroniseer ook files.xml voor media met sync_files ingeschakeld. Vereist om
+\fBurpm find\fR in beschikbare pakketten te laten zoeken.
+.RE
+.TP
+.B import
+Importeer mediaconfiguratie van urpmi.
+.TP
+.B link \fInaam\fR \fI+server\fR|\fI-server\fR ...
+Koppel of ontkoppel servers aan een medium. Gebruik +server om toe te voegen, -server om te verwijderen.
+Gebruik +all/-all om alle servers toe te voegen/te verwijderen. Koppelt alleen servers die het medium beschikbaar hebben.
+.TP
+.B set \fInaam\fR \fR[\fIopties\fR]
+Wijzig media-instellingen.
+.RS
+.TP
+.B \-\-shared \fIyes\fR|\fIno\fR
+Schakel het delen van dit medium met peers in/uit.
+.TP
+.B \-\-replication \fIbeleid\fR
+Replicatiebeleid: none, on_demand, seed.
+.TP
+.B \-\-seeds \fIsecties\fR
+rpmsrate-secties voor seed-replicatie (kommagescheiden), bijv. INSTALL,CAT_PLASMA5,CAT_GNOME.
+.TP
+.B \-\-quota \fIgrootte\fR
+Quota per medium (bijv. 5G, 500M).
+.TP
+.B \-\-retention \fIdagen\fR
+Aantal dagen om gecachte pakketten te bewaren.
+.TP
+.B \-\-priority \fIN\fR
+Mediaprioriteit (hoger = voorkeur).
+.TP
+.B \-\-sync\-files
+Schakel automatische files.xml-synchronisatie in voor dit medium. Vereist om
+\fBurpm find\fR in beschikbare pakketten te laten zoeken.
+.TP
+.B \-\-no\-sync\-files
+Schakel automatische files.xml-synchronisatie uit.
+.TP
+.BR \-a ", " \-\-all
+Pas instelling toe op alle ingeschakelde media (gebruik met \fB\-\-sync\-files\fR of \fB\-\-no\-sync\-files\fR).
+.RE
+.TP
+.B autoconfig \fB\-\-release\fR \fIversie\fR
+Voeg automatisch officiële Mageia-media toe voor een release. Aliassen: \fBauto\fR, \fBac\fR.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIversie\fR
+Mageia-versie (bijv. 10, cauldron). Vereist.
+.TP
+.B \-\-arch \fIarch\fR
+Doelarchitectuur (standaard: host).
+.TP
+.BR \-n ", " \-\-dry\-run
+Toon wat zou worden toegevoegd zonder wijzigingen aan te brengen.
+.TP
+.B \-\-no\-nonfree
+Sla nonfree-media over.
+.TP
+.B \-\-no\-tainted
+Sla tainted-media over.
+.RE
+.TP
+.B discover \fIurl\fR
+Ontdek alle beschikbare media vanuit het \fBmedia.cfg\fR-bestand van een repository.
+Werkt met officiële mirrors, communautaire repositories (MLO) en bedrijfsmirrors.
+Bestaande servers die dezelfde inhoud hosten worden automatisch gekoppeld
+(geverifieerd met MD5-controlesom van synthesis.hdlist.cz).
+Aliassen: \fBdisc\fR.
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Toon wat zou worden toegevoegd zonder wijzigingen aan te brengen.
+.TP
+.B \-\-enable
+Schakel alle ontdekte media in, inclusief die gemarkeerd als \fBnoauto\fR in media.cfg.
+.TP
+.B \-\-sources
+Neem SRPMS-media op (standaard uitgesloten).
+.TP
+.B \-\-debug
+Neem debug-media op (standaard uitgesloten).
+.RE
+.RE
+.TP
+.B server \fR[\fIsubcommando\fR]
+Beheer downloadservers. Zonder subcommando worden servers weergegeven.
+.RS
+.TP
+.B list
+.RS
+Lijst geconfigureerde servers.
+.sp
+.BR \-\-all
+Lijst alle servers, inclusief uitgeschakelde.
+.RE
+.TP
+.B add \fInaam\fR \fIurl\fR
+Voeg een nieuwe server toe.
+.TP
+.B remove \fInaam\fR
+Verwijder een server.
+.TP
+.B enable \fInaam\fR
+Schakel een server in.
+.TP
+.B disable \fInaam\fR
+Schakel een server uit.
+.TP
+.B priority \fInaam\fR \fIN\fR
+Stel serverprioriteit in (hoger getal = voorkeur, standaard 50).
+.TP
+.B test \fR[\fInaam\fR]
+Test de connectiviteit naar een server (of alle ingeschakelde servers) en
+detecteer automatisch de beste IP-modus (auto/ipv4/ipv6/dual).
+.TP
+.B ip-mode \fInaam\fR \fImodus\fR
+Forceer de IP-versie die wordt gebruikt voor verbinding met een server.
+Geldige modi: \fBauto\fR (systeemstandaard), \fBipv4\fR, \fBipv6\fR, \fBdual\fR
+(beide werken, IPv4 heeft voorkeur).
+.TP
+.B stats \fInaam\fR
+Toon gemeten prestatiestatistieken voor een server: downloadsnelheid (EWMA van
+eerdere downloads), latentie, succes-/fouttellingen en tijd van laatste controle.
+Statistieken worden automatisch bijgewerkt na elke download en metadatasynchronisatie.
+.TP
+.B autoconfig
+Ontdek en voeg automatisch de snelste servers toe vanuit de Mageia-mirrorlist.
+Test de latentie van alle kandidaten en behoudt de N beste.
+De gemeten latentie wordt opgeslagen zodat de servervolgorde vanaf de eerste download relevant is.
+.RE
+.SS P2P en cache
+.TP
+.B peer \fR[\fIsubcommando\fR]
+Beheer P2P-peers. Zonder subcommando worden peers weergegeven.
+.RS
+.TP
+.B list
+Lijst ontdekte peers en downloadstatistieken.
+.TP
+.B blacklist \fIhost\fR
+Blokkeer een peer.
+.TP
+.B unblacklist \fIhost\fR
+Deblokkeer een peer.
+.TP
+.B clean \fIhost\fR
+Verwijder RPM's die van een peer zijn gedownload.
+.RE
+.TP
+.B cache \fIsubcommando\fR
+Beheer de pakketcache.
+.RS
+.TP
+.B clean
+Verwijder verweesde RPM's uit de cache.
+.TP
+.B info
+Toon cachestatistieken.
+.RE
+.SS Geschiedenis en terugdraaien
+.TP
+.B history \fR[\fIN\fR]
+Toon transactiegeschiedenis. Standaard: laatste 10 transacties.
+.TP
+.B rollback \fIspec\fR
+Draai transacties terug.
+.RS
+.TP
+.B rollback 5
+Draai de laatste 5 transacties terug.
+.TP
+.B rollback to 42
+Draai terug naar transactie #42.
+.TP
+.B rollback to 26/11/2025
+Draai terug naar een specifieke datum.
+.RE
+.TP
+.B undo \fR[\fIN\fR]
+Maak de laatste transactie ongedaan, of transactie #N.
+.SS Configuratie
+.TP
+.B config \fIsubcommando\fR
+Beheer de urpm-configuratie.
+.TP
+.B key \fIsubcommando\fR
+Beheer GPG-sleutels voor pakketverificatie.
+.TP
+.B mark \fIpakket\fR manual|auto
+Markeer pakketten als handmatig of automatisch geïnstalleerd.
+.TP
+.B hold \fR[\fIpakket\fR ...] [\fB\-r\fR \fIreden\fR]
+Vergrendel pakketten om upgrades en vervanging door obsoletes te voorkomen.
+Zonder argumenten worden vergrendelde pakketten weergegeven.
+.RS
+.TP
+.BR \-r ", " \-\-reason " " \fIreden\fR
+Registreer een reden voor de vergrendeling.
+.TP
+.BR \-l ", " \-\-list
+Lijst vergrendelde pakketten.
+.RE
+.TP
+.B unhold \fIpakket\fR ...
+Verwijder de vergrendeling van pakketten, zodat ze kunnen worden bijgewerkt of vervangen.
+.SS Initialisatie en downloaden
+.TP
+.B init \fR[\fB\-\-release\fR \fIversie\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]
+Initialiseer urpm met standaard Mageia-media. Test mirrors en configureert de beste.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIversie\fR
+Mageia-versie (bijv. 10, cauldron).
+.TP
+.B \-\-urpm\-root " " \fIpad\fR
+Initialiseer in een chroot-map.
+.RE
+.TP
+.B download \fIpakket\fR ...
+Download pakketten naar de cache zonder te installeren.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIversie\fR
+Doelversie voor cross-release downloads.
+.TP
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
+Download build-afhankelijkheden van spec-bestand.
+.TP
+.B \-\-only\-peers
+Download alleen van LAN-peers, geen upstream-mirrors.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Sta extra architecturen toe (bijv. \fB\-\-allow\-arch i686\fR).
+.RE
+.SS Containerbuildsysteem
+.TP
+.B mkimage \fB\-\-release\fR \fIversie\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInaam\fR]
+Maak een minimale Docker/Podman-image voor RPM-builds.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIversie\fR
+Mageia-versie (bijv. 10, cauldron).
+.TP
+.BR \-t ", " \-\-tag " " \fItag\fR
+Image-tag (bijv. mageia:10-build).
+.TP
+.B \-\-profile " " \fInaam\fR
+Pakketprofiel (standaard: build). Beschikbare profielen: build (RPM-buildomgeving),
+ci (CI/testen), minimal (minimaal systeem met urpm). Profielen worden geladen uit
+/usr/share/urpm/profiles/*.yaml en /etc/urpm/profiles/*.yaml.
+.TP
+.B \-\-arch " " \fIarch\fR
+Doelarchitectuur (standaard: host).
+.TP
+.BR \-p ", " \-\-packages " " \fIlijst\fR
+Extra pakketten (kommagescheiden).
+.TP
+.B \-\-runtime " " docker|podman
+Containerruntime (standaard: automatische detectie).
+.TP
+.B \-\-keep\-chroot
+Bewaar de tijdelijke chroot na het aanmaken van de image.
+.TP
+.BR \-w ", " \-\-workdir " " \fIpad\fR
+Werkmap voor de chroot (standaard: /tmp).
+.RE
+.TP
+.B build \fB\-\-image\fR \fItag\fR \fIbron\fR ...
+Bouw RPM-pakketten in geïsoleerde containers.
+.RS
+.TP
+.BR \-i ", " \-\-image " " \fItag\fR
+Te gebruiken Docker/Podman-image.
+.TP
+.BR \-o ", " \-\-output " " \fImap\fR
+Uitvoermap voor SRPM-builds (standaard: ./build-output).
+Voor .spec-bestanden gaan de resultaten naar workspace/RPMS/ en workspace/SRPMS/.
+.TP
+.BR \-w ", " \-\-with\-rpms " " \fIpatroon\fR
+Pre-installeer lokale RPM's in de container voor de build. Handig wanneer u
+een pakket bouwt dat afhankelijk is van een bibliotheek die u zojuist lokaal hebt gebouwd.
+Ondersteunt glob-patronen en kan herhaald worden. Voorbeeld: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+.TP
+.B \-\-runtime " " docker|podman
+Containerruntime (standaard: automatische detectie).
+.TP
+.BR \-j ", " \-\-parallel " " \fIN\fR
+Aantal parallelle builds (standaard: 1).
+.TP
+.B \-\-keep\-container
+Bewaar de container na de build (voor debugging).
+.PP
+Bronnen kunnen .src.rpm- of .spec-bestanden zijn. Voor .spec-bestanden worden
+bronnen automatisch gekopieerd uit de map SOURCES/ (ondersteunt workspace/SPECS/
+en workspace/SOURCES/ indelingen).
+.RE
+.SH BESTANDEN
+.TP
+.I /var/lib/urpm/
+Database- en cachemap.
+.TP
+.I /var/lib/urpm/packages.db
+SQLite-database voor pakketmetadata en geschiedenis.
+.TP
+.I /var/lib/urpm/medias/
+Cache van gedownloade pakketten.
+.TP
+.I /etc/bash_completion.d/urpm
+Bash-aanvulscript.
+.SH VOORBEELDEN
+.TP
+Een pakket installeren:
+.B urpm i firefox
+.TP
+Pakketten zoeken:
+.B urpm q video player
+.TP
+Alle pakketten bijwerken:
+.B urpm u
+.TP
+Een pakket verwijderen zonder bevestiging te vragen:
+.B urpm e \-y gimp
+.TP
+Uitleggen waarom een pakket is geïnstalleerd:
+.B urpm why libpng
+.TP
+Mediametadata bijwerken:
+.B urpm m u
+.SH ZIE OOK
+.BR urpmd (8),
+.BR rpm (8),
+.SH FOUTEN
+Meld fouten op https://github.com/pvi-github/urpm-ng/issues
+.SH AUTEURS
+Pascal Vilarem (Maât) en bijdragers.
+.SH COPYRIGHT
+Copyright (C) 2024-2025 Pascal Vilarem (Maât).
+Gelicentieerd onder GPLv3+.

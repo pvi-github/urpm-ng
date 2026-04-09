@@ -1,0 +1,126 @@
+.\" Handbuchseite fuer urpmd
+.TH URPMD 8 "Januar 2025" "urpm-ng" "Systemverwaltung"
+.SH BEZEICHNUNG
+urpmd \- urpm-Daemon fuer intelligente Cache-Verwaltung und P2P-Freigabe
+.SH UEBERSICHT
+.B urpmd
+.RI [ Optionen ]
+.SH BESCHREIBUNG
+.B urpmd
+ist der Hintergrunddienst fuer urpm-ng. Er bietet:
+.IP \(bu 2
+Intelligentes Paket-Caching mit vorausschauenden Downloads
+.IP \(bu 2
+P2P-Paketfreigabe zwischen Rechnern im lokalen Netzwerk
+.IP \(bu 2
+HTTP-Server zur Bereitstellung von Paketen an Peers
+.IP \(bu 2
+Automatische Peer-Erkennung ueber UDP-Broadcast
+.IP \(bu 2
+Aktualisierung der Metadaten im Hintergrund
+.PP
+Der Daemon wird ueber systemd verwaltet und startet nach der Installation automatisch.
+.SH OPTIONEN
+.TP
+.BR \-h ", " \-\-help
+Zeigt die Hilfe an und beendet das Programm.
+.TP
+.BR \-f ", " \-\-foreground
+Im Vordergrund ausfuehren (nicht daemonisieren). Nuetzlich zur Fehlersuche.
+.TP
+.BR \-p ", " \-\-port " " \fIPORT\fR
+HTTP-Server-Port. Standard: 9876 (Produktion), 9877 (Entwicklung).
+.TP
+.BR \-H ", " \-\-host " " \fIHOST\fR
+Bindungsadresse des HTTP-Servers. Standard: 0.0.0.0 (alle Schnittstellen).
+.TP
+.BR \-v ", " \-\-verbose
+Ausfuehrliche Protokollierung aktivieren.
+.TP
+.B \-\-dev
+Entwicklungsmodus erzwingen. Der Entwicklungsmodus wird automatisch erkannt,
+wenn aus dem Quellbaum ausgefuehrt oder wenn .urpm.local vorhanden ist.
+.TP
+.B \-\-prod
+Produktionsmodus erzwingen, .urpm.local-Erkennung wird ignoriert.
+.SH NETZWERK-PORTS
+.TP
+.B TCP 9876
+HTTP-Server fuer Paket-Downloads und API.
+.TP
+.B UDP 9878
+P2P-Erkennung ueber Broadcast/Multicast.
+.PP
+Diese Ports muessen in der Firewall geoeffnet sein, damit die P2P-Freigabe
+funktioniert. Das Paket urpm-ng konfiguriert shorewall automatisch, falls vorhanden.
+.SH P2P-FREIGABE
+Wenn urpmd auf mehreren Rechnern im selben lokalen Netzwerk laeuft:
+.IP \(bu 2
+Rechner erkennen sich gegenseitig ueber UDP-Broadcast auf Port 9878
+.IP \(bu 2
+Wenn ein Paket benoetigt wird, prueft urpm zuerst die lokalen Peers
+.IP \(bu 2
+Pakete werden von Peers heruntergeladen, wenn verfuegbar (schneller als Spiegel)
+.IP \(bu 2
+Rueckfall auf konfigurierte Server, wenn Peers das Paket nicht haben
+.PP
+Die P2P-Freigabe beachtet Paketsignaturen - nur signierte Pakete von
+vertrauenswuerdigen Peers werden verwendet.
+.SH VORAUSSCHAUENDE DOWNLOADS
+Der Daemon ueberwacht Paketzugriffsmuster und kann Pakete vorab herunterladen,
+die voraussichtlich bald benoetigt werden, basierend auf:
+.IP \(bu 2
+Abhaengigkeiten kuerzlich installierter Pakete
+.IP \(bu 2
+Aktualisierungsmuster der konfigurierten Medien
+.IP \(bu 2
+Erkennung von Netzwerk-Leerlauf, um Beeintraechtigungen des Benutzers zu vermeiden
+.SH DATEIEN
+.TP
+.I /var/lib/urpm/packages.db
+SQLite-Datenbank mit Paketmetadaten, Peer-Informationen
+und Download-Verlauf.
+.TP
+.I /var/lib/urpm/medias/
+Verzeichnis mit zwischengespeicherten Paketen, nach Medien geordnet.
+.TP
+.I /run/urpmd.pid
+PID-Datei (Produktionsmodus).
+.TP
+.I /var/log/urpmd.log
+Protokolldatei (wenn systemd-Journal nicht verwendet wird).
+.SH SYSTEMD
+Der Daemon wird ueber systemd gesteuert:
+.TP
+Daemon starten:
+.B systemctl start urpmd
+.TP
+Daemon stoppen:
+.B systemctl stop urpmd
+.TP
+Beim Systemstart aktivieren:
+.B systemctl enable urpmd
+.TP
+Status pruefen:
+.B systemctl status urpmd
+.TP
+Protokolle anzeigen:
+.B journalctl -u urpmd
+.SH BEISPIELE
+.TP
+Im Vordergrund zur Fehlersuche ausfuehren:
+.B urpmd -f -v
+.TP
+Auf alternativem Port ausfuehren:
+.B urpmd -p 8080
+.SH SIEHE AUCH
+.BR urpm (1),
+.BR systemctl (1),
+.BR journalctl (1)
+.SH FEHLER
+Fehler melden unter https://github.com/pvi-github/urpm-ng/issues
+.SH AUTOREN
+Pascal Vilarem (Maât) und Mitwirkende.
+.SH COPYRIGHT
+Copyright (C) 2024-2025 Pascal Vilarem (Maât).
+Lizenziert unter GPLv3+.

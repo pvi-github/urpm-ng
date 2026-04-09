@@ -259,6 +259,27 @@ Skip nonfree media.
 .B \-\-no\-tainted
 Skip tainted media.
 .RE
+.TP
+.B discover \fIurl\fR
+Discover all available media from a repository's \fBmedia.cfg\fR file.
+Works with official mirrors, community repos (MLO), and corporate mirrors.
+Existing servers hosting the same content are automatically linked
+(verified by MD5 checksum of synthesis.hdlist.cz).
+Aliases: \fBdisc\fR.
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Show what would be added without making changes.
+.TP
+.B \-\-enable
+Enable all discovered media, including those marked \fBnoauto\fR in media.cfg.
+.TP
+.B \-\-sources
+Include SRPMS media (excluded by default).
+.TP
+.B \-\-debug
+Include debug media (excluded by default).
+.RE
 .RE
 .TP
 .B server \fR[\fIsubcommand\fR]

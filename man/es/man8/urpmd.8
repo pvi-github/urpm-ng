@@ -1,0 +1,127 @@
+.\" Pagina de manual para urpmd
+.TH URPMD 8 "Enero 2025" "urpm-ng" "Administracion del sistema"
+.SH NOMBRE
+urpmd \- demonio urpm para la gestion inteligente de cache y el uso compartido P2P
+.SH SINOPSIS
+.B urpmd
+.RI [ opciones ]
+.SH DESCRIPCION
+.B urpmd
+es el demonio en segundo plano para urpm-ng. Proporciona:
+.IP \(bu 2
+Almacenamiento inteligente en cache con descargas predictivas
+.IP \(bu 2
+Uso compartido de paquetes P2P entre maquinas de la red local
+.IP \(bu 2
+Servidor HTTP para servir paquetes a los pares
+.IP \(bu 2
+Descubrimiento automatico de pares mediante broadcast UDP
+.IP \(bu 2
+Actualizacion de metadatos en segundo plano
+.PP
+El demonio se gestiona mediante systemd y se inicia automaticamente tras la instalacion.
+.SH OPCIONES
+.TP
+.BR \-h ", " \-\-help
+Muestra la ayuda y sale.
+.TP
+.BR \-f ", " \-\-foreground
+Ejecuta en primer plano (no se demoniza). Util para depuracion.
+.TP
+.BR \-p ", " \-\-port " " \fIPUERTO\fR
+Puerto del servidor HTTP. Por defecto: 9876 (produccion), 9877 (desarrollo).
+.TP
+.BR \-H ", " \-\-host " " \fIHOST\fR
+Direccion de escucha del servidor HTTP. Por defecto: 0.0.0.0 (todas las interfaces).
+.TP
+.BR \-v ", " \-\-verbose
+Activa el registro detallado.
+.TP
+.B \-\-dev
+Fuerza el modo desarrollo. El modo dev se autodetecta al ejecutar
+desde el arbol de fuentes o si .urpm.local existe.
+.TP
+.B \-\-prod
+Fuerza el modo produccion, ignorando la deteccion de .urpm.local.
+.SH PUERTOS DE RED
+.TP
+.B TCP 9876
+Servidor HTTP para descargas y API.
+.TP
+.B UDP 9878
+Descubrimiento P2P por broadcast/multicast.
+.PP
+Estos puertos deben estar abiertos en el cortafuegos para que el uso
+compartido P2P funcione. El paquete urpm-ng configura automaticamente
+shorewall si esta presente.
+.SH USO COMPARTIDO P2P
+Cuando urpmd se ejecuta en varias maquinas de la misma red local:
+.IP \(bu 2
+Las maquinas se descubren mediante broadcast UDP en el puerto 9878
+.IP \(bu 2
+Cuando se necesita un paquete, urpm verifica primero los pares locales
+.IP \(bu 2
+Los paquetes se descargan desde los pares si estan disponibles (mas rapido)
+.IP \(bu 2
+Se recurre a los servidores configurados si los pares no tienen el paquete
+.PP
+El uso compartido P2P respeta las firmas: solo se utilizan paquetes
+firmados provenientes de pares de confianza.
+.SH DESCARGAS PREDICTIVAS
+El demonio monitoriza los patrones de acceso a paquetes y puede predescargar
+los paquetes que probablemente se necesitaran pronto, basandose en:
+.IP \(bu 2
+Las dependencias de los paquetes instalados recientemente
+.IP \(bu 2
+Los patrones de actualizacion de los medios configurados
+.IP \(bu 2
+La deteccion de red inactiva para evitar afectar al usuario
+.SH ARCHIVOS
+.TP
+.I /var/lib/urpm/packages.db
+Base de datos SQLite con los metadatos de paquetes, informacion
+de pares e historial de descargas.
+.TP
+.I /var/lib/urpm/medias/
+Directorio con los paquetes en cache, organizados por medio.
+.TP
+.I /run/urpmd.pid
+Archivo PID (modo produccion).
+.TP
+.I /var/log/urpmd.log
+Archivo de registro (cuando no se usa el journal de systemd).
+.SH SYSTEMD
+El demonio se controla mediante systemd:
+.TP
+Iniciar el demonio:
+.B systemctl start urpmd
+.TP
+Detener el demonio:
+.B systemctl stop urpmd
+.TP
+Habilitar en el arranque:
+.B systemctl enable urpmd
+.TP
+Verificar el estado:
+.B systemctl status urpmd
+.TP
+Ver los registros:
+.B journalctl -u urpmd
+.SH EJEMPLOS
+.TP
+Ejecutar en primer plano para depuracion:
+.B urpmd -f -v
+.TP
+Ejecutar en un puerto alternativo:
+.B urpmd -p 8080
+.SH VEASE TAMBIEN
+.BR urpm (1),
+.BR systemctl (1),
+.BR journalctl (1)
+.SH ERRORES
+Informar de errores en https://github.com/pvi-github/urpm-ng/issues
+.SH AUTORES
+Pascal Vilarem (Maat) y colaboradores.
+.SH COPYRIGHT
+Copyright (C) 2024-2025 Pascal Vilarem (Maat).
+Licenciado bajo GPLv3+.

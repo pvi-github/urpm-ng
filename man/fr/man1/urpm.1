@@ -260,6 +260,27 @@ Ignore les medias nonfree.
 .B \-\-no\-tainted
 Ignore les medias tainted.
 .RE
+.TP
+.B discover \fIurl\fR
+Decouvre tous les medias disponibles depuis le fichier \fBmedia.cfg\fR d'un depot.
+Fonctionne avec les miroirs officiels, les depots communautaires (MLO) et les miroirs d'entreprise.
+Les serveurs existants hebergeant le meme contenu sont automatiquement lies
+(verification par somme MD5 du synthesis.hdlist.cz).
+Alias : \fBdisc\fR.
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Affiche ce qui serait ajoute sans modifier.
+.TP
+.B \-\-enable
+Active tous les medias decouverts, y compris ceux marques \fBnoauto\fR dans media.cfg.
+.TP
+.B \-\-sources
+Inclut les medias SRPMS (exclus par defaut).
+.TP
+.B \-\-debug
+Inclut les medias debug (exclus par defaut).
+.RE
 .RE
 .TP
 .B server \fR[\fIsous-commande\fR]

@@ -1,0 +1,539 @@
+.\" Handbuchseite fuer urpm
+.TH URPM 1 "January 2025" "urpm-ng" "Benutzerbefehle"
+.SH BEZEICHNUNG
+urpm \- moderner Paketmanager fuer Mageia Linux
+.SH UEBERSICHT
+.B urpm
+.RI [ Optionen ]
+.I Befehl
+.RI [ Argumente ]
+.SH BESCHREIBUNG
+.B urpm
+ist ein moderner Paketmanager fuer Mageia Linux mit schneller
+Abhaengigkeitsaufloesung ueber libsolv, P2P-Paketfreigabe zwischen
+LAN-Rechnern und einer intuitiven Kommandozeilenoberflaeche.
+.PP
+Er ist als komplette Neuentwicklung der klassischen urpmi-Werkzeuge konzipiert.
+.SH OPTIONEN
+.TP
+.BR \-h ", " \-\-help
+Zeigt die Hilfe an und beendet das Programm.
+.TP
+.BR \-V ", " \-\-version
+Zeigt die Versionsnummer an und beendet das Programm.
+.TP
+.BR \-v ", " \-\-verbose
+Ausfuehrliche Ausgabe.
+.TP
+.BR \-q ", " \-\-quiet
+Stille Ausgabe.
+.TP
+.B \-\-nocolor
+Deaktiviert farbige Ausgabe.
+.SH BEFEHLE
+.SS Paketinstallation und -entfernung
+.TP
+.B i|install \fIPaket\fR ...
+Installiert ein oder mehrere Pakete.
+.RS
+.TP
+.BR \-y ", " \-\-auto
+Keine Bestaetigung erforderlich.
+.TP
+.B \-\-download\-only
+Pakete herunterladen, ohne sie zu installieren.
+.TP
+.B \-\-without\-recommends
+Empfohlene Pakete nicht installieren.
+.TP
+.B \-\-with\-suggests
+Auch vorgeschlagene Pakete installieren.
+.TP
+.B \-\-only\-peers
+Nur von LAN-Peers herunterladen, keine Upstream-Spiegel verwenden.
+.TP
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
+Build-Abhaengigkeiten aus einer Spec-Datei oder SRPM installieren. Automatische Erkennung, wenn keine Datei angegeben.
+.TP
+.B \-\-sync
+Wartet, bis alle Scriptlets und Trigger abgeschlossen sind.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Erlaubt zusaetzliche Architekturen neben der Systemarchitektur und noarch.
+Kann wiederholt werden. Standardmaessig werden nur Pakete fuer die Systemarchitektur
+(z.B. x86_64) und noarch beruecksichtigt. Verwenden Sie diese Option, um 32-Bit-Pakete
+auf 64-Bit-Systemen zu installieren (z.B. \fB\-\-allow\-arch i686\fR fuer wine oder steam).
+.RE
+.TP
+.B e|erase \fIPaket\fR ...
+Entfernt ein oder mehrere Pakete. Alias: \fBremove\fR.
+.RS
+.TP
+.BR \-y ", " \-\-auto
+Keine Bestaetigung erforderlich.
+.TP
+.B \-\-auto\-orphans
+Entfernt auch verwaiste Abhaengigkeiten.
+.RE
+.TP
+.B autoremove
+Entfernt verwaiste Pakete, alte Kernel, fehlgeschlagene Abhaengigkeiten oder Build-Abhaengigkeiten.
+Alias: \fBar\fR.
+.RS
+.TP
+.BR \-o ", " \-\-orphans
+Entfernt verwaiste Pakete (Standard, wenn kein Selektor angegeben).
+.TP
+.BR \-k ", " \-\-kernels
+Entfernt alte Kernel (behaelt laufenden + N neueste, siehe \fBurpm config kernel\-keep\fR).
+.TP
+.BR \-f ", " \-\-faildeps
+Entfernt verwaiste Abhaengigkeiten von abgebrochenen Transaktionen.
+.TP
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br
+Entfernt Pakete, die als Build-Abhaengigkeiten installiert wurden (erfasst in
+.IR /var/lib/rpm/installed\-through\-builddeps.list ")."
+.TP
+.BR \-a ", " \-\-all
+Alle oben genannten Selektoren.
+.TP
+.BR \-y ", " \-\-auto
+Keine Bestaetigung erforderlich.
+.RE
+.SS Metadaten und Paketaktualisierungen
+.TP
+.B update \fR[\fIMedium\fR]
+Aktualisiert nur die Medien-Metadaten (apt-Stil). Aktualisiert keine Pakete.
+.RS
+.TP
+.B \-\-files
+Synchronisiert auch files.xml fuer Medien mit aktiviertem sync_files.
+.RE
+.TP
+.B u|upgrade \fR[\fIPaket\fR ...]
+Aktualisiert Pakete (Systemaktualisierung, wenn keines angegeben).
+.RS
+.TP
+.BR \-y ", " \-\-auto
+Keine Bestaetigung erforderlich.
+.TP
+.B \-\-with\-recommends
+Empfohlene Pakete installieren.
+.TP
+.B \-\-only\-peers
+Nur von LAN-Peers herunterladen, keine Upstream-Spiegel verwenden.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Erlaubt zusaetzliche Architekturen (z.B. \fB\-\-allow\-arch i686\fR).
+.RE
+.SS Paketinformationen
+.TP
+.B q|query \fIMuster\fR
+Sucht Pakete nach Name oder Beschreibung. Alias: \fBs\fR, \fBsearch\fR.
+.TP
+.B show \fIPaket\fR
+Zeigt detaillierte Paketinformationen an.
+.TP
+.B list \fR[\fIMuster\fR]
+Listet Pakete auf. Verwenden Sie \fB\-\-installed\fR fuer nur installierte Pakete.
+.TP
+.B provides \fIPaket\fR
+Zeigt die von einem Paket bereitgestellten Faehigkeiten an.
+.TP
+.B whatprovides \fIFaehigkeit\fR
+Findet Pakete, die eine Faehigkeit bereitstellen.
+.TP
+.B find \fIMuster\fR
+Findet das Paket, das eine Datei enthaelt, die dem Muster entspricht.
+.RS
+.TP
+.BR \-i ", " \-\-installed
+Nur in installierten Paketen suchen.
+.TP
+.BR \-a ", " \-\-available
+Nur in verfuegbaren Paketen suchen (erfordert files.xml-Synchronisation).
+.TP
+.BR \-l ", " \-\-limit " " \fIN\fR
+Ergebnisse auf N Treffer begrenzen.
+.PP
+Standardmaessig wird in installierten und verfuegbaren Paketen gesucht.
+Die Suche in verfuegbaren Paketen erfordert die Aktivierung der files.xml-Synchronisation ueber
+\fBurpm media set \-\-all \-\-sync-files\fR gefolgt von
+\fBurpm media update \-\-files\fR.
+.RE
+.TP
+.B depends \fIPaket\fR
+Zeigt die Abhaengigkeiten eines Pakets an.
+.TP
+.B rdepends \fIPaket\fR
+Zeigt die umgekehrten Abhaengigkeiten an.
+.TP
+.B why \fIPaket\fR
+Erklaert, warum ein Paket installiert ist.
+.SS Medien- und Serververwaltung
+.TP
+.B media \fR[\fIUnterbefehl\fR]
+Verwaltet Medienquellen. Ohne Unterbefehl werden die Medien aufgelistet.
+.RS
+.TP
+.B list
+Listet konfigurierte Medien auf.
+.TP
+.B add \fIName\fR \fIURL\fR
+Fuegt ein neues Medium hinzu.
+.TP
+.B remove \fIName\fR
+Entfernt ein Medium.
+.TP
+.B enable \fIName\fR
+Aktiviert ein Medium.
+.TP
+.B disable \fIName\fR
+Deaktiviert ein Medium.
+.TP
+.B update \fR[\fIName\fR]
+Aktualisiert Medien-Metadaten (parallel).
+.RS
+.TP
+.B \-\-files
+Synchronisiert auch files.xml fuer Medien mit aktiviertem sync_files. Erforderlich, damit
+\fBurpm find\fR in verfuegbaren Paketen suchen kann.
+.RE
+.TP
+.B import
+Importiert die Konfiguration von urpmi.
+.TP
+.B link \fIName\fR \fI+Server\fR|\fI-Server\fR ...
+Verknuepft oder trennt Server mit einem Medium. Verwenden Sie +Server zum Hinzufuegen, -Server zum Entfernen.
+Verwenden Sie +all/-all, um alle Server hinzuzufuegen/zu entfernen. Verknuepft nur Server, die das Medium bereitstellen.
+.TP
+.B set \fIName\fR \fR[\fIOptionen\fR]
+Aendert die Einstellungen eines Mediums.
+.RS
+.TP
+.B \-\-shared \fIyes\fR|\fIno\fR
+Aktiviert/deaktiviert die Freigabe dieses Mediums fuer Peers.
+.TP
+.B \-\-replication \fIRichtlinie\fR
+Replikationsrichtlinie: none, on_demand, seed.
+.TP
+.B \-\-seeds \fISektionen\fR
+rpmsrate-Sektionen fuer Seed-Replikation (kommagetrennt), z.B. INSTALL,CAT_PLASMA5,CAT_GNOME.
+.TP
+.B \-\-quota \fIGroesse\fR
+Kontingent pro Medium (z.B. 5G, 500M).
+.TP
+.B \-\-retention \fITage\fR
+Aufbewahrungsdauer fuer zwischengespeicherte Pakete in Tagen.
+.TP
+.B \-\-priority \fIN\fR
+Medienprioriaet (hoeher = bevorzugt).
+.TP
+.B \-\-sync\-files
+Aktiviert automatische files.xml-Synchronisation fuer dieses Medium. Erforderlich, damit
+\fBurpm find\fR in verfuegbaren Paketen suchen kann.
+.TP
+.B \-\-no\-sync\-files
+Deaktiviert automatische files.xml-Synchronisation.
+.TP
+.BR \-a ", " \-\-all
+Wendet die Einstellung auf alle aktiven Medien an (verwenden mit \fB\-\-sync\-files\fR oder \fB\-\-no\-sync\-files\fR).
+.RE
+.TP
+.B autoconfig \fB\-\-release\fR \fIVersion\fR
+Fuegt automatisch offizielle Mageia-Medien fuer ein Release hinzu. Alias: \fBauto\fR, \fBac\fR.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIVersion\fR
+Mageia-Version (z.B. 10, cauldron). Erforderlich.
+.TP
+.B \-\-arch \fIarch\fR
+Zielarchitektur (Standard: Host).
+.TP
+.BR \-n ", " \-\-dry\-run
+Zeigt an, was hinzugefuegt wuerde, ohne Aenderungen vorzunehmen.
+.TP
+.B \-\-no\-nonfree
+Nonfree-Medien ueberspringen.
+.TP
+.B \-\-no\-tainted
+Tainted-Medien ueberspringen.
+.RE
+.TP
+.B discover \fIURL\fR
+Erkennt alle verfuegbaren Medien aus der \fBmedia.cfg\fR-Datei eines Repositorys.
+Funktioniert mit offiziellen Spiegeln, Community-Repositorys (MLO) und Unternehmensspiegeln.
+Bestehende Server mit gleichem Inhalt werden automatisch verknuepft
+(Verifizierung ueber MD5-Pruefsumme von synthesis.hdlist.cz).
+Alias: \fBdisc\fR.
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Zeigt an, was hinzugefuegt wuerde, ohne Aenderungen vorzunehmen.
+.TP
+.B \-\-enable
+Aktiviert alle erkannten Medien, einschliesslich der in media.cfg als \fBnoauto\fR markierten.
+.TP
+.B \-\-sources
+Schliesst SRPMS-Medien ein (standardmaessig ausgeschlossen).
+.TP
+.B \-\-debug
+Schliesst Debug-Medien ein (standardmaessig ausgeschlossen).
+.RE
+.RE
+.TP
+.B server \fR[\fIUnterbefehl\fR]
+Verwaltet Download-Server. Ohne Unterbefehl werden die Server aufgelistet.
+.RS
+.TP
+.B list
+.RS
+Listet konfigurierte Server auf.
+.sp
+.BR \-\-all
+Listet alle Server auf, auch deaktivierte.
+.RE
+.TP
+.B add \fIName\fR \fIURL\fR
+Fuegt einen neuen Server hinzu.
+.TP
+.B remove \fIName\fR
+Entfernt einen Server.
+.TP
+.B enable \fIName\fR
+Aktiviert einen Server.
+.TP
+.B disable \fIName\fR
+Deaktiviert einen Server.
+.TP
+.B priority \fIName\fR \fIN\fR
+Setzt die Serverprioriaet (hoehere Zahl = bevorzugt, Standard 50).
+.TP
+.B test \fR[\fIName\fR]
+Testet die Verbindung zu einem Server (oder allen aktiven Servern) und erkennt
+automatisch den besten IP-Modus (auto/ipv4/ipv6/dual).
+.TP
+.B ip-mode \fIName\fR \fIModus\fR
+Erzwingt die IP-Version fuer die Verbindung zu einem Server.
+Gueltige Modi: \fBauto\fR (Systemstandard), \fBipv4\fR, \fBipv6\fR, \fBdual\fR
+(beide funktionieren, IPv4 bevorzugt).
+.TP
+.B stats \fIName\fR
+Zeigt gemessene Leistungsstatistiken fuer einen Server an: Download-Geschwindigkeit
+(EWMA-Durchschnitt vergangener Downloads), Latenz, Erfolgs-/Fehlerzaehler und
+Zeitpunkt der letzten Pruefung.
+Statistiken werden automatisch nach jedem Download und jeder Metadaten-Synchronisation aktualisiert.
+.TP
+.B autoconfig
+Erkennt und fuegt automatisch die schnellsten Server aus der Mageia-Spiegelliste hinzu.
+Testet die Latenz aller Kandidaten und behaelt die N besten.
+Die gemessene Latenz wird gespeichert, damit die Serverreihenfolge ab dem ersten Download sinnvoll ist.
+.RE
+.SS P2P und Cache
+.TP
+.B peer \fR[\fIUnterbefehl\fR]
+Verwaltet P2P-Peers. Ohne Unterbefehl werden die Peers aufgelistet.
+.RS
+.TP
+.B list
+Listet erkannte Peers und Download-Statistiken auf.
+.TP
+.B blacklist \fIHost\fR
+Blockiert einen Peer.
+.TP
+.B unblacklist \fIHost\fR
+Entsperrt einen Peer.
+.TP
+.B clean \fIHost\fR
+Loescht von einem Peer heruntergeladene RPMs.
+.RE
+.TP
+.B cache \fIUnterbefehl\fR
+Verwaltet den Paket-Cache.
+.RS
+.TP
+.B clean
+Entfernt verwaiste RPMs aus dem Cache.
+.TP
+.B info
+Zeigt Cache-Statistiken an.
+.RE
+.SS Verlauf und Ruecknahme
+.TP
+.B history \fR[\fIN\fR]
+Zeigt den Transaktionsverlauf an. Standard: letzte 10 Transaktionen.
+.TP
+.B rollback \fISpez\fR
+Macht Transaktionen rueckgaengig.
+.RS
+.TP
+.B rollback 5
+Macht die letzten 5 Transaktionen rueckgaengig.
+.TP
+.B rollback to 42
+Kehrt zur Transaktion #42 zurueck.
+.TP
+.B rollback to 26/11/2025
+Kehrt zu einem bestimmten Datum zurueck.
+.RE
+.TP
+.B undo \fR[\fIN\fR]
+Macht die letzte Transaktion oder Transaktion #N rueckgaengig.
+.SS Konfiguration
+.TP
+.B config \fIUnterbefehl\fR
+Verwaltet die urpm-Konfiguration.
+.TP
+.B key \fIUnterbefehl\fR
+Verwaltet GPG-Schluessel fuer die Paketverifizierung.
+.TP
+.B mark \fIPaket\fR manual|auto
+Markiert Pakete als manuell oder automatisch installiert.
+.TP
+.B hold \fR[\fIPaket\fR ...] [\fB\-r\fR \fIGrund\fR]
+Sperrt Pakete, um Aktualisierungen und Ersetzung durch Obsoletes zu verhindern.
+Ohne Argumente werden gesperrte Pakete aufgelistet.
+.RS
+.TP
+.BR \-r ", " \-\-reason " " \fIGrund\fR
+Zeichnet einen Grund fuer die Sperre auf.
+.TP
+.BR \-l ", " \-\-list
+Listet gesperrte Pakete auf.
+.RE
+.TP
+.B unhold \fIPaket\fR ...
+Hebt die Sperre von Paketen auf, sodass sie aktualisiert oder ersetzt werden koennen.
+.SS Initialisierung und Download
+.TP
+.B init \fR[\fB\-\-release\fR \fIVersion\fR] [\fB\-\-mirrorlist\fR \fIURL\fR]
+Initialisiert urpm mit Standard-Mageia-Medien. Testet Spiegel und konfiguriert die besten.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIVersion\fR
+Mageia-Version (z.B. 10, cauldron).
+.TP
+.B \-\-urpm\-root " " \fIPfad\fR
+Initialisiert in einem Chroot-Verzeichnis.
+.RE
+.TP
+.B download \fIPaket\fR ...
+Laedt Pakete in den Cache herunter, ohne sie zu installieren.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIVersion\fR
+Zielversion fuer versionsuebergreifende Downloads.
+.TP
+.BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
+Laedt Build-Abhaengigkeiten aus einer Spec-Datei herunter.
+.TP
+.B \-\-only\-peers
+Nur von LAN-Peers herunterladen, keine Upstream-Spiegel verwenden.
+.TP
+.B \-\-allow\-arch " " \fIarch\fR
+Erlaubt zusaetzliche Architekturen (z.B. \fB\-\-allow\-arch i686\fR).
+.RE
+.SS Container-Build-System
+.TP
+.B mkimage \fB\-\-release\fR \fIVersion\fR \fB\-\-tag\fR \fITag\fR [\fB\-\-profile\fR \fIName\fR]
+Erstellt ein minimales Docker/Podman-Image fuer RPM-Builds.
+.RS
+.TP
+.BR \-r ", " \-\-release " " \fIVersion\fR
+Mageia-Version (z.B. 10, cauldron).
+.TP
+.BR \-t ", " \-\-tag " " \fITag\fR
+Image-Tag (z.B. mageia:10-build).
+.TP
+.B \-\-profile " " \fIName\fR
+Paketprofil (Standard: build). Verfuegbare Profile: build (RPM-Build-Umgebung),
+ci (CI/Tests), minimal (Minimalsystem mit urpm). Profile werden aus
+/usr/share/urpm/profiles/*.yaml und /etc/urpm/profiles/*.yaml geladen.
+.TP
+.B \-\-arch " " \fIarch\fR
+Zielarchitektur (Standard: Host).
+.TP
+.BR \-p ", " \-\-packages " " \fIListe\fR
+Zusaetzliche Pakete (kommagetrennt).
+.TP
+.B \-\-runtime " " docker|podman
+Container-Laufzeitumgebung (Standard: automatische Erkennung).
+.TP
+.B \-\-keep\-chroot
+Temporaeres Chroot nach der Image-Erstellung beibehalten.
+.TP
+.BR \-w ", " \-\-workdir " " \fIPfad\fR
+Arbeitsverzeichnis fuer das Chroot (Standard: /tmp).
+.RE
+.TP
+.B build \fB\-\-image\fR \fITag\fR \fIQuelle\fR ...
+Erstellt RPM-Pakete in isolierten Containern.
+.RS
+.TP
+.BR \-i ", " \-\-image " " \fITag\fR
+Zu verwendendes Docker/Podman-Image.
+.TP
+.BR \-o ", " \-\-output " " \fIVerz\fR
+Ausgabeverzeichnis fuer SRPM-Builds (Standard: ./build-output).
+Fuer .spec-Dateien gehen die Ergebnisse nach workspace/RPMS/ und workspace/SRPMS/.
+.TP
+.BR \-w ", " \-\-with\-rpms " " \fIMuster\fR
+Installiert lokale RPMs im Container vor dem Build. Nuetzlich, wenn ein Paket
+von einer Bibliothek abhaengt, die Sie gerade lokal erstellt haben. Unterstuetzt
+Glob-Muster und kann wiederholt werden. Beispiel: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+.TP
+.B \-\-runtime " " docker|podman
+Container-Laufzeitumgebung (Standard: automatische Erkennung).
+.TP
+.BR \-j ", " \-\-parallel " " \fIN\fR
+Anzahl paralleler Builds (Standard: 1).
+.TP
+.B \-\-keep\-container
+Container nach dem Build beibehalten (fuer Fehlersuche).
+.PP
+Quellen koennen .src.rpm- oder .spec-Dateien sein. Bei .spec-Dateien werden die
+Quellen automatisch aus dem SOURCES/-Verzeichnis kopiert (unterstuetzt
+workspace/SPECS/- und workspace/SOURCES/-Strukturen).
+.RE
+.SH DATEIEN
+.TP
+.I /var/lib/urpm/
+Datenbank- und Cache-Verzeichnis.
+.TP
+.I /var/lib/urpm/packages.db
+SQLite-Datenbank fuer Paketmetadaten und Verlauf.
+.TP
+.I /var/lib/urpm/medias/
+Cache fuer heruntergeladene Pakete.
+.TP
+.I /etc/bash_completion.d/urpm
+Bash-Vervollstaendigungsskript.
+.SH BEISPIELE
+.TP
+Ein Paket installieren:
+.B urpm i firefox
+.TP
+Nach Paketen suchen:
+.B urpm q video player
+.TP
+Alle Pakete aktualisieren:
+.B urpm u
+.TP
+Ein Paket ohne Bestaetigung entfernen:
+.B urpm e \-y gimp
+.TP
+Erklaeren, warum ein Paket installiert ist:
+.B urpm why libpng
+.TP
+Medien-Metadaten aktualisieren:
+.B urpm m u
+.SH SIEHE AUCH
+.BR urpmd (8),
+.BR rpm (8),
+.SH FEHLER
+Fehler melden unter https://github.com/pvi-github/urpm-ng/issues
+.SH AUTOREN
+Pascal Vilarem (Maat) und Mitwirkende.
+.SH COPYRIGHT
+Copyright (C) 2024-2025 Pascal Vilarem (Maat).
+Lizenziert unter GPLv3+.
