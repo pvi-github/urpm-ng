@@ -2233,6 +2233,24 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
             installed = type('Obj', (), {
                 'nonfree': False, 'tainted': False, 'has_32bit': False})()
 
+    # ── Warn if repo version differs from local system ────────────────
+    local_version = ''
+    try:
+        with open('/etc/os-release') as f:
+            for line in f:
+                if line.startswith('VERSION_ID='):
+                    local_version = line.strip().split('=')[1].strip('"')
+                    break
+    except OSError:
+        pass
+    if local_version and info.version and info.version != local_version:
+        print(colors.warning(
+            _("Warning: these media are for Mageia {repo_ver}, "
+              "this system runs Mageia {local_ver}").format(
+                repo_ver=info.version, local_ver=local_version)))
+        print(colors.dim(
+            _("  They will only be served to LAN peers, not used locally.")))
+
     # ── Display plan ─────────────────────────────────────────────────
     print(colors.bold(
         _("Found {n} media for {branch} {version} ({arch}):").format(
