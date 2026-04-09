@@ -642,7 +642,17 @@ class PackageDatabase(
             from .config import get_db_path
             db_path = get_db_path()
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Detect read-only mode: DB exists but not writable by current user.
+        # In that case we open with immutable=1 so SQLite reads the DB file
+        # directly without needing -wal/-shm files (which require write
+        # access to the directory).
+        import os
+        self.read_only = (self.db_path.exists()
+                          and not os.access(self.db_path, os.W_OK))
+
+        if not self.read_only:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Lock for thread-safe database access (used with ThreadingHTTPServer)
         self._lock = threading.RLock()
@@ -655,22 +665,30 @@ class PackageDatabase(
         self.conn = self._create_connection()
         self._local.conn = self.conn
 
-        self._init_schema()
+        if not self.read_only:
+            self._init_schema()
 
     def _create_connection(self) -> sqlite3.Connection:
         """Create a new SQLite connection with proper settings.
 
+        When the database is not writable (normal user reading a
+        root-owned DB), opens with ``immutable=1`` so SQLite reads
+        the main DB file directly — no -wal/-shm files needed.
+
         Returns:
             Configured SQLite connection
         """
-        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        if self.read_only:
+            uri = f"file:{self.db_path}?immutable=1"
+            conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        else:
+            conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            # WAL mode for concurrent reads + single writer (urpmd)
+            conn.execute("PRAGMA journal_mode=WAL")
+            # NORMAL sync is safe with WAL (only FULL needed for rollback journal)
+            conn.execute("PRAGMA synchronous=NORMAL")
         conn.row_factory = sqlite3.Row
-        # WAL mode for concurrent reads + single writer
-        conn.execute("PRAGMA journal_mode=WAL")
-        # NORMAL sync is safe with WAL (only FULL needed for rollback journal)
-        conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
-        # Wait up to 5 seconds if database is locked (inter-process safety)
         conn.execute(f"PRAGMA busy_timeout={self.BUSY_TIMEOUT_MS}")
         return conn
 
