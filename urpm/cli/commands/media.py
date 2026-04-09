@@ -598,11 +598,16 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         print(colors.error(_("No media could be added")))
         return 1
 
-    # Link servers to media
+    # Link servers to media (MD5 verified)
     print(_("\nLinking servers to media..."))
+    from ...core.server_pool import verify_media_match
+    from ...core.config import build_server_url
     for server in servers_added:
+        srv_url = build_server_url(server)
         for media in media_added:
-            if not db.server_media_link_exists(server['id'], media['id']):
+            if db.server_media_link_exists(server['id'], media['id']):
+                continue
+            if verify_media_match(srv_url, media, db):
                 db.link_server_media(server['id'], media['id'])
 
     print(colors.success(_("\nInitialized with {servers} server(s) and {media} media").format(servers=len(servers_added), media=len(media_added))))
@@ -1815,32 +1820,14 @@ def cmd_media_link(args, db: 'PackageDatabase') -> int:
     # Get all servers for +all/-all
     all_servers = db.list_servers()
 
-    def check_server_has_media(server: dict) -> bool:
-        """Check if server has this media available."""
-        if not relative_path:
-            return True  # Can't check without relative_path
-
-        if server['protocol'] == 'file':
-            # Local filesystem check
-            md5_path = Path(server['base_path']) / relative_path / "media_info" / "MD5SUM"
-            return md5_path.exists()
-        else:
-            # Remote check via HEAD request
-            base_url = build_server_url(server)
-            url = f"{base_url}/{relative_path}/media_info/MD5SUM"
-            try:
-                req = urllib.request.Request(url, method='HEAD')
-                urllib.request.urlopen(req, timeout=5)
-                return True
-            except:
-                return False
-
     def try_add_server(server: dict) -> bool:
-        """Try to add a server, returns True if added."""
+        """Try to add a server after MD5 verification, returns True if added."""
         if db.server_media_link_exists(server['id'], media_id):
             return False  # Already linked
 
-        if not check_server_has_media(server):
+        from ...core.server_pool import verify_media_match
+        srv_url = build_server_url(server)
+        if not verify_media_match(srv_url, media, db):
             skipped.append(server['name'])
             return False
 
@@ -2103,11 +2090,17 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
             )
             print(_("  Added media: {name}").format(name=media_name))
 
-            # Link media to all enabled servers
+            # Link media to other enabled servers (MD5 verified)
             media = db.get_media(media_name)
             if media:
-                for server in db.list_servers(enabled_only=True):
-                    db.link_server_media(server['id'], media['id'])
+                from ...core.server_pool import verify_media_match
+                from ...core.config import build_server_url
+                for srv in db.list_servers(enabled_only=True):
+                    if db.server_media_link_exists(srv['id'], media['id']):
+                        continue
+                    srv_url = build_server_url(srv)
+                    if verify_media_match(srv_url, media, db):
+                        db.link_server_media(srv['id'], media['id'])
 
         added += 1
 
@@ -2354,17 +2347,30 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
             print(colors.error(
                 _("  Failed to add {name}: {err}").format(name=media_name, err=e)))
 
-    # ── Link to other enabled servers ────────────────────────────────
+    # ── Link other enabled servers (MD5 verified) ─────────────────────
     other_servers = [s for s in db.list_servers(enabled_only=True)
                      if s['id'] != server['id']]
-    if other_servers:
-        all_new_media = [db.get_media(f"mga{m.version}-{m.short_name}")
-                         for m in media_list]
-        all_new_media = [mid for mid in all_new_media if mid]
-        for s in other_servers:
+    if other_servers and added > 0:
+        from ...core.server_pool import verify_media_match
+        from ...core.config import build_server_url
+        linked_count = 0
+        all_new_media = []
+        for m in media_list:
+            entry = db.get_media_by_version_arch_shortname(
+                m.version, m.architecture, m.short_name)
+            if entry:
+                all_new_media.append(entry)
+        for srv in other_servers:
+            srv_url = build_server_url(srv)
             for media_entry in all_new_media:
-                if not db.server_media_link_exists(s['id'], media_entry['id']):
-                    db.link_server_media(s['id'], media_entry['id'])
+                if db.server_media_link_exists(srv['id'], media_entry['id']):
+                    continue
+                if verify_media_match(srv_url, media_entry, db):
+                    db.link_server_media(srv['id'], media_entry['id'])
+                    linked_count += 1
+        if linked_count:
+            print(_("{count} additional server-media links (MD5 verified)").format(
+                count=linked_count))
 
     # ── Summary ──────────────────────────────────────────────────────
     print(colors.success(

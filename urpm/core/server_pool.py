@@ -15,7 +15,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import List, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -299,13 +299,94 @@ def _unique_name(host, existing_names):
     return name
 
 
+def _fetch_synthesis_md5(base_url: str, relative_path: str,
+                         timeout: int = 5) -> Optional[str]:
+    """Fetch MD5SUM file and extract the synthesis.hdlist.cz hash.
+
+    Args:
+        base_url: Server base URL (scheme + host + base_path).
+        relative_path: Media relative path (e.g. ``10/x86_64/media/core/release``).
+        timeout: HTTP timeout in seconds.
+
+    Returns:
+        MD5 hex digest of ``synthesis.hdlist.cz``, or None on failure.
+    """
+    from .sync import parse_md5sum_file
+    url = f"{base_url}/{relative_path}/media_info/MD5SUM"
+    try:
+        req = Request(url)
+        req.add_header('User-Agent', 'urpm/0.7')
+        with urlopen(req, timeout=timeout) as resp:
+            content = resp.read().decode('utf-8', errors='replace')
+        checksums = parse_md5sum_file(content)
+        return checksums.get('synthesis.hdlist.cz')
+    except Exception:
+        return None
+
+
+def verify_media_match(candidate_url: str, media: dict,
+                       db: 'PackageDatabase') -> bool:
+    """Check that a candidate server hosts the same media content.
+
+    Compares the MD5 of ``synthesis.hdlist.cz`` between the candidate
+    server and servers already linked to this media.  Tries up to 3
+    reference servers; a single match is enough to confirm.
+
+    Args:
+        candidate_url: Base URL of the candidate server.
+        media: Media dict (must have ``relative_path`` and ``id``).
+        db: Database instance.
+
+    Returns:
+        True if the candidate's synthesis matches a reference server's,
+        False if no match after 3 attempts or no reference available.
+    """
+    from .config import build_server_url
+
+    rpath = media.get('relative_path', '')
+    if not rpath:
+        return False
+
+    # Fetch candidate's synthesis MD5
+    candidate_md5 = _fetch_synthesis_md5(candidate_url, rpath)
+    if not candidate_md5:
+        return False
+
+    # Get servers already linked to this media
+    linked_servers = db.get_servers_for_media(media['id'])
+    if not linked_servers:
+        # No reference — first server for this media, accept it
+        return True
+
+    max_attempts = 3
+    attempts = 0
+    for srv in linked_servers:
+        if attempts >= max_attempts:
+            break
+        ref_url = build_server_url(srv)
+        ref_md5 = _fetch_synthesis_md5(ref_url, rpath)
+        if ref_md5 is None:
+            # Reference unreachable, try next
+            continue
+        attempts += 1
+        if ref_md5 == candidate_md5:
+            return True
+
+    # No match after trying references
+    return False
+
+
 def _link_servers_to_media(db, added_servers):
-    """Link newly added servers to all enabled media."""
+    """Link newly added servers to enabled media after MD5 verification.
+
+    For each candidate server and each enabled media, verifies that the
+    server hosts the same ``synthesis.hdlist.cz`` (by MD5 comparison with
+    existing reference servers) before creating the link.
+    """
     from .config import build_server_url
 
     all_media = db.list_media()
-    media_to_scan = [(m['id'], m.get('relative_path', ''))
-                     for m in all_media
+    media_to_scan = [m for m in all_media
                      if m.get('enabled', 1) and m.get('relative_path')]
     if not media_to_scan:
         return
@@ -314,18 +395,14 @@ def _link_servers_to_media(db, added_servers):
         server = db.get_server(server_name)
         base_url = build_server_url(server)
 
-        def check_media(mid, rpath):
-            try:
-                req = Request(f"{base_url}/{rpath}/media_info/MD5SUM",
-                              method='HEAD')
-                urlopen(req, timeout=3)
-                return mid
-            except Exception:
-                return None
+        def check_media(media_entry):
+            if verify_media_match(base_url, media_entry, db):
+                return media_entry['id']
+            return None
 
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(check_media, mid, rp): mid
-                       for mid, rp in media_to_scan}
+            futures = {executor.submit(check_media, m): m['id']
+                       for m in media_to_scan}
             for future in as_completed(futures):
                 media_id = future.result()
                 if media_id:
