@@ -1395,12 +1395,6 @@ class PackageDatabase(
                 # Delete obsolete packages from DB
                 obsolete_ids = [p['id'] for p in obsolete_packages]
                 placeholders = ','.join('?' * len(obsolete_ids))
-                # Clean FTS before deleting (external content mode)
-                if self._has_packages_fts(conn):
-                    conn.execute(
-                        f"DELETE FROM packages_fts WHERE rowid IN ({placeholders})",
-                        obsolete_ids
-                    )
                 conn.execute(
                     f"DELETE FROM packages WHERE id IN ({placeholders})",
                     obsolete_ids
@@ -1546,24 +1540,18 @@ class PackageDatabase(
                     enhances_rows
                 )
 
-            # Step 6: Rebuild FTS index for this media
+            conn.commit()
+
+            # Rebuild FTS index after commit — external content FTS5
+            # requires a full rebuild because targeted DELETE/INSERT
+            # can desync when the content table changes mid-transaction.
             if media_id and self._has_packages_fts(conn):
                 if progress_callback:
                     progress_callback(total, "updating search index...")
-                # Delete old FTS entries for this media's packages
-                conn.execute("""
-                    DELETE FROM packages_fts WHERE rowid IN (
-                        SELECT id FROM packages WHERE media_id = ?
-                    )
-                """, (media_id,))
-                # Re-insert current packages
-                conn.execute("""
-                    INSERT INTO packages_fts(rowid, name, summary, description)
-                        SELECT id, name, COALESCE(summary, ''), COALESCE(description, '')
-                        FROM packages WHERE media_id = ?
-                """, (media_id,))
-
-            conn.commit()
+                conn.execute(
+                    "INSERT INTO packages_fts(packages_fts) VALUES('rebuild')"
+                )
+                conn.commit()
 
             if progress_callback:
                 progress_callback(total, "done")
@@ -1588,17 +1576,17 @@ class PackageDatabase(
                 (media_id,)
             )
 
-        # Clean FTS index before deleting packages (external content mode)
-        if self._has_packages_fts():
-            self.conn.execute("""
-                DELETE FROM packages_fts WHERE rowid IN (
-                    SELECT id FROM packages WHERE media_id = ?
-                )
-            """, (media_id,))
-
         # Now delete packages
         self.conn.execute("DELETE FROM packages WHERE media_id = ?", (media_id,))
         self.conn.commit()
+
+        # Rebuild FTS index after delete (full rebuild is safest with
+        # external content mode — targeted deletes can desync)
+        if self._has_packages_fts():
+            self.conn.execute(
+                "INSERT INTO packages_fts(packages_fts) VALUES('rebuild')"
+            )
+            self.conn.commit()
 
     # =========================================================================
     # Package queries
