@@ -1751,10 +1751,10 @@ class PackageDatabase(
             SELECT p.id, p.name, p.version, p.release, p.arch,
                    p.nevra, p.summary, p.size,
                    (p.name_lower LIKE ?) AS is_name_match
-            FROM packages p
-            JOIN packages_fts fts ON fts.rowid = p.id
+            FROM packages_fts fts
+            JOIN packages p ON p.id = fts.rowid
             {version_join}
-            WHERE packages_fts MATCH ? {version_filter}
+            WHERE fts MATCH ? {version_filter}
             ORDER BY is_name_match DESC, p.name_lower
             {limit_clause}
         """, (f'%{pattern.lower()}%', fts_query) + params + limit_params)
