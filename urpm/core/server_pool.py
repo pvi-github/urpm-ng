@@ -140,6 +140,11 @@ def ensure_minimum_servers(db: 'PackageDatabase',
                 server_ids.append((s['id'], name))
         _link_servers_to_media(db, server_ids)
 
+        # Probe real bandwidth by downloading a synthesis.hdlist.cz from
+        # one of the linked media.  Runs in parallel across all new
+        # servers so user wait is bounded by the slowest, not the sum.
+        _probe_bandwidth(db, server_ids)
+
     return PoolCheckResult(sufficient=len(existing) + len(added) >= min_needed,
                            had=len(existing), needed=min_needed, added=added)
 
@@ -271,3 +276,78 @@ def _link_servers_to_media(db, added_servers):
                 media_id = future.result()
                 if media_id:
                     db.link_server_media(server_id, media_id)
+
+
+def _probe_bandwidth(db, added_servers):
+    """Measure real bandwidth of new servers by downloading synthesis.hdlist.cz.
+
+    Picks one enabled media with a relative_path and downloads its
+    ``synthesis.hdlist.cz`` from each new server in parallel.  The
+    measured KB/s replaces the seeded average, giving the proportional
+    planner accurate data from the start.
+    """
+    import pycurl
+    from .config import build_server_url
+
+    # Find a media to probe against
+    all_media = db.list_media()
+    probe_media = None
+    for m in all_media:
+        if m.get('enabled', 1) and m.get('relative_path'):
+            probe_media = m
+            break
+    if not probe_media:
+        return
+
+    rpath = probe_media['relative_path']
+    probe_file = f"{rpath}/media_info/synthesis.hdlist.cz"
+
+    def _probe_one(server_id, server_name):
+        """Download synthesis.hdlist.cz and return (server_id, kbps)."""
+        server = db.get_server(server_name)
+        if not server:
+            return server_id, None
+        base_url = build_server_url(server)
+        url = f"{base_url}/{probe_file}"
+
+        c = pycurl.Curl()
+        try:
+            # Discard data — we only care about speed
+            c.setopt(pycurl.URL, url)
+            c.setopt(pycurl.WRITEFUNCTION, lambda _data: None)
+            c.setopt(pycurl.FOLLOWLOCATION, 1)
+            c.setopt(pycurl.CONNECTTIMEOUT, 5)
+            c.setopt(pycurl.LOW_SPEED_LIMIT, 512)
+            c.setopt(pycurl.LOW_SPEED_TIME, 10)
+            c.setopt(pycurl.USERAGENT, 'urpm/0.7')
+            c.setopt(pycurl.NOSIGNAL, 1)
+            c.setopt(pycurl.NOPROGRESS, 1)
+
+            c.perform()
+
+            http_code = c.getinfo(pycurl.HTTP_CODE)
+            if http_code >= 400:
+                return server_id, None
+
+            dl_bytes = c.getinfo(pycurl.SIZE_DOWNLOAD)
+            dl_time = c.getinfo(pycurl.TOTAL_TIME)
+            if dl_time > 0 and dl_bytes > 1024:
+                kbps = int(dl_bytes / dl_time / 1024)
+                return server_id, kbps
+            return server_id, None
+
+        except pycurl.error:
+            return server_id, None
+        finally:
+            c.close()
+
+    with ThreadPoolExecutor(max_workers=len(added_servers)) as executor:
+        futures = [
+            executor.submit(_probe_one, sid, name)
+            for sid, name in added_servers
+        ]
+        for future in as_completed(futures):
+            server_id, kbps = future.result()
+            if kbps and kbps > 0:
+                db.update_server_stats(server_id, bandwidth_kbps=kbps)
+                logger.info("Probed server %d: %d KB/s", server_id, kbps)

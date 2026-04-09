@@ -561,12 +561,28 @@ class DownloadCoordinator:
         total_items = len(items)
         last_active_name = None
 
+        # Mid-session replanning state.  After _REPLAN_AFTER results we
+        # check whether actual server speeds diverge from the plan — if
+        # so, drain the queue and redistribute remaining items.
+        _REPLAN_AFTER = 20          # min results before first replan
+        _REPLAN_MIN_REMAINING = 20  # don't replan for a handful of items
+        _REPLAN_DRIFT = 0.30        # 30% speed drift triggers replan
+        _replanned = False
+
         # Poll results queue in real-time instead of waiting for join()
         while len(results) < total_items:
             try:
                 # Short timeout to stay responsive and allow progress updates
                 result = self._results_queue.get(timeout=0.1)
                 results.append(result)
+
+                # ── Mid-session replan check ────────────────────────
+                if (not _replanned
+                        and len(results) >= _REPLAN_AFTER
+                        and total_items - len(results) >= _REPLAN_MIN_REMAINING):
+                    _replanned = _maybe_replan(
+                        self._work_queue, self.downloader, assignments,
+                        _REPLAN_DRIFT)
 
                 if result.success:
                     completed_bytes += result.item.size
@@ -788,6 +804,76 @@ def _interleave_by_server(items: List['DownloadItem']) -> List['DownloadItem']:
     # Items without a server go at the end
     result.extend(no_server)
     return result
+
+
+def _maybe_replan(work_queue, downloader, assignments, drift_threshold):
+    """Drain the work queue and replan if server speeds drifted significantly.
+
+    Compares session-measured speeds to the DB-stored speeds that the
+    original plan was based on.  If any server's actual speed differs by
+    more than *drift_threshold* (fraction), the remaining items are
+    re-planned with the fresh speed data and re-interleaved.
+
+    Must be called from the main thread.  Workers block naturally on the
+    empty queue (0.5 s timeout) during the brief drain-and-refill window.
+
+    Returns:
+        True if a replan was performed, False otherwise.
+    """
+    with downloader._session_stats_lock:
+        session_kbps = dict(downloader._session_server_kbps)
+
+    if not session_kbps:
+        return False
+
+    # Check drift: compare session speeds to what the DB had at plan time
+    significant_drift = False
+    for sid, measured in session_kbps.items():
+        if downloader.db:
+            server = downloader.db.get_server_by_id(sid)
+            if server:
+                stored = server.get('bandwidth_kbps') or measured
+                if stored > 0:
+                    ratio = abs(measured - stored) / stored
+                    if ratio > drift_threshold:
+                        significant_drift = True
+                        logger.info(
+                            "Server %s drifted %.0f%%: %d → %d KB/s",
+                            server.get('name', sid),
+                            ratio * 100, stored, measured)
+                        break
+
+    if not significant_drift:
+        return False
+
+    # Drain remaining items from the queue (fast — just dequeue)
+    remaining = []
+    while True:
+        try:
+            item, assignment = work_queue.get_nowait()
+            remaining.append((item, assignment))
+        except queue.Empty:
+            break
+
+    if len(remaining) < 10:
+        # Not worth replanning — put them back
+        for item, assignment in remaining:
+            work_queue.put((item, assignment))
+        return False
+
+    # Re-plan with actual measured speeds
+    items_only = [item for item, _ in remaining]
+    items_only.sort(key=lambda it: it.size or 0, reverse=True)
+    _plan_server_assignments(items_only, session_kbps)
+    interleaved = _interleave_by_server(items_only)
+
+    for item in interleaved:
+        assignment = assignments.get(item.filename)
+        work_queue.put((item, assignment))
+
+    logger.info("Replanned %d remaining items with fresh speed data",
+                len(interleaved))
+    return True
 
 
 class Downloader:
