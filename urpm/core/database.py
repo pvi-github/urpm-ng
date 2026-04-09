@@ -18,7 +18,7 @@ from .db import (
 )
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -378,6 +378,15 @@ CREATE TABLE IF NOT EXISTS transaction_readmes (
     FOREIGN KEY (transaction_id) REFERENCES history(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_tr_transaction ON transaction_readmes(transaction_id);
+
+-- FTS5 index for fast package search (name, summary, description)
+CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(
+    name,
+    summary,
+    description,
+    content = 'packages',
+    content_rowid = 'id'
+);
 """
 
 # Migrations: dict of from_version -> (to_version, sql_script)
@@ -602,6 +611,20 @@ MIGRATIONS = {
         );
         CREATE INDEX IF NOT EXISTS idx_tr_transaction
             ON transaction_readmes(transaction_id);
+    """),
+    23: (24, """
+        -- Migration v23 -> v24: FTS5 index for package search
+        CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(
+            name,
+            summary,
+            description,
+            content = 'packages',
+            content_rowid = 'id'
+        );
+        -- Populate FTS from existing packages
+        INSERT INTO packages_fts(rowid, name, summary, description)
+            SELECT id, name, COALESCE(summary, ''), COALESCE(description, '')
+            FROM packages;
     """),
 }
 
@@ -1372,6 +1395,12 @@ class PackageDatabase(
                 # Delete obsolete packages from DB
                 obsolete_ids = [p['id'] for p in obsolete_packages]
                 placeholders = ','.join('?' * len(obsolete_ids))
+                # Clean FTS before deleting (external content mode)
+                if self._has_packages_fts(conn):
+                    conn.execute(
+                        f"DELETE FROM packages_fts WHERE rowid IN ({placeholders})",
+                        obsolete_ids
+                    )
                 conn.execute(
                     f"DELETE FROM packages WHERE id IN ({placeholders})",
                     obsolete_ids
@@ -1517,6 +1546,23 @@ class PackageDatabase(
                     enhances_rows
                 )
 
+            # Step 6: Rebuild FTS index for this media
+            if media_id and self._has_packages_fts(conn):
+                if progress_callback:
+                    progress_callback(total, "updating search index...")
+                # Delete old FTS entries for this media's packages
+                conn.execute("""
+                    DELETE FROM packages_fts WHERE rowid IN (
+                        SELECT id FROM packages WHERE media_id = ?
+                    )
+                """, (media_id,))
+                # Re-insert current packages
+                conn.execute("""
+                    INSERT INTO packages_fts(rowid, name, summary, description)
+                        SELECT id, name, COALESCE(summary, ''), COALESCE(description, '')
+                        FROM packages WHERE media_id = ?
+                """, (media_id,))
+
             conn.commit()
 
             if progress_callback:
@@ -1541,6 +1587,14 @@ class PackageDatabase(
                 f"DELETE FROM {table} WHERE pkg_id IN {pkg_subquery}",
                 (media_id,)
             )
+
+        # Clean FTS index before deleting packages (external content mode)
+        if self._has_packages_fts():
+            self.conn.execute("""
+                DELETE FROM packages_fts WHERE rowid IN (
+                    SELECT id FROM packages WHERE media_id = ?
+                )
+            """, (media_id,))
 
         # Now delete packages
         self.conn.execute("DELETE FROM packages WHERE media_id = ?", (media_id,))
@@ -1589,13 +1643,23 @@ class PackageDatabase(
         where_clause = f"AND {table_alias}.mageia_version IN ({placeholders})"
         return join_clause, where_clause, tuple(accepted)
 
+    def _has_packages_fts(self, conn=None) -> bool:
+        """Check if the packages_fts virtual table exists."""
+        c = conn or self.conn
+        row = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='packages_fts'"
+        ).fetchone()
+        return row is not None
+
     def search(self, pattern: str, limit: int = None, search_provides: bool = False) -> List[Dict]:
         """Search packages by name, summary, and optionally provides.
 
+        Uses FTS5 full-text index when available (fast), falls back to
+        LIKE queries otherwise.
+
         Search order (results are deduplicated):
-            1. Package name (substring match)
-            2. Provides capabilities (if search_provides=True)
-            3. Summary/description text
+            1. Package name + summary + description (via FTS or LIKE)
+            2. Provides capabilities (if search_provides=True, always LIKE)
 
         Filters by system version to avoid returning packages from other
         Mageia versions (e.g., mga9 packages on a mga10 system).
@@ -1609,12 +1673,128 @@ class PackageDatabase(
             List of package dicts. May include 'matched_provide' or
             'matched_summary' keys indicating how the package was found.
         """
-        pattern_lower = f'%{pattern.lower()}%'
         results = []
         seen_ids = set()
 
         # Build version filter (respects version-mode config)
         version_join, version_filter, version_params = self._build_version_filter()
+
+        if self._has_packages_fts():
+            results, seen_ids = self._search_fts(
+                pattern, limit, version_join, version_filter, version_params)
+        else:
+            results, seen_ids = self._search_like(
+                pattern, limit, version_join, version_filter, version_params)
+
+        # Search in provides if requested (always LIKE — capabilities are not free text)
+        if search_provides and (limit is None or len(results) < limit):
+            pattern_lower = f'%{pattern.lower()}%'
+            provides_params = (pattern_lower,) + version_params
+            if limit:
+                remaining = limit - len(results)
+                cursor = self.conn.execute(f"""
+                    SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
+                           p.nevra, p.summary, p.size, pr.capability as matched_provide
+                    FROM packages p
+                    JOIN provides pr ON pr.pkg_id = p.id
+                    {version_join}
+                    WHERE LOWER(pr.capability) LIKE ? {version_filter}
+                    ORDER BY p.name_lower
+                    LIMIT ?
+                """, provides_params + (remaining + len(seen_ids),))
+            else:
+                cursor = self.conn.execute(f"""
+                    SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
+                           p.nevra, p.summary, p.size, pr.capability as matched_provide
+                    FROM packages p
+                    JOIN provides pr ON pr.pkg_id = p.id
+                    {version_join}
+                    WHERE LOWER(pr.capability) LIKE ? {version_filter}
+                    ORDER BY p.name_lower
+                """, provides_params)
+
+            for row in cursor:
+                pkg = dict(row)
+                if pkg['id'] not in seen_ids:
+                    seen_ids.add(pkg['id'])
+                    results.append(pkg)
+                    if limit and len(results) >= limit:
+                        break
+
+        # Deduplicate by NEVRA — the same noarch package can appear in
+        # both x86_64 and i586 media with different database IDs.
+        seen_nevras = set()
+        unique = []
+        for pkg in results:
+            nevra = pkg.get('nevra') or f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}"
+            if nevra not in seen_nevras:
+                seen_nevras.add(nevra)
+                unique.append(pkg)
+        results = unique
+
+        # Add installed status by checking RPM database
+        for pkg in results:
+            pkg['installed'] = self._is_installed(pkg['name'])
+
+        return results
+
+    def _search_fts(self, pattern: str, limit: int,
+                    version_join: str, version_filter: str,
+                    version_params: tuple) -> tuple:
+        """Search packages using FTS5 index.
+
+        FTS5 MATCH with prefix query (``term*``) matches word prefixes,
+        so ``fire`` finds ``firefox``.  Name matches are ranked first
+        (via ``rank`` column), then summary/description matches are
+        flagged with ``matched_summary``.
+
+        Returns:
+            (results, seen_ids) tuple
+        """
+        # Escape FTS5 special characters and build prefix query
+        safe = pattern.replace('"', '""')
+        fts_query = f'"{safe}"*'
+
+        params = version_params
+        limit_clause = f"LIMIT ?" if limit else ""
+        limit_params = (limit,) if limit else ()
+
+        cursor = self.conn.execute(f"""
+            SELECT p.id, p.name, p.version, p.release, p.arch,
+                   p.nevra, p.summary, p.size,
+                   (p.name_lower LIKE ?) AS is_name_match
+            FROM packages p
+            JOIN packages_fts fts ON fts.rowid = p.id
+            {version_join}
+            WHERE packages_fts MATCH ? {version_filter}
+            ORDER BY is_name_match DESC, p.name_lower
+            {limit_clause}
+        """, (f'%{pattern.lower()}%', fts_query) + params + limit_params)
+
+        results = []
+        seen_ids = set()
+        for row in cursor:
+            pkg = dict(row)
+            if not pkg.pop('is_name_match', 0):
+                pkg['matched_summary'] = True
+            results.append(pkg)
+            seen_ids.add(pkg['id'])
+
+        return results, seen_ids
+
+    def _search_like(self, pattern: str, limit: int,
+                     version_join: str, version_filter: str,
+                     version_params: tuple) -> tuple:
+        """Fallback search using LIKE queries (no FTS index).
+
+        Three sequential queries: name, then summary/description.
+
+        Returns:
+            (results, seen_ids) tuple
+        """
+        pattern_lower = f'%{pattern.lower()}%'
+        results = []
+        seen_ids = set()
         base_params = (pattern_lower,) + version_params
 
         # Search by name
@@ -1640,39 +1820,6 @@ class PackageDatabase(
             pkg = dict(row)
             results.append(pkg)
             seen_ids.add(pkg['id'])
-
-        # Search in provides if requested
-        if search_provides and (limit is None or len(results) < limit):
-            if limit:
-                remaining = limit - len(results)
-                cursor = self.conn.execute(f"""
-                    SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
-                           p.nevra, p.summary, p.size, pr.capability as matched_provide
-                    FROM packages p
-                    JOIN provides pr ON pr.pkg_id = p.id
-                    {version_join.replace('p.media_id', 'p.media_id') if version_join else ''}
-                    WHERE LOWER(pr.capability) LIKE ? {version_filter}
-                    ORDER BY p.name_lower
-                    LIMIT ?
-                """, base_params + (remaining + len(seen_ids),))
-            else:
-                cursor = self.conn.execute(f"""
-                    SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
-                           p.nevra, p.summary, p.size, pr.capability as matched_provide
-                    FROM packages p
-                    JOIN provides pr ON pr.pkg_id = p.id
-                    {version_join.replace('p.media_id', 'p.media_id') if version_join else ''}
-                    WHERE LOWER(pr.capability) LIKE ? {version_filter}
-                    ORDER BY p.name_lower
-                """, base_params)
-
-            for row in cursor:
-                pkg = dict(row)
-                if pkg['id'] not in seen_ids:
-                    seen_ids.add(pkg['id'])
-                    results.append(pkg)
-                    if limit and len(results) >= limit:
-                        break
 
         # Search in summary/description
         if limit is None or len(results) < limit:
@@ -1706,22 +1853,7 @@ class PackageDatabase(
                     if limit and len(results) >= limit:
                         break
 
-        # Deduplicate by NEVRA — the same noarch package can appear in
-        # both x86_64 and i586 media with different database IDs.
-        seen_nevras = set()
-        unique = []
-        for pkg in results:
-            nevra = pkg.get('nevra') or f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}"
-            if nevra not in seen_nevras:
-                seen_nevras.add(nevra)
-                unique.append(pkg)
-        results = unique
-
-        # Add installed status by checking RPM database
-        for pkg in results:
-            pkg['installed'] = self._is_installed(pkg['name'])
-
-        return results
+        return results, seen_ids
 
     def get_package(self, name: str) -> Optional[Dict]:
         """Get a package by exact name (latest version).
