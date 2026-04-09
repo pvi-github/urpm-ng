@@ -1754,7 +1754,7 @@ class PackageDatabase(
             FROM packages_fts fts
             JOIN packages p ON p.id = fts.rowid
             {version_join}
-            WHERE fts MATCH ? {version_filter}
+            WHERE packages_fts MATCH ? {version_filter}
             ORDER BY is_name_match DESC, p.name_lower
             {limit_clause}
         """, (f'%{pattern.lower()}%', fts_query) + params + limit_params)
