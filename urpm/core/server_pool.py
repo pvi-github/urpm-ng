@@ -82,17 +82,18 @@ def ensure_minimum_servers(db: 'PackageDatabase',
                                needed=min_needed)
     arch = platform.machine()
 
-    # Build duplicate sets
+    # Build duplicate sets — keyed by (host, base_path) so that the same
+    # hostname with different base paths (e.g. corporate mirror hosting
+    # both official and community repos) is treated as distinct servers.
     all_servers = db.list_servers()
-    existing_urls = set()
+    existing_host_paths = set()
     existing_names = set()
     for s in all_servers:
-        url = f"{s['protocol']}://{s['host']}{s.get('base_path', '')}".rstrip('/')
-        existing_urls.add(url)
+        existing_host_paths.add((s['host'], s.get('base_path', '')))
         existing_names.add(s['name'])
 
     # Fetch mirrorlist
-    candidates = _fetch_and_filter(version, arch, existing_urls)
+    candidates = _fetch_and_filter(version, arch, existing_host_paths)
     if not candidates:
         logger.warning("No new mirror candidates found")
         return PoolCheckResult(sufficient=False, had=len(existing),
@@ -134,16 +135,23 @@ def ensure_minimum_servers(db: 'PackageDatabase',
     # Link new servers to enabled media
     if added:
         server_ids = []
-        for name, _ in added:
+        for name, _latency in added:
             s = db.get_server(name)
             if s:
                 server_ids.append((s['id'], name))
         _link_servers_to_media(db, server_ids)
 
-        # Probe real bandwidth by downloading a synthesis.hdlist.cz from
-        # one of the linked media.  Runs in parallel across all new
-        # servers so user wait is bounded by the slowest, not the sum.
-        _probe_bandwidth(db, server_ids)
+    # Probe ALL enabled servers that lack bandwidth data — not just
+    # newly added ones.  This covers servers imported from urpmi.cfg
+    # or added manually that were never probed.
+    servers_to_probe = []
+    for s in db.list_servers(enabled_only=True):
+        if not s.get('bandwidth_kbps'):
+            servers_to_probe.append((s['id'], s['name']))
+    if servers_to_probe:
+        logger.info("Probing %d servers without bandwidth data",
+                    len(servers_to_probe))
+        _probe_bandwidth(db, servers_to_probe)
 
     return PoolCheckResult(sufficient=len(existing) + len(added) >= min_needed,
                            had=len(existing), needed=min_needed, added=added)
@@ -176,8 +184,71 @@ def _detect_version() -> str:
     return ''
 
 
-def _fetch_and_filter(version, arch, existing_urls):
-    """Fetch mirrorlist, parse URLs, filter duplicates and non-HTTP."""
+def dedup_mirror_urls(mirror_urls, suffix_pattern, existing_host_paths=None):
+    """Parse and deduplicate mirror URLs by (host, base_path).
+
+    Filters non-HTTP(S) URLs, strips *suffix_pattern* from each URL path
+    to obtain the server ``base_path``, then deduplicates:
+
+    * Same host + same base_path + different scheme → keep https.
+    * Same host + different base_path → distinct servers (e.g. corporate
+      mirror hosting both official and community repos).
+    * Entries whose (host, base_path) is in *existing_host_paths* are
+      skipped entirely.
+
+    Args:
+        mirror_urls: Iterable of raw mirror URL strings.
+        suffix_pattern: Compiled regex stripped from each URL path to
+            derive the server base_path.
+        existing_host_paths: Optional set of ``(host, base_path)`` tuples
+            to exclude (typically servers already in the database).
+
+    Returns:
+        List of candidate dicts, each with keys
+        ``scheme``, ``host``, ``base_path``, ``full_url``.
+    """
+    if existing_host_paths is None:
+        existing_host_paths = set()
+
+    by_host_path = {}  # (host, base_path) → candidate dict
+    for mirror_url in mirror_urls:
+        mirror_url = mirror_url.strip()
+        if not mirror_url:
+            continue
+        parsed = urlparse(mirror_url)
+        if parsed.scheme not in ('http', 'https'):
+            continue
+
+        host = parsed.hostname
+        base_path = suffix_pattern.sub('', parsed.path).rstrip('/')
+        key = (host, base_path)
+
+        if key in existing_host_paths:
+            continue
+
+        prev = by_host_path.get(key)
+        if prev is None or parsed.scheme == 'https':
+            by_host_path[key] = {
+                'scheme': parsed.scheme,
+                'host': host,
+                'base_path': base_path,
+                'full_url': mirror_url,
+            }
+
+    return list(by_host_path.values())
+
+
+def _fetch_and_filter(version, arch, existing_host_paths):
+    """Fetch mirrorlist and return deduplicated candidates.
+
+    Args:
+        version: Mageia version string (e.g. "9", "10").
+        arch: Architecture string (e.g. "x86_64").
+        existing_host_paths: Set of (host, base_path) tuples already in DB.
+
+    Returns:
+        List of candidate dicts with scheme/host/base_path/full_url.
+    """
     url = _MIRRORLIST_URL.format(version=version, arch=arch)
     try:
         with urlopen(url, timeout=10) as resp:
@@ -192,25 +263,8 @@ def _fetch_and_filter(version, arch, existing_urls):
     suffix_re = re.compile(
         rf'{re.escape(version)}/{re.escape(arch)}/media/core/release/?$')
 
-    candidates = []
-    for mirror_url in content.split('\n'):
-        mirror_url = mirror_url.strip()
-        if not mirror_url:
-            continue
-        parsed = urlparse(mirror_url)
-        if parsed.scheme not in ('http', 'https'):
-            continue
-        base_path = suffix_re.sub('', parsed.path).rstrip('/')
-        full_base = f"{parsed.scheme}://{parsed.hostname}{base_path}"
-        if full_base in existing_urls:
-            continue
-        candidates.append({
-            'scheme': parsed.scheme,
-            'host': parsed.hostname,
-            'base_path': base_path,
-            'full_url': mirror_url,
-        })
-    return candidates
+    return dedup_mirror_urls(
+        content.split('\n'), suffix_re, existing_host_paths)
 
 
 def _test_latency(candidates, max_workers=10, timeout=5):
@@ -279,67 +333,86 @@ def _link_servers_to_media(db, added_servers):
 
 
 def _probe_bandwidth(db, added_servers):
-    """Measure real bandwidth of new servers by downloading synthesis.hdlist.cz.
+    """Measure real bandwidth of servers by downloading files.xml.lzma.
 
-    Picks one enabled media with a relative_path and downloads its
-    ``synthesis.hdlist.cz`` from each new server in parallel.  The
-    measured KB/s replaces the seeded average, giving the proportional
-    planner accurate data from the start.
+    Uses ``files.xml.lzma`` (~25 MB on core/release) rather than
+    ``synthesis.hdlist.cz`` (a few KB) to get past TCP slow-start and
+    measure real sustained throughput.  Falls back to synthesis.hdlist.cz
+    if files.xml.lzma is not available.
+
+    Picks one enabled media with a relative_path and downloads from each
+    server in parallel.  The measured KB/s replaces any seeded average,
+    giving the proportional planner accurate data.
     """
     import pycurl
     from .config import build_server_url
 
-    # Find a media to probe against
+    # Find a media to probe against — prefer core/release (largest files)
     all_media = db.list_media()
     probe_media = None
     for m in all_media:
         if m.get('enabled', 1) and m.get('relative_path'):
-            probe_media = m
-            break
+            if probe_media is None:
+                probe_media = m
+            # Prefer core/release for bigger files
+            rp = m.get('relative_path', '')
+            if 'core' in rp and 'release' in rp and 'debug' not in rp:
+                probe_media = m
+                break
     if not probe_media:
         return
 
     rpath = probe_media['relative_path']
-    probe_file = f"{rpath}/media_info/synthesis.hdlist.cz"
+    # files.xml.lzma is ~25 MB, giving a real bandwidth measurement.
+    # Fall back to synthesis.hdlist.cz if unavailable (HTTP 404).
+    probe_files = [
+        f"{rpath}/media_info/files.xml.lzma",
+        f"{rpath}/media_info/synthesis.hdlist.cz",
+    ]
 
     def _probe_one(server_id, server_name):
-        """Download synthesis.hdlist.cz and return (server_id, kbps)."""
+        """Download a probe file and return (server_id, kbps).
+
+        Tries files.xml.lzma first (large, accurate), falls back to
+        synthesis.hdlist.cz (small, rough estimate).
+        """
         server = db.get_server(server_name)
         if not server:
             return server_id, None
         base_url = build_server_url(server)
-        url = f"{base_url}/{probe_file}"
 
-        c = pycurl.Curl()
-        try:
-            # Discard data — we only care about speed
-            c.setopt(pycurl.URL, url)
-            c.setopt(pycurl.WRITEFUNCTION, lambda _data: None)
-            c.setopt(pycurl.FOLLOWLOCATION, 1)
-            c.setopt(pycurl.CONNECTTIMEOUT, 5)
-            c.setopt(pycurl.LOW_SPEED_LIMIT, 512)
-            c.setopt(pycurl.LOW_SPEED_TIME, 10)
-            c.setopt(pycurl.USERAGENT, 'urpm/0.7')
-            c.setopt(pycurl.NOSIGNAL, 1)
-            c.setopt(pycurl.NOPROGRESS, 1)
+        for probe_file in probe_files:
+            url = f"{base_url}/{probe_file}"
+            c = pycurl.Curl()
+            try:
+                c.setopt(pycurl.URL, url)
+                c.setopt(pycurl.WRITEFUNCTION, lambda _data: None)
+                c.setopt(pycurl.FOLLOWLOCATION, 1)
+                c.setopt(pycurl.CONNECTTIMEOUT, 5)
+                c.setopt(pycurl.LOW_SPEED_LIMIT, 512)
+                c.setopt(pycurl.LOW_SPEED_TIME, 10)
+                c.setopt(pycurl.USERAGENT, 'urpm/0.7')
+                c.setopt(pycurl.NOSIGNAL, 1)
+                c.setopt(pycurl.NOPROGRESS, 1)
 
-            c.perform()
+                c.perform()
 
-            http_code = c.getinfo(pycurl.HTTP_CODE)
-            if http_code >= 400:
-                return server_id, None
+                http_code = c.getinfo(pycurl.HTTP_CODE)
+                if http_code >= 400:
+                    continue  # try next probe file
 
-            dl_bytes = c.getinfo(pycurl.SIZE_DOWNLOAD)
-            dl_time = c.getinfo(pycurl.TOTAL_TIME)
-            if dl_time > 0 and dl_bytes > 1024:
-                kbps = int(dl_bytes / dl_time / 1024)
-                return server_id, kbps
-            return server_id, None
+                dl_bytes = c.getinfo(pycurl.SIZE_DOWNLOAD)
+                dl_time = c.getinfo(pycurl.TOTAL_TIME)
+                if dl_time > 0 and dl_bytes > 1024:
+                    kbps = int(dl_bytes / dl_time / 1024)
+                    return server_id, kbps
 
-        except pycurl.error:
-            return server_id, None
-        finally:
-            c.close()
+            except pycurl.error:
+                continue  # try next probe file
+            finally:
+                c.close()
+
+        return server_id, None
 
     with ThreadPoolExecutor(max_workers=len(added_servers)) as executor:
         futures = [
