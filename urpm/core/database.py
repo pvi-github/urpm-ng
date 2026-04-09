@@ -643,11 +643,10 @@ class PackageDatabase(
             db_path = get_db_path()
         self.db_path = Path(db_path)
 
-        # Detect read-only mode: DB exists but not writable by current user.
-        # In that case we open with immutable=1 so SQLite reads the DB file
-        # directly without needing -wal/-shm files (which require write
-        # access to the directory).
         import os
+        # Read-only mode: DB exists but current user can't write to it.
+        # Non-root users open with mode=ro and rely on -wal/-shm files
+        # being readable (644), maintained by root processes (urpm, urpmd).
         self.read_only = (self.db_path.exists()
                           and not os.access(self.db_path, os.W_OK))
 
@@ -671,25 +670,29 @@ class PackageDatabase(
     def _create_connection(self) -> sqlite3.Connection:
         """Create a new SQLite connection with proper settings.
 
-        When the database is not writable (normal user reading a
-        root-owned DB), opens with ``immutable=1`` so SQLite reads
-        the main DB file directly — no -wal/-shm files needed.
+        In read-only mode (non-root), opens via ``mode=ro`` URI so SQLite
+        reads through the WAL shared memory without needing write access.
+        This requires that -wal/-shm files exist and are world-readable
+        (644), which is ensured by :meth:`ensure_wal_readable`.
 
         Returns:
             Configured SQLite connection
         """
         if self.read_only:
-            uri = f"file:{self.db_path}?immutable=1"
+            uri = f"file:{self.db_path}?mode=ro"
             conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute(f"PRAGMA busy_timeout={self.BUSY_TIMEOUT_MS}")
         else:
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
             # WAL mode for concurrent reads + single writer (urpmd)
             conn.execute("PRAGMA journal_mode=WAL")
             # NORMAL sync is safe with WAL (only FULL needed for rollback journal)
             conn.execute("PRAGMA synchronous=NORMAL")
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute(f"PRAGMA busy_timeout={self.BUSY_TIMEOUT_MS}")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute(f"PRAGMA busy_timeout={self.BUSY_TIMEOUT_MS}")
         return conn
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -1198,12 +1201,48 @@ class PackageDatabase(
 
         self.conn.commit()
 
+    def ensure_wal_readable(self):
+        """Ensure WAL auxiliary files exist and are world-readable.
+
+        SQLite WAL mode uses two auxiliary files (-wal and -shm) that must
+        be present and readable for ``mode=ro`` connections to work.  Root
+        processes (urpm CLI, urpmd scheduler) call this method to guarantee
+        that non-root users can read the database.
+
+        Safe to call at any time — skips silently when not running as root
+        or when the DB file doesn't exist yet.
+        """
+        import os
+        if os.getuid() != 0 or not self.db_path.exists():
+            return
+
+        for suffix in ('-wal', '-shm'):
+            aux = self.db_path.with_suffix(self.db_path.suffix + suffix)
+            try:
+                if aux.exists():
+                    # Ensure world-readable
+                    st = aux.stat()
+                    if not (st.st_mode & 0o004):
+                        aux.chmod(st.st_mode | 0o044)
+                else:
+                    # SQLite may have cleaned up after checkpoint — recreate
+                    aux.touch()
+                    aux.chmod(0o644)
+            except OSError:
+                pass
+
     def close(self):
         """Close database connection.
+
+        When running as root, ensures -wal/-shm files persist with
+        world-readable permissions so non-root users can open the DB
+        in read-only mode.
 
         Note: Thread-local connections are automatically cleaned up when
         threads end (e.g., when ThreadPoolExecutor workers terminate).
         """
+        if not self.read_only:
+            self.ensure_wal_readable()
         # Close main thread connection
         if self.conn:
             self.conn.close()
@@ -1211,6 +1250,10 @@ class PackageDatabase(
         # Clear thread-local reference if in main thread
         if hasattr(self._local, 'conn'):
             self._local.conn = None
+        # After close, SQLite may checkpoint and delete -wal/-shm.
+        # Re-ensure they exist for non-root readers.
+        if not self.read_only:
+            self.ensure_wal_readable()
 
     def __enter__(self):
         return self

@@ -213,6 +213,8 @@ class Scheduler:
         # Check metadata refresh (adaptive per-media interval)
         if self._should_run_task('metadata', now):
             self._run_metadata_check()
+            # Ensure -wal/-shm are readable by non-root after DB writes
+            self.db.ensure_wal_readable()
             # Schedule next check using the minimum adaptive interval
             # among all enabled media. This ensures we check at least as
             # often as the most imminent media needs.
