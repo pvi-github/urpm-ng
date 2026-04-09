@@ -1,7 +1,10 @@
 """Media management commands."""
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
@@ -463,21 +466,9 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     # The suffix to strip is: {version}/{arch}
     suffix_pattern = re.compile(rf'{re.escape(version)}/{re.escape(arch)}/?$')
 
-    candidates = []
-    for url in mirror_urls:
-        parsed = urlparse(url)
-        if parsed.scheme not in ('http', 'https'):
-            continue
-
-        # Extract base path by stripping the suffix
-        base_path = suffix_pattern.sub('', parsed.path).rstrip('/')
-
-        candidates.append({
-            'scheme': parsed.scheme,
-            'host': parsed.hostname,
-            'base_path': base_path,
-            'full_url': url,
-        })
+    # Parse and deduplicate candidates
+    from ...core.server_pool import dedup_mirror_urls
+    candidates = dedup_mirror_urls(mirror_urls, suffix_pattern)
 
     if not candidates:
         print(colors.error(_("No valid HTTP/HTTPS mirrors found")))
@@ -1523,7 +1514,27 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
 
     print("\n" + colors.bold(_("Summary:")) + " " + _("{added} added, {replaced} replaced, {errors} errors").format(added=added, replaced=replaced, errors=errors))
 
+    # Probe all enabled servers that lack bandwidth data — covers servers
+    # just imported from urpmi.cfg that were never probed.
     if added + replaced > 0:
+        from ...core.server_pool import _probe_bandwidth
+        servers_to_probe = []
+        for s in db.list_servers(enabled_only=True):
+            if not s.get('bandwidth_kbps'):
+                servers_to_probe.append((s['id'], s['name']))
+        if servers_to_probe:
+            print("\n" + _("Probing {count} servers...").format(
+                count=len(servers_to_probe)))
+            _probe_bandwidth(db, servers_to_probe)
+            for s_id, s_name in servers_to_probe:
+                srv = db.get_server(s_name)
+                if srv and srv.get('bandwidth_kbps'):
+                    bw = srv['bandwidth_kbps']
+                    if bw >= 1024:
+                        print(f"  {s_name}: {bw / 1024:.1f} MB/s")
+                    else:
+                        print(f"  {s_name}: {bw} KB/s")
+
         print(colors.info(_("\nRun 'urpm media update' to fetch package lists")))
 
     return 1 if errors else 0
@@ -2111,3 +2122,237 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
 
     return 0
 
+
+
+def cmd_media_discover(args, db: 'PackageDatabase') -> int:
+    """Discover and add media from a repository's media.cfg.
+
+    Fetches ``media_info/media.cfg`` from the given URL, parses all declared
+    media, and creates the corresponding database entries (server, media,
+    links).  Works with official Mageia mirrors and community repositories
+    (e.g. MLO).
+
+    Enable logic (mirrors urpmi's ``needed_extra_media``):
+        - Media without ``noauto`` → enabled
+        - ``noauto`` nonfree → enabled if nonfree packages installed
+        - ``noauto`` tainted → enabled if tainted packages installed
+        - ``noauto`` 32-bit  → enabled if 32-bit packages installed
+        - ``--nonfree`` / ``--no-nonfree`` override auto-detection
+        - ``--tainted`` / ``--no-tainted`` override auto-detection
+        - ``--enable`` forces everything on (except SRPMS/debug/testing)
+        - Backports, testing, debug, SRPMS → always disabled
+    """
+    from .. import colors
+    from ...core.media_cfg import (
+        fetch_media_cfg, parse_media_cfg, filter_media, decompose_url,
+        detect_installed_categories, should_enable,
+    )
+
+    url = args.url
+    dry_run = getattr(args, 'dry_run', False)
+    include_srpms = getattr(args, 'sources', False)
+    include_debug = getattr(args, 'debug', False)
+
+    # Parse --with / --without into per-category overrides
+    with_cats = set()
+    without_cats = set()
+    raw_with = getattr(args, 'with_categories', None)
+    raw_without = getattr(args, 'without_categories', None)
+    if raw_with:
+        with_cats = {c.strip().lower() for c in raw_with.split(',')}
+    if raw_without:
+        without_cats = {c.strip().lower() for c in raw_without.split(',')}
+
+    enable_all = 'all' in with_cats
+
+    # None = auto-detect, True = force on, False = force off
+    force_nonfree = None
+    if 'nonfree' in with_cats or enable_all:
+        force_nonfree = True
+    elif 'nonfree' in without_cats:
+        force_nonfree = False
+
+    force_tainted = None
+    if 'tainted' in with_cats or enable_all:
+        force_tainted = True
+    elif 'tainted' in without_cats:
+        force_tainted = False
+
+    force_32bit = None
+    if '32bit' in with_cats or enable_all:
+        force_32bit = True
+    elif '32bit' in without_cats:
+        force_32bit = False
+
+    # ── Fetch and parse media.cfg ────────────────────────────────────
+    print(colors.info(_("Fetching media.cfg from {url}...").format(url=url)))
+    try:
+        content = fetch_media_cfg(url)
+    except RuntimeError as e:
+        print(colors.error(str(e)))
+        return 1
+
+    # First parse to get version/arch from [media_info]
+    scheme, host, base_path, media_root = decompose_url(url, '', '')
+    info, _unused = parse_media_cfg(content, media_root)
+
+    if not info.version:
+        print(colors.error(_("media.cfg has no version — cannot proceed")))
+        return 1
+
+    # Re-decompose with real version/arch
+    scheme, host, base_path, media_root = decompose_url(
+        url, info.version, info.arch)
+
+    # Re-parse with correct media_root
+    info, all_media = parse_media_cfg(content, media_root)
+
+    # ── Filter (drop SRPMS/debug) ────────────────────────────────────
+    media_list = filter_media(
+        all_media,
+        include_srpms=include_srpms,
+        include_debug=include_debug,
+    )
+
+    if not media_list:
+        print(colors.warning(_("No media found in media.cfg")))
+        return 0
+
+    # ── Detect installed categories for smart enable ─────────────────
+    if not dry_run or not enable_all:
+        try:
+            installed = detect_installed_categories()
+            if installed.nonfree:
+                print(colors.dim(_("  Detected nonfree packages installed")))
+            if installed.tainted:
+                print(colors.dim(_("  Detected tainted packages installed")))
+            if installed.has_32bit:
+                print(colors.dim(_("  Detected 32-bit packages installed")))
+        except Exception as e:
+            logger.warning("Failed to detect installed categories: %s", e)
+            installed = type('Obj', (), {
+                'nonfree': False, 'tainted': False, 'has_32bit': False})()
+
+    # ── Display plan ─────────────────────────────────────────────────
+    print(colors.bold(
+        _("Found {n} media for {branch} {version} ({arch}):").format(
+            n=len(media_list),
+            branch=info.branch or '?',
+            version=info.version,
+            arch=info.arch or 'multi',
+        )))
+
+    skipped_srpms = sum(1 for m in all_media if m.is_srpms) if not include_srpms else 0
+    skipped_debug = sum(1 for m in all_media if m.is_debug) if not include_debug else 0
+
+    for m in media_list:
+        enabled = should_enable(
+            m, installed,
+            force_nonfree=force_nonfree,
+            force_tainted=force_tainted,
+            force_32bit=force_32bit,
+            force_enable_all=enable_all,
+        )
+        state = _("enabled") if enabled else _("disabled")
+        tag = ""
+        if m.is_testing:
+            tag = colors.dim(" [testing]")
+        elif m.is_update:
+            tag = colors.dim(" [updates]")
+        marker = colors.success("  + ") if enabled else colors.dim("  - ")
+        print(f"{marker}{m.name} ({m.architecture}) [{state}]{tag}")
+
+    if skipped_srpms:
+        print(colors.dim(_("  ({n} source media hidden, use --sources to include)").format(n=skipped_srpms)))
+    if skipped_debug:
+        print(colors.dim(_("  ({n} debug media hidden, use --debug to include)").format(n=skipped_debug)))
+
+    if dry_run:
+        print(colors.warning(_("\nDry run — no changes made")))
+        return 0
+
+    # ── Create server ────────────────────────────────────────────────
+    server = db.get_server_by_location(scheme, host, base_path)
+
+    if not server:
+        server_name = _generate_server_name(scheme, host)
+        base_server_name = server_name
+        counter = 1
+        while db.get_server(server_name):
+            counter += 1
+            server_name = f"{base_server_name}-{counter}"
+
+        is_official = any(m.is_official for m in media_list)
+        server_id = db.add_server(
+            name=server_name,
+            protocol=scheme,
+            host=host,
+            base_path=base_path,
+            is_official=is_official,
+        )
+        server = db.get_server(server_name)
+        print(colors.info(_("  Server: {name} (new)").format(name=server_name)))
+    else:
+        print(colors.info(_("  Server: {name} (existing)").format(name=server['name'])))
+
+    # ── Create media and link ────────────────────────────────────────
+    added = 0
+    existed = 0
+
+    for m in media_list:
+        enabled = should_enable(
+            m, installed,
+            force_nonfree=force_nonfree,
+            force_tainted=force_tainted,
+            force_32bit=force_32bit,
+            force_enable_all=enable_all,
+        )
+        media_name = f"mga{m.version}-{m.short_name}"
+
+        existing = db.get_media_by_version_arch_shortname(
+            m.version, m.architecture, m.short_name)
+
+        if existing:
+            if not db.server_media_link_exists(server['id'], existing['id']):
+                db.link_server_media(server['id'], existing['id'])
+            existed += 1
+            continue
+
+        try:
+            media_id = db.add_media(
+                name=media_name,
+                short_name=m.short_name,
+                mageia_version=m.version,
+                architecture=m.architecture,
+                relative_path=m.relative_path,
+                is_official=m.is_official,
+                allow_unsigned=not m.is_official,
+                enabled=enabled,
+                update_media=m.is_update,
+            )
+            db.link_server_media(server['id'], media_id)
+            added += 1
+        except Exception as e:
+            print(colors.error(
+                _("  Failed to add {name}: {err}").format(name=media_name, err=e)))
+
+    # ── Link to other enabled servers ────────────────────────────────
+    other_servers = [s for s in db.list_servers(enabled_only=True)
+                     if s['id'] != server['id']]
+    if other_servers:
+        all_new_media = [db.get_media(f"mga{m.version}-{m.short_name}")
+                         for m in media_list]
+        all_new_media = [mid for mid in all_new_media if mid]
+        for s in other_servers:
+            for media_entry in all_new_media:
+                if not db.server_media_link_exists(s['id'], media_entry['id']):
+                    db.link_server_media(s['id'], media_entry['id'])
+
+    # ── Summary ──────────────────────────────────────────────────────
+    print(colors.success(
+        _("\n{added} media added, {existed} already existed").format(
+            added=added, existed=existed)))
+    if added > 0:
+        print(colors.dim(_("Run 'urpm media update' to sync metadata")))
+
+    return 0

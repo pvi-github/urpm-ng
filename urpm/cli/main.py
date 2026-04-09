@@ -94,8 +94,8 @@ from .commands.media import (
     cmd_media_list, cmd_init, cmd_media_add, cmd_media_remove,
     cmd_media_enable, cmd_media_disable, cmd_media_update,
     cmd_media_import, cmd_media_set, cmd_media_seed_info,
-    cmd_media_link, cmd_media_autoconfig, parse_urpmi_cfg,
-    STANDARD_MEDIA_TYPES,
+    cmd_media_link, cmd_media_autoconfig, cmd_media_discover,
+    parse_urpmi_cfg, STANDARD_MEDIA_TYPES,
 )
 from .commands.query import (
     cmd_search, cmd_show, cmd_list, cmd_provides, cmd_whatprovides, cmd_find,
@@ -1499,6 +1499,57 @@ Examples:
         help=_('Skip tainted media')
     )
 
+    media_discover = media_subparsers.add_parser(
+        'discover', aliases=['disc'],
+        help=_('Discover media from a repository via media.cfg'),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_('''Discover and add all media from a repository's media.cfg.
+
+Fetches media_info/media.cfg from the given URL and creates all declared
+media automatically.  Works with official Mageia mirrors and community
+repositories (e.g. MLO).
+
+By default, nonfree/tainted/32-bit media are auto-enabled based on what
+is already installed (like urpmi).  Use --with / --without to override.
+
+Categories: nonfree, tainted, 32bit, all
+
+Examples:
+  urpm media discover https://repository.mageialinux-online.org/9/x86_64/media/
+  urpm media discover --with nonfree,tainted https://mirror.example.org/.../media/
+  urpm media discover --without nonfree https://mirror.example.org/.../media/
+  urpm media discover --with all https://mirror.example.org/.../media/
+  urpm media disc -n https://mirror.example.org/.../media/
+''')
+    )
+    media_discover.add_argument(
+        'url',
+        help=_('Media root URL (must contain media_info/media.cfg)')
+    )
+    media_discover.add_argument(
+        '--with', dest='with_categories', metavar='CATEGORIES',
+        help=_('Force-enable categories (comma-separated: nonfree,tainted,32bit,all)')
+    )
+    media_discover.add_argument(
+        '--without', dest='without_categories', metavar='CATEGORIES',
+        help=_('Force-disable categories (comma-separated: nonfree,tainted,32bit)')
+    )
+    media_discover.add_argument(
+        '--sources',
+        action='store_true',
+        help=_('Include source (SRPMS) media')
+    )
+    media_discover.add_argument(
+        '--debug',
+        action='store_true',
+        help=_('Include debug media')
+    )
+    media_discover.add_argument(
+        '--dry-run', '-n',
+        action='store_true',
+        help=_('Show what would be added without making changes')
+    )
+
     # =========================================================================
     # server / srv
     # =========================================================================
@@ -2242,6 +2293,8 @@ def main(argv=None) -> int:
                 return cmd_media_link(args, db)
             elif args.media_command in ('autoconfig', 'auto', 'ac'):
                 return cmd_media_autoconfig(args, db)
+            elif args.media_command in ('discover', 'disc'):
+                return cmd_media_discover(args, db)
             else:
                 return cmd_not_implemented(args, db)
 
