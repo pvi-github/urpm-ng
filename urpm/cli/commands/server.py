@@ -23,8 +23,11 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
     host_width = max(4, max(len(srv['host']) for srv in servers))
 
     # Header
-    print(f"\n{_('Name'):<{name_width}} {_('Protocol'):<8} {_('Host'):<{host_width}} {_('Pri'):>4} {_('IP'):>6} {_('Status'):<8}")
-    print("-" * (name_width + host_width + 35))
+    print(f"\n{_('Name'):<{name_width}} {_('Protocol'):<8} {_('Host'):<{host_width}}"
+          f" {_('Pri'):>4} {_('IP'):>6}"
+          f" {_('BW'):>10} {_('Lat'):>6}"
+          f" {_('Status'):<8}")
+    print("-" * (name_width + host_width + 55))
 
     for srv in servers:
         status = colors.success(_("enabled")) if srv['enabled'] else colors.dim(_("disabled"))
@@ -40,7 +43,32 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
         else:
             ip_str = ip_padded
 
-        print(f"{srv['name']:<{name_width}} {srv['protocol']:<8} {srv['host']:<{host_width}} {srv['priority']:>4} {ip_str} {status}")
+        # Bandwidth and latency
+        # Pad first, then colorize (ANSI codes break alignment)
+        bw_kbps = srv.get('bandwidth_kbps')
+        lat_ms = srv.get('latency_ms')
+        if bw_kbps and bw_kbps >= 1024:
+            bw_padded = f"{bw_kbps / 1024:.1f} MB/s"
+        elif bw_kbps:
+            bw_padded = f"{bw_kbps} KB/s"
+        else:
+            bw_padded = "—"
+        bw_padded = f"{bw_padded:>10}"
+        if not bw_kbps:
+            bw_padded = colors.dim(bw_padded)
+
+        if lat_ms:
+            lat_padded = f"{lat_ms}ms"
+        else:
+            lat_padded = "—"
+        lat_padded = f"{lat_padded:>6}"
+        if not lat_ms:
+            lat_padded = colors.dim(lat_padded)
+
+        print(f"{srv['name']:<{name_width}} {srv['protocol']:<8} {srv['host']:<{host_width}}"
+              f" {srv['priority']:>4} {ip_str}"
+              f" {bw_padded} {lat_padded}"
+              f" {status}")
 
     print()
     return 0
@@ -439,13 +467,15 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     needed = TARGET_SERVERS - existing_count
     print(_("Have {count} enabled servers, need {needed} more to reach {target}").format(count=existing_count, needed=needed, target=TARGET_SERVERS))
 
-    # Get all servers for duplicate check
+    # Get all servers for duplicate check — keyed by (host, base_path)
+    # so http and https for the same mirror are treated as duplicates,
+    # but the same host with different base paths (e.g. corporate mirror
+    # hosting multiple repos) is treated as distinct.
     all_servers = db.list_servers()
-    existing_urls = set()
+    existing_host_paths = set()
     existing_names = set()
     for s in all_servers:
-        url = f"{s['protocol']}://{s['host']}{s.get('base_path', '')}".rstrip('/')
-        existing_urls.add(url)
+        existing_host_paths.add((s['host'], s.get('base_path', '').rstrip('/')))
         existing_names.add(s['name'])
 
     # Fetch mirrorlist
@@ -471,43 +501,17 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     # Pattern to strip from URLs: {version}/{arch}/media/core/release/
     suffix_pattern = re.compile(rf'{re.escape(version)}/{re.escape(arch)}/media/core/release/?$')
 
-    # Parse and filter candidates
-    candidates = []
-    skipped_protocol = 0
-    skipped_duplicate = 0
-
-    for url in mirror_urls:
-        url = url.strip()
-        if not url:
-            continue
-
-        parsed = urlparse(url)
-
-        # Filter: only http/https
-        if parsed.scheme not in ('http', 'https'):
-            skipped_protocol += 1
-            continue
-
-        # Extract base path by stripping the suffix
-        base_path = suffix_pattern.sub('', parsed.path).rstrip('/')
-        full_base = f"{parsed.scheme}://{parsed.hostname}{base_path}"
-
-        # Check for duplicate
-        if full_base in existing_urls:
-            skipped_duplicate += 1
-            continue
-
-        candidates.append({
-            'scheme': parsed.scheme,
-            'host': parsed.hostname,
-            'base_path': base_path,
-            'full_url': url,  # Original URL for latency test
-        })
+    # Parse and deduplicate candidates
+    from ...core.server_pool import dedup_mirror_urls
+    total_urls = len([u for u in mirror_urls if u.strip()])
+    candidates = dedup_mirror_urls(
+        mirror_urls, suffix_pattern, existing_host_paths)
+    skipped = total_urls - len(candidates)
 
     if not candidates:
         print(_("No new servers to add"))
-        if skipped_duplicate:
-            print(colors.dim("  " + _("({count} already configured)").format(count=skipped_duplicate)))
+        if skipped:
+            print(colors.dim("  " + _("({count} already configured or duplicates)").format(count=skipped)))
         return 0
 
     print(_("Testing latency to {count} candidates...").format(count=len(candidates)), end=' ', flush=True)
@@ -628,7 +632,7 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
         "Added {added} server, now have {total} enabled",
         "Added {added} servers, now have {total} enabled",
         len(added_servers)).format(added=len(added_servers), total=existing_count + len(added_servers)))
-    if skipped_protocol:
-        print(colors.dim(_("Skipped {count} (ftp/other protocol)").format(count=skipped_protocol)))
+    if skipped:
+        print(colors.dim(_("Skipped {count} (duplicates or other protocol)").format(count=skipped)))
 
     return 0
