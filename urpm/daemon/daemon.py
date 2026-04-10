@@ -430,6 +430,23 @@ class UrpmDaemon:
                         missing.append(filename)
                         continue
 
+                # Self-heal stale index: verify the file still exists on disk.
+                # The index is a long-lived in-memory cache that is only
+                # invalidated in a handful of scheduler paths, so a file that
+                # was deleted (cleanup, retention, signature purge, manual rm)
+                # can still appear here long after it is gone.  A missed stat
+                # would make us advertise the file, then return 404 on the
+                # download — exactly the symptom reported in issue #19.
+                full_path = medias_dir / path
+                if not full_path.is_file():
+                    logger.debug(
+                        "Dropping stale index entry: %s (path %s no longer on disk)",
+                        filename, path,
+                    )
+                    self._rpm_index.pop(filename, None)
+                    missing.append(filename)
+                    continue
+
                 available.append({
                     'filename': filename,
                     'size': info['size'],

@@ -424,6 +424,13 @@ class DownloadCoordinator:
         def progress_cb(bytes_done: int, bytes_total: int):
             self.update_download_progress(slot, bytes_done)
 
+        # Track the last peer failure so we can surface it if we end up
+        # refusing to fall back to upstream.  Without this, --only-peers
+        # failures all look like "Not available from peers" even when the
+        # peer answered /api/have positively and the actual failure was
+        # something more specific (HTTP 404, network, signature mismatch…).
+        last_peer_error: Optional[str] = None
+
         try:
             # Try peer download if assigned
             if assignment and assignment.source == 'peer' and assignment.peer:
@@ -453,7 +460,10 @@ class DownloadCoordinator:
                         result.from_peer = True
                         return result
 
-                    # Peer failed - check if GPG issue (should blacklist)
+                    # Peer failed - remember why for later diagnostics
+                    last_peer_error = f"{peer.host}: {result.error or 'unknown error'}"
+
+                    # Check if GPG issue (should blacklist)
                     if result.blacklist_peer:
                         self.mark_peer_failed(peer, result.blacklist_peer.reason)
 
@@ -469,6 +479,7 @@ class DownloadCoordinator:
                         if result.success:
                             result.from_peer = True
                             return result
+                        last_peer_error = f"{alt_peer.host}: {result.error or 'unknown error'}"
                         if result.blacklist_peer:
                             self.mark_peer_failed(alt_peer, result.blacklist_peer.reason)
 
@@ -476,10 +487,17 @@ class DownloadCoordinator:
             if self.downloader.only_peers:
                 # Only peers mode: fail if no peer has the package
                 logger.debug(f"only_peers mode: skipping upstream for {item.filename}")
+                if last_peer_error:
+                    error_msg = (
+                        f"peer download failed ({last_peer_error}), "
+                        f"upstream disabled (--only-peers)"
+                    )
+                else:
+                    error_msg = "no peer has this package (--only-peers mode)"
                 return DownloadResult(
                     item=item,
                     success=False,
-                    error="Not available from peers (--only-peers mode)"
+                    error=error_msg,
                 )
 
             # Download from upstream - source will be set by download_one via callback
