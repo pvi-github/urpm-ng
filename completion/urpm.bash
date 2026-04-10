@@ -112,9 +112,17 @@ _urpm_config_dropins() {
 }
 
 _urpm_profile_names() {
-    # Placeholder: resolved in C5 when `urpm mkimage --profile` lands.
-    # Returns nothing so callers fall back to plain file completion.
-    :
+    # mkimage profiles live as YAML files, system-wide under
+    # /usr/share/urpm/profiles/ and overridable under /etc/urpm/profiles/.
+    # Return the basename of each (without the .yaml suffix).
+    local dir f
+    for dir in /usr/share/urpm/profiles /etc/urpm/profiles; do
+        [[ -d "$dir" ]] || continue
+        for f in "$dir"/*.yaml; do
+            [[ -f "$f" ]] || continue
+            basename "$f" .yaml
+        done
+    done | sort -u
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -262,6 +270,171 @@ _urpm_autoremove() {
 _urpm_cleandeps() {
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--auto -y --dry-run" -- "$cur"))
+    fi
+}
+
+# ── Additional top-level commands ────────────────────────────
+
+# Common Mageia release values for --release on init / download.
+_URPM_RELEASE_CHOICES="8 9 10 cauldron"
+# Container runtime choices for mkimage / build.
+_URPM_RUNTIME_CHOICES="docker podman"
+
+_urpm_download() {
+    # download / dl — install-like flag set minus install-only flags.
+    case "$prev" in
+        --release|-r)
+            COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
+            return
+            ;;
+        --allow-arch|--arch)
+            COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+            return
+            ;;
+        --buildrequires|--builddeps|--br|-b)
+            _filedir '@(spec|src.rpm)'
+            return
+            ;;
+    esac
+
+    local download_opts="--release -r --arch --auto -y --without-recommends
+        --no-peers --only-peers --nodeps --allow-arch
+        --buildrequires --builddeps --br -b"
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$download_opts" -- "$cur"))
+    else
+        COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
+    fi
+}
+
+_urpm_init() {
+    # init — bootstrap a urpm root. Does NOT inherit display/debug.
+    case "$prev" in
+        --release)
+            COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
+            return
+            ;;
+        --arch)
+            COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+            return
+            ;;
+        --mirrorlist)
+            _filedir
+            return
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--mirrorlist --arch --release --auto -y --no-sync" -- "$cur"))
+    fi
+}
+
+_urpm_cleanup() {
+    : # No flags, no positionals — relies on --urpm-root from global flags.
+}
+
+_urpm_hold() {
+    # `urpm hold` with no package lists current holds; with packages,
+    # adds them. Takes installed packages only.
+    case "$prev" in
+        --reason|-r)
+            return  # Free text.
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--reason -r --list -l" -- "$cur"))
+    else
+        COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
+    fi
+}
+
+_urpm_unhold() {
+    # unhold releases held packages — no command-specific flags.
+    if [[ "$cur" != -* ]]; then
+        COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
+    fi
+}
+
+_urpm_progress() {
+    # progress — single optional flag, does NOT inherit display/debug.
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--watch -w" -- "$cur"))
+    fi
+}
+
+_urpm_readme() {
+    # readme — show post-install READMEs. --transaction/-t takes an ID.
+    case "$prev" in
+        --transaction|-t)
+            COMPREPLY=($(compgen -W "$(_urpm_transaction_ids)" -- "$cur"))
+            return
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--last --transaction -t --list -l" -- "$cur"))
+    fi
+}
+
+_urpm_mkimage() {
+    # mkimage builds a root chroot / OCI image.
+    case "$prev" in
+        --release|-r)
+            COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
+            return
+            ;;
+        --profile)
+            COMPREPLY=($(compgen -W "$(_urpm_profile_names)" -- "$cur"))
+            return
+            ;;
+        --arch)
+            COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+            return
+            ;;
+        --runtime)
+            COMPREPLY=($(compgen -W "$_URPM_RUNTIME_CHOICES" -- "$cur"))
+            return
+            ;;
+        --workdir|-w)
+            _filedir -d
+            return
+            ;;
+        --tag|-t|--packages|-p)
+            return  # Free text.
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--release -r --tag -t --profile --arch \
+            --packages -p --runtime --keep-chroot --workdir -w" -- "$cur"))
+    fi
+}
+
+_urpm_build() {
+    # build — compile .src.rpm or .spec sources inside a container image.
+    case "$prev" in
+        --image|-i)
+            return  # Free text (OCI image reference).
+            ;;
+        --output|-o)
+            _filedir -d
+            return
+            ;;
+        --runtime)
+            COMPREPLY=($(compgen -W "$_URPM_RUNTIME_CHOICES" -- "$cur"))
+            return
+            ;;
+        --parallel|-j)
+            COMPREPLY=($(compgen -W "1 2 4 6 8 12 16" -- "$cur"))
+            return
+            ;;
+        --with-rpms|-w)
+            return  # Free text glob pattern.
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--image -i --output -o --with-rpms -w \
+            --runtime --parallel -j --keep-container" -- "$cur"))
+    else
+        _filedir '@(spec|src.rpm)'
     fi
 }
 
@@ -490,8 +663,17 @@ _urpm() {
         erase|e)                                _urpm_erase ;;
         upgrade|u)                              _urpm_upgrade ;;
         update|up)                              _urpm_update ;;
+        download|dl)                            _urpm_download ;;
+        init)                                   _urpm_init ;;
+        cleanup)                                _urpm_cleanup ;;
         autoremove|ar)                          _urpm_autoremove ;;
         cleandeps|cd)                           _urpm_cleandeps ;;
+        hold)                                   _urpm_hold ;;
+        unhold)                                 _urpm_unhold ;;
+        progress)                               _urpm_progress ;;
+        readme)                                 _urpm_readme ;;
+        mkimage)                                _urpm_mkimage ;;
+        build)                                  _urpm_build ;;
 
         search|s|query|q)                       _urpm_search ;;
         show|sh|info)                           _urpm_show ;;
