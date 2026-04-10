@@ -267,55 +267,102 @@ _urpm_cleandeps() {
 
 # ── Query / inspection commands ──────────────────────────────
 
+# Positional filter for `urpm list`.
+_URPM_LIST_FILTERS="installed available updates upgradable all"
+# Common depth values for depends/rdepends tree views.
+_URPM_DEPTH_CHOICES="1 2 3 4 5 6 7 8 9"
+
 _urpm_search() {
-    local search_opts="--installed --available --all"
+    # search only exposes --installed and --unavailable; the old
+    # completion also offered --available and --all which never
+    # existed as argparse flags.
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$search_opts" -- "$cur"))
+        COMPREPLY=($(compgen -W "--installed --unavailable" -- "$cur"))
     fi
-    # Package name is free text — no name completion on purpose.
+    # Pattern is free text (FTS query) — no name completion.
 }
 
 _urpm_show() {
-    if [[ "$cur" != -* ]]; then
+    # show / sh / info — take a package and expose --files / --changelog.
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--files --changelog" -- "$cur"))
+    else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
 }
 
 _urpm_list() {
-    local list_opts="--installed --available --upgradable --recent --orphans --autoremovable"
-    if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$list_opts" -- "$cur"))
+    # list takes a single positional filter from a fixed choice list.
+    # No command-specific flags beyond display_parent.
+    if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_LIST_FILTERS" -- "$cur"))
     fi
 }
 
 _urpm_find() {
-    : # File path or capability — free text, no completion.
+    # find / f — FTS-based file name search. Pattern is free text.
+    case "$prev" in
+        --limit|-l)
+            COMPREPLY=($(compgen -W "10 25 50 100 250 500" -- "$cur"))
+            return
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--available -a --installed -i --limit -l" -- "$cur"))
+    fi
+}
+
+_urpm_provides() {
+    # provides / p — takes a package name.
+    if [[ "$cur" != -* ]]; then
+        COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
+    fi
 }
 
 _urpm_whatprovides() {
-    : # Capability string — no specific completion.
+    # whatprovides / wp — takes a capability string or a file path.
+    : # Free text, no completion.
 }
 
 _urpm_depends() {
-    local depends_opts="--installed --available --recursive --tree"
+    # depends / d / requires / req — far richer than rdepends.
+    case "$prev" in
+        --depth)
+            COMPREPLY=($(compgen -W "$_URPM_DEPTH_CHOICES" -- "$cur"))
+            return
+            ;;
+        --prefer)
+            return  # Free text (CSV of preferred alternatives).
+            ;;
+    esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$depends_opts" -- "$cur"))
+        COMPREPLY=($(compgen -W "--tree --all -a --legacy --prefer \
+            --pager --no-libs --depth" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
 }
 
 _urpm_rdepends() {
-    local depends_opts="--installed --available --recursive --tree"
+    # rdepends / rd / whatrequires / wr — narrower flag set than depends
+    # (no --pager, --prefer, --no-libs, --legacy); default depth is 3.
+    case "$prev" in
+        --depth)
+            COMPREPLY=($(compgen -W "$_URPM_DEPTH_CHOICES" -- "$cur"))
+            return
+            ;;
+    esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$depends_opts" -- "$cur"))
+        COMPREPLY=($(compgen -W "--tree --all -a --depth --hide-uninstalled" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
 }
 
 _urpm_recommends_family() {
-    # recommends / whatrecommends / suggests / whatsuggests — all take package names.
+    # recommends / whatrecommends / suggests / whatsuggests — each is a
+    # distinct parser in main.py (no aliases) but none expose any
+    # command-specific flag beyond display_parent. All take a package.
     if [[ "$cur" != -* ]]; then
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
@@ -449,7 +496,8 @@ _urpm() {
         search|s|query|q)                       _urpm_search ;;
         show|sh|info)                           _urpm_show ;;
         list|l)                                 _urpm_list ;;
-        find|f|provides|p)                      _urpm_find ;;
+        find|f)                                 _urpm_find ;;
+        provides|p)                             _urpm_provides ;;
         whatprovides|wp)                        _urpm_whatprovides ;;
         depends|d|requires|req)                 _urpm_depends ;;
         rdepends|rd|whatrequires|wr)            _urpm_rdepends ;;
