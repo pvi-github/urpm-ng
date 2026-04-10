@@ -271,7 +271,6 @@ urpm why <package>            # Explain why a package is installed
 
 # Options for depends
 --tree                        # Show dependency tree
---installed                   # Only show installed dependencies
 --prefer=<prefs>              # Filter by preferences (same syntax as install)
 
 # Options for rdepends

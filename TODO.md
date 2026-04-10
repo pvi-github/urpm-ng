@@ -31,6 +31,15 @@
 
 ## Phase 1 : Fonctionnalités utilisateur
 
+### Queries et dépendances
+- [ ] `--installed` / `-i` pour `depends` et `rdepends` : restreindre
+  l'affichage aux paquets actuellement installés
+  - Intérêt : "qu'est-ce qui dépend *réellement* de X sur ce système",
+    sans le bruit des dépendances facultatives non installées
+  - Cohérent avec le flag `--installed` déjà supporté par `search`
+  - README mentionnait cette option à tort (retirée le 2026-04-10) : à
+    ré-introduire quand le flag sera réellement implémenté
+
 ### needs-restarting
 - [ ] Détecter reboot nécessaire (kernel, glibc, systemd)
 - [ ] Lister services à redémarrer
