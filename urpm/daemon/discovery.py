@@ -6,6 +6,8 @@ import random
 import socket
 import threading
 import time
+import fcntl
+import struct
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, TYPE_CHECKING
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
 from .. import __version__
 from ..core.database import PackageDatabase
 from ..core.config import PROD_DISCOVERY_PORT, DEV_DISCOVERY_PORT
+from ..core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -243,26 +246,99 @@ class PeerDiscovery:
                     break
                 time.sleep(1)
 
+    def _get_broadcast_targets(self) -> list[tuple[str, str, str]]:
+        """Get broadcast targets for all active network interfaces.
+
+        Respects the ``discovery_interfaces`` setting: ``all`` returns every
+        interface that is UP and has a broadcast address (loopback excluded);
+        a comma-separated list restricts to those named interfaces.
+
+        Returns:
+            List of ``(interface_name, broadcast_address, local_ip)`` tuples.
+        """
+        # ioctl constants (Linux)
+        SIOCGIFFLAGS = 0x8913
+        SIOCGIFADDR = 0x8915
+        SIOCGIFBRDADDR = 0x8919
+        IFF_UP = 0x1
+        IFF_BROADCAST = 0x2
+        IFF_LOOPBACK = 0x8
+
+        # Which interfaces to consider
+        settings = get_settings()
+        cfg = settings.daemon.discovery_interfaces.strip().lower()
+        allowed = None  # None = all
+        if cfg != "all":
+            allowed = {n.strip() for n in cfg.split(",") if n.strip()}
+
+        results: list[tuple[str, str, str]] = []
+
+        try:
+            interfaces = socket.if_nameindex()
+        except OSError:
+            return [("default", "<broadcast>", self._get_local_ip())]
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            for _idx, name in interfaces:
+                # Filter by config
+                if allowed is not None and name not in allowed:
+                    continue
+
+                try:
+                    ifreq = struct.pack("256s", name.encode("utf-8")[:15])
+
+                    # Interface flags
+                    flags_res = fcntl.ioctl(sock.fileno(), SIOCGIFFLAGS, ifreq)
+                    flags = struct.unpack("H", flags_res[16:18])[0]
+
+                    if not (flags & IFF_UP):
+                        continue
+                    if flags & IFF_LOOPBACK:
+                        continue
+                    if not (flags & IFF_BROADCAST):
+                        continue
+
+                    # Broadcast address
+                    brd_res = fcntl.ioctl(sock.fileno(), SIOCGIFBRDADDR, ifreq)
+                    broadcast = socket.inet_ntoa(brd_res[20:24])
+
+                    # Local IP on this interface
+                    addr_res = fcntl.ioctl(sock.fileno(), SIOCGIFADDR, ifreq)
+                    local_ip = socket.inet_ntoa(addr_res[20:24])
+
+                    results.append((name, broadcast, local_ip))
+                except OSError:
+                    continue
+        finally:
+            sock.close()
+
+        if not results:
+            return [("default", "<broadcast>", self._get_local_ip())]
+
+        return results
+
     def _send_broadcast(self):
-        """Send UDP broadcast announcing our presence."""
+        """Send UDP broadcast on all configured interfaces."""
         if not self._udp_socket:
             return
 
-        # Build broadcast message
-        message = {
-            'host': self._get_local_ip(),
-            'port': self.daemon.port,
-            'version': __version__,
-        }
+        targets = self._get_broadcast_targets()
 
-        data = DISCOVERY_MAGIC + json.dumps(message).encode('utf-8')
+        for ifname, broadcast_addr, local_ip in targets:
+            message = {
+                'host': local_ip,
+                'port': self.daemon.port,
+                'version': __version__,
+            }
 
-        try:
-            # Send to broadcast address
-            self._udp_socket.sendto(data, ('<broadcast>', self.discovery_port))
-            logger.debug("Sent discovery broadcast")
-        except OSError as e:
-            logger.debug(f"Broadcast send failed: {e}")
+            data = DISCOVERY_MAGIC + json.dumps(message).encode('utf-8')
+
+            try:
+                self._udp_socket.sendto(data, (broadcast_addr, self.discovery_port))
+                logger.debug(f"Sent broadcast on {ifname} ({broadcast_addr})")
+            except OSError as e:
+                logger.debug(f"Broadcast on {ifname} failed: {e}")
 
     def _listen_loop(self):
         """Listen for discovery broadcasts from other peers."""
@@ -414,11 +490,13 @@ class PeerDiscovery:
         if port != self.daemon.port:
             return False
 
-        local_ip = self._get_local_ip()
-        if host == local_ip:
-            return True
         if host in ('127.0.0.1', 'localhost', '::1'):
             return True
+
+        # Check against all local interface IPs
+        for _ifname, _brd, local_ip in self._get_broadcast_targets():
+            if host == local_ip:
+                return True
 
         return False
 

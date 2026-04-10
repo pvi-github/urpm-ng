@@ -95,12 +95,26 @@ class TransactionSettings:
 
 
 @dataclass
+class DaemonSettings:
+    """Daemon (urpmd) behaviour."""
+
+    discovery_interfaces: str = "all"
+    """Network interfaces for P2P discovery broadcasts.
+
+    ``all`` broadcasts on every active interface with a broadcast address
+    (excludes loopback).  A comma-separated list of interface names
+    (e.g. ``eth0,vboxnet0``) restricts broadcasts to those interfaces.
+    """
+
+
+@dataclass
 class Settings:
     """Top-level urpm-ng settings, assembled from config files."""
 
     resolver: ResolverSettings = field(default_factory=ResolverSettings)
     download: DownloadSettings = field(default_factory=DownloadSettings)
     transaction: TransactionSettings = field(default_factory=TransactionSettings)
+    daemon: DaemonSettings = field(default_factory=DaemonSettings)
 
     # Path that was actually loaded (for diagnostics / ``urpm config show``)
     _config_dir: Path = field(default=SYSTEM_CONFIG_DIR, repr=False)
@@ -239,6 +253,14 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
             except ValueError:
                 pass
 
+    # [daemon]
+    if cp.has_section("daemon"):
+        for key, raw in cp.items("daemon"):
+            if key == "discovery_interfaces":
+                val = raw.strip()
+                if val:
+                    settings.daemon.discovery_interfaces = val
+
     # [transaction] — reserved for future settings; mode fields removed
     # (smart sync is now the default, --sync forces full sync)
 
@@ -314,5 +336,9 @@ def format_settings(settings: Settings = None) -> str:
 
     lines.append("[transaction]")
     lines.append("# Smart sync is the default; use --sync for full sync")
+
+    lines.append("")
+    lines.append("[daemon]")
+    lines.append(f"discovery_interfaces = {settings.daemon.discovery_interfaces}")
 
     return "\n".join(lines)
