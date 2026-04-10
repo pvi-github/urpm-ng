@@ -35,6 +35,64 @@ _urpm_media_names() {
     urpm media list --quiet 2>/dev/null | awk '{print $1}'
 }
 
+_urpm_extract_table_first_column() {
+    # Shared helper for tabular `urpm <cmd> list` outputs. A real table
+    # always contains a "----" separator row; if we don't see one, the
+    # command printed an error / empty message and we return nothing.
+    # Avoids proposing localised error words ("Aucun ...") as names.
+    local out="$1"
+    [[ -n "$out" ]] || return 0
+    echo "$out" | grep -q '^-\{4,\}' || return 0
+    echo "$out" | awk '
+        /^-/ { next }
+        /^$/ { next }
+        # Skip the header row (the one before the separator) by
+        # requiring the first column not to look like a localised
+        # word. Accept alphanumerics with dots, dashes, underscores.
+        $1 ~ /^[A-Za-z0-9][A-Za-z0-9._-]*$/ {
+            # Drop rows that are clearly headers (single uppercase word
+            # followed by more uppercase-starting columns).
+            if ($1 ~ /^[A-Z][a-zô]*$/ && NF >= 3) next
+            print $1
+        }
+    '
+}
+
+_urpm_server_names() {
+    _urpm_extract_table_first_column "$(urpm --quiet server list 2>/dev/null)"
+}
+
+_urpm_peer_hosts() {
+    _urpm_extract_table_first_column "$(urpm --quiet peer list 2>/dev/null)"
+}
+
+_urpm_transaction_ids() {
+    # `urpm history` prints an ID-first table. Match data rows by the
+    # "<integer> |" pattern so headers and separators are skipped.
+    urpm --quiet history 2>/dev/null | awk '
+        /^ *[0-9]+ \|/ { print $1 }
+    '
+}
+
+_urpm_config_dropins() {
+    # Config drop-ins live in /etc/urpm/conf.d/*.cfg; completion for
+    # `urpm config edit <name>` should propose drop-in basenames.
+    local dir="${URPM_DEV_MODE:+/var/lib/urpm-dev}/etc/urpm/conf.d"
+    [[ -d "$dir" ]] || dir="/etc/urpm/conf.d"
+    [[ -d "$dir" ]] || return 0
+    local f
+    for f in "$dir"/*.cfg; do
+        [[ -f "$f" ]] || continue
+        basename "$f" .cfg
+    done
+}
+
+_urpm_profile_names() {
+    # Placeholder: resolved in C5 when `urpm mkimage --profile` lands.
+    # Returns nothing so callers fall back to plain file completion.
+    :
+}
+
 # ─────────────────────────────────────────────────────────────
 # 2. Constants
 # ─────────────────────────────────────────────────────────────
@@ -210,7 +268,9 @@ _urpm_rollback() {
 }
 
 _urpm_undo() {
-    : # Transaction ID — dynamic completion added in C2.
+    if [[ "$cur" != -* ]]; then
+        COMPREPLY=($(compgen -W "$(_urpm_transaction_ids)" -- "$cur"))
+    fi
 }
 
 # ── Subcommand groups ────────────────────────────────────────
