@@ -577,16 +577,100 @@ _urpm_undo() {
 # ── Subcommand groups ────────────────────────────────────────
 
 _urpm_media() {
-    local media_subcmds="list l ls add a remove r enable e disable d update u set s"
+    local media_subcmds="list l ls add a remove r enable e disable d update u \
+set s import discover disc autoconfig auto ac seed-info link"
+
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$media_subcmds" -- "$cur"))
-    elif [[ $cword -gt 2 ]]; then
-        case "${words[2]}" in
-            remove|r|enable|e|disable|d|update|u|set|s)
-                _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
-                ;;
-        esac
+        return
     fi
+
+    local sub="${words[2]}"
+    case "$sub" in
+        list|l|ls)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--all -a $_URPM_DISPLAY_FLAGS" -- "$cur"))
+            fi
+            ;;
+        add|a)
+            case "$prev" in
+                --name|--custom|--version) return ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--name --custom --update --disabled \
+--auto -y --import-key --allow-unsigned --version" -- "$cur"))
+            fi
+            ;;
+        remove|r|enable|e|disable|d|seed-info)
+            _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            ;;
+        update|u)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--files -f --no-appstream" -- "$cur"))
+            else
+                _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            fi
+            ;;
+        import)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--replace --auto -y" -- "$cur"))
+            else
+                _filedir 'cfg'
+            fi
+            ;;
+        set|s)
+            case "$prev" in
+                --shared)
+                    COMPREPLY=($(compgen -W "yes no" -- "$cur"))
+                    return
+                    ;;
+                --replication)
+                    COMPREPLY=($(compgen -W "none on_demand seed" -- "$cur"))
+                    return
+                    ;;
+                --seeds|--quota|--retention|--priority)
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--all -a --shared --replication \
+--seeds --quota --retention --priority --sync-files --no-sync-files" -- "$cur"))
+            else
+                _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            fi
+            ;;
+        autoconfig|auto|ac)
+            case "$prev" in
+                --release|-r)
+                    COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
+                    return
+                    ;;
+                --arch)
+                    COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--release -r --arch --dry-run -n \
+--no-nonfree --no-tainted" -- "$cur"))
+            fi
+            ;;
+        discover|disc)
+            case "$prev" in
+                --with|--without) return ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--with --without --sources --debug \
+--dry-run -n" -- "$cur"))
+            fi
+            ;;
+        link)
+            if [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            fi
+            # Subsequent positionals are +server/-server — no dynamic list.
+            ;;
+    esac
 }
 
 _urpm_server() {
