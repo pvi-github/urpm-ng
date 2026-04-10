@@ -196,7 +196,7 @@ _urpm_install() {
         --buildrequires --builddeps --br -b --install-src"
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$install_opts" -- "$cur"))
+        COMPREPLY=($(compgen -W "$install_opts $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
     elif [[ "$cur" == */* || "$cur" == .* ]]; then
         _filedir rpm
     else
@@ -218,7 +218,7 @@ _urpm_erase() {
         --erase-recommends --keep-suggests --debug --sync"
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$erase_opts" -- "$cur"))
+        COMPREPLY=($(compgen -W "$erase_opts $_URPM_DISPLAY_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
     fi
@@ -245,7 +245,7 @@ _urpm_upgrade() {
         --only-peers --allow-arch --sync --config-policy"
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$upgrade_opts" -- "$cur"))
+        COMPREPLY=($(compgen -W "$upgrade_opts $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
     fi
@@ -255,7 +255,7 @@ _urpm_update() {
     # Top-level `update` is a shortcut for `media update`; it takes a
     # media name (optional, default = all) and only one extra flag.
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--files" -- "$cur"))
+        COMPREPLY=($(compgen -W "--files $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
     else
         _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
     fi
@@ -263,13 +263,13 @@ _urpm_update() {
 
 _urpm_autoremove() {
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--auto -y --dry-run" -- "$cur"))
+        COMPREPLY=($(compgen -W "--auto -y --dry-run $_URPM_DISPLAY_FLAGS" -- "$cur"))
     fi
 }
 
 _urpm_cleandeps() {
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--auto -y --dry-run" -- "$cur"))
+        COMPREPLY=($(compgen -W "--auto -y --dry-run $_URPM_DISPLAY_FLAGS" -- "$cur"))
     fi
 }
 
@@ -302,7 +302,7 @@ _urpm_download() {
         --buildrequires --builddeps --br -b"
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$download_opts" -- "$cur"))
+        COMPREPLY=($(compgen -W "$download_opts $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
@@ -342,15 +342,17 @@ _urpm_hold() {
             ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--reason -r --list -l" -- "$cur"))
+        COMPREPLY=($(compgen -W "--reason -r --list -l $_URPM_DISPLAY_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
     fi
 }
 
 _urpm_unhold() {
-    # unhold releases held packages — no command-specific flags.
-    if [[ "$cur" != -* ]]; then
+    # unhold releases held packages — no command-specific flags beyond display.
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+    else
         COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
     fi
 }
@@ -450,7 +452,7 @@ _urpm_search() {
     # completion also offered --available and --all which never
     # existed as argparse flags.
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--installed --unavailable" -- "$cur"))
+        COMPREPLY=($(compgen -W "--installed --unavailable $_URPM_DISPLAY_FLAGS" -- "$cur"))
     fi
     # Pattern is free text (FTS query) — no name completion.
 }
@@ -458,7 +460,7 @@ _urpm_search() {
 _urpm_show() {
     # show / sh / info — take a package and expose --files / --changelog.
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--files --changelog" -- "$cur"))
+        COMPREPLY=($(compgen -W "--files --changelog $_URPM_DISPLAY_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
@@ -467,7 +469,9 @@ _urpm_show() {
 _urpm_list() {
     # list takes a single positional filter from a fixed choice list.
     # No command-specific flags beyond display_parent.
-    if [[ $cword -eq 2 ]]; then
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+    elif [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$_URPM_LIST_FILTERS" -- "$cur"))
     fi
 }
@@ -481,20 +485,24 @@ _urpm_find() {
             ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--available -a --installed -i --limit -l" -- "$cur"))
+        COMPREPLY=($(compgen -W "--available -a --installed -i --limit -l $_URPM_DISPLAY_FLAGS" -- "$cur"))
     fi
 }
 
 _urpm_provides() {
     # provides / p — takes a package name.
-    if [[ "$cur" != -* ]]; then
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+    else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
 }
 
 _urpm_whatprovides() {
     # whatprovides / wp — takes a capability string or a file path.
-    : # Free text, no completion.
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+    fi
 }
 
 _urpm_depends() {
@@ -510,7 +518,7 @@ _urpm_depends() {
     esac
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--tree --all -a --legacy --prefer \
-            --pager --no-libs --depth" -- "$cur"))
+            --pager --no-libs --depth $_URPM_DISPLAY_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
@@ -526,7 +534,7 @@ _urpm_rdepends() {
             ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--tree --all -a --depth --hide-uninstalled" -- "$cur"))
+        COMPREPLY=($(compgen -W "--tree --all -a --depth --hide-uninstalled $_URPM_DISPLAY_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
@@ -536,13 +544,17 @@ _urpm_recommends_family() {
     # recommends / whatrecommends / suggests / whatsuggests — each is a
     # distinct parser in main.py (no aliases) but none expose any
     # command-specific flag beyond display_parent. All take a package.
-    if [[ "$cur" != -* ]]; then
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+    else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
 }
 
 _urpm_why() {
-    if [[ "$cur" != -* ]]; then
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+    else
         COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
     fi
 }
@@ -551,25 +563,49 @@ _urpm_why() {
 
 _urpm_mark() {
     local mark_subcmds="manual m explicit auto a dep show s list"
-    if [[ $cword -eq 2 ]]; then
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+    elif [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$mark_subcmds" -- "$cur"))
-    elif [[ $cword -gt 2 && "${words[2]}" =~ ^(manual|m|explicit|auto|a|dep)$ ]]; then
+    elif [[ "${words[2]}" =~ ^(manual|m|explicit|auto|a|dep)$ ]]; then
         COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
     fi
 }
 
 _urpm_history() {
-    if [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "list search show" -- "$cur"))
+    # history / h — flag-based (not subcommand-based). The old
+    # completion offered "list search show" which were never real
+    # subcommands. Positional is an integer count.
+    case "$prev" in
+        --detail|-d|--delete)
+            COMPREPLY=($(compgen -W "$(_urpm_transaction_ids)" -- "$cur"))
+            return
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--install -i --remove -r --detail -d \
+--delete $_URPM_DISPLAY_FLAGS" -- "$cur"))
     fi
+    # Positional COUNT is an integer — no dynamic completion.
 }
 
 _urpm_rollback() {
-    : # Transaction ID — dynamic completion added in C2.
+    # rollback / r — optional --auto/-y and a free-form positional
+    # ("N", "to N", "to DATE"). Provide transaction IDs for the
+    # "to N" form when the user has already typed "to".
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--auto -y $_URPM_DISPLAY_FLAGS" -- "$cur"))
+    elif [[ "$prev" == "to" ]]; then
+        COMPREPLY=($(compgen -W "$(_urpm_transaction_ids)" -- "$cur"))
+    elif [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "to" -- "$cur"))
+    fi
 }
 
 _urpm_undo() {
-    if [[ "$cur" != -* ]]; then
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--auto -y $_URPM_DISPLAY_FLAGS" -- "$cur"))
+    else
         COMPREPLY=($(compgen -W "$(_urpm_transaction_ids)" -- "$cur"))
     fi
 }
@@ -598,22 +634,26 @@ set s import discover disc autoconfig auto ac seed-info link"
             esac
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--name --custom --update --disabled \
---auto -y --import-key --allow-unsigned --version" -- "$cur"))
+--auto -y --import-key --allow-unsigned --version $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
         remove|r|enable|e|disable|d|seed-info)
-            _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+            else
+                _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            fi
             ;;
         update|u)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--files -f --no-appstream" -- "$cur"))
+                COMPREPLY=($(compgen -W "--files -f --no-appstream $_URPM_DISPLAY_FLAGS" -- "$cur"))
             else
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
             ;;
         import)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--replace --auto -y" -- "$cur"))
+                COMPREPLY=($(compgen -W "--replace --auto -y $_URPM_DISPLAY_FLAGS" -- "$cur"))
             else
                 _filedir 'cfg'
             fi
@@ -634,7 +674,8 @@ set s import discover disc autoconfig auto ac seed-info link"
             esac
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--all -a --shared --replication \
---seeds --quota --retention --priority --sync-files --no-sync-files" -- "$cur"))
+--seeds --quota --retention --priority --sync-files --no-sync-files \
+$_URPM_DISPLAY_FLAGS" -- "$cur"))
             else
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
@@ -652,20 +693,25 @@ set s import discover disc autoconfig auto ac seed-info link"
             esac
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--release -r --arch --dry-run -n \
---no-nonfree --no-tainted" -- "$cur"))
+--no-nonfree --no-tainted $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
         discover|disc)
             case "$prev" in
                 --with|--without) return ;;
             esac
+            # NB: `media discover --debug` is a store_true "include debug
+            # media" flag that shadows debug_parent's --debug, so we do
+            # NOT add $_URPM_DEBUG_FLAGS here.
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--with --without --sources --debug \
---dry-run -n" -- "$cur"))
+--dry-run -n $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
         link)
-            if [[ $cword -eq 3 ]]; then
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
             # Subsequent positionals are +server/-server — no dynamic list.
@@ -694,29 +740,21 @@ priority test t ip-mode stats autoconfig auto"
                 --priority|-p) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--priority -p --disabled --custom" -- "$cur"))
+                COMPREPLY=($(compgen -W "--priority -p --disabled --custom $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             # Positionals are NAME URL — no dynamic list possible.
             ;;
-        remove|r|rm|enable|e|disable|d|stats)
-            if [[ $cword -eq 3 ]]; then
+        remove|r|rm|enable|e|disable|d|stats|test|t|priority)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
             fi
-            ;;
-        test|t)
-            # Optional positional: one server name (empty = all).
-            if [[ $cword -eq 3 ]]; then
-                _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
-            fi
-            ;;
-        priority)
-            if [[ $cword -eq 3 ]]; then
-                _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
-            fi
-            # 4th positional = integer, no completion.
             ;;
         ip-mode)
-            if [[ $cword -eq 3 ]]; then
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
             elif [[ $cword -eq 4 ]]; then
                 COMPREPLY=($(compgen -W "auto ipv4 ipv6 dual" -- "$cur"))
@@ -730,7 +768,7 @@ priority test t ip-mode stats autoconfig auto"
                     ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -n --release -r" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -n --release -r $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
     esac
@@ -749,19 +787,27 @@ enable-version clean sync rate-limit"
     case "$sub" in
         clean)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -n" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -n $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
         sync)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--latest-only" -- "$cur"))
+                COMPREPLY=($(compgen -W "--latest-only $_URPM_DISPLAY_FLAGS" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
             ;;
         rate-limit)
-            if [[ $cword -eq 3 ]]; then
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
                 COMPREPLY=($(compgen -W "on off" -- "$cur"))
+            fi
+            ;;
+        *)
+            # Flagless subcommands still inherit display_parent.
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
     esac
@@ -778,7 +824,12 @@ _urpm_cache() {
     case "${words[2]}" in
         clean)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -n --auto -y --verbose -v" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -n --auto -y --verbose -v $_URPM_DISPLAY_FLAGS" -- "$cur"))
+            fi
+            ;;
+        *)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
     esac
@@ -789,6 +840,12 @@ _urpm_config() {
 show gnome-auto-upgrades gau discover-auto-upgrades dau \
 packagekit-auto-upgrades pau edit"
     local auto_upgrade_choices="yes no true false on off"
+
+    # config has no flags of its own, but inherits display_parent.
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        return
+    fi
 
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$config_subcmds" -- "$cur"))
@@ -837,7 +894,9 @@ packagekit-auto-upgrades pau edit"
 
 _urpm_key() {
     local key_subcmds="list ls l import i add remove rm del"
-    if [[ $cword -eq 2 ]]; then
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+    elif [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$key_subcmds" -- "$cur"))
     elif [[ $cword -eq 3 && "${words[2]}" =~ ^(import|i|add)$ ]]; then
         _filedir
@@ -856,12 +915,17 @@ unblacklist unbl unblock clean"
 
     local sub="${words[2]}"
     case "$sub" in
+        list|ls)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+            fi
+            ;;
         downloads|dl)
             case "$prev" in
                 --limit|-n) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--limit -n" -- "$cur"))
+                COMPREPLY=($(compgen -W "--limit -n $_URPM_DISPLAY_FLAGS" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
             fi
@@ -871,7 +935,7 @@ unblacklist unbl unblock clean"
                 --port|-p|--reason|-r) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--port -p --reason -r" -- "$cur"))
+                COMPREPLY=($(compgen -W "--port -p --reason -r $_URPM_DISPLAY_FLAGS" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
             fi
@@ -881,12 +945,15 @@ unblacklist unbl unblock clean"
                 --port|-p) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--port -p" -- "$cur"))
+                COMPREPLY=($(compgen -W "--port -p $_URPM_DISPLAY_FLAGS" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
             fi
             ;;
         clean)
+            # NB: peer clean defines its own --show-all (no truncation)
+            # and does NOT inherit display_parent — do not add
+            # $_URPM_DISPLAY_FLAGS here.
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--yes -y --show-all -a" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
