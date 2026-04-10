@@ -751,7 +751,54 @@ _urpm_cache() {
 }
 
 _urpm_config() {
-    : # Entire config dispatch is added in C8.
+    local config_subcmds="blacklist bl redlist rl kernel-keep kk version-mode vm \
+show gnome-auto-upgrades gau discover-auto-upgrades dau \
+packagekit-auto-upgrades pau edit"
+    local auto_upgrade_choices="yes no true false on off"
+
+    if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$config_subcmds" -- "$cur"))
+        return
+    fi
+
+    local sub="${words[2]}"
+    case "$sub" in
+        blacklist|bl|redlist|rl)
+            if [[ $cword -eq 3 ]]; then
+                COMPREPLY=($(compgen -W "list ls add a remove rm" -- "$cur"))
+                return
+            fi
+            local subsub="${words[3]}"
+            case "$subsub" in
+                add|a|remove|rm)
+                    if [[ $cword -eq 4 ]]; then
+                        COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
+                    fi
+                    ;;
+            esac
+            ;;
+        kernel-keep|kk)
+            # Optional integer positional — no completion.
+            ;;
+        version-mode|vm)
+            if [[ $cword -eq 3 ]]; then
+                COMPREPLY=($(compgen -W "system cauldron auto" -- "$cur"))
+            fi
+            ;;
+        gnome-auto-upgrades|gau|discover-auto-upgrades|dau|packagekit-auto-upgrades|pau)
+            if [[ $cword -eq 3 ]]; then
+                COMPREPLY=($(compgen -W "$auto_upgrade_choices" -- "$cur"))
+            fi
+            ;;
+        show)
+            # No positional, no flags.
+            ;;
+        edit)
+            if [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_config_dropins)
+            fi
+            ;;
+    esac
 }
 
 _urpm_key() {
