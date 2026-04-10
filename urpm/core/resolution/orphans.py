@@ -709,18 +709,28 @@ class OrphansMixin:
         return cap
 
     def find_upgrade_orphans(self, all_actions: list) -> list:
-        """Find packages that will become orphans after a transaction.
+        """Find packages that become newly orphaned by a transaction.
 
-        Simulates the post-transaction state (applying upgrades, installs,
-        and removes) then checks which unrequested packages are no longer
-        required by anyone.
+        Implements the formal specification::
+
+            new_orphans(T) = { P ∈ S_post |
+                unrequested(P) ∧ orphan(P, S_post)
+                ∧ ¬(P ∈ S_pre ∧ orphan(P, S_pre)) }
+
+        where ``orphan(P, S) ≡ ∀Q ∈ S, P ∉ Requires(Q) ∪ Recommends(Q)``.
+
+        Pre-existing orphans (already orphan before the transaction) are
+        NOT flagged — that is the job of ``urpm autoremove``.  Weak deps
+        (Recommends) count as real dependency edges for this computation:
+        a package pulled only by Recommends is a legitimate child of its
+        parent, and must be flagged if the parent stops recommending it.
 
         Args:
             all_actions: All PackageActions in the transaction (upgrades,
                          installs, removes, downgrades).
 
         Returns:
-            List of PackageAction for packages that will become orphans
+            List of PackageAction(REMOVE) for packages to clean up.
         """
         from ..resolver import TransactionType, PackageAction
 
@@ -737,10 +747,9 @@ class OrphansMixin:
 
         ts = rpm.TransactionSet(self.root or '/')
 
-        # Classify transaction actions
-        upgraded_names = set()   # Packages being upgraded (same name, new version)
-        installed_names = set()  # New packages being installed
-        removed_names = set()    # Packages being removed (obsoleted, etc.)
+        upgraded_names = set()
+        installed_names = set()
+        removed_names = set()
 
         for action in all_actions:
             if action.action == TransactionType.UPGRADE:
@@ -750,81 +759,78 @@ class OrphansMixin:
             elif action.action == TransactionType.REMOVE:
                 removed_names.add(action.name)
 
-        # If nothing changes, no orphans
-        if not upgraded_names and not installed_names and not removed_names:
+        if not (upgraded_names or installed_names or removed_names):
             return []
 
-        # Build pre- and post-transaction states in a single rpmdb pass.
-        # Pre-state = current rpmdb as-is (what we have now).
-        # Post-state = rpmdb with upgrades applied (new requires/provides
-        # from synthesis), removals excluded, and new installs added.
-        # Comparing orphan status between both states lets us detect
-        # packages that become NEWLY orphaned by the transaction.
-        pre_state = {}   # name -> {'requires': set, 'provides': set}
-        post_state = {}  # name -> {'requires': set, 'provides': set}
         logger = logging.getLogger(__name__)
+
+        def _collect_from_header(hdr):
+            """Extract (requires ∪ recommends, provides) from an rpmdb header."""
+            reqs = set()
+            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
+                if not req.startswith('rpmlib('):
+                    reqs.add(self._extract_cap_name(req))
+            for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
+                reqs.add(self._extract_cap_name(rec))
+            provs = set()
+            for p in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                provs.add(self._extract_cap_name(p))
+            return reqs, provs
+
+        def _collect_from_synthesis(pkg):
+            """Extract (requires ∪ recommends, provides) from a synthesis entry."""
+            reqs = set()
+            provs = set()
+            if pkg:
+                for r in pkg.get('requires', []):
+                    cap = self._extract_cap_name(r)
+                    if not cap.startswith('rpmlib('):
+                        reqs.add(cap)
+                for r in pkg.get('recommends', []):
+                    reqs.add(self._extract_cap_name(r))
+                for p in pkg.get('provides', []):
+                    provs.add(self._extract_cap_name(p))
+            return reqs, provs
+
+        # Build S_pre (current rpmdb) and S_post (rpmdb + upgrades applied,
+        # removals excluded, new installs added) in a single rpmdb pass.
+        pre_state = {}
+        post_state = {}
 
         for hdr in ts.dbMatch():
             name = hdr[rpm.RPMTAG_NAME]
             if name == 'gpg-pubkey':
                 continue
 
-            # Read current rpmdb data (used for pre-state, and post-state
-            # for non-upgraded packages)
-            rpmdb_requires = set()
-            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                if not req.startswith('rpmlib('):
-                    rpmdb_requires.add(self._extract_cap_name(req))
-            rpmdb_provides = {name}
-            for p in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                rpmdb_provides.add(self._extract_cap_name(p))
+            rpm_reqs, rpm_provs = _collect_from_header(hdr)
+            rpm_provs.add(name)
+            pre_state[name] = {'requires': rpm_reqs, 'provides': rpm_provs}
 
-            # Pre-state: all current packages (including those being removed)
-            pre_state[name] = {
-                'requires': rpmdb_requires, 'provides': rpmdb_provides,
-            }
-
-            # Post-state: skip removed, use synthesis for upgraded
             if name in removed_names:
                 continue
 
             if name in upgraded_names:
-                pkg = self.db.get_package(name)
-                new_requires = set()
-                new_provides = {name}
-                if pkg:
-                    for r in pkg.get('requires', []):
-                        cap = self._extract_cap_name(r)
-                        if not cap.startswith('rpmlib('):
-                            new_requires.add(cap)
-                    for p in pkg.get('provides', []):
-                        new_provides.add(self._extract_cap_name(p))
+                new_reqs, new_provs = _collect_from_synthesis(
+                    self.db.get_package(name)
+                )
+                new_provs.add(name)
                 post_state[name] = {
-                    'requires': new_requires, 'provides': new_provides,
+                    'requires': new_reqs, 'provides': new_provs,
                 }
             else:
                 post_state[name] = {
-                    'requires': rpmdb_requires, 'provides': rpmdb_provides,
+                    'requires': rpm_reqs, 'provides': rpm_provs,
                 }
 
-        # Add newly installed packages to post-state only
         for name in installed_names:
             if name in post_state:
                 continue
-            pkg = self.db.get_package(name)
-            requires = set()
-            provides = {name}
-            if pkg:
-                for r in pkg.get('requires', []):
-                    cap = self._extract_cap_name(r)
-                    if not cap.startswith('rpmlib('):
-                        requires.add(cap)
-                for p in pkg.get('provides', []):
-                    provides.add(self._extract_cap_name(p))
-            post_state[name] = {'requires': requires, 'provides': provides}
+            reqs, provs = _collect_from_synthesis(self.db.get_package(name))
+            provs.add(name)
+            post_state[name] = {'requires': reqs, 'provides': provs}
 
         def _build_reverse_deps(state):
-            """Build reverse-dependency graph from a state dict."""
+            """Build reverse-dependency graph: for each P, who requires P."""
             cap_providers = {}
             for name, info in state.items():
                 for cap in info['provides']:
@@ -834,53 +840,58 @@ class OrphansMixin:
                 for req in info['requires']:
                     for provider in cap_providers.get(req, set()):
                         if provider != name:
-                            rev.setdefault(provider, set()).add(name)
+                            rev[provider].add(name)
             return rev
 
-        pre_reverse_deps = _build_reverse_deps(pre_state)
-        post_reverse_deps = _build_reverse_deps(post_state)
+        pre_reverse = _build_reverse_deps(pre_state)
+        post_reverse = _build_reverse_deps(post_state)
 
+        # Newly installed packages are not yet in the persisted "unrequested"
+        # set (mark_dependencies runs AFTER the transaction).  Treat them
+        # as unrequested for this computation so that:
+        #   1. they become valid orphan candidates when nothing ends up
+        #      requiring them, and
+        #   2. graph traversal walks THROUGH them instead of stopping
+        #      (they must not count as "explicit" ancestors for their
+        #      own dependencies).
         effective_unrequested = set(unrequested)
+        effective_unrequested |= {n.lower() for n in installed_names}
 
-        def _has_explicit_ancestor(pkg_name, visited, rev_deps):
-            """Walk up reverse deps to find any explicit (non-unrequested) package."""
-            if pkg_name in visited:
-                return False
-            visited.add(pkg_name)
-            for dep_name in rev_deps.get(pkg_name, set()):
-                if dep_name.lower() not in effective_unrequested:
-                    return True
-                if _has_explicit_ancestor(dep_name, visited, rev_deps):
-                    return True
-            return False
+        def _is_orphan(pkg_name, rev_deps):
+            """True iff no explicit (non-unrequested) ancestor reaches pkg_name.
 
-        # A package is NEWLY orphaned if it had an explicit ancestor before
-        # the transaction but won't have one after.  Pre-existing orphans
-        # (no ancestor in either state) are NOT flagged — that's the job
-        # of `urpm autoremove`, not `urpm upgrade`.
+            Iterative DFS to avoid recursion limits on large dep graphs.
+            """
+            visited = {pkg_name}
+            stack = [pkg_name]
+            while stack:
+                current = stack.pop()
+                for parent in rev_deps.get(current, set()):
+                    if parent.lower() not in effective_unrequested:
+                        return False
+                    if parent not in visited:
+                        visited.add(parent)
+                        stack.append(parent)
+            return True
+
+        # Literal translation of the formal spec:
+        #   P ∈ S_post ∧ unrequested(P)
+        #   ∧ orphan(P, S_post)
+        #   ∧ ¬(P ∈ S_pre ∧ orphan(P, S_pre))
         orphan_candidates = set()
         for name in post_state:
             if name.lower() not in effective_unrequested:
                 continue
-            # Packages being upgraded or installed are not orphan candidates
-            if name in upgraded_names or name in installed_names:
+            if not _is_orphan(name, post_reverse):
                 continue
-            # Must be orphan in post-state
-            if _has_explicit_ancestor(name, set(), post_reverse_deps):
+            if name in pre_state and _is_orphan(name, pre_reverse):
                 continue
-            # Must NOT have been orphan in pre-state (i.e. had an ancestor before)
-            if name not in pre_state:
-                continue  # New package, not a pre-existing orphan
-            if not _has_explicit_ancestor(name, set(), pre_reverse_deps):
-                continue  # Already orphaned before — skip
             orphan_candidates.add(name)
 
         logger.debug(
-            "[orphan-diag] pre_state=%d, post_state=%d, unrequested=%d, "
-            "orphan_candidates=%d: %s",
+            "[orphan-diag] pre=%d post=%d unrequested=%d new_orphans=%d: %s",
             len(pre_state), len(post_state), len(effective_unrequested),
-            len(orphan_candidates),
-            sorted(orphan_candidates)[:20],
+            len(orphan_candidates), sorted(orphan_candidates)[:20],
         )
 
         # Build PackageAction list for orphans
