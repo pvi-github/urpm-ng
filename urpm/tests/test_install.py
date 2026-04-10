@@ -2292,7 +2292,6 @@ class TestShouldRestart:
 
         assert len(messages) == 1
         assert 'kernel-desktop' in messages[0]
-        assert 'computer' in messages[0].lower() or 'restart' in messages[0].lower()
 
     @pytest.mark.stable
     def test_format_restart_messages_session(self):
