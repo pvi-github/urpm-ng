@@ -129,7 +129,7 @@ class PoolMixin:
             # User needs to choose between system version and cauldron
             raise VersionConflictError(
                 f"Ambiguous media configuration: both {system_version} and cauldron media are enabled. "
-                f"Use 'urpm config set version-mode <system|cauldron>' to choose.",
+                f"Use 'urpm config version-mode <system|cauldron>' to choose.",
                 conflict_info
             )
 
