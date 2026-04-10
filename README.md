@@ -176,7 +176,6 @@ urpm install mypackage --allow-arch i686 --allow-arch armv7hl
 ```bash
 urpm erase <package>          # Remove a package
 urpm e <package>              # Short alias
-urpm remove <package>         # Alternative alias
 
 # Options
 --auto                        # Non-interactive mode
