@@ -737,17 +737,51 @@ priority test t ip-mode stats autoconfig auto"
 }
 
 _urpm_mirror() {
-    local mirror_subcmds="status enable disable quota"
+    local mirror_subcmds="status enable disable quota disable-version \
+enable-version clean sync rate-limit"
+
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$mirror_subcmds" -- "$cur"))
+        return
     fi
+
+    local sub="${words[2]}"
+    case "$sub" in
+        clean)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--dry-run -n" -- "$cur"))
+            fi
+            ;;
+        sync)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--latest-only" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            fi
+            ;;
+        rate-limit)
+            if [[ $cword -eq 3 ]]; then
+                COMPREPLY=($(compgen -W "on off" -- "$cur"))
+            fi
+            ;;
+    esac
 }
 
 _urpm_cache() {
-    local cache_subcmds="info clean rebuild stats"
+    local cache_subcmds="info clean rebuild rebuild-fts stats"
+
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$cache_subcmds" -- "$cur"))
+        return
     fi
+
+    case "${words[2]}" in
+        clean)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--dry-run -n --auto -y --verbose -v" -- "$cur"))
+            fi
+            ;;
+    esac
 }
 
 _urpm_config() {
@@ -805,16 +839,95 @@ _urpm_key() {
     local key_subcmds="list ls l import i add remove rm del"
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$key_subcmds" -- "$cur"))
-    elif [[ $cword -gt 2 && "${words[2]}" =~ ^(import|i|add)$ ]]; then
+    elif [[ $cword -eq 3 && "${words[2]}" =~ ^(import|i|add)$ ]]; then
         _filedir
     fi
+    # `key remove KEYID` positional is an opaque hex id — no dynamic list.
 }
 
 _urpm_peer() {
-    local peer_subcmds="list ls downloads dl blacklist bl block unblacklist unbl unblock"
+    local peer_subcmds="list ls downloads dl blacklist bl block \
+unblacklist unbl unblock clean"
+
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$peer_subcmds" -- "$cur"))
+        return
     fi
+
+    local sub="${words[2]}"
+    case "$sub" in
+        downloads|dl)
+            case "$prev" in
+                --limit|-n) return ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--limit -n" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
+            fi
+            ;;
+        blacklist|bl|block)
+            case "$prev" in
+                --port|-p|--reason|-r) return ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--port -p --reason -r" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
+            fi
+            ;;
+        unblacklist|unbl|unblock)
+            case "$prev" in
+                --port|-p) return ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--port -p" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
+            fi
+            ;;
+        clean)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--yes -y --show-all -a" -- "$cur"))
+            elif [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
+            fi
+            ;;
+    esac
+}
+
+_urpm_appstream() {
+    local appstream_subcmds="generate gen status merge init-distro"
+
+    if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$appstream_subcmds" -- "$cur"))
+        return
+    fi
+
+    case "${words[2]}" in
+        generate|gen)
+            case "$prev" in
+                --output|-o) _filedir; return ;;
+                --media|-m)
+                    _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--output -o --no-compress --media -m" -- "$cur"))
+            fi
+            ;;
+        merge)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--refresh -r" -- "$cur"))
+            fi
+            ;;
+        init-distro)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--force -f" -- "$cur"))
+            fi
+            ;;
+    esac
 }
 
 # ── Fallback: first word, or unknown command ─────────────────
@@ -879,6 +992,7 @@ _urpm() {
         config|cfg)                             _urpm_config ;;
         key|k)                                  _urpm_key ;;
         peer)                                   _urpm_peer ;;
+        appstream)                              _urpm_appstream ;;
 
         *)                                      _urpm_global ;;
     esac
