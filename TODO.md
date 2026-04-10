@@ -40,6 +40,16 @@
   - README mentionnait cette option à tort (retirée le 2026-04-10) : à
     ré-introduire quand le flag sera réellement implémenté
 
+### Ergonomie CLI
+- [ ] Renommer `urpm media discover --with` / `--without` en
+  `--enabled` / `--disabled`
+  - `--with` / `--without` laissent croire à un filtrage sur les paquets
+    présents, alors qu'il s'agit en réalité d'activer/désactiver des
+    media au moment de la découverte
+  - Garder les anciens noms comme alias cachés pendant une release
+    pour ne pas casser les scripts existants
+  - Mettre à jour README, man pages, complétion bash
+
 ### needs-restarting
 - [ ] Détecter reboot nécessaire (kernel, glibc, systemd)
 - [ ] Lister services à redémarrer

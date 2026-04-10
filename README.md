@@ -395,7 +395,6 @@ Discover all available media from any Mageia-compatible repository
 urpm media discover https://repo.example.org/9/x86_64/media/       # Add all media
 urpm media discover --dry-run https://repo.example.org/9/x86_64/media/  # Preview only
 urpm media discover --sources --debug https://...                   # Include SRPMS and debug
-urpm media discover --enable https://...                            # Enable all (even noauto)
 ```
 
 The command fetches `media.cfg` from the repository, discovers all media,
