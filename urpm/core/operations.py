@@ -475,15 +475,24 @@ class PackageOperations:
 
         success = queue_result.success if queue_result is not None else True
 
+        # Surface per-operation errors to the caller so the CLI can show
+        # the real rpm problems (e.g. file conflicts). Fall back to the
+        # queue-level overall_error only when no per-op error is available,
+        # otherwise the detailed list is silently dropped and the user
+        # sees "Installation failed:" with nothing after.
+        op_errors: List[str] = []
+        if queue_result and not queue_result.success:
+            for op in queue_result.operations:
+                if not op.success:
+                    op_errors.extend(op.errors)
+            if not op_errors and queue_result.overall_error:
+                op_errors = [queue_result.overall_error]
+
         return ResilientInstallResult(
             success=success,
             installed_count=installed_count,
             excluded_packages=excluded,
-            errors=(
-                [queue_result.overall_error]
-                if queue_result and not queue_result.success and queue_result.overall_error
-                else []
-            ),
+            errors=op_errors,
             reduced_transaction=bool(excluded),
             queue_result=queue_result,
         )

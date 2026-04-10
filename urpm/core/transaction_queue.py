@@ -691,7 +691,15 @@ queue._child_process_standalone()
                 elif msg.msg_type == 'op_error':
                     if current_op_result:
                         current_op_result.success = False
-                        current_op_result.errors = [msg.error] if msg.error else []
+                        # Prefer the full `errors` list (e.g. every file
+                        # conflict in an rpm transaction); fall back to
+                        # the single `error` field for older messages.
+                        if msg.errors:
+                            current_op_result.errors = list(msg.errors)
+                        elif msg.error:
+                            current_op_result.errors = [msg.error]
+                        else:
+                            current_op_result.errors = []
                         results.append(current_op_result)
                         current_op_result = None
                 elif msg.msg_type == 'queue_error':
