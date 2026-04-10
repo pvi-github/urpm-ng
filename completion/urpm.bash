@@ -133,9 +133,36 @@ _URPM_COMMANDS="install i erase e upgrade u update up \
 
 # ── Core transaction commands ────────────────────────────────
 
+# Flags that take a value from a fixed choice list — completed when
+# the previous word on the command line matches.
+_URPM_CONFIG_POLICY_CHOICES="keep replace ask"
+_URPM_ERASE_DEBUG_CHOICES="solver tsrun all"
+# Common RPM architectures for --allow-arch. Not a closed choice list
+# in argparse — just a convenience shortlist.
+_URPM_ARCH_CHOICES="x86_64 i686 i586 aarch64 armv7hl noarch"
+
 _urpm_install() {
-    local install_opts="--auto -y --force --reinstall --download-only --nodeps
-        --nosignature --without-recommends --with-suggests --prefer --all"
+    # Value-completion for flags with a fixed / conventional argument.
+    case "$prev" in
+        --config-policy)
+            COMPREPLY=($(compgen -W "$_URPM_CONFIG_POLICY_CHOICES" -- "$cur"))
+            return
+            ;;
+        --allow-arch)
+            COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+            return
+            ;;
+        --buildrequires|--builddeps|--br|-b)
+            _filedir '@(spec|src.rpm)'
+            return
+            ;;
+    esac
+
+    local install_opts="--auto -y --test --force --reinstall --download-only
+        --nodeps --nosignature --noscripts --without-recommends --with-suggests
+        --prefer --all --no-peers --only-peers --allow-arch --sync --config-policy
+        --buildrequires --builddeps --br -b --install-src"
+
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "$install_opts" -- "$cur"))
     elif [[ "$cur" == */* || "$cur" == .* ]]; then
@@ -146,7 +173,18 @@ _urpm_install() {
 }
 
 _urpm_erase() {
-    local erase_opts="--auto -y --force --nodeps"
+    # erase defines its OWN --debug with a closed choice list, shadowing
+    # the store_true --debug from debug_parent.
+    case "$prev" in
+        --debug)
+            COMPREPLY=($(compgen -W "$_URPM_ERASE_DEBUG_CHOICES" -- "$cur"))
+            return
+            ;;
+    esac
+
+    local erase_opts="--auto -y --test --force --auto-orphans --keep-orphans
+        --erase-recommends --keep-suggests --debug --sync"
+
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "$erase_opts" -- "$cur"))
     else
@@ -155,7 +193,25 @@ _urpm_erase() {
 }
 
 _urpm_upgrade() {
-    local upgrade_opts="--auto -y --force --download-only --without-recommends --all"
+    # Note the asymmetry with install: upgrade has --with-recommends
+    # (opt-in) while install has --without-recommends (opt-out). There
+    # is no --reinstall, --nodeps, --noscripts, --prefer, --all,
+    # --buildrequires or --install-src on upgrade.
+    case "$prev" in
+        --config-policy)
+            COMPREPLY=($(compgen -W "$_URPM_CONFIG_POLICY_CHOICES" -- "$cur"))
+            return
+            ;;
+        --allow-arch)
+            COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+            return
+            ;;
+    esac
+
+    local upgrade_opts="--auto -y --test --force --download-only --nosignature
+        --noerase-orphans --with-recommends --with-suggests --no-peers
+        --only-peers --allow-arch --sync --config-policy"
+
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "$upgrade_opts" -- "$cur"))
     else
@@ -164,9 +220,10 @@ _urpm_upgrade() {
 }
 
 _urpm_update() {
-    local update_opts="--auto -y --force"
+    # Top-level `update` is a shortcut for `media update`; it takes a
+    # media name (optional, default = all) and only one extra flag.
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$update_opts" -- "$cur"))
+        COMPREPLY=($(compgen -W "--files" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_media_names)" -- "$cur"))
     fi
