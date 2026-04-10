@@ -32,7 +32,31 @@ _urpm_available_packages() {
 }
 
 _urpm_media_names() {
-    urpm media list --quiet 2>/dev/null | awk '{print $1}'
+    # Query urpm's SQLite cache directly. The `media` table stores one
+    # row per configured medium, whose name may contain spaces (e.g.
+    # "Core Release"), which ruled out the old text-scraping approach.
+    local cache_db="${URPM_DEV_MODE:+/var/lib/urpm-dev}/var/lib/urpm/packages.db"
+    [[ -f "$cache_db" ]] || return 0
+    sqlite3 "$cache_db" 'SELECT name FROM media' 2>/dev/null
+}
+
+_urpm_compreply_from_lines() {
+    # Read newline-separated choices from stdin and populate COMPREPLY
+    # with shell-escaped matches. Use this whenever a dynamic helper
+    # may return values containing spaces (e.g. media names like
+    # "Core Release"). `printf %q` produces a form that bash parses
+    # back into the original string when inserted on the command line.
+    #
+    # Usage: _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+    local cur="$1"
+    local line
+    COMPREPLY=()
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        if [[ -z "$cur" || "$line" == "$cur"* ]]; then
+            COMPREPLY+=("$(printf '%q' "$line")")
+        fi
+    done
 }
 
 _urpm_extract_table_first_column() {
@@ -225,7 +249,7 @@ _urpm_update() {
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--files" -- "$cur"))
     else
-        COMPREPLY=($(compgen -W "$(_urpm_media_names)" -- "$cur"))
+        _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
     fi
 }
 
@@ -339,7 +363,7 @@ _urpm_media() {
     elif [[ $cword -gt 2 ]]; then
         case "${words[2]}" in
             remove|r|enable|e|disable|d|update|u|set|s)
-                COMPREPLY=($(compgen -W "$(_urpm_media_names)" -- "$cur"))
+                _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
                 ;;
         esac
     fi
