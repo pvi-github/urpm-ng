@@ -421,6 +421,11 @@ class TransactionQueue:
         self.root = root
         self.use_userns = use_userns
         self.operations: List[QueuedOperation] = []
+        # Sentinel for the scriptlet-marker capture fd. Set to a real fd in
+        # _child_process() (root branch). _child_process_standalone() leaves
+        # it at -1; the callbacks' os.write will then raise OSError(EBADF),
+        # which is already swallowed by the surrounding try/except.
+        self._capture_fd = -1
 
     @staticmethod
     def _userns_available() -> bool:
