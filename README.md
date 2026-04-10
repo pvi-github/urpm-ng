@@ -221,7 +221,6 @@ urpm ar                       # Short alias
 
 # Options
 --auto, -y                    # Non-interactive mode
---include-warned              # Also remove packages in redlist
 ```
 
 ## Search and Query
