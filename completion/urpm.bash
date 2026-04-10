@@ -674,17 +674,66 @@ set s import discover disc autoconfig auto ac seed-info link"
 }
 
 _urpm_server() {
-    local server_subcmds="list l ls add a remove r rm enable e disable d test t autoconfig auto"
+    local server_subcmds="list l ls add a remove r rm enable e disable d \
+priority test t ip-mode stats autoconfig auto"
+
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$server_subcmds" -- "$cur"))
-    elif [[ $cword -eq 3 ]]; then
-        case "${words[2]}" in
-            remove|r|rm|enable|e|disable|d|test|t)
-                # TODO(C7): switch to _urpm_server_names once the helper lands.
-                COMPREPLY=($(compgen -W "$(_urpm_media_names)" -- "$cur"))
-                ;;
-        esac
+        return
     fi
+
+    local sub="${words[2]}"
+    case "$sub" in
+        list|l|ls)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--all -a $_URPM_DISPLAY_FLAGS" -- "$cur"))
+            fi
+            ;;
+        add|a)
+            case "$prev" in
+                --priority|-p) return ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--priority -p --disabled --custom" -- "$cur"))
+            fi
+            # Positionals are NAME URL — no dynamic list possible.
+            ;;
+        remove|r|rm|enable|e|disable|d|stats)
+            if [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
+            fi
+            ;;
+        test|t)
+            # Optional positional: one server name (empty = all).
+            if [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
+            fi
+            ;;
+        priority)
+            if [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
+            fi
+            # 4th positional = integer, no completion.
+            ;;
+        ip-mode)
+            if [[ $cword -eq 3 ]]; then
+                _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
+            elif [[ $cword -eq 4 ]]; then
+                COMPREPLY=($(compgen -W "auto ipv4 ipv6 dual" -- "$cur"))
+            fi
+            ;;
+        autoconfig|auto)
+            case "$prev" in
+                --release|-r)
+                    COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--dry-run -n --release -r" -- "$cur"))
+            fi
+            ;;
+    esac
 }
 
 _urpm_mirror() {
