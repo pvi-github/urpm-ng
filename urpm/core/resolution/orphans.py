@@ -1,14 +1,168 @@
 """Orphan package detection operations."""
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set, Tuple
 
 try:
     import rpm
     HAS_RPM = True
 except ImportError:
     HAS_RPM = False
+
+
+# --- Module-level constants for versioned capability handling ---------------
+#
+# A "sense" is an RPMSENSE_* bitmask describing a dependency comparison
+# operator (e.g. ``>=`` is ``RPMSENSE_GREATER | RPMSENSE_EQUAL``).  The
+# mask below isolates the three comparison bits from the other RPMSENSE
+# flags (PREREQ, SCRIPT_PRE, …) which do not affect satisfiability.
+
+if HAS_RPM:
+    _SENSE_MASK = (
+        rpm.RPMSENSE_LESS | rpm.RPMSENSE_EQUAL | rpm.RPMSENSE_GREATER
+    )
+    _SYNTHESIS_SENSE_MAP = {
+        '<':  rpm.RPMSENSE_LESS,
+        '<=': rpm.RPMSENSE_LESS | rpm.RPMSENSE_EQUAL,
+        '=':  rpm.RPMSENSE_EQUAL,
+        '==': rpm.RPMSENSE_EQUAL,
+        '>=': rpm.RPMSENSE_GREATER | rpm.RPMSENSE_EQUAL,
+        '>':  rpm.RPMSENSE_GREATER,
+    }
+else:  # pragma: no cover - rpm is always available in production
+    _SENSE_MASK = 0
+    _SYNTHESIS_SENSE_MAP = {}
+
+
+@dataclass
+class UpgradeOrphanPlan:
+    """Plan for handling orphans discovered during an upgrade transaction.
+
+    :meth:`OrphansMixin.find_upgrade_orphans` partitions new orphans
+    into two disjoint concerns so the caller can project them cleanly
+    onto the transaction:
+
+    Attributes:
+        removes: ``PackageAction`` instances (always ``REMOVE``) for
+            packages that are **currently installed in the rpmdb** and
+            become orphaned by the transaction.  The caller should
+            erase them.  For a package being upgraded-then-orphaned the
+            action carries the **old** (rpmdb) EVR — the caller must
+            additionally skip the new version (see
+            :attr:`cancelled_new_versions`).
+        cancelled_new_versions: Lowercase names of packages whose new
+            version must not be installed because it would be orphaned
+            on arrival.  This covers both:
+
+            * brand-new ``INSTALL`` actions whose only requester is
+              another orphan (e.g. a dep rename without ``Obsoletes``);
+              and
+            * ``UPGRADE``/``DOWNGRADE``/``REINSTALL`` actions whose
+              target version has no legitimate requester (its companion
+              old version, if any, is in :attr:`removes`).
+
+            The caller must drop the corresponding action from the
+            transaction plan *and* skip the matching downloaded RPM.
+
+    The historical flat ``List[PackageAction]`` return type conflated
+    the two concerns and caused silent no-op transactions when libsolv
+    was asked to simultaneously install and remove the same package
+    name.
+    """
+
+    removes: List = field(default_factory=list)
+    cancelled_new_versions: Set[str] = field(default_factory=set)
+
+    def __bool__(self) -> bool:
+        return bool(self.removes or self.cancelled_new_versions)
+
+
+def _parse_synthesis_cap(cap: str) -> Tuple[str, int, str]:
+    """Parse a synthesis capability string into ``(name, sense, evr)``.
+
+    The Mageia synthesis format stores a versioned capability with a
+    bracket suffix: ``libpng[>= 1.6.0]``.  Non-versioned capabilities
+    have no bracket, e.g. ``perl(Foo::Bar)`` or
+    ``libfoo.so.1()(64bit)``.  Brackets never appear inside unversioned
+    capability names in this format, so a plain ``find('[')`` is
+    unambiguous.
+
+    Args:
+        cap: Raw capability string from ``synthesis.hdlist.cz``.
+
+    Returns:
+        A tuple ``(name, sense, evr)`` where ``sense`` is an RPMSENSE
+        bitmask (``0`` for an unversioned capability) and ``evr`` is the
+        version string (empty for an unversioned capability).
+    """
+    idx = cap.find('[')
+    if idx < 0:
+        return cap, 0, ''
+    name = cap[:idx]
+    end = cap.rfind(']')
+    inside = cap[idx + 1:end] if end > idx else cap[idx + 1:]
+    parts = inside.split(None, 1)
+    if len(parts) != 2:
+        return name, 0, ''
+    op, evr = parts
+    return name, _SYNTHESIS_SENSE_MAP.get(op, 0), evr
+
+
+def _evr_tuple(evr: str) -> Tuple[str, str, str]:
+    """Split an ``epoch:version-release`` string for :func:`rpm.labelCompare`.
+
+    Missing epoch defaults to ``'0'``; missing release to ``''``.
+    """
+    if ':' in evr:
+        epoch, rest = evr.split(':', 1)
+    else:
+        epoch, rest = '0', evr
+    if '-' in rest:
+        version, release = rest.split('-', 1)
+    else:
+        version, release = rest, ''
+    return (epoch, version, release)
+
+
+def _provider_satisfies(prov_evr: str, req_sense: int, req_evr: str) -> bool:
+    """Return ``True`` iff a provider's EVR satisfies a versioned require.
+
+    The check mirrors rpm's own ``rpmdsCompare`` semantics:
+
+    * An unversioned require (no comparison bit set) is satisfied by
+      any provider — the same answer ``_SENSE_MASK``-masking would
+      give.
+    * A versioned require against an unversioned provider fails.
+      RPM's auto-generated ``Provides: NAME = EVR`` covers almost every
+      real package, so an unversioned provider here typically means an
+      explicit ``Provides: foo`` without a version, which cannot be
+      compared against a version constraint.
+    * Otherwise the two EVRs are compared with :func:`rpm.labelCompare`
+      and the result cross-referenced against the require's sense
+      bits.  Granularity matches rpm: if the require omits the release
+      component (``Requires: foo = 1`` instead of ``= 1-1``), the
+      provider's release is ignored so the comparison degenerates to
+      version-only equality.  This is how rpm accepts ``foo-1-5`` as a
+      valid provider for ``Requires: foo = 1``.
+    """
+    if not HAS_RPM:  # pragma: no cover - rpm is always available in production
+        return True
+    if not (req_sense & _SENSE_MASK):
+        return True
+    if not prov_evr:
+        return False
+    p_epoch, p_ver, p_rel = _evr_tuple(prov_evr)
+    r_epoch, r_ver, r_rel = _evr_tuple(req_evr)
+    if not r_rel:
+        p_rel = ''
+    result = rpm.labelCompare((p_epoch, p_ver, p_rel), (r_epoch, r_ver, r_rel))
+    if result == 0:
+        return bool(req_sense & rpm.RPMSENSE_EQUAL)
+    if result < 0:
+        return bool(req_sense & rpm.RPMSENSE_LESS)
+    return bool(req_sense & rpm.RPMSENSE_GREATER)
 
 
 class OrphansMixin:
@@ -708,7 +862,7 @@ class OrphansMixin:
             cap = cap.split('[')[0]
         return cap
 
-    def find_upgrade_orphans(self, all_actions: list) -> list:
+    def find_upgrade_orphans(self, all_actions: list) -> "UpgradeOrphanPlan":
         """Find packages that become newly orphaned by a transaction.
 
         Implements the formal specification::
@@ -721,25 +875,45 @@ class OrphansMixin:
 
         Pre-existing orphans (already orphan before the transaction) are
         NOT flagged — that is the job of ``urpm autoremove``.  Weak deps
-        (Recommends) count as real dependency edges for this computation:
-        a package pulled only by Recommends is a legitimate child of its
-        parent, and must be flagged if the parent stops recommending it.
+        (Recommends) count as real dependency edges for this
+        computation: a package pulled only by Recommends is a
+        legitimate child of its parent, and must be flagged if the
+        parent stops recommending it.
+
+        Dependency edges are **version-aware**: a ``Requires: tt >= 2``
+        against a provider ``tt1`` that only advertises ``Provides: tt =
+        1`` does NOT establish an edge.  Without this filter a virtual
+        rename (``tt1`` being replaced by ``tt2``, both providing
+        ``tt``) would leave the old provider undetected as orphan.
 
         Args:
-            all_actions: All PackageActions in the transaction (upgrades,
-                         installs, removes, downgrades).
+            all_actions: All ``PackageAction`` instances in the
+                transaction (upgrades, installs, removes, downgrades).
 
         Returns:
-            List of PackageAction(REMOVE) for packages to clean up.
+            An :class:`UpgradeOrphanPlan` partitioning the new orphans
+            into:
+
+            * ``removes`` — REMOVE actions for orphans currently in the
+              rpmdb, ready to append to the transaction.
+            * ``cancelled_new_versions`` — lowercase names whose
+              INSTALL/UPGRADE/DOWNGRADE/REINSTALL action must be dropped
+              from the plan (and whose downloaded RPM must be skipped)
+              because the new version would be orphan-on-arrival.
+
+            Both fields are populated for a package being
+            upgraded-then-orphaned: ``removes`` erases the old version
+            and the name appears in ``cancelled_new_versions`` so the
+            caller does not install the new version.
         """
         from ..resolver import TransactionType, PackageAction
 
         if not HAS_RPM:
-            return []
+            return UpgradeOrphanPlan()
 
         unrequested = self._get_unrequested_packages()
         if not unrequested:
-            return []
+            return UpgradeOrphanPlan()
 
         # Exclude builddeps — managed separately via autoremove --buildrequires
         builddeps = self._get_builddep_packages()
@@ -760,40 +934,103 @@ class OrphansMixin:
                 removed_names.add(action.name)
 
         if not (upgraded_names or installed_names or removed_names):
-            return []
+            return UpgradeOrphanPlan()
 
         logger = logging.getLogger(__name__)
 
         def _collect_from_header(hdr):
-            """Extract (requires ∪ recommends, provides) from an rpmdb header."""
-            reqs = set()
-            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                if not req.startswith('rpmlib('):
-                    reqs.add(self._extract_cap_name(req))
-            for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
-                reqs.add(self._extract_cap_name(rec))
-            provs = set()
-            for p in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                provs.add(self._extract_cap_name(p))
+            """Extract versioned requires/recommends/provides from a header.
+
+            Returns ``(requires, provides)`` where:
+
+            * ``requires`` is a ``list[(name, sense, evr)]`` — an edge
+              is only satisfied by a provider whose EVR matches the
+              ``(sense, evr)`` constraint.  Recommends are merged in
+              because they are real dependency edges for orphan
+              computation.
+            * ``provides`` is a ``list[(name, evr)]``.
+
+            ``rpmlib(…)`` build-time capabilities are stripped.
+            """
+            reqs: List[Tuple[str, int, str]] = []
+            req_names = hdr[rpm.RPMTAG_REQUIRENAME] or []
+            req_vers = hdr[rpm.RPMTAG_REQUIREVERSION] or []
+            req_flags = hdr[rpm.RPMTAG_REQUIREFLAGS] or []
+            for i, req_name in enumerate(req_names):
+                if req_name.startswith('rpmlib('):
+                    continue
+                ver = req_vers[i] if i < len(req_vers) else ''
+                flag_raw = req_flags[i] if i < len(req_flags) else 0
+                reqs.append((req_name, flag_raw & _SENSE_MASK, ver or ''))
+
+            rec_names = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
+            rec_vers = hdr[rpm.RPMTAG_RECOMMENDVERSION] or []
+            rec_flags = hdr[rpm.RPMTAG_RECOMMENDFLAGS] or []
+            for i, rec_name in enumerate(rec_names):
+                ver = rec_vers[i] if i < len(rec_vers) else ''
+                flag_raw = rec_flags[i] if i < len(rec_flags) else 0
+                reqs.append((rec_name, flag_raw & _SENSE_MASK, ver or ''))
+
+            provs: List[Tuple[str, str]] = []
+            prov_names = hdr[rpm.RPMTAG_PROVIDENAME] or []
+            prov_vers = hdr[rpm.RPMTAG_PROVIDEVERSION] or []
+            for i, prov_name in enumerate(prov_names):
+                ver = prov_vers[i] if i < len(prov_vers) else ''
+                provs.append((prov_name, ver or ''))
+
             return reqs, provs
 
         def _collect_from_synthesis(pkg):
-            """Extract (requires ∪ recommends, provides) from a synthesis entry."""
-            reqs = set()
-            provs = set()
-            if pkg:
-                for r in pkg.get('requires', []):
-                    cap = self._extract_cap_name(r)
-                    if not cap.startswith('rpmlib('):
-                        reqs.add(cap)
-                for r in pkg.get('recommends', []):
-                    reqs.add(self._extract_cap_name(r))
-                for p in pkg.get('provides', []):
-                    provs.add(self._extract_cap_name(p))
+            """Extract versioned requires/recommends/provides from a synthesis dict.
+
+            Parses ``name[op evr]`` capability strings stored by
+            :mod:`urpm.core.synthesis` into the same tuple layout used
+            by :func:`_collect_from_header`.  Missing ``pkg`` produces
+            empty lists.
+            """
+            reqs: List[Tuple[str, int, str]] = []
+            provs: List[Tuple[str, str]] = []
+            if not pkg:
+                return reqs, provs
+
+            for r in pkg.get('requires', []):
+                name, sense, evr = _parse_synthesis_cap(r)
+                if name.startswith('rpmlib('):
+                    continue
+                reqs.append((name, sense, evr))
+            for r in pkg.get('recommends', []):
+                name, sense, evr = _parse_synthesis_cap(r)
+                reqs.append((name, sense, evr))
+            for p in pkg.get('provides', []):
+                name, _sense, evr = _parse_synthesis_cap(p)
+                provs.append((name, evr))
+
             return reqs, provs
+
+        def _pkg_self_evr(pkg):
+            """Build the EVR string for a synthesis pkg dict (may be empty)."""
+            if not pkg:
+                return ''
+            epoch = pkg.get('epoch', 0) or 0
+            try:
+                epoch_int = int(epoch)
+            except (TypeError, ValueError):
+                epoch_int = 0
+            version = pkg.get('version', '') or ''
+            release = pkg.get('release', '') or ''
+            if epoch_int > 0:
+                return f"{epoch_int}:{version}-{release}"
+            return f"{version}-{release}"
 
         # Build S_pre (current rpmdb) and S_post (rpmdb + upgrades applied,
         # removals excluded, new installs added) in a single rpmdb pass.
+        #
+        # Each state entry stores requires as list[(name, sense, evr)] and
+        # provides as list[(name, evr)] so the reverse-dep graph can be
+        # filtered by version constraints.  The auto-generated self-provide
+        # ``name = EVR`` is always present in well-formed RPM headers and
+        # synthesis entries, but we re-append it here as a safety net for
+        # sparsely populated fixtures (see ``test_orphans.py``).
         pre_state = {}
         post_state = {}
 
@@ -802,18 +1039,25 @@ class OrphansMixin:
             if name == 'gpg-pubkey':
                 continue
 
+            epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+            version = hdr[rpm.RPMTAG_VERSION] or ''
+            release = hdr[rpm.RPMTAG_RELEASE] or ''
+            self_evr = (
+                f"{epoch}:{version}-{release}" if epoch
+                else f"{version}-{release}"
+            )
+
             rpm_reqs, rpm_provs = _collect_from_header(hdr)
-            rpm_provs.add(name)
+            rpm_provs.append((name, self_evr))
             pre_state[name] = {'requires': rpm_reqs, 'provides': rpm_provs}
 
             if name in removed_names:
                 continue
 
             if name in upgraded_names:
-                new_reqs, new_provs = _collect_from_synthesis(
-                    self.db.get_package(name)
-                )
-                new_provs.add(name)
+                new_pkg = self.db.get_package(name)
+                new_reqs, new_provs = _collect_from_synthesis(new_pkg)
+                new_provs.append((name, _pkg_self_evr(new_pkg)))
                 post_state[name] = {
                     'requires': new_reqs, 'provides': new_provs,
                 }
@@ -825,21 +1069,37 @@ class OrphansMixin:
         for name in installed_names:
             if name in post_state:
                 continue
-            reqs, provs = _collect_from_synthesis(self.db.get_package(name))
-            provs.add(name)
+            new_pkg = self.db.get_package(name)
+            reqs, provs = _collect_from_synthesis(new_pkg)
+            provs.append((name, _pkg_self_evr(new_pkg)))
             post_state[name] = {'requires': reqs, 'provides': provs}
 
         def _build_reverse_deps(state):
-            """Build reverse-dependency graph: for each P, who requires P."""
-            cap_providers = {}
+            """Build a reverse-dependency graph with version-constraint filtering.
+
+            For each package ``P``, return the set of packages that
+            require ``P`` — but only when the require edge is
+            version-satisfied.  A provider whose EVR fails to match a
+            require's ``(sense, evr)`` constraint is not credited with
+            an in-edge, which is what lets :func:`find_upgrade_orphans`
+            detect a virtual rename such as ``tt1`` (``Provides: tt =
+            1``) → ``tt2`` (``Provides: tt = 2``) against a
+            ``Requires: tt >= 2``.
+            """
+            cap_providers: dict = {}
             for name, info in state.items():
-                for cap in info['provides']:
-                    cap_providers.setdefault(cap, set()).add(name)
+                for cap_name, prov_evr in info['provides']:
+                    cap_providers.setdefault(cap_name, []).append(
+                        (name, prov_evr)
+                    )
+
             rev = {name: set() for name in state}
             for name, info in state.items():
-                for req in info['requires']:
-                    for provider in cap_providers.get(req, set()):
-                        if provider != name:
+                for req_name, req_sense, req_evr in info['requires']:
+                    for provider, prov_evr in cap_providers.get(req_name, ()):
+                        if provider == name:
+                            continue
+                        if _provider_satisfies(prov_evr, req_sense, req_evr):
                             rev[provider].add(name)
             return rev
 
@@ -894,11 +1154,13 @@ class OrphansMixin:
             len(orphan_candidates), sorted(orphan_candidates)[:20],
         )
 
-        # Build PackageAction list for orphans
-        orphans = []
-        seen_orphans = set()
+        # Build the plan: rpmdb-side removes and cancelled new versions.
+        plan = UpgradeOrphanPlan()
 
-        # Orphans already in rpmdb (upgraded or unchanged packages)
+        # Category 1 — orphans currently in the rpmdb are erased with their
+        # old (pre-transaction) EVR.  A package being upgraded-then-orphaned
+        # lands here too: its old version appears in removes, and its new
+        # version is cancelled in the second loop below.
         for hdr in ts.dbMatch():
             name = hdr[rpm.RPMTAG_NAME]
             if name not in orphan_candidates:
@@ -915,7 +1177,7 @@ class OrphansMixin:
             else:
                 evr = f"{version}-{release}"
 
-            orphans.append(PackageAction(
+            plan.removes.append(PackageAction(
                 action=TransactionType.REMOVE,
                 name=name,
                 evr=evr,
@@ -923,29 +1185,28 @@ class OrphansMixin:
                 nevra=f"{name}-{evr}.{arch}",
                 size=size,
             ))
-            seen_orphans.add(name)
 
-        # Orphans from newly installed packages (not in rpmdb yet)
-        # These are Obsoletes replacements or new deps with no explicit requester.
-        # The caller (upgrade.py) will exclude them from rpm_paths.
+        # Category 2 — orphans whose new version would be installed by the
+        # current transaction must have that install cancelled.  Previously
+        # this path emitted a REMOVE action for the newly-installed name,
+        # which caused rpm's transaction engine to silently no-op the
+        # simultaneous install+remove (cf. ``test_auto_select_f``).  We now
+        # return the names separately so the caller can drop the action
+        # and skip the downloaded RPM without asking rpm to install+remove
+        # the same NVRA in one shot.
+        new_version_actions = {
+            TransactionType.INSTALL,
+            TransactionType.UPGRADE,
+            TransactionType.DOWNGRADE,
+            TransactionType.REINSTALL,
+        }
         for action in all_actions:
-            if action.action != TransactionType.INSTALL:
+            if action.action not in new_version_actions:
                 continue
-            if action.name in seen_orphans:
-                continue
-            if action.name not in orphan_candidates:
-                continue
-            orphans.append(PackageAction(
-                action=TransactionType.REMOVE,
-                name=action.name,
-                evr=action.evr,
-                arch=action.arch,
-                nevra=action.nevra,
-                size=action.size,
-            ))
-            seen_orphans.add(action.name)
+            if action.name in orphan_candidates:
+                plan.cancelled_new_versions.add(action.name.lower())
 
-        return orphans
+        return plan
 
     def find_erase_orphans(self, erase_names: List[str], erase_recommends: bool = False,
                            keep_suggests: bool = False) -> list:

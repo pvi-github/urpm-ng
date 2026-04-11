@@ -1859,7 +1859,7 @@ class TestOrphans(BaseUrpmiTest):
         self._test_auto_select_both("e", "ee1", "e-2 ee2-2", "ee1-1")
 
     @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: dep rename without Obsoletes not handled", strict=False)
+    @pytest.mark.xfail(reason="cmd_upgrade: rpm transaction silently applies nothing (plan correct, no-op execution on partial cancel + orphan remove)", strict=False)
     def test_auto_select_f(self):
         self._test_auto_select_both("f", "ff1", "f-2 ff2-2")
 
@@ -1897,8 +1897,7 @@ class TestOrphans(BaseUrpmiTest):
     def test_auto_select_s(self):
         self._test_auto_select_both("s", "ss1 ss2", "s-2 ss1-1 ss2-1")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="find_upgrade_orphans ignores version constraints", strict=False)
+    @pytest.mark.stable
     def test_auto_select_t(self):
         self._test_auto_select_both("t", "tt1", "t-2 tt2-2", "tt1-1")
 

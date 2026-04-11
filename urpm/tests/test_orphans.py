@@ -218,13 +218,28 @@ rpm = pytest.importorskip('rpm')
 
 
 def _fake_hdr(name, requires=(), recommends=(), provides=(),
+              require_vers=(), require_flags=(),
+              recommend_vers=(), recommend_flags=(),
+              provide_vers=(),
               epoch=0, version='1', release='1', arch='noarch', size=0):
-    """Build a minimal fake rpm header that supports ``hdr[rpm.RPMTAG_*]``."""
+    """Build a minimal fake rpm header that supports ``hdr[rpm.RPMTAG_*]``.
+
+    The ``*_vers`` / ``*_flags`` parallel arrays are optional and default
+    to empty; ``find_upgrade_orphans`` tolerates short arrays by padding
+    with empty strings / zero flags.  Tests that only care about the name
+    graph can ignore them entirely (backward-compatible with pre-version
+    tests).
+    """
     tag_map = {
         rpm.RPMTAG_NAME: name,
         rpm.RPMTAG_REQUIRENAME: list(requires),
+        rpm.RPMTAG_REQUIREVERSION: list(require_vers),
+        rpm.RPMTAG_REQUIREFLAGS: list(require_flags),
         rpm.RPMTAG_RECOMMENDNAME: list(recommends),
+        rpm.RPMTAG_RECOMMENDVERSION: list(recommend_vers),
+        rpm.RPMTAG_RECOMMENDFLAGS: list(recommend_flags),
         rpm.RPMTAG_PROVIDENAME: list(provides),
+        rpm.RPMTAG_PROVIDEVERSION: list(provide_vers),
         rpm.RPMTAG_EPOCH: epoch,
         rpm.RPMTAG_VERSION: version,
         rpm.RPMTAG_RELEASE: release,
@@ -257,7 +272,11 @@ class TestFindUpgradeOrphansSpec:
     """
 
     def _run(self, resolver, headers, actions):
-        """Patch rpm.TransactionSet and dispatch to find_upgrade_orphans."""
+        """Patch rpm.TransactionSet and dispatch to find_upgrade_orphans.
+
+        Returns ``(plan, TransactionType)`` where ``plan`` is the
+        :class:`UpgradeOrphanPlan` returned by the resolver.
+        """
         from urpm.core.resolver import TransactionType
         with patch('urpm.core.resolution.orphans.rpm.TransactionSet') as ts_cls:
             ts_cls.return_value.dbMatch.return_value = headers
@@ -289,8 +308,11 @@ class TestFindUpgradeOrphansSpec:
             _make_action('a', TransactionType.UPGRADE),
         ]
 
-        orphans, _ = self._run(resolver, headers, actions)
-        assert {o.name for o in orphans} == {'a'}
+        plan, _ = self._run(resolver, headers, actions)
+        assert {o.name for o in plan.removes} == {'a'}
+        # ``a`` is also being upgraded, so the new version must be
+        # cancelled alongside the REMOVE of its old version.
+        assert plan.cancelled_new_versions == {'a'}
 
     def test_newly_installed_dep_counted_as_unrequested(self, resolver):
         """Fix #2: newly installed packages feed ``effective_unrequested``.
@@ -330,8 +352,8 @@ class TestFindUpgradeOrphansSpec:
             _make_action('leaf', TransactionType.INSTALL),
         ]
 
-        orphans, _ = self._run(resolver, headers, actions)
-        assert orphans == [], (
+        plan, _ = self._run(resolver, headers, actions)
+        assert not plan, (
             "new_dep is a legitimate dep of user_app and leaf is a "
             "legitimate dep of new_dep — none must be flagged"
         )
@@ -361,8 +383,11 @@ class TestFindUpgradeOrphansSpec:
             _make_action('h', TransactionType.UPGRADE),
         ]
 
-        orphans, _ = self._run(resolver, headers, actions)
-        assert {o.name for o in orphans} == {'hh'}
+        plan, _ = self._run(resolver, headers, actions)
+        assert {o.name for o in plan.removes} == {'hh'}
+        # ``hh`` is NOT in the action list (not being upgraded or
+        # installed), so no new-version cancellation is required.
+        assert plan.cancelled_new_versions == set()
 
     def test_preexisting_orphan_not_flagged(self, resolver):
         """Spec clause ``¬(P ∈ S_pre ∧ orphan(P, S_pre))``.
@@ -390,8 +415,155 @@ class TestFindUpgradeOrphansSpec:
             _make_action('user_app', TransactionType.UPGRADE),
         ]
 
-        orphans, _ = self._run(resolver, headers, actions)
-        assert orphans == [], (
+        plan, _ = self._run(resolver, headers, actions)
+        assert not plan, (
             "stale was already orphan before the transaction — "
             "find_upgrade_orphans must leave it to autoremove"
         )
+
+    # -- Family A regression tests -----------------------------------------
+    #
+    # The two scenarios below pin the Family A fix landed together with
+    # the :class:`UpgradeOrphanPlan` refactor.  They cover the two
+    # distinct bugs that were conflated under a single xfail pair in
+    # ``test_install.py::TestOrphans`` (``test_auto_select_t`` and
+    # ``test_auto_select_f``).
+
+    def test_version_constraint_filters_stale_provider(self, resolver):
+        """Version-aware reverse graph: stale provider is not a parent.
+
+        Scenario (mirrors ``test_auto_select_t``):
+
+        * ``t-1`` is installed explicitly and requires the virtual
+          capability ``tt`` (unversioned in v1).
+        * ``tt1-1`` is installed as a dep of ``t-1`` and provides
+          ``tt = 1``.
+        * The upgrade plan advances ``t`` to ``t-2`` which requires
+          ``tt >= 2`` — now satisfied by the new ``tt2-2`` (``Provides:
+          tt = 2``).  Libsolv installs ``tt2`` alongside.
+
+        The expected post-transaction state has ``tt1-1`` orphaned:
+        its only in-edge (via virtual ``tt``) has a version constraint
+        that ``tt1`` cannot satisfy.  The old version-blind reverse
+        graph credited ``tt1`` for the edge and masked the orphan.
+        """
+        from urpm.core.resolver import TransactionType
+
+        resolver._save_unrequested_packages({'tt1', 'tt2'})
+        resolver.db.get_package.side_effect = lambda name: {
+            't': {
+                'name': 't', 'epoch': 0, 'version': '2', 'release': '1',
+                'requires': ['tt[>= 2]'], 'recommends': [],
+                'provides': ['t[= 2-1]'],
+            },
+            'tt2': {
+                'name': 'tt2', 'epoch': 0, 'version': '2', 'release': '1',
+                'requires': [], 'recommends': [],
+                'provides': ['tt2[= 2-1]', 'tt[= 2]'],
+            },
+        }.get(name)
+
+        headers = [
+            _fake_hdr(
+                't',
+                requires=['tt'],
+                require_vers=[''],
+                require_flags=[0],
+                provides=['t'],
+                provide_vers=['1-1'],
+            ),
+            _fake_hdr(
+                'tt1',
+                provides=['tt1', 'tt'],
+                provide_vers=['1-1', '1'],
+            ),
+        ]
+        actions = [
+            _make_action('t', TransactionType.UPGRADE),
+            _make_action('tt2', TransactionType.INSTALL),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+
+        # ``tt1`` is in the rpmdb and becomes orphaned → removes.
+        assert {o.name for o in plan.removes} == {'tt1'}
+        # ``tt1`` is NOT being installed/upgraded, so it's not in
+        # cancelled_new_versions.  And ``tt2`` has a legitimate parent
+        # (``t-2`` requires ``tt >= 2`` satisfied by ``tt2``), so it's
+        # not cancelled either.
+        assert plan.cancelled_new_versions == set()
+
+    def test_cancelled_new_install_not_emitted_as_remove(self, resolver):
+        """Orphan-on-arrival: a new install whose parent is orphan.
+
+        Scenario (mirrors ``test_auto_select_f`` with ``req_f``
+        extension): a user had ``req_f-1`` requiring ``f-1`` requiring
+        ``ff1``.  After upgrade, ``req_f-2`` no longer requires ``f``
+        and ``f-2`` switches from ``ff1`` to ``ff2``.  Libsolv produces
+        a plan that upgrades ``req_f`` and ``f``, and installs ``ff2``
+        as a dep of ``f-2``.
+
+        The post-state reasoning:
+
+        * ``f-2`` is orphan — ``req_f-2`` no longer requires it and ``f``
+          is unrequested.
+        * ``ff2`` is transitively orphan — its only requester (``f-2``)
+          is itself orphan.
+
+        The old implementation emitted a ``REMOVE(ff2)`` PackageAction
+        alongside an ``INSTALL(ff2)`` from libsolv.  rpm's transaction
+        engine silently no-ops such install+remove pairs.  The new
+        implementation must instead report ``ff2`` in
+        ``cancelled_new_versions`` so the caller can drop the install
+        action and the downloaded RPM.
+        """
+        from urpm.core.resolver import TransactionType
+
+        resolver._save_unrequested_packages({'f', 'ff1', 'ff2'})
+        resolver.db.get_package.side_effect = lambda name: {
+            'req_f': {
+                'name': 'req_f', 'epoch': 0, 'version': '2', 'release': '1',
+                'requires': [], 'recommends': [],
+                'provides': ['req_f[= 2-1]'],
+            },
+            'f': {
+                'name': 'f', 'epoch': 0, 'version': '2', 'release': '1',
+                'requires': ['ff2'], 'recommends': [],
+                'provides': ['f[= 2-1]'],
+            },
+            'ff2': {
+                'name': 'ff2', 'epoch': 0, 'version': '2', 'release': '1',
+                'requires': [], 'recommends': [],
+                'provides': ['ff2[= 2-1]'],
+            },
+        }.get(name)
+
+        headers = [
+            _fake_hdr('req_f', requires=['f'], provides=['req_f']),
+            _fake_hdr('f', requires=['ff1'], provides=['f']),
+            _fake_hdr('ff1', provides=['ff1']),
+        ]
+        actions = [
+            _make_action('req_f', TransactionType.UPGRADE),
+            _make_action('f', TransactionType.UPGRADE),
+            _make_action('ff2', TransactionType.INSTALL),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+
+        # Category 1: rpmdb-side removes.  ``f-1`` and ``ff1-1`` are
+        # both in the rpmdb and both orphan in the post-state:
+        # ``f-1`` because req_f-2 no longer requires it, ``ff1-1``
+        # because f-2 no longer requires it.
+        assert {o.name for o in plan.removes} == {'f', 'ff1'}
+
+        # Category 2: ``ff2`` is being INSTALLED but is orphan-on-arrival
+        # → must be cancelled, not emitted as a REMOVE action.
+        # ``f`` is being UPGRADED and its old version is in removes, so
+        # its new version must also be cancelled (otherwise we'd install
+        # f-2 only for libsolv to wonder why).
+        assert plan.cancelled_new_versions == {'ff2', 'f'}
+
+        # And critically, ``ff2`` must NOT appear in ``removes`` — that
+        # was the silent-no-op bug the refactor exists to fix.
+        assert 'ff2' not in {o.name for o in plan.removes}

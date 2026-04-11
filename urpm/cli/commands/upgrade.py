@@ -154,19 +154,48 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         print(colors.success(_("All packages are up to date.")))
         return 0
 
-    # Categorize actions
+    # Find orphaned dependencies (unless --noerase-orphans)
+    # Pass all actions so orphan detection can simulate the full
+    # post-transaction state.
+    orphans = []
+    cancelled_new_versions: set = set()
+    if not getattr(args, 'noerase_orphans', False):
+        plan = resolver.find_upgrade_orphans(result.actions)
+
+        # Pre-existing REMOVE actions already destined for erasure — don't
+        # list the same name twice in the orphan summary.
+        already_removed = {
+            a.name for a in result.actions if a.action.value == 'remove'
+        }
+        orphans = [o for o in plan.removes if o.name not in already_removed]
+        cancelled_new_versions = plan.cancelled_new_versions
+
+        # Project ``cancelled_new_versions`` onto the transaction plan:
+        # these are "orphan-on-arrival" packages whose new version must
+        # not land in the rpmdb.  Emitting a REMOVE for a name that is
+        # simultaneously INSTALL-planned would cause rpm's transaction
+        # engine to silently no-op both sides (cf. test_auto_select_f),
+        # so we drop the incoming action here and skip the matching
+        # downloaded RPM further below.
+        if cancelled_new_versions:
+            from ...core.resolver import TransactionType
+            _cancel_types = {
+                TransactionType.INSTALL,
+                TransactionType.UPGRADE,
+                TransactionType.DOWNGRADE,
+                TransactionType.REINSTALL,
+            }
+            result.actions = [
+                a for a in result.actions
+                if not (a.action in _cancel_types
+                        and a.name.lower() in cancelled_new_versions)
+            ]
+
+    # Categorize actions (after the orphan projection above)
     upgrades = [a for a in result.actions if a.action.value == 'upgrade']
     installs = [a for a in result.actions if a.action.value == 'install']
     removes = [a for a in result.actions if a.action.value == 'remove']
     downgrades = [a for a in result.actions if a.action.value == 'downgrade']
-
-    # Find orphaned dependencies (unless --noerase-orphans)
-    # Pass all actions so orphan detection can simulate the full post-transaction state
-    orphans = []
-    if not getattr(args, 'noerase_orphans', False):
-        removes_names = {a.name for a in removes}
-        orphans = [o for o in resolver.find_upgrade_orphans(result.actions)
-                   if o.name not in removes_names]
 
     # Show packages by category
     from .. import colors, display
@@ -323,14 +352,21 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         else:
             action.reason = InstallReason.DEPENDENCY
 
-    # Exclude orphan new-installs from rpm_paths (don't install them)
+    # Names needed later for history and the resilient_install call.
     orphan_names = [a.name for a in orphans] if orphans else []
-    if orphan_names:
+
+    # Skip downloaded RPMs whose new version has been cancelled — these
+    # are the "orphan-on-arrival" packages whose INSTALL/UPGRADE action
+    # was dropped above.  Matching is done on a lowercased basename
+    # prefix to tolerate any case drift between package names and
+    # on-disk filenames.
+    if cancelled_new_versions:
         import os
-        orphan_set = set(orphan_names)
-        rpm_paths = [p for p in rpm_paths
-                     if not any(os.path.basename(p).startswith(f"{n}-")
-                                for n in orphan_set)]
+        rpm_paths = [
+            p for p in rpm_paths
+            if not any(os.path.basename(p).lower().startswith(f"{n}-")
+                       for n in cancelled_new_versions)
+        ]
 
     # Include orphans in transaction recording (with 'orphan' reason)
     all_record_actions = list(result.actions)
