@@ -1885,7 +1885,7 @@ class TestOrphans(BaseUrpmiTest):
         self._test_auto_select_both("n", "nn", "n-2 nn-2")
 
     @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: dep rename without Obsoletes not handled", strict=False)
+    @pytest.mark.xfail(reason="cmd_upgrade: rpm transaction silently applies nothing (plan correct, no-op execution)", strict=False)
     def test_auto_select_o(self):
         self._test_auto_select_both("o", "oo1", "o-2 oo2-2")
 
@@ -1919,7 +1919,7 @@ class TestOrphans(BaseUrpmiTest):
         self._test_urpme(["g"], "g", "g", "")
 
     @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: upgrade not applied during --auto-select", strict=False)
+    @pytest.mark.xfail(reason="Bookkeeping: explicit status lost during upgrade (gg demoted to dep)", strict=False)
     def test_urpme_gg_g(self):
         """Remove g-2 after upgrading: gg-2 remains as it was explicitly requested."""
         self._test_urpme(["gg", "g"], "g", "g", "gg-2")
