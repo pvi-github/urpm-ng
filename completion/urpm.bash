@@ -378,7 +378,8 @@ _urpm_readme() {
 }
 
 _urpm_mkimage() {
-    # mkimage builds a root chroot / OCI image.
+    # mkimage builds a root chroot / OCI image. It has no positional
+    # argument, so a bare TAB shows the flag list for discoverability.
     case "$prev" in
         --release|-r)
             COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
@@ -404,10 +405,8 @@ _urpm_mkimage() {
             return  # Free text.
             ;;
     esac
-    if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--release -r --tag -t --profile --arch \
-            --packages -p --runtime --keep-chroot --workdir -w" -- "$cur"))
-    fi
+    COMPREPLY=($(compgen -W "--release -r --tag -t --profile --arch \
+        --packages -p --runtime --keep-chroot --workdir -w" -- "$cur"))
 }
 
 _urpm_build() {
