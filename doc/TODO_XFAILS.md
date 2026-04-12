@@ -6,14 +6,15 @@ reconvertir chaque entrée en test actif vert (ou la supprimer si obsolète).
 
 Date de l'inventaire : **2026-04-10** · dernière mise à jour : **2026-04-12**
 Périmètre : `urpm/tests/` uniquement.
-Totaux : **15 xfails + 3 skips** = 18 entrées à traiter.
+Totaux : **13 xfails + 3 skips** = 16 entrées à traiter.
 
-**Progression** : Famille A close (test_t débloqué le 2026-04-12, test_f
-reclassé en Famille C). Le reclassement de `test_f` révèle que la famille A
-était mal découpée : les deux tests avaient des causes racines
-complètement différentes, et le fix effectif est sémantique (comparaison
-EVR de `_provider_satisfies`) plus structurel (dataclass `UpgradeOrphanPlan`
-séparant `removes` et `cancelled_new_versions`).
+**Progression** :
+- Famille A close (test_t débloqué le 2026-04-12, test_f reclassé en
+  Famille C). Fix : comparaison EVR `_provider_satisfies` + dataclass
+  `UpgradeOrphanPlan`.
+- Famille C close (test_o + test_f débloqués le 2026-04-12). Fix :
+  fusion des orphan erases dans la transaction principale (supprime
+  l'état intermédiaire incohérent qui bloquait rpm).
 
 > Entrées hors backlog (légitimes, à ne pas toucher) :
 > - `urpm/tests/test_orphans.py:217` — `pytest.importorskip('rpm')`
@@ -28,7 +29,7 @@ séparant `removes` et `cancelled_new_versions`).
 |---|---|---:|---:|---|---|
 | A. `find_upgrade_orphans` — contraintes de version / renames | `urpm/core/resolution/orphans.py` + `urpm/cli/commands/upgrade.py` | ~~2~~ 0 | 0 | — | **Close** |
 | B. `find_erase_orphans` / unrequested bookkeeping | `urpm/core/resolution/orphans.py` + `urpm/cli/commands/upgrade.py` (`mark_dependencies`) | 3 | 0 | M | Haute |
-| C. `cmd_upgrade` — transaction silencieusement no-op | `urpm/cli/commands/upgrade.py` (chemin d'exécution rpm) | 2 | 0 | M | Haute |
+| C. `cmd_upgrade` — transaction silencieusement no-op | `urpm/cli/commands/upgrade.py` (chemin d'exécution rpm) | ~~2~~ 0 | 0 | — | **Close** |
 | D. Résolveur libsolv — conflits & virtual-provides | `urpm/core/resolution/*.py` | 10 | 0 | L | Moyenne |
 | F. Test incorrect (obsolète) | *n/a* — supprimer ou réécrire | 0 | 1 | S | Haute |
 | G. Fonctionnalités non implémentées | `urpm/cli/commands/install.py` ; infra multi-arch | 0 | 2 | L | Basse |
@@ -110,31 +111,31 @@ moissonner comme orphelin. Cible code : `mark_dependencies` /
 - `test_unorphan_v1` / `v2` : jumeaux. Probablement même cause racine que
   `gg_g`. À traiter en grappe.
 
-### Famille C — `cmd_upgrade` : transaction silencieusement no-op
+### Famille C — `cmd_upgrade` : transaction silencieusement no-op ✅ CLOSE
 
-| Fichier:ligne | Test | Raison décorateur |
+Famille fermée le **2026-04-12**. Les deux tests sont débloqués.
+
+| Fichier:ligne | Test | Statut |
 |---|---|---|
-| `test_install.py:1863` | `TestOrphans::test_auto_select_f` | cmd_upgrade: rpm transaction silently applies nothing (plan correct, no-op execution on partial cancel + orphan remove) |
-| `test_install.py:1889` | `TestOrphans::test_auto_select_o` | cmd_upgrade: rpm transaction silently applies nothing (plan correct, no-op execution) |
+| `test_install.py:1863` | `TestOrphans::test_auto_select_f` | ✅ Débloqué — décorateur xfail retiré |
+| `test_install.py:1889` | `TestOrphans::test_auto_select_o` | ✅ Débloqué — décorateur xfail retiré |
 
-**Notes investigation :**
-- `test_auto_select_o` : reclassé depuis Famille A après re-triage. Le
-  plan upgrade est calculé **correctement** (Update `o-2`, Install
-  `oo2-2`, Remove `oo1-1`), les paquets sont téléchargés, le message
-  final affiche "2 packages upgraded"… mais la rpmdb reste sur `o-1-1,
-  oo1-1-1`. **La transaction rpm est un no-op silencieux.** Aucun
-  affichage d'install/remove n'apparaît après le téléchargement.
-- `test_auto_select_f` : reclassé depuis Famille A le 2026-04-12. Le fix
-  Famille A fait maintenant calculer le plan correctement (scénario 3
-  avec `req-f` : `removes=[('f','1-1')]`, `cancelled=['f','ff2']`), mais
-  l'exécution rpm reste un no-op silencieux : `2 packages upgraded, 1
-  removed (obsoleted)` annoncé, rpmdb inchangée. **Symptôme identique à
-  `test_o`**, probablement même cause racine dans
-  `resilient_install`/chemin d'exécution rpm.
-- Différence avec l'ancien `test_t` (avant fix Famille A) : `test_t`
-  calculait un plan **incomplet** (oubli de `tt1`) ; `test_o` et `test_f`
-  calculent un plan **complet** mais ne l'exécutent pas. Symptômes
-  proches en surface, causes opposées — d'où la nécessité du re-triage.
+**Cause racine :** les orphan erases étaient exécutés dans une
+transaction rpm **séparée** (background `add_erase`), alors que les
+orphelins ont souvent des `Requires` sur des paquets en cours d'upgrade
+dans la transaction principale. rpm voyait un état intermédiaire
+incohérent (ex: `oo1 Requires o=1` mais `o-1` → `o-2`) et bloquait.
+Le code classait ce blocage comme "scriptlet deps (ignored)" via un
+heuristique de nom de fichier (`rsplit('-', 2)[0]`), puis le filtre
+`"is needed by (installed)"` sur `ts.run()` avalait le problème et
+retournait `True, total, []` — succès annoncé, rpmdb inchangée.
+
+**Fix :** fusion de `orphan_names` dans `erase_names` au site d'appel
+de `resilient_install` dans `upgrade.py`. Tout passe dans une seule
+`rpm.TransactionSet` : installs, upgrades, erases (obsoleted) et
+orphan erases. rpm voit le tableau complet et applique tout d'un coup.
+Pas d'impact sur le temps de transaction (une seule passe au lieu de
+deux).
 
 ### Famille D — Résolveur libsolv : conflits et virtual-provides
 
