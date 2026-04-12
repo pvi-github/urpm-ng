@@ -663,14 +663,21 @@ class PackageOperations:
     def mark_dependencies(self, resolver, actions: list):
         """Mark packages as dependencies or explicit in the deps list.
 
+        Only genuinely new packages (TransactionType.INSTALL) get their
+        bookkeeping status set.  Upgrades, downgrades and reinstalls
+        preserve whatever status the package already had — an explicit
+        package must not be demoted to dependency just because it was
+        pulled in as a transitive dep of the current transaction.
+
         Args:
             resolver: Resolver instance
             actions: List of PackageAction from resolver
         """
-        from .resolver import InstallReason
+        from .resolver import InstallReason, TransactionType
 
         dep_packages = [a.name for a in actions
-                        if a.reason != InstallReason.EXPLICIT]
+                        if a.reason != InstallReason.EXPLICIT
+                        and a.action == TransactionType.INSTALL]
         explicit_packages = [a.name for a in actions
                             if a.reason == InstallReason.EXPLICIT]
         if dep_packages:

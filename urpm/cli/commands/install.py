@@ -428,6 +428,15 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 result.actions.append(reinstall_action)
 
     if not result.actions:
+        # Promote user-requested packages to explicit even when already
+        # installed (the resolver skips unchanged packages from its
+        # action list, so mark_dependencies alone would miss them).
+        if not builddeps:
+            user_requested = list(package_names)
+            for info in local_rpm_infos:
+                user_requested.append(info['name'])
+            if user_requested:
+                resolver.mark_as_explicit(user_requested)
         print(_("Nothing to do"))
         return 0
 
@@ -1147,6 +1156,15 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
         # Update installed-through-deps.list for urpmi compatibility
         ops.mark_dependencies(resolver, result.actions)
+        # Promote user-requested packages to explicit even when already
+        # installed (the resolver skips unchanged packages from its
+        # action list, so mark_dependencies alone would miss them).
+        if not builddeps:
+            user_requested = list(package_names)
+            for info in local_rpm_infos:
+                user_requested.append(info['name'])
+            if user_requested:
+                resolver.mark_as_explicit(user_requested)
         dep_packages = [a.name for a in result.actions
                         if a.reason != InstallReason.EXPLICIT]
         # Track build dependencies for selective cleanup

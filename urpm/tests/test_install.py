@@ -1904,19 +1904,16 @@ class TestOrphans(BaseUrpmiTest):
         """Remove g-2, gg-2 stays (was explicitly installed)."""
         self._test_urpme(["g"], "g", "g", "")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Bookkeeping: explicit status lost during upgrade (gg demoted to dep)", strict=False)
+    @pytest.mark.stable
     def test_urpme_gg_g(self):
         """Remove g-2 after upgrading: gg-2 remains as it was explicitly requested."""
         self._test_urpme(["gg", "g"], "g", "g", "gg-2")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: package lost after install/upgrade/autoremove", strict=False)
+    @pytest.mark.stable
     def test_unorphan_v1(self):
         self._test_unorphan_v1("u1", "u2")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: package lost after install/upgrade/autoremove", strict=False)
+    @pytest.mark.stable
     def test_unorphan_v2(self):
         self._test_unorphan_v2("u1", "u2")
 

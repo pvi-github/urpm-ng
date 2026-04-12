@@ -569,9 +569,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
         ops.complete_transaction(transaction_id)
 
-        new_deps = [a.name for a in result.actions if a.action.value == 'install']
-        if new_deps:
-            resolver.mark_as_dependency(new_deps)
+        ops.mark_dependencies(resolver, result.actions)
         removed = [a.name for a in result.actions if a.action.value == 'remove']
         if removed:
             resolver.unmark_packages(removed)

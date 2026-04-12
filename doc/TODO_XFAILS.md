@@ -6,7 +6,7 @@ reconvertir chaque entrée en test actif vert (ou la supprimer si obsolète).
 
 Date de l'inventaire : **2026-04-10** · dernière mise à jour : **2026-04-12**
 Périmètre : `urpm/tests/` uniquement.
-Totaux : **13 xfails + 2 skips** = 15 entrées à traiter.
+Totaux : **10 xfails + 2 skips** = 12 entrées à traiter.
 
 **Progression** :
 - Famille A close (test_t débloqué le 2026-04-12, test_f reclassé en
@@ -15,6 +15,11 @@ Totaux : **13 xfails + 2 skips** = 15 entrées à traiter.
 - Famille C close (test_o + test_f débloqués le 2026-04-12). Fix :
   fusion des orphan erases dans la transaction principale (supprime
   l'état intermédiaire incohérent qui bloquait rpm).
+- Famille B close (test_urpme_gg_g + test_unorphan_v1/v2 débloqués
+  le 2026-04-12). Fix : deux bugs de bookkeeping corrigés — (1)
+  `mark_dependencies` ne démote plus les UPGRADE/DOWNGRADE/REINSTALL,
+  (2) `cmd_install` promeut les paquets explicites même quand le
+  resolver les skippe (déjà installés).
 
 > Entrées hors backlog (légitimes, à ne pas toucher) :
 > - `urpm/tests/test_orphans.py:217` — `pytest.importorskip('rpm')`
@@ -28,7 +33,7 @@ Totaux : **13 xfails + 2 skips** = 15 entrées à traiter.
 | Famille | Chemin de code cible | xfails | skips | Effort | Priorité |
 |---|---|---:|---:|---|---|
 | A. `find_upgrade_orphans` — contraintes de version / renames | `urpm/core/resolution/orphans.py` + `urpm/cli/commands/upgrade.py` | ~~2~~ 0 | 0 | — | **Close** |
-| B. `find_erase_orphans` / unrequested bookkeeping | `urpm/core/resolution/orphans.py` + `urpm/cli/commands/upgrade.py` (`mark_dependencies`) | 3 | 0 | M | Haute |
+| B. `find_erase_orphans` / unrequested bookkeeping | `urpm/core/operations.py` + `urpm/cli/commands/install.py` + `upgrade.py` | ~~3~~ 0 | 0 | — | **Close** |
 | C. `cmd_upgrade` — transaction silencieusement no-op | `urpm/cli/commands/upgrade.py` (chemin d'exécution rpm) | ~~2~~ 0 | 0 | — | **Close** |
 | D. Résolveur libsolv — conflits & virtual-provides | `urpm/core/resolution/*.py` | 10 | 0 | L | Moyenne |
 | F. Test incorrect (obsolète) | *n/a* — supprimé | 0 | 0 | — | **Close** |
@@ -85,31 +90,41 @@ Famille fermée le **2026-04-12**. Les deux tests étaient mal regroupés :
 - `test_cancelled_new_install_not_emitted_as_remove` — pin de la
   séparation `removes` vs `cancelled_new_versions`.
 
-### Famille B — `find_erase_orphans` / bookkeeping `unrequested`
+### Famille B — `find_erase_orphans` / bookkeeping `unrequested` ✅ CLOSE
 
-Symptôme : un paquet **explicite** perd son statut au passage d'une opération
-(upgrade ou install/upgrade/autoremove), puis se fait silencieusement
-moissonner comme orphelin. Cible code : `mark_dependencies` /
-`mark_as_explicit` / `_save_unrequested_packages` autour des flows
-`install`, `upgrade`, `autoremove`.
+Famille fermée le **2026-04-12**. Les trois tests sont débloqués.
 
-| Fichier:ligne | Test | Raison décorateur |
+| Fichier:ligne | Test | Statut |
 |---|---|---|
-| `test_install.py:1923` | `TestOrphans::test_urpme_gg_g` | Bookkeeping: explicit status lost during upgrade (gg demoted to dep) |
-| `test_install.py:1929` | `TestOrphans::test_unorphan_v1` | Resolver: package lost after install/upgrade/autoremove |
-| `test_install.py:1934` | `TestOrphans::test_unorphan_v2` | Resolver: package lost after install/upgrade/autoremove |
+| `test_install.py:1909` | `TestOrphans::test_urpme_gg_g` | ✅ Débloqué — décorateur xfail retiré |
+| `test_install.py:1913` | `TestOrphans::test_unorphan_v1` | ✅ Débloqué — décorateur xfail retiré |
+| `test_install.py:1916` | `TestOrphans::test_unorphan_v2` | ✅ Débloqué — décorateur xfail retiré |
 
-**Notes investigation :**
-- `test_urpme_gg_g` : reclassé depuis Famille C. Scénario re-rejoué :
-  `gg` installé explicitement, puis `g` explicitement, puis `urpm upgrade`.
-  Le résumé d'upgrade affiche `gg-2` en "Dépendance" — `gg` a perdu son
-  statut explicite pendant la mise à jour. Sur `urpme g`, `gg` est alors
-  flaggé orphelin et supprimé ; il ne devrait pas l'être. Raison
-  décorateur "upgrade not applied" est trompeuse, à corriger en
-  `"Bookkeeping: explicit status lost during upgrade"`. Trace :
-  `/tmp/redflag_gg.log`.
-- `test_unorphan_v1` / `v2` : jumeaux. Probablement même cause racine que
-  `gg_g`. À traiter en grappe.
+**Cause racine :** deux bugs de bookkeeping dans le tracking
+`installed-through-deps.list` :
+
+1. **Bug 1 — demotion d'un paquet explicite lors d'un upgrade**
+   (`operations.py`, `mark_dependencies`) — quand un paquet déjà
+   installé explicitement est tiré comme dépendance transitive d'un
+   autre install (ex: `install g` tire `gg` en UPGRADE), le resolver
+   assigne `reason=DEPENDENCY` dans le contexte de la transaction
+   courante. `mark_dependencies` appelait alors `mark_as_dependency`
+   pour ce paquet, le déclassant en dep. **Fix :** ne marquer comme
+   dep que les actions `TransactionType.INSTALL` (genuinely new).
+   Les UPGRADE/DOWNGRADE/REINSTALL conservent leur statut existant.
+
+2. **Bug 2 — promotion manquée pour un paquet déjà installé**
+   (`install.py`, `cmd_install`) — quand l'utilisateur demande
+   explicitement un paquet déjà installé à la bonne version, libsolv
+   le skippe (`SOLVER_TRANSACTION_IGNORE`). Le early return "Nothing
+   to do" court-circuitait `mark_dependencies`, donc `mark_as_explicit`
+   n'était jamais appelé. **Fix :** appel `mark_as_explicit` pour les
+   paquets demandés par l'utilisateur avant le early return.
+
+3. **Nettoyage `upgrade.py`** — remplacement de l'appel direct
+   `mark_as_dependency` (qui ignorait le champ `reason`) par
+   `ops.mark_dependencies` pour respecter la sémantique EXPLICIT vs
+   DEPENDENCY du resolver.
 
 ### Famille C — `cmd_upgrade` : transaction silencieusement no-op ✅ CLOSE
 
@@ -203,17 +218,15 @@ endroit.
 
 ## Synthèse cross-fichiers
 
-- **Module chaud** : `urpm/core/resolution/` accumule **15/16 xfails** (tout
+- **Module chaud** : `urpm/core/resolution/` accumule **10/12 xfails** (tout
   sauf la famille G skips). C'est l'endroit où investir.
 - **Fichiers non concernés** : `test_cli.py`, `test_database.py`,
   `test_download.py`, `test_suggests.py`, `test_synthesis.py` — aucune
   entrée. `test_orphans.py` est propre depuis le rewrite de
   `find_upgrade_orphans` (commit `84a6780`).
-- **Gains rapides** (à faire en premier) :
-  1. Famille F (1 skip) — suppression / réécriture triviale.
-  2. Famille A (3 xfails) — trio structuré, fix probablement localisé.
-  3. Re-triage des 3 red flags — bloquant pour prioriser la suite.
-- **Gros morceau** : famille D (10 xfails libsolv) — à attaquer en dernier,
+- **Familles closes** : A, B, C, F — 8 xfails éliminés, 1 test obsolète
+  supprimé. Les gains rapides sont faits.
+- **Gros morceau restant** : famille D (10 xfails libsolv) — à attaquer
   après avoir collecté les traces et identifié les causes racines communes.
 
 ---
