@@ -269,13 +269,14 @@ for lang in fr de es pt nl; do
         %{buildroot}%{_datadir}/locale/$lang/LC_MESSAGES/urpm.mo
 done
 
-# Install man pages (English)
+# Install man pages (all languages)
+for lang in en de es fr nl pt; do
+    install -Dm644 man/$lang/man1/urpm.1 %{buildroot}%{_mandir}/$lang/man1/urpm.1
+    install -Dm644 man/$lang/man8/urpmd.8 %{buildroot}%{_mandir}/$lang/man8/urpmd.8
+done
+# English goes to the default (unlocalized) mandir too
 install -Dm644 man/en/man1/urpm.1 %{buildroot}%{_mandir}/man1/urpm.1
 install -Dm644 man/en/man8/urpmd.8 %{buildroot}%{_mandir}/man8/urpmd.8
-
-# Install man pages (French)
-install -Dm644 man/fr/man1/urpm.1 %{buildroot}%{_mandir}/fr/man1/urpm.1
-install -Dm644 man/fr/man8/urpmd.8 %{buildroot}%{_mandir}/fr/man8/urpmd.8
 
 # Install mkimage profiles
 install -dm755 %{buildroot}%{_datadir}/urpm/profiles
@@ -423,7 +424,7 @@ fi
 %config(noreplace) %{_sysconfdir}/urpm/urpm.cfg
 %{_sysconfdir}/urpm/conf.d/*.cfg
 %{_mandir}/man1/urpm.1*
-%{_mandir}/fr/man1/urpm.1*
+%{_mandir}/*/man1/urpm.1*
 %dir %{_datadir}/urpm
 %dir %{_datadir}/urpm/profiles
 %{_datadir}/urpm/profiles/*.yaml
@@ -437,7 +438,7 @@ fi
 %{_bindir}/urpmd
 %{_unitdir}/urpmd.service
 %{_mandir}/man8/urpmd.8*
-%{_mandir}/fr/man8/urpmd.8*
+%{_mandir}/*/man8/urpmd.8*
 
 # ============================================================================
 # Files for urpm-ng-appstream
