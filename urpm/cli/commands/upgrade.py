@@ -470,12 +470,16 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             full_sync=full_sync,
         )
 
+        all_erase_names = list(remove_names)
+        if orphan_names:
+            all_erase_names.extend(orphan_names)
+
         resilient_result = ops.resilient_install(
             rpm_paths,
             download_items=download_items,
             options=upgrade_opts,
-            erase_names=remove_names,
-            orphan_names=orphan_names or None,
+            erase_names=all_erase_names,
+            orphan_names=None,
             mode="upgrade",
             progress_callback=queue_progress,
             root=upgrade_opts.root,

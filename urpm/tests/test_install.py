@@ -1858,8 +1858,7 @@ class TestOrphans(BaseUrpmiTest):
     def test_auto_select_e(self):
         self._test_auto_select_both("e", "ee1", "e-2 ee2-2", "ee1-1")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="cmd_upgrade: rpm transaction silently applies nothing (plan correct, no-op execution on partial cancel + orphan remove)", strict=False)
+    @pytest.mark.stable
     def test_auto_select_f(self):
         self._test_auto_select_both("f", "ff1", "f-2 ff2-2")
 
@@ -1884,8 +1883,7 @@ class TestOrphans(BaseUrpmiTest):
     def test_auto_select_n(self):
         self._test_auto_select_both("n", "nn", "n-2 nn-2")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="cmd_upgrade: rpm transaction silently applies nothing (plan correct, no-op execution)", strict=False)
+    @pytest.mark.stable
     def test_auto_select_o(self):
         self._test_auto_select_both("o", "oo1", "o-2 oo2-2")
 
