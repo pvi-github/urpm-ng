@@ -74,6 +74,11 @@ class AlternativesMixin:
 
                 # If multiple different packages provide this, it's an alternative
                 if len(provider_names) > 1:
+                    # Skip if a provider is already in the transaction —
+                    # the capability is already satisfied, no choice needed.
+                    if provider_names & installing:
+                        continue
+
                     is_valid = self._is_valid_alternative(base_cap, provider_names, installing)
                     if not is_valid:
                         continue
@@ -131,6 +136,20 @@ class AlternativesMixin:
 
                     if len(provider_names) > 1:
                         if not self._is_valid_alternative(base_cap, provider_names, installing):
+                            continue
+
+                        # Skip if another requirement of the same package already
+                        # names one of the providers: e.g., 'a' requires both 'bb'
+                        # and 'b2', and b2 provides bb → no user choice needed.
+                        covered_by_named_dep = False
+                        for other_dep in s.lookup_deparray(dep_type):
+                            other_name = str(other_dep).split()[0]
+                            if other_name == base_cap:
+                                continue
+                            if other_name in provider_names:
+                                covered_by_named_dep = True
+                                break
+                        if covered_by_named_dep:
                             continue
 
                         seen_caps.add(base_cap)

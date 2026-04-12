@@ -59,54 +59,13 @@ class PoolMixin:
             pool.installed = installed
 
             if HAS_RPM:
-                # Note: libsolv's add_rpmdb() doesn't respect set_rootdir()
-                # For chroot installs, we need to use rpm module directly
                 if self.root:
-                    # Use rpm module to read from chroot's rpmdb
-                    ts = rpm.TransactionSet(self.root or '/')
-                    ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES | rpm._RPMVSF_NODIGESTS)
-
-                    # Map RPM flags to libsolv relation flags
-                    def rpm_flags_to_solv(flags):
-                        rel = 0
-                        if flags & rpm.RPMSENSE_LESS:
-                            rel |= solv.REL_LT
-                        if flags & rpm.RPMSENSE_GREATER:
-                            rel |= solv.REL_GT
-                        if flags & rpm.RPMSENSE_EQUAL:
-                            rel |= solv.REL_EQ
-                        return rel
-
-                    for hdr in ts.dbMatch():
-                        s = installed.add_solvable()
-                        s.name = hdr[rpm.RPMTAG_NAME]
-                        epoch = hdr[rpm.RPMTAG_EPOCH] or 0
-                        version = hdr[rpm.RPMTAG_VERSION]
-                        release = hdr[rpm.RPMTAG_RELEASE]
-                        s.evr = f"{epoch}:{version}-{release}" if epoch else f"{version}-{release}"
-                        s.arch = hdr[rpm.RPMTAG_ARCH] or "noarch"
-
-                        # Add provides
-                        prov_names = hdr[rpm.RPMTAG_PROVIDENAME] or []
-                        prov_flags = hdr[rpm.RPMTAG_PROVIDEFLAGS] or []
-                        prov_vers = hdr[rpm.RPMTAG_PROVIDEVERSION] or []
-                        for i, pname in enumerate(prov_names):
-                            pflags = prov_flags[i] if i < len(prov_flags) else 0
-                            pver = prov_vers[i] if i < len(prov_vers) else ''
-                            if pver and pflags:
-                                dep_id = pool.rel2id(
-                                    pool.str2id(pname),
-                                    pool.str2id(pver),
-                                    rpm_flags_to_solv(pflags)
-                                )
-                            else:
-                                dep_id = pool.str2id(pname)
-                            s.add_deparray(solv.SOLVABLE_PROVIDES, dep_id)
-
-                    self._installed_count = installed.nsolvables
-                    debug.log(f"Loaded {self._installed_count} installed packages from chroot rpmdb")
+                    # libsolv's add_rpmdb() doesn't respect set_rootdir(),
+                    # so for chroot installs we use _load_rpmdb() which reads
+                    # the chroot rpmdb via the rpm module and populates all
+                    # dependency types (Requires, Conflicts, Obsoletes, …).
+                    self._installed_count = self._load_rpmdb(pool, installed)
                 else:
-                    # Normal case: use libsolv's native method
                     installed.add_rpmdb()
                     self._installed_count = installed.nsolvables
             else:

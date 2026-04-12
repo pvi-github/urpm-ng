@@ -431,7 +431,7 @@ class TestInstall(BaseUrpmiTest):
 
     # TODO or not superuser-exclude, needs the option excludedocs and excludepath
     @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver bug: upgrade promotion fails", strict=False)
+    @pytest.mark.xfail(reason="Solver prefers cross-arch substitute over removal (different policy from urpmi)", strict=False)
     def test_failing_promotion(self):
         # testcase 1
         # a-1
@@ -806,36 +806,31 @@ class TestHandleConflictDeps(BaseUrpmiTest):
         assert self._install(pkg2) == 0
         self.check_installed_names([pkg2], remove=True)
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: conflict dependency resolution fails", strict=False)
+    @pytest.mark.stable
     def test_simple_c_then_d(self):
         """c installed first, then d (conflicts with c) replaces it."""
         self.prepare()
         self._test_simple("c", "d")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: conflict dependency resolution fails", strict=False)
+    @pytest.mark.stable
     def test_simple_d_then_c(self):
         """d installed first, then c (conflicts with d) replaces it."""
         self.prepare()
         self._test_simple("d", "c")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: virtual-provide conflict resolution fails", strict=False)
+    @pytest.mark.stable
     def test_simple_e_then_f(self):
         """e conflicts with ff; f provides ff — f should replace e (mdvbz #17106)."""
         self.prepare()
         self._test_simple("e", "f")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: virtual-provide conflict resolution fails", strict=False)
+    @pytest.mark.stable
     def test_simple_f_then_e(self):
         """f provides ff; e conflicts with ff — e should replace f."""
         self.prepare()
         self._test_simple("f", "e")
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: simultaneous conflicting install fails", strict=False)
+    @pytest.mark.stable
     def test_conflict_on_install(self):
         """Simultaneous install of conflicting packages: only one is chosen.
 
@@ -860,8 +855,7 @@ class TestHandleConflictDeps(BaseUrpmiTest):
         else:
             self.check_installed_names(["g"], remove=True)
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: conflict resolution during upgrade fails", strict=False)
+    @pytest.mark.stable
     def test_conflict_on_upgrade(self):
         """Conflict resolution during upgrade (bugs #12696, #11885).
 
@@ -955,8 +949,7 @@ class TestHandleConflictDeps2(BaseUrpmiTest):
         self._install(*wanted)  # partial: one side will be dropped
         self._check_scenario(first, result1, result2)
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: mismatch in conflict-upgrade resolution", strict=False)
+    @pytest.mark.stable
     def test_conflict_upgrade_c_d(self):
         """Upgrade c+d1 where c-2 requires d2 and d2 conflicts with d1.
 
@@ -972,8 +965,7 @@ class TestHandleConflictDeps2(BaseUrpmiTest):
             result2=["c-2", "d2-2"],
         )
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: a1 not replaced by a2, provider install fails", strict=False)
+    @pytest.mark.stable
     def test_conflict_upgrade_a_b(self):
         """Upgrade a1+b where b-2 requires a2 and a2 conflicts with a1.
 
@@ -2041,8 +2033,7 @@ class TestPrefer2(BaseUrpmiTest):
         assert self._install(pkg) == 0
         self.check_installed_names(expected, remove=True)
 
-    @pytest.mark.todo
-    @pytest.mark.xfail(reason="Resolver: prefer logic installs both providers instead of one", strict=False)
+    @pytest.mark.stable
     def test_prefer_b1_over_b2(self):
         """a requires bb+b2; b1 and b2 both provide bb => b1 must be picked."""
         self.prepare()

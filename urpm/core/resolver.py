@@ -393,6 +393,41 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         self._held_obsolete_warnings = []  # List of (held_pkg, obsoleting_pkg) tuples
         self._held_upgrade_warnings = []  # List of held package names skipped from upgrade
 
+    def _solve_with_auto_resolution(self, solver, jobs, debug=None, max_retries=5):
+        """Solve with automatic conflict resolution.
+
+        When the first solve fails, iterates over each problem's first
+        solution, applies its elements (job modifications or supplementary
+        jobs), and re-solves.  Repeats up to *max_retries* times.
+
+        This handles cases like mutual conflicts (install a + b where
+        a conflicts b) or upgrade promotions where a dep chain cannot
+        be satisfied: the solver drops the problematic job and finds
+        the best achievable subset.
+
+        Returns:
+            Remaining unsolved problems (empty list on success).
+        """
+        problems = solver.solve(jobs)
+        retries = 0
+        while problems and retries < max_retries:
+            retries += 1
+            if debug:
+                debug.log(f"Solver has {len(problems)} problem(s), applying solutions (retry {retries}/{max_retries})")
+            for problem in problems:
+                solutions = problem.solutions()
+                if not solutions:
+                    continue
+                for element in solutions[0].elements():
+                    newjob = element.Job()
+                    if element.type == solv.Solver.SOLVER_SOLUTION_JOB:
+                        jobs[element.jobidx] = newjob
+                    else:
+                        if newjob and newjob not in jobs:
+                            jobs.append(newjob)
+            problems = solver.solve(jobs)
+        return problems
+
     def resolve_install(self, package_names: List[str],
                         choices: Dict[str, str] = None,
                         favored_packages: set = None,
@@ -666,16 +701,13 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         if not self.install_recommends:
             solver.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)
 
-        problems = solver.solve(jobs)
+        problems = self._solve_with_auto_resolution(solver, jobs)
 
         if problems:
-            problem_strs = []
-            for problem in problems:
-                problem_strs.append(str(problem))
             return Resolution(
                 success=False,
                 actions=[],
-                problems=problem_strs
+                problems=[str(p) for p in problems]
             )
 
         # Get transaction and order it for correct install sequence
@@ -1228,7 +1260,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         if not self.install_recommends:
             solver.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)
 
-        problems = solver.solve(jobs)
+        problems = self._solve_with_auto_resolution(solver, jobs, debug)
 
         if problems:
             debug.log_problems(problems)

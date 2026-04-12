@@ -644,7 +644,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         try:
             answer = input("\n" + _("Install recommended packages? [Y/n] "))
             install_recommends_final = answer.lower() not in ('n', 'no')
-        except EOFError:
+        except (EOFError, OSError):
             print(_("\nAborted"))
             return 1
 
@@ -657,7 +657,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         try:
             answer = input("\n" + _("Install suggested packages? [Y/n] "))
             install_suggests = answer.lower() not in ('n', 'no')
-        except EOFError:
+        except (EOFError, OSError):
             print(_("\nAborted"))
             return 1
 
@@ -741,8 +741,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
     final_actions = list(result.actions)
 
-    # Separate packages being removed (obsoleted) from packages being installed
+    # Separate packages being removed (obsoleted/conflicting) from installs
     remove_pkgs = [a for a in final_actions if a.action == TransactionType.REMOVE]
+    remove_names = [a.name for a in remove_pkgs]
     install_actions = [a for a in final_actions if a.action != TransactionType.REMOVE]
 
     # Categorize install packages by install reason
@@ -803,7 +804,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             if not confirm_yes(answer):
                 print(_("Aborted"))
                 return 1
-        except EOFError:
+        except (EOFError, OSError):
             print(_("\nAborted"))
             return 1
 
@@ -1044,6 +1045,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             progress_callback=queue_progress,
             root=rpm_root or '/',
             urpm_root=getattr(args, 'urpm_root', None),
+            erase_names=remove_names or None,
             full_sync=full_sync,
         )
 

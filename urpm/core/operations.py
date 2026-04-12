@@ -277,6 +277,7 @@ class PackageOperations:
         progress_callback: Callable[['TransactionProgress'], None] = None,
         auth_context=None,
         actions: list = None,
+        erase_names: List[str] = None,
         full_sync: bool = False,
     ) -> Any:
         """Execute RPM installation via TransactionQueue.
@@ -288,6 +289,7 @@ class PackageOperations:
             auth_context: Optional AuthContext for permission check + audit
             actions: PackageAction list from resolver (used for README.urpmi
                      display after transaction completes in the child process)
+            erase_names: Package names to remove (obsoleted/conflicting)
             full_sync: If True, wait for the entire transaction including
                 triggers. If False (default), wait for extraction only and
                 run triggers in the background.
@@ -316,7 +318,8 @@ class PackageOperations:
             test=options.test,
             reinstall=options.reinstall,
             noscripts=options.noscripts,
-            actions=actions
+            actions=actions,
+            erase_names=erase_names or [],
         )
 
         result = queue.execute(
@@ -461,6 +464,7 @@ class PackageOperations:
                 progress_callback=progress_callback,
                 auth_context=auth_context,
                 actions=actions,
+                erase_names=erase_names,
                 full_sync=full_sync,
             )
 
