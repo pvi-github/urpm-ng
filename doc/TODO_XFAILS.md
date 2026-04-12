@@ -6,7 +6,7 @@ reconvertir chaque entrée en test actif vert (ou la supprimer si obsolète).
 
 Date de l'inventaire : **2026-04-10** · dernière mise à jour : **2026-04-12**
 Périmètre : `urpm/tests/` uniquement.
-Totaux : **10 xfails + 2 skips** = 12 entrées à traiter.
+Totaux : **1 xfail + 2 skips** = 3 entrées restantes.
 
 **Progression** :
 - Famille A close (test_t débloqué le 2026-04-12, test_f reclassé en
@@ -20,6 +20,14 @@ Totaux : **10 xfails + 2 skips** = 12 entrées à traiter.
   `mark_dependencies` ne démote plus les UPGRADE/DOWNGRADE/REINSTALL,
   (2) `cmd_install` promeut les paquets explicites même quand le
   resolver les skippe (déjà installés).
+- Famille D close à 9/10 (2026-04-12). Fix : (1) `_solve_with_auto_resolution`
+  pour résolution itérative de conflits via libsolv Problem/Solution API,
+  (2) chroot rpmdb loader remplacé par `_load_rpmdb` complet (Requires,
+  Conflicts, Obsoletes), (3) `erase_names` transmis dans le flux install,
+  (4) alternatives redondantes skippées quand un provider nommé couvre déjà
+  la capability virtuelle (bug #46874). Le xfail restant
+  (`test_failing_promotion`) est une différence de politique : le solver
+  préfère substituer cross-arch plutôt que supprimer.
 
 > Entrées hors backlog (légitimes, à ne pas toucher) :
 > - `urpm/tests/test_orphans.py:217` — `pytest.importorskip('rpm')`
@@ -35,7 +43,7 @@ Totaux : **10 xfails + 2 skips** = 12 entrées à traiter.
 | A. `find_upgrade_orphans` — contraintes de version / renames | `urpm/core/resolution/orphans.py` + `urpm/cli/commands/upgrade.py` | ~~2~~ 0 | 0 | — | **Close** |
 | B. `find_erase_orphans` / unrequested bookkeeping | `urpm/core/operations.py` + `urpm/cli/commands/install.py` + `upgrade.py` | ~~3~~ 0 | 0 | — | **Close** |
 | C. `cmd_upgrade` — transaction silencieusement no-op | `urpm/cli/commands/upgrade.py` (chemin d'exécution rpm) | ~~2~~ 0 | 0 | — | **Close** |
-| D. Résolveur libsolv — conflits & virtual-provides | `urpm/core/resolution/*.py` | 10 | 0 | L | Moyenne |
+| D. Résolveur libsolv — conflits & virtual-provides | `urpm/core/resolution/*.py` | ~~10~~ 1 | 0 | — | **9/10 Close** |
 | F. Test incorrect (obsolète) | *n/a* — supprimé | 0 | 0 | — | **Close** |
 | G. Fonctionnalités non implémentées | `urpm/cli/commands/install.py` ; infra multi-arch | 0 | 2 | L | Basse |
 
@@ -152,30 +160,37 @@ orphan erases. rpm voit le tableau complet et applique tout d'un coup.
 Pas d'impact sur le temps de transaction (une seule passe au lieu de
 deux).
 
-### Famille D — Résolveur libsolv : conflits et virtual-provides
+### Famille D — Résolveur libsolv : conflits et virtual-provides ✅ 9/10 CLOSE
 
-Bloc le plus volumineux du backlog. Tous partagent des raisons génériques
-("conflict … fails", "virtual-provide … fails"). Probablement **un seul fix
-libsolv** peut en déverrouiller plusieurs à la fois.
+9 tests débloqués le **2026-04-12** grâce à quatre corrections :
+1. `_solve_with_auto_resolution()` dans `resolver.py` — résolution itérative
+   de conflits via l'API Problem/Solution de libsolv (max 5 retries).
+2. Chroot rpmdb loader dans `pool.py` — remplacé le loader incomplet
+   (Provides seulement) par `_load_rpmdb()` complet (Requires, Conflicts,
+   Obsoletes, weak deps).
+3. Flux `erase_names` dans `install.py` → `operations.py` — les suppressions
+   issues de conflits sont transmises à la transaction rpm.
+4. Alternatives redondantes dans `alternatives.py` — skip quand un provider
+   déjà en transaction ou nommément requis couvre la capability virtuelle
+   (fix bug #46874).
+
+**Tests débloqués** (→ `@pytest.mark.stable`) :
+- `test_simple_c_then_d`, `test_simple_d_then_c` (conflit direct)
+- `test_simple_e_then_f`, `test_simple_f_then_e` (conflit virtual-provide)
+- `test_conflict_on_install` (install simultané de conflits)
+- `test_conflict_on_upgrade` (conflit pendant upgrade)
+- `test_conflict_upgrade_c_d`, `test_conflict_upgrade_a_b` (upgrade partiel)
+- `test_prefer_b1_over_b2` (provider redondant, bug #46874)
+
+**Xfail restant** (différence de politique, pas un bug) :
 
 | Fichier:ligne | Test | Raison |
 |---|---|---|
-| `test_install.py:435`  | `TestInstall::test_failing_promotion` | Resolver bug: upgrade promotion fails |
-| `test_install.py:811`  | `TestHandleConflictDeps::test_simple_c_then_d` | Resolver: conflict dependency resolution fails |
-| `test_install.py:818`  | `TestHandleConflictDeps::test_simple_d_then_c` | Resolver: conflict dependency resolution fails |
-| `test_install.py:825`  | `TestHandleConflictDeps::test_simple_e_then_f` | Resolver: virtual-provide conflict resolution fails |
-| `test_install.py:832`  | `TestHandleConflictDeps::test_simple_f_then_e` | Resolver: virtual-provide conflict resolution fails |
-| `test_install.py:839`  | `TestHandleConflictDeps::test_conflict_on_install` | Resolver: simultaneous conflicting install fails |
-| `test_install.py:865`  | `TestHandleConflictDeps::test_conflict_on_upgrade` | Resolver: conflict resolution during upgrade fails |
-| `test_install.py:960`  | `TestHandleConflictDeps2::test_conflict_upgrade_c_d` | Resolver: mismatch in conflict-upgrade resolution |
-| `test_install.py:977`  | `TestHandleConflictDeps2::test_conflict_upgrade_a_b` | Resolver: a1 not replaced by a2, provider install fails |
-| `test_install.py:2063` | `TestPrefer2::test_prefer_b1_over_b2` | Resolver: prefer logic installs both providers instead of one |
+| `test_install.py:434` | `TestInstall::test_failing_promotion` | Solver prefers cross-arch substitute over removal (different policy from urpmi) |
 
-**Stratégie suggérée :**
-1. Rejouer chaque test avec `--runxfail -x` et collecter la trace libsolv.
-2. Grouper par cause racine (solver flag manquant ? mauvaise pondération ?
-   mauvaise préférence de provider ?).
-3. Traiter par grappe, pas un par un.
+Le solver libsolv trouve une solution techniquement valide (installer
+f1.i686 quand f1.x86_64 est cassé) là où urpmi supprimait le paquet.
+Nécessiterait un flag de politique configurable, pas un hack global.
 
 ### Famille F — Test obsolète à supprimer ✅ CLOSE
 
@@ -218,16 +233,17 @@ endroit.
 
 ## Synthèse cross-fichiers
 
-- **Module chaud** : `urpm/core/resolution/` accumule **10/12 xfails** (tout
-  sauf la famille G skips). C'est l'endroit où investir.
+- **Module chaud** : `urpm/core/resolution/` — nettoyé. Le seul xfail
+  restant (`test_failing_promotion`) est une différence de politique, pas
+  un bug de code.
 - **Fichiers non concernés** : `test_cli.py`, `test_database.py`,
   `test_download.py`, `test_suggests.py`, `test_synthesis.py` — aucune
   entrée. `test_orphans.py` est propre depuis le rewrite de
   `find_upgrade_orphans` (commit `84a6780`).
-- **Familles closes** : A, B, C, F — 8 xfails éliminés, 1 test obsolète
-  supprimé. Les gains rapides sont faits.
-- **Gros morceau restant** : famille D (10 xfails libsolv) — à attaquer
-  après avoir collecté les traces et identifié les causes racines communes.
+- **Familles closes** : A, B, C, D (9/10), F — 17 xfails éliminés, 1 test
+  obsolète supprimé. Reste 1 xfail + 2 skips.
+- **Prochaine cible** : famille G (2 skips) — dépend d'infra multi-arch
+  et de l'implémentation de `--force`.
 
 ---
 
