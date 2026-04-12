@@ -6,7 +6,7 @@ reconvertir chaque entrée en test actif vert (ou la supprimer si obsolète).
 
 Date de l'inventaire : **2026-04-10** · dernière mise à jour : **2026-04-12**
 Périmètre : `urpm/tests/` uniquement.
-Totaux : **13 xfails + 3 skips** = 16 entrées à traiter.
+Totaux : **13 xfails + 2 skips** = 15 entrées à traiter.
 
 **Progression** :
 - Famille A close (test_t débloqué le 2026-04-12, test_f reclassé en
@@ -31,7 +31,7 @@ Totaux : **13 xfails + 3 skips** = 16 entrées à traiter.
 | B. `find_erase_orphans` / unrequested bookkeeping | `urpm/core/resolution/orphans.py` + `urpm/cli/commands/upgrade.py` (`mark_dependencies`) | 3 | 0 | M | Haute |
 | C. `cmd_upgrade` — transaction silencieusement no-op | `urpm/cli/commands/upgrade.py` (chemin d'exécution rpm) | ~~2~~ 0 | 0 | — | **Close** |
 | D. Résolveur libsolv — conflits & virtual-provides | `urpm/core/resolution/*.py` | 10 | 0 | L | Moyenne |
-| F. Test incorrect (obsolète) | *n/a* — supprimer ou réécrire | 0 | 1 | S | Haute |
+| F. Test incorrect (obsolète) | *n/a* — supprimé | 0 | 0 | — | **Close** |
 | G. Fonctionnalités non implémentées | `urpm/cli/commands/install.py` ; infra multi-arch | 0 | 2 | L | Basse |
 
 Effort : S = <1 j · M = 1–3 j · L = 3 j+. `?` = à re-évaluer avant estimation.
@@ -162,14 +162,12 @@ libsolv** peut en déverrouiller plusieurs à la fois.
    mauvaise préférence de provider ?).
 3. Traiter par grappe, pas un par un.
 
-### Famille F — Test obsolète à supprimer
+### Famille F — Test obsolète à supprimer ✅ CLOSE
 
-| Fichier:ligne | Test | Raison |
-|---|---|---|
-| `test_install.py:1907` | `TestOrphans::test_auto_select_r_with_rr2` | Test itself is incorrect — libsolv only installs one provider |
-
-**Action :** supprimer ou réécrire pour refléter le comportement correct de
-libsolv (installe un seul provider). **Gain facile**, à faire en premier.
+Test `test_auto_select_r_with_rr2` supprimé le **2026-04-12**. Le test
+partait du principe que libsolv installe les deux providers d'une même
+capability, ce qui est incorrect. Le scénario mono-provider est déjà
+couvert par `test_auto_select_r`.
 
 ### Famille G — Fonctionnalités non encore implémentées
 

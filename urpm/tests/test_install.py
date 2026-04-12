@@ -1899,17 +1899,6 @@ class TestOrphans(BaseUrpmiTest):
     def test_auto_select_t(self):
         self._test_auto_select_both("t", "tt1", "t-2 tt2-2", "tt1-1")
 
-    @pytest.mark.deferred
-    @pytest.mark.skip(reason="Test itself is incorrect — libsolv only installs one provider")
-    def test_auto_select_r_with_rr2(self):
-        """r with both rr1 and rr2 available: rr1 becomes orphan after upgrade."""
-        self._test_auto_select(
-            ["r", "rr2"],
-            " ".join(self._add_version1("r", "rr1", "rr2")),
-            "r-2 rr2-1",
-            "rr1-1",
-        )
-
     @pytest.mark.stable
     def test_urpme_g(self):
         """Remove g-2, gg-2 stays (was explicitly installed)."""
