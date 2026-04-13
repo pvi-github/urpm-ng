@@ -7,21 +7,21 @@ urpm \- gestor de paquetes moderno para Mageia Linux
 .RI [ opciones ]
 .I comando
 .RI [ argumentos ]
-.SH DESCRIPCION
+.SH DESCRIPCIÓN
 .B urpm
 es un gestor de paquetes moderno para Mageia Linux, que ofrece una
-resolucion rapida de dependencias mediante libsolv, comparticion de
-paquetes P2P entre maquinas de la red local, y una interfaz de linea
+resolución rápida de dependencias mediante libsolv, compartición de
+paquetes P2P entre máquinas de la red local, y una interfaz de línea
 de comandos intuitiva.
 .PP
-Esta disenado como una reescritura completa del conjunto de herramientas urpmi.
+Está diseñado como una reescritura completa del conjunto de herramientas urpmi.
 .SH OPCIONES
 .TP
 .BR \-h ", " \-\-help
 Muestra el mensaje de ayuda y sale.
 .TP
 .BR \-V ", " \-\-version
-Muestra el numero de version y sale.
+Muestra el número de versión y sale.
 .TP
 .BR \-v ", " \-\-verbose
 Modo detallado.
@@ -32,14 +32,14 @@ Modo silencioso.
 .B \-\-nocolor
 Desactiva la salida con colores.
 .SH COMANDOS
-.SS Instalacion y eliminacion de paquetes
+.SS Instalación y eliminación de paquetes
 .TP
 .B i|install \fIpaquete\fR ...
-Instala uno o mas paquetes.
+Instala uno o más paquetes.
 .RS
 .TP
 .BR \-y ", " \-\-auto
-Sin confirmacion.
+Sin confirmación.
 .TP
 .B \-\-download\-only
 Descarga sin instalar.
@@ -48,67 +48,67 @@ Descarga sin instalar.
 No instala los paquetes recomendados.
 .TP
 .B \-\-with\-suggests
-Instala tambien los paquetes sugeridos.
+Instala también los paquetes sugeridos.
 .TP
 .B \-\-only\-peers
-Descarga unicamente desde pares LAN, sin espejos upstream.
+Descarga únicamente desde pares LAN, sin espejos upstream.
 .TP
 .BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
-Instala las dependencias de compilacion desde un archivo spec o SRPM. Deteccion automatica si no se especifica.
+Instala las dependencias de compilación desde un archivo spec o SRPM. Detección automática si no se especifica.
 .TP
 .B \-\-sync
 Espera a que todos los scriptlets y triggers finalicen antes de retornar.
 .TP
 .B \-\-allow\-arch " " \fIarch\fR
-Permite arquitecturas adicionales ademas de la arquitectura del sistema y noarch.
+Permite arquitecturas adicionales además de la arquitectura del sistema y noarch.
 Puede repetirse. Por defecto, solo se consideran los paquetes que coinciden con la
-arquitectura del sistema (ej: x86_64) y noarch. Use esta opcion para instalar paquetes
+arquitectura del sistema (ej: x86_64) y noarch. Use esta opción para instalar paquetes
 de 32 bits en sistemas de 64 bits (ej: \fB\-\-allow\-arch i686\fR para wine o steam).
 .RE
 .TP
 .B e|erase \fIpaquete\fR ...
-Elimina uno o mas paquetes. Alias: \fBremove\fR.
+Elimina uno o más paquetes. Alias: \fBremove\fR.
 .RS
 .TP
 .BR \-y ", " \-\-auto
-Sin confirmacion.
+Sin confirmación.
 .TP
 .B \-\-auto\-orphans
-Elimina tambien las dependencias huerfanas.
+Elimina también las dependencias huérfanas.
 .RE
 .TP
 .B autoremove
-Elimina paquetes huerfanos, kernels antiguos, dependencias fallidas o dependencias de compilacion.
+Elimina paquetes huérfanos, kernels antiguos, dependencias fallidas o dependencias de compilación.
 Alias: \fBar\fR.
 .RS
 .TP
 .BR \-o ", " \-\-orphans
-Elimina paquetes huerfanos (por defecto si no se indica selector).
+Elimina paquetes huérfanos (por defecto si no se indica selector).
 .TP
 .BR \-k ", " \-\-kernels
-Elimina kernels antiguos (conserva el actual + N recientes, ver \fBurpm config kernel\-keep\fR).
+Elimina kernels antiguos (conserva el actual + N reciéntes, ver \fBurpm config kernel\-keep\fR).
 .TP
 .BR \-f ", " \-\-faildeps
-Elimina dependencias huerfanas de transacciones interrumpidas.
+Elimina dependencias huérfanas de transacciónes interrumpidas.
 .TP
 .BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br
-Elimina paquetes instalados como dependencias de compilacion (registrados en
+Elimina paquetes instalados como dependencias de compilación (registrados en
 .IR /var/lib/rpm/installed\-through\-builddeps.list ")."
 .TP
 .BR \-a ", " \-\-all
 Todos los selectores anteriores.
 .TP
 .BR \-y ", " \-\-auto
-Sin confirmacion.
+Sin confirmación.
 .RE
-.SS Metadatos y actualizaciones de paquetes
+.SS Metadatos y actualizaciónes de paquetes
 .TP
 .B update \fR[\fImedio\fR]
-Actualiza unicamente los metadatos de los medios (estilo apt). No actualiza paquetes.
+Actualiza únicamente los metadatos de los medios (estilo apt). No actualiza paquetes.
 .RS
 .TP
 .B \-\-files
-Sincroniza tambien files.xml para los medios con sync_files activado.
+Sincroniza también files.xml para los medios con sync_files activado.
 .RE
 .TP
 .B u|upgrade \fR[\fIpaquete\fR ...]
@@ -116,24 +116,24 @@ Actualiza paquetes (todo el sistema si no se especifica ninguno).
 .RS
 .TP
 .BR \-y ", " \-\-auto
-Sin confirmacion.
+Sin confirmación.
 .TP
 .B \-\-with\-recommends
 Instala los paquetes recomendados.
 .TP
 .B \-\-only\-peers
-Descarga unicamente desde pares LAN, sin espejos upstream.
+Descarga únicamente desde pares LAN, sin espejos upstream.
 .TP
 .B \-\-allow\-arch " " \fIarch\fR
 Permite arquitecturas adicionales (ej: \fB\-\-allow\-arch i686\fR).
 .RE
-.SS Informacion sobre paquetes
+.SS Información sobre paquetes
 .TP
 .B q|query \fIpatron\fR
-Busca paquetes por nombre o descripcion. Alias: \fBs\fR, \fBsearch\fR.
+Busca paquetes por nombre o descripción. Alias: \fBs\fR, \fBsearch\fR.
 .TP
 .B show \fIpaquete\fR
-Muestra informacion detallada de un paquete.
+Muestra información detallada de un paquete.
 .TP
 .B list \fR[\fIpatron\fR]
 Lista paquetes. Use \fB\-\-installed\fR para solo paquetes instalados.
@@ -152,13 +152,13 @@ Encuentra el paquete que contiene un archivo que coincide con el patron.
 Busca solo en paquetes instalados.
 .TP
 .BR \-a ", " \-\-available
-Busca solo en paquetes disponibles (requiere sincronizacion de files.xml).
+Busca solo en paquetes disponibles (requiere sincronización de files.xml).
 .TP
 .BR \-l ", " \-\-limit " " \fIN\fR
 Limita los resultados a N coincidencias.
 .PP
 Por defecto, busca en paquetes instalados y disponibles.
-La busqueda en paquetes disponibles requiere activar la sincronizacion de files.xml mediante
+La búsqueda en paquetes disponibles requiere activar la sincronización de files.xml mediante
 \fBurpm media set \-\-all \-\-sync-files\fR seguido de
 \fBurpm media update \-\-files\fR.
 .RE
@@ -170,18 +170,18 @@ Muestra las dependencias de un paquete.
 Muestra las dependencias inversas.
 .TP
 .B why \fIpaquete\fR
-Explica por que un paquete esta instalado.
-.SS Gestion de medios y servidores
+Explica por qué un paquete está instalado.
+.SS Gestión de medios y servidores
 .TP
 .B media \fR[\fIsubcomando\fR]
-Gestiona las fuentes de medios. Sin subcomando, lista los medios.
+Gestióna las fuentes de medios. Sin subcomando, lista los medios.
 .RS
 .TP
 .B list
 Lista los medios configurados.
 .TP
 .B add \fInombre\fR \fIurl\fR
-Anade un nuevo medio.
+Añade un nuevo medio.
 .TP
 .B remove \fInombre\fR
 Elimina un medio.
@@ -197,12 +197,12 @@ Actualiza los metadatos (en paralelo).
 .RS
 .TP
 .B \-\-files
-Sincroniza tambien files.xml para los medios con sync_files activado. Necesario para
+Sincroniza también files.xml para los medios con sync_files activado. Necesario para
 que \fBurpm find\fR busque en paquetes disponibles.
 .RE
 .TP
 .B import
-Importa la configuracion desde urpmi.
+Importa la configuración desde urpmi.
 .TP
 .B link \fInombre\fR \fI+servidor\fR|\fI-servidor\fR ...
 Asocia o desasocia servidores de un medio. Use +servidor para anadir, -servidor para eliminar.
@@ -213,46 +213,46 @@ Modifica los parametros de un medio.
 .RS
 .TP
 .B \-\-shared \fIyes\fR|\fIno\fR
-Activa/desactiva la comparticion de este medio con los pares.
+Activa/desactiva la compartición de este medio con los pares.
 .TP
 .B \-\-replication \fIpolicy\fR
-Politica de replicacion: none, on_demand, seed.
+Política de replicacion: none, on_demand, seed.
 .TP
-.B \-\-seeds \fIsecciones\fR
+.B \-\-seeds \fIsecciónes\fR
 Secciones rpmsrate para la replicacion seed (separadas por comas), ej: INSTALL,CAT_PLASMA5,CAT_GNOME.
 .TP
-.B \-\-quota \fItamano\fR
+.B \-\-quota \fItamaño\fR
 Cuota por medio (ej: 5G, 500M).
 .TP
 .B \-\-retention \fIdias\fR
-Dias de conservacion de paquetes en cache.
+Días de conservación de paquetes en cache.
 .TP
 .B \-\-priority \fIN\fR
 Prioridad del medio (mayor = preferido).
 .TP
 .B \-\-sync\-files
-Activa la sincronizacion automatica de files.xml para este medio. Necesario para que
+Activa la sincronización automática de files.xml para este medio. Necesario para que
 \fBurpm find\fR busque en paquetes disponibles.
 .TP
 .B \-\-no\-sync\-files
-Desactiva la sincronizacion automatica de files.xml.
+Desactiva la sincronización automática de files.xml.
 .TP
 .BR \-a ", " \-\-all
-Aplica la configuracion a todos los medios activos (usar con \fB\-\-sync\-files\fR o \fB\-\-no\-sync\-files\fR).
+Aplica la configuración a todos los medios activos (usar con \fB\-\-sync\-files\fR o \fB\-\-no\-sync\-files\fR).
 .RE
 .TP
-.B autoconfig \fB\-\-release\fR \fIversion\fR
-Anade automaticamente los medios oficiales de Mageia para una version. Alias: \fBauto\fR, \fBac\fR.
+.B autoconfig \fB\-\-release\fR \fIversión\fR
+Añade automáticamente los medios oficiales de Mageia para una versión. Alias: \fBauto\fR, \fBac\fR.
 .RS
 .TP
-.BR \-r ", " \-\-release " " \fIversion\fR
-Version de Mageia (ej: 10, cauldron). Obligatorio.
+.BR \-r ", " \-\-release " " \fIversión\fR
+Versión de Mageia (ej: 10, cauldron). Obligatorio.
 .TP
 .B \-\-arch \fIarch\fR
 Arquitectura destino (por defecto: la del sistema).
 .TP
 .BR \-n ", " \-\-dry\-run
-Muestra lo que se anadira sin realizar cambios.
+Muestra lo que se añadirá sin realizar cambios.
 .TP
 .B \-\-no\-nonfree
 Omite los medios nonfree.
@@ -264,13 +264,13 @@ Omite los medios tainted.
 .B discover \fIurl\fR
 Descubre todos los medios disponibles desde el archivo \fBmedia.cfg\fR de un repositorio.
 Funciona con espejos oficiales, repositorios comunitarios (MLO) y espejos corporativos.
-Los servidores existentes que alojan el mismo contenido se enlazan automaticamente
-(verificacion mediante suma MD5 de synthesis.hdlist.cz).
+Los servidores existentes que alojan el mismo contenido se enlazan automáticamente
+(verificación mediante suma MD5 de synthesis.hdlist.cz).
 Alias: \fBdisc\fR.
 .RS
 .TP
 .BR \-n ", " \-\-dry\-run
-Muestra lo que se anadira sin realizar cambios.
+Muestra lo que se añadirá sin realizar cambios.
 .TP
 .B \-\-enable
 Activa todos los medios descubiertos, incluyendo los marcados como \fBnoauto\fR en media.cfg.
@@ -284,7 +284,7 @@ Incluye los medios debug (excluidos por defecto).
 .RE
 .TP
 .B server \fR[\fIsubcomando\fR]
-Gestiona los servidores de descarga. Sin subcomando, lista los servidores.
+Gestióna los servidores de descarga. Sin subcomando, lista los servidores.
 .RS
 .TP
 .B list
@@ -296,10 +296,10 @@ Lista todos los servidores incluyendo los desactivados.
 .RE
 .TP
 .B add \fInombre\fR \fIurl\fR
-Anade un nuevo servidor.
+Añade un nuevo servidor.
 .TP
 .B remove \fInombre\fR [\fInombre\fR ...]
-Eliminar uno o mas servidores.
+Eliminar uno o más servidores.
 .TP
 .B enable \fInombre\fR
 Activa un servidor.
@@ -308,47 +308,47 @@ Activa un servidor.
 Desactiva un servidor.
 .TP
 .B priority \fInombre\fR \fIN\fR
-Establece la prioridad del servidor (numero mayor = preferido, por defecto 50).
+Establece la prioridad del servidor (número mayor = preferido, por defecto 50).
 .TP
 .B test \fR[\fInombre\fR]
 Prueba la conectividad de un servidor (o de todos los servidores activos) y
-detecta automaticamente el mejor modo IP (auto/ipv4/ipv6/dual).
+detecta automáticamente el mejor modo IP (auto/ipv4/ipv6/dual).
 .TP
 .B ip-mode \fInombre\fR \fImode\fR
-Fuerza la version IP utilizada para conectarse a un servidor.
-Modos validos: \fBauto\fR (por defecto del sistema), \fBipv4\fR, \fBipv6\fR, \fBdual\fR
+Fuerza la versión IP utilizada para conectarse a un servidor.
+Modos válidos: \fBauto\fR (por defecto del sistema), \fBipv4\fR, \fBipv6\fR, \fBdual\fR
 (ambos funcionan, se prefiere IPv4).
 .TP
 .B stats \fInombre\fR
-Muestra las estadisticas de rendimiento medidas para un servidor: velocidad de
+Muestra las estadísticas de rendimiento medidas para un servidor: velocidad de
 descarga (media EWMA de descargas anteriores), latencia, contadores de
-exito/fallo y fecha de la ultima comprobacion.
-Las estadisticas se actualizan automaticamente despues de cada descarga
-y cada sincronizacion de metadatos.
+exito/fallo y fecha de la última comprobacion.
+Las estadísticas se actualizan automáticamente después de cada descarga
+y cada sincronización de metadatos.
 .TP
 .B autoconfig
-Descubre y anade automaticamente los servidores mas rapidos desde la
+Descubre y añade automáticamente los servidores mas rápidos desde la
 mirrorlist de Mageia. Prueba la latencia de todos los candidatos y conserva los N
 mejores. La latencia medida se guarda para que el orden de los servidores
 sea significativo desde la primera descarga.
 .sp
-El filtrado geografico (lista blanca/negra por pais o continente) se
-aplica desde la seccion
+El filtrado geográfico (lista blanca/negra por país o continente) se
+aplica desde la sección
 .B [server]
 en
 .IR /etc/urpm/conf.d/10\-server.cfg .
 Establecer
 .B auto_add = false
-para desactivar la adicion automatica de servidores.
+para desactivar la adición automática de servidores.
 .RE
 .SS P2P y cache
 .TP
 .B peer \fR[\fIsubcomando\fR]
-Gestiona los pares P2P. Sin subcomando, lista los pares.
+Gestióna los pares P2P. Sin subcomando, lista los pares.
 .RS
 .TP
 .B list
-Lista los pares descubiertos y las estadisticas de descarga.
+Lista los pares descubiertos y las estadísticas de descarga.
 .TP
 .B blacklist \fIhost\fR
 Bloquea un par.
@@ -361,69 +361,69 @@ Elimina los RPM descargados desde un par.
 .RE
 .TP
 .B cache \fIsubcomando\fR
-Gestiona la cache de paquetes.
+Gestióna la cache de paquetes.
 .RS
 .TP
 .B clean
-Elimina los RPM huerfanos de la cache.
+Elimina los RPM huérfanos de la cache.
 .TP
 .B info
-Muestra las estadisticas de la cache.
+Muestra las estadísticas de la cache.
 .RE
-.SS Historial y reversion
+.SS Historial y reversión
 .TP
 .B history \fR[\fIN\fR]
-Muestra el historial de transacciones. Por defecto: las 10 ultimas.
+Muestra el historial de transacciónes. Por defecto: las 10 últimas.
 .TP
 .B rollback \fIspec\fR
-Revierte transacciones.
+Revierte transacciónes.
 .RS
 .TP
 .B rollback 5
-Revierte las ultimas 5 transacciones.
+Revierte las últimas 5 transacciónes.
 .TP
 .B rollback to 42
-Revierte a la transaccion #42.
+Revierte a la transacción #42.
 .TP
 .B rollback to 26/11/2025
-Revierte a una fecha especifica.
+Revierte a una fecha específica.
 .RE
 .TP
 .B undo \fR[\fIN\fR]
-Deshace la ultima transaccion, o la transaccion #N.
-.SS Configuracion
+Deshace la última transacción, o la transacción #N.
+.SS Configuración
 .TP
 .B config \fIsubcomando\fR
-Gestiona la configuracion de urpm.
+Gestióna la configuración de urpm.
 .TP
 .B key \fIsubcomando\fR
-Gestiona las claves GPG para la verificacion de paquetes.
+Gestióna las claves GPG para la verificación de paquetes.
 .TP
 .B mark \fIpaquete\fR manual|auto
-Marca paquetes como instalados manualmente o automaticamente.
+Marca paquetes como instalados manualmente o automáticamente.
 .TP
-.B hold \fR[\fIpaquete\fR ...] [\fB\-r\fR \fIrazon\fR]
-Bloquea paquetes para impedir actualizaciones y reemplazo por obsoletos.
+.B hold \fR[\fIpaquete\fR ...] [\fB\-r\fR \fIrazón\fR]
+Bloquea paquetes para impedir actualizaciónes y reemplazo por obsoletos.
 Sin argumentos, lista los paquetes bloqueados.
 .RS
 .TP
-.BR \-r ", " \-\-reason " " \fIrazon\fR
-Registra una razon para el bloqueo.
+.BR \-r ", " \-\-reason " " \fIrazón\fR
+Registra una razón para el bloqueo.
 .TP
 .BR \-l ", " \-\-list
 Lista los paquetes bloqueados.
 .RE
 .TP
 .B unhold \fIpaquete\fR ...
-Elimina el bloqueo de paquetes, permitiendo su actualizacion o reemplazo.
-.SS Inicializacion y descarga
+Elimina el bloqueo de paquetes, permitiendo su actualización o reemplazo.
+.SS Inicialización y descarga
 .TP
-.B init \fR[\fB\-\-release\fR \fIversion\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]
+.B init \fR[\fB\-\-release\fR \fIversión\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]
 Inicializa urpm con los medios estandar de Mageia. Prueba los espejos y configura los mejores.
 .RS
 .TP
-.BR \-r ", " \-\-release " " \fIversion\fR
-Version de Mageia (ej: 10, cauldron).
+.BR \-r ", " \-\-release " " \fIversión\fR
+Versión de Mageia (ej: 10, cauldron).
 .TP
 .B \-\-urpm\-root " " \fIruta\fR
 Inicializa en un directorio chroot.
@@ -433,33 +433,33 @@ Inicializa en un directorio chroot.
 Descarga paquetes a la cache sin instalarlos.
 .RS
 .TP
-.BR \-r ", " \-\-release " " \fIversion\fR
-Version destino para descargas entre versiones.
+.BR \-r ", " \-\-release " " \fIversión\fR
+Versión destino para descargas entre versiones.
 .TP
 .BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
-Descarga las dependencias de compilacion desde un archivo spec.
+Descarga las dependencias de compilación desde un archivo spec.
 .TP
 .B \-\-only\-peers
-Descarga unicamente desde pares LAN, sin espejos upstream.
+Descarga únicamente desde pares LAN, sin espejos upstream.
 .TP
 .B \-\-allow\-arch " " \fIarch\fR
 Permite arquitecturas adicionales (ej: \fB\-\-allow\-arch i686\fR).
 .RE
-.SS Sistema de compilacion en contenedores
+.SS Sistema de compilación en contenedores
 .TP
-.B mkimage \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInombre\fR]
-Crea una imagen Docker/Podman minima para compilaciones RPM.
+.B mkimage \fB\-\-release\fR \fIversión\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInombre\fR]
+Crea una imagen Docker/Podman mínima para compilaciones RPM.
 .RS
 .TP
-.BR \-r ", " \-\-release " " \fIversion\fR
-Version de Mageia (ej: 10, cauldron).
+.BR \-r ", " \-\-release " " \fIversión\fR
+Versión de Mageia (ej: 10, cauldron).
 .TP
 .BR \-t ", " \-\-tag " " \fItag\fR
 Etiqueta de la imagen (ej: mageia:10-build).
 .TP
 .B \-\-profile " " \fInombre\fR
 Perfil de paquetes (por defecto: build). Perfiles disponibles: build (entorno de
-compilacion RPM), ci (CI/pruebas), minimal (sistema minimo con urpm). Los perfiles
+compilación RPM), ci (CI/pruebas), minimal (sistema mínimo con urpm). Los perfiles
 se cargan desde /usr/share/urpm/profiles/*.yaml y /etc/urpm/profiles/*.yaml.
 .TP
 .B \-\-arch " " \fIarch\fR
@@ -469,10 +469,10 @@ Arquitectura destino (por defecto: la del sistema).
 Paquetes adicionales (separados por comas).
 .TP
 .B \-\-runtime " " docker|podman
-Motor de contenedores (por defecto: deteccion automatica).
+Motor de contenedores (por defecto: detección automática).
 .TP
 .B \-\-keep\-chroot
-Conservar el chroot temporal despues de crear la imagen.
+Conservar el chroot temporal después de crear la imagen.
 .TP
 .BR \-w ", " \-\-workdir " " \fIruta\fR
 Directorio de trabajo para el chroot (por defecto: /tmp).
@@ -490,21 +490,21 @@ Directorio de salida para compilaciones SRPM (por defecto: ./build-output).
 Para archivos .spec, los resultados van a workspace/RPMS/ y workspace/SRPMS/.
 .TP
 .BR \-w ", " \-\-with\-rpms " " \fIpatron\fR
-Preinstala RPMs locales en el contenedor antes de compilar. Util para
-compilar un paquete que depende de una biblioteca recien compilada localmente.
+Preinstala RPMs locales en el contenedor antes de compilar. Útil para
+compilar un paquete que depende de una biblioteca recién compilada localmente.
 Soporta patrones glob y puede repetirse. Ejemplo: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
 .TP
 .B \-\-runtime " " docker|podman
-Motor de contenedores (por defecto: deteccion automatica).
+Motor de contenedores (por defecto: detección automática).
 .TP
 .BR \-j ", " \-\-parallel " " \fIN\fR
-Numero de compilaciones en paralelo (por defecto: 1).
+Número de compilaciones en paralelo (por defecto: 1).
 .TP
 .B \-\-keep\-container
-Conservar el contenedor despues de compilar (para depuracion).
+Conservar el contenedor después de compilar (para depuración).
 .PP
 Las fuentes pueden ser archivos .src.rpm o .spec. Para archivos .spec,
-las fuentes se copian automaticamente desde el directorio SOURCES/ (soporta
+las fuentes se copian automáticamente desde el directorio SOURCES/ (soporta
 las estructuras workspace/SPECS/ y workspace/SOURCES/).
 .RE
 .SH ARCHIVOS
@@ -519,15 +519,15 @@ Base de datos SQLite para metadatos e historial de paquetes.
 Cache de paquetes descargados.
 .TP
 .I /etc/urpm/urpm.cfg
-Archivo de configuracion principal.
+Archivo de configuración principal.
 .TP
 .I /etc/urpm/conf.d/*.cfg
-Archivos de configuracion adicionales (cargados alfabeticamente despues
-de urpm.cfg). La seccion
+Archivos de configuración adicionales (cargados alfabéticamente después
+de urpm.cfg). La sección
 .B [server]
 en
 .I 10\-server.cfg
-controla la adicion automatica de espejos y el filtrado geografico
+controla la adición automática de espejos y el filtrado geográfico
 (country_blacklist, country_whitelist, continent_blacklist, continent_whitelist, auto_add).
 .TP
 .I /etc/bash_completion.d/urpm
@@ -543,15 +543,15 @@ Buscar paquetes:
 Actualizar todos los paquetes:
 .B urpm u
 .TP
-Eliminar un paquete sin pedir confirmacion:
+Eliminar un paquete sin pedir confirmación:
 .B urpm e \-y gimp
 .TP
-Mostrar por que un paquete esta instalado:
+Mostrar por qué un paquete está instalado:
 .B urpm why libpng
 .TP
 Actualizar los metadatos de los medios:
 .B urpm m u
-.SH VEASE TAMBIEN
+.SH VÉASE TAMBIÉN
 .BR urpmd (8),
 .BR rpm (8),
 .SH ERRORES
