@@ -266,12 +266,20 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             mirrorlist=None,
             auto=True,
             no_sync=False,
-            no_mount=True,  # Skip mount operations - container runtime handles /dev, /proc
+            no_mount=True,  # Skip mount operations - we mount /proc and /sys ourselves below
         )
         ret = cmd_init(init_args, chroot_db)
         if ret != 0:
             print(colors.error(_("Failed to initialize chroot")))
             return ret
+
+        # Mount /proc and /sys for scriptlets that need them
+        proc_path = os.path.join(tmpdir, 'proc')
+        sys_path = os.path.join(tmpdir, 'sys')
+        os.makedirs(proc_path, exist_ok=True)
+        os.makedirs(sys_path, exist_ok=True)
+        subprocess.run(['mount', '-t', 'proc', 'proc', proc_path], check=True)
+        subprocess.run(['mount', '-t', 'sysfs', 'sysfs', sys_path], check=True)
 
         # 2. Install packages
         # Use noscripts when not root (user namespace) - scriptlets often fail
@@ -644,6 +652,9 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
 
     finally:
         if not keep_chroot:
+            # Unmount /proc and /sys before removing the chroot tree
+            cleanup_args = argparse.Namespace(urpm_root=tmpdir)
+            cmd_cleanup(cleanup_args, db)
             print(_("\nCleaning up temporary directory..."))
             shutil.rmtree(tmpdir, ignore_errors=True)
         else:

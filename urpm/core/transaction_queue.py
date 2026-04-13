@@ -300,6 +300,7 @@ class QueueResult:
     operations: List[OperationResult] = field(default_factory=list)
     overall_error: str = ""
     scriptlet_output: str = ""  # Captured stdout from RPM scriptlets
+    script_error_packages: List[str] = field(default_factory=list)  # Packages with scriptlet errors
 
 
 @dataclass
@@ -331,6 +332,7 @@ class QueueProgressMessage:
     bytes_total: int = 0     # Total bytes for current package
     script: str = ""         # Scriptlet phase (e.g. 'post-install')
     scriptlet_output: str = ""  # Captured stdout from RPM scriptlets
+    script_errors: List[str] = field(default_factory=list)  # Packages with scriptlet errors
 
     def to_json(self) -> str:
         d = {
@@ -352,6 +354,8 @@ class QueueProgressMessage:
         }
         if self.scriptlet_output:
             d['scriptlet_output'] = self.scriptlet_output
+        if self.script_errors:
+            d['script_errors'] = self.script_errors
         return json.dumps(d)
 
     @classmethod
@@ -374,6 +378,7 @@ class QueueProgressMessage:
             bytes_total=d.get('bytes_total', 0),
             script=d.get('script', ''),
             scriptlet_output=d.get('scriptlet_output', ''),
+            script_errors=d.get('script_errors', []),
         )
 
 
@@ -856,6 +861,7 @@ queue._child_process_standalone()
         current_op_result: Optional[OperationResult] = None
         overall_error = ""
         scriptlet_output = ""
+        script_error_packages: List[str] = []
         smart_released = False
 
         try:
@@ -922,6 +928,7 @@ queue._child_process_standalone()
 
                 elif msg.msg_type == 'scriptlet_output':
                     scriptlet_output = msg.scriptlet_output
+                    script_error_packages = msg.script_errors or []
 
                 elif msg.msg_type == 'queue_done':
                     break
@@ -958,6 +965,7 @@ queue._child_process_standalone()
             operations=results,
             overall_error=overall_error,
             scriptlet_output=scriptlet_output,
+            script_error_packages=script_error_packages,
         )
 
     def _child_process(self, read_fd: int, write_fd: int,
@@ -991,6 +999,7 @@ queue._child_process_standalone()
         _stdout_capture_path = _stdout_capture.name
         _capture_fd = _stdout_capture.fileno()
         self._capture_fd = _capture_fd  # accessible from install/erase callbacks
+        self._script_error_packages = set()  # track packages with scriptlet errors
         os.dup2(_capture_fd, 1)  # stdout → temp file
         os.dup2(_capture_fd, 2)  # stderr → temp file
         # Update Python-level objects so print(..., file=sys.stderr) also
@@ -1121,10 +1130,12 @@ queue._child_process_standalone()
                                 _script_outputs[_pkg] += '\n' + _body
                             else:
                                 _script_outputs[_pkg] = _body
-                    if _script_outputs:
+                    _script_errs = list(self._script_error_packages)
+                    if _script_outputs or _script_errs:
                         _pipe_write(QueueProgressMessage(
                             msg_type='scriptlet_output',
-                            scriptlet_output=_json.dumps(_script_outputs),
+                            scriptlet_output=_json.dumps(_script_outputs) if _script_outputs else '',
+                            script_errors=_script_errs,
                         ).to_json())
                     else:
                         # Markers only, no actual output — skip
@@ -1565,6 +1576,7 @@ queue._child_process_standalone()
             if reason == rpm.RPMCALLBACK_SCRIPT_ERROR:
                 script_name = _clean_script_key(key)
                 _log_background(f"Scriptlet error: {script_name}")
+                self._script_error_packages.add(script_name)
                 return
 
         # Set problem filters
@@ -1826,6 +1838,11 @@ queue._child_process_standalone()
                                            current=completed[0],
                                            phase='script_done',
                                            script=script_name)
+
+            elif reason == rpm.RPMCALLBACK_SCRIPT_ERROR:
+                script_name = _clean_script_key(key)
+                _log_background(f"Scriptlet error: {script_name}")
+                self._script_error_packages.add(script_name)
 
             elif reason == rpm.RPMCALLBACK_TRANS_STOP:
                 _log_background(f"Erase complete: {total} packages")

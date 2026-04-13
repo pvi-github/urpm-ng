@@ -277,3 +277,95 @@ def make_progress_callback(
     _callback.cleanup = _cleanup
 
     return _callback
+
+
+def display_scriptlet_output(queue_result, verbose: bool = False) -> None:
+    """Display captured scriptlet output after a transaction.
+
+    In verbose mode, shows all output grouped by package.  In normal mode,
+    shows only packages that had scriptlet errors, with a summary count
+    for packages that produced output without errors.
+
+    Args:
+        queue_result: A ``QueueResult`` with ``scriptlet_output`` (JSON
+            string mapping package names to their output) and
+            ``script_error_packages`` (list of names that errored).
+        verbose: If True, show all output; otherwise show only errors.
+    """
+    import json
+    from .. import colors
+
+    if queue_result is None:
+        return
+
+    scriptlet_output = getattr(queue_result, 'scriptlet_output', '')
+    error_packages = set(getattr(queue_result, 'script_error_packages', None) or [])
+
+    # Parse the output dict
+    script_dict = {}
+    if scriptlet_output:
+        try:
+            script_dict = json.loads(scriptlet_output)
+        except (json.JSONDecodeError, TypeError):
+            # Fallback: show raw output if JSON parse fails
+            if verbose or error_packages:
+                print(colors.dim("\n  " + _("Scriptlet output:")))
+                for line in scriptlet_output.splitlines():
+                    print(colors.dim(f"    {line}"))
+            return
+
+    if not script_dict and not error_packages:
+        return
+
+    # Separate packages into error vs. normal
+    error_with_output = {p: script_dict[p] for p in script_dict if p in error_packages}
+    normal_with_output = {p: script_dict[p] for p in script_dict if p not in error_packages}
+    # Error packages with no captured output still need display
+    error_no_output = error_packages - set(script_dict.keys())
+
+    if verbose:
+        # Show everything: errors in red, normal in dim
+        if not script_dict and not error_no_output:
+            return
+        print(colors.dim("\n  " + _("Scriptlet output:")))
+        for pkg, output in script_dict.items():
+            color_fn = colors.error if pkg in error_packages else colors.dim
+            if pkg:
+                print(color_fn(f"    {pkg}:"))
+                for line in output.splitlines():
+                    print(color_fn(f"      {line}"))
+            else:
+                # Pre-marker output (no package name)
+                for line in output.splitlines():
+                    print(color_fn(f"    {line}"))
+        # Error packages that produced no output
+        for pkg in sorted(error_no_output):
+            print(colors.error(f"    {pkg}: " + _("scriptlet error (no output)")))
+    else:
+        # Non-verbose: show only errors, summarize the rest
+        has_error_display = bool(error_with_output) or bool(error_no_output)
+        if has_error_display:
+            print(colors.dim("\n  " + _("Scriptlet output:")))
+            for pkg, output in error_with_output.items():
+                if pkg:
+                    print(colors.error(f"    {pkg}:"))
+                    for line in output.splitlines():
+                        print(colors.error(f"      {line}"))
+                else:
+                    for line in output.splitlines():
+                        print(colors.error(f"    {line}"))
+            for pkg in sorted(error_no_output):
+                print(colors.error(f"    {pkg}: " + _("scriptlet error (no output)")))
+
+        # Summary for normal (non-error) packages that had output
+        normal_count = len(normal_with_output)
+        if normal_count > 0:
+            summary = ngettext(
+                "{count} package had scriptlet output (use --verbose to see)",
+                "{count} packages had scriptlet output (use --verbose to see)",
+                normal_count,
+            ).format(count=normal_count)
+            if has_error_display:
+                print(colors.dim(f"    {summary}"))
+            else:
+                print(colors.dim(f"\n  {summary}"))
