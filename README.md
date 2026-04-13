@@ -8,13 +8,13 @@ urpm-ng is a complete rewrite of the classic urpmi toolset, providing faster per
 
 ### Distribution
 
-At the moment you need mageia 9 or Mageia 10.
+At the moment you need Mageia 9 or Mageia 10.
 
 ### Firewall ports to open (for P2P sharing)
 
 If you want to use P2P package sharing between LAN machines, open these ports:
-- **TCP 9876** (production) or **TCP 9877** (dev mode) - urpmd HTTP API
-broadcasts
+- **TCP 9876** (production) or **TCP 9877** (dev mode) -- urpmd HTTP API
+- **UDP 9878** (production) or **UDP 9879** (dev mode) -- Peer discovery broadcasts
 
 Use the Mageia Control Center (MCC) > Security > Firewall, or edit `/etc/shorewall/rules.drakx` directly.
 
@@ -64,7 +64,7 @@ Note: At first install, urpm-ng will import its config from urpmi.
 
 ## Configuration
 
-Not needed at the moment.
+urpm works out of the box. Advanced options (blacklist, redlist, kernel-keep) are documented below.
 
 When installed system-wide (in `/usr/bin/`), urpm uses:
 - Database: `/var/lib/urpm/packages.db`
@@ -190,6 +190,14 @@ urpm e <package>              # Short alias
 urpm update                   # Update all media metadata
 urpm update "Core Release"    # Update specific media
 urpm update --files           # Also sync files.xml
+```
+
+### Download packages (without installing)
+
+```bash
+urpm download <package>       # Download a package to cache
+urpm dl <package>             # Short alias
+urpm download --only-peers pkg  # Download only from LAN peers
 ```
 
 ### Upgrade packages
@@ -749,6 +757,12 @@ urpm build --image mga:10-build ./mypackage.src.rpm
 ls ./build-output/
 ```
 
+## Package README Messages
+
+```bash
+urpm readme <package>         # Display README.urpmi messages from installed packages
+```
+
 ## Orphan Cleanup
 
 ```bash
@@ -795,7 +809,7 @@ The daemon automatically performs:
 - Media metadata sync
 - Cache cleanup
 - Updates availability check
-- Peer discovery (mDNS)
+- Peer discovery (UDP broadcast)
 
 ## P2P Package Sharing
 
@@ -856,6 +870,11 @@ This installs:
 └─────────────────┘
 ```
 
+### rpmdrake-ng (Qt6)
+
+A dedicated Qt6 GUI for package management is under development. See
+`rpmdrake/README.md` for details.
+
 ## Troubleshooting
 
 ```bash
@@ -880,10 +899,9 @@ gdbus introspect --system --dest org.mageia.Urpm.v1 \
 
 ## Prerequisites
 
-### Firewall ports to open
+### Firewall ports
 
-If you want to use P2P package sharing between LAN machines, open these ports:
-- **UDP 9878** (production) or **UDP 9879** (dev mode) - Peer discovery 
+See Prerequisites section for network ports to open for P2P sharing.
 
 ### Setting up your environment
 
@@ -932,7 +950,7 @@ cd /where/is/urpm-ng
 ## Running urpm
 
 ```bash
-# Run urpm (as root in a specific concole)
+# Run urpm (as root in a specific console)
 
 cd /where/is/urpm-ng
 
@@ -942,11 +960,9 @@ cd /where/is/urpm-ng
 
 ## Coding, testing, contributing...
 
-TODO.
+Contributions of all kinds are welcome: code, testing, translating, giving feedback... no contribution is too small.
 
-contribution can be of various sorts : code, testing, translating, giving feedback... no contribution it too tiny. Even telling that you spoetted a typo in documentation is valuable.
-
-This part will also  talk about creating branches, submitting merge requests, doing clean commits, state of the art commit messages, commenting code, writing state of the art issues...
+See `CLAUDE.md` for development guidelines and `doc/ARCHITECTURE.md` for technical architecture.
 
 ---
 
