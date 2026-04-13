@@ -79,3 +79,4 @@ rpmdrake/rpmbuild/SRPMS/
 rpmdrake/rpmbuild/BUILD/
 rpmdrake/rpmbuild/BUILDROOT/
 rpmdrake/rpmbuild/SPECS/log.*
+.audit/
