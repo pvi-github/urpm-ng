@@ -864,13 +864,18 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             num_workers=get_settings().download.parallel)
 
         def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
-                     item_bytes=None, item_total=None, slots_status=None):
-            # Calculate global speed from all active downloads
+                     item_bytes=None, item_total=None, slots_status=None,
+                     coordinator_speed=0.0):
+            # Calculate global speed from all active downloads.
+            # Fall back to coordinator-level global speed when per-slot
+            # speeds are unavailable (small packages finish too fast).
             global_speed = 0.0
             if slots_status:
                 for slot, prog in slots_status:
                     if prog is not None:
                         global_speed += prog.get_speed()
+            if global_speed == 0.0:
+                global_speed = coordinator_speed
 
             progress_display.update(
                 pkg_num, pkg_total, bytes_done, bytes_total,
@@ -1094,7 +1099,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         ops.complete_transaction(transaction_id)
 
         # Display README messages (post-install, files now on disk)
-        if qr is not None and qr.operations:
+        # Suppressed in mkimage context (no_readme flag)
+        if qr is not None and qr.operations and not getattr(args, 'no_readme', False):
             readme_msgs = qr.operations[0].readme_messages
             if readme_msgs:
                 if args.auto:
@@ -1443,12 +1449,15 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
             num_workers=get_settings().download.parallel)
 
     def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
-                 item_bytes=None, item_total=None, slots_status=None):
+                 item_bytes=None, item_total=None, slots_status=None,
+                 coordinator_speed=0.0):
         global_speed = 0.0
         if slots_status:
             for slot, prog in slots_status:
                 if prog is not None:
                     global_speed += prog.get_speed()
+        if global_speed == 0.0:
+            global_speed = coordinator_speed
         progress_display.update(
             pkg_num, pkg_total, bytes_done, bytes_total,
             slots_status or [], global_speed

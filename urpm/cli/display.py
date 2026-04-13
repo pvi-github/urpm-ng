@@ -7,6 +7,7 @@ Provides flexible package list display with multiple output modes:
 """
 
 import json
+import re
 import shutil
 from enum import Enum
 from typing import List, Optional, Callable, Any, Dict
@@ -310,6 +311,46 @@ def format_duration(seconds: float) -> str:
     return " ".join(parts)
 
 
+# Regex to strip ANSI escape sequences for visible-width calculation
+_ANSI_ESCAPE_RE = re.compile(r'\033\[[0-9;]*[A-Za-z]')
+
+
+def _visible_len(text: str) -> int:
+    """Return the visible width of *text* (excluding ANSI escape sequences)."""
+    return len(_ANSI_ESCAPE_RE.sub('', text))
+
+
+def _truncate_to_width(text: str, max_width: int) -> str:
+    """Truncate *text* so its visible width fits in *max_width* columns.
+
+    ANSI escape sequences are not counted toward width.  If the visible
+    text is already within *max_width*, return it unchanged.  Otherwise,
+    truncate the visible part and append '...' (included in *max_width*).
+    """
+    vis_len = _visible_len(text)
+    if vis_len <= max_width:
+        return text
+
+    # Walk through the string, tracking visible characters consumed.
+    # When we've consumed (max_width - 3) visible chars, stop and append "...".
+    target = max(0, max_width - 3)
+    visible_count = 0
+    i = 0
+    result_parts = []
+    while i < len(text) and visible_count < target:
+        m = _ANSI_ESCAPE_RE.match(text, i)
+        if m:
+            # Include the escape sequence verbatim (zero visible width)
+            result_parts.append(m.group())
+            i = m.end()
+        else:
+            result_parts.append(text[i])
+            visible_count += 1
+            i += 1
+    result_parts.append('...')
+    return ''.join(result_parts)
+
+
 class DownloadProgressDisplay:
     """Handles multi-line download progress display with proper terminal control.
 
@@ -351,8 +392,10 @@ class DownloadProgressDisplay:
         """
         lines = []
 
-        # Global progress line
-        pct = (bytes_done * 100 // bytes_total) if bytes_total > 0 else 0
+        # Global progress line — use count-based percentage so that many
+        # small packages still move the indicator (byte-based stays at 99%
+        # when a few large packages are done but hundreds of small ones remain).
+        pct = (pkg_num * 100 // pkg_total) if pkg_total > 0 else 0
         speed_str = format_speed(global_speed) if global_speed > 0 else ""
         header = f"  [{pkg_num}/{pkg_total}] {pct}%"
         if speed_str:
@@ -420,7 +463,14 @@ class DownloadProgressDisplay:
         output = self.render(pkg_num, pkg_total, bytes_done, bytes_total,
                             slots_status, global_speed)
         output_lines = output.split('\n')
-        num_lines = len(output_lines)
+
+        # Truncate every line to terminal width BEFORE printing.
+        # This prevents wrapping which would break the cursor-up count.
+        # We use visible-width measurement so ANSI escapes are not counted.
+        truncated_lines = [
+            _truncate_to_width(line, term_width - 1) for line in output_lines
+        ]
+        num_lines = len(truncated_lines)
 
         # Move cursor to start of our display block
         if self.last_lines_count > 0:
@@ -428,11 +478,8 @@ class DownloadProgressDisplay:
             print(f"\033[{self.last_lines_count}F", end='', flush=True)
         # else: first time, we're already at the right position
 
-        # Print all lines
-        for i, line in enumerate(output_lines):
-            # Truncate to terminal width to prevent wrapping
-            if len(line) > term_width - 1:
-                line = line[:term_width - 4] + "..."
+        # Print all lines (already truncated — no wrapping possible)
+        for line in truncated_lines:
             # Clear line and print content
             print(f"\033[K{line}", flush=True)
 

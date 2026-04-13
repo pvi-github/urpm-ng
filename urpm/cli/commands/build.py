@@ -309,6 +309,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             sync=True,
             allow_no_root=True,
             config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
+            no_readme=True,  # Suppress README.urpmi display in mkimage
         )
         ret = cmd_install(setup_args, chroot_db)
         if ret != 0:
@@ -341,6 +342,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             sync=True,
             allow_no_root=True,
             config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
+            no_readme=True,  # Suppress README.urpmi display in mkimage
         )
         ret = cmd_install(fs_args, chroot_db)
         if ret != 0:
@@ -459,6 +461,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             sync=True,
             allow_no_root=True,
             config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
+            no_readme=True,  # Suppress README.urpmi display in mkimage
         )
         ret = cmd_install(coreutils_args, chroot_db)
         if ret != 0:
@@ -492,6 +495,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             sync=True,  # Wait for all scriptlets to complete
             allow_no_root=True,  # Installing to user-owned chroot
             config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
+            no_readme=True,  # Suppress README.urpmi display in mkimage
         )
         ret = cmd_install(install_args, chroot_db)
         if ret != 0:
@@ -525,6 +529,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             sync=True,  # Wait for all scriptlets to complete
             allow_no_root=True,  # Installing to user-owned chroot
             config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
+            no_readme=True,  # Suppress README.urpmi display in mkimage
         )
         ret = cmd_install(urpm_install_args, chroot_db)
 
@@ -590,6 +595,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
                 sync=True,  # Wait for all scriptlets to complete
                 allow_no_root=True,  # Installing to user-owned chroot
                 config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
+            no_readme=True,  # Suppress README.urpmi display in mkimage
             )
             ret = cmd_install(urpm_local_args, chroot_db)
             if ret != 0:

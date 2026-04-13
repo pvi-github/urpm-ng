@@ -134,7 +134,8 @@ def test_download_progress_display():
         (3, progress3)
     ]
     result = display.render(2, 4, 2700000, 10000000, slots_status, global_speed=180000.5)
-    assert("[2/4] 27% 175.8KB/s" in result)
+    # Percentage is count-based: 2/4 = 50%
+    assert("[2/4] 50% 175.8KB/s" in result)
     assert("neovim-data" in result)
     assert("blablabla" in result)
     assert("prout" in result)

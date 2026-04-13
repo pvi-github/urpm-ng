@@ -13,6 +13,7 @@ import queue
 import threading
 import urllib.request
 import urllib.error
+import time as _time_mod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Callable, Tuple, Dict, Set
@@ -275,6 +276,13 @@ class DownloadCoordinator:
         self._current_progress_lock = threading.Lock()
         self._current_downloads: Dict[int, DownloadProgress] = {}  # slot -> DownloadProgress
 
+        # Global speed tracker: accumulates bytes across ALL downloads so that
+        # a meaningful speed is always available even when individual packages
+        # finish too fast (< 0.1s) to collect per-slot samples.
+        self._global_bytes_total = 0  # total bytes downloaded so far (all slots)
+        self._global_speed_samples: List[Tuple[float, int]] = []  # [(time, cumulative_bytes)]
+        self._GLOBAL_SPEED_WINDOW = 3.0  # seconds of history for speed calc
+
     def is_peer_failed(self, peer: Peer) -> bool:
         """Check if peer has failed (thread-safe)."""
         with self._failed_peers_lock:
@@ -359,6 +367,43 @@ class DownloadCoordinator:
         with self._current_progress_lock:
             return [(slot, self._current_downloads.get(slot))
                     for slot in range(self.max_workers)]
+
+    def update_global_speed(self, completed_bytes: int):
+        """Record a global speed sample based on total completed + in-flight bytes.
+
+        Call this from the poll loop in download_all() at each tick.
+        The sample records *completed_bytes* (fully finished downloads)
+        plus the sum of bytes_done across all active slots.
+
+        Args:
+            completed_bytes: Total bytes from fully completed downloads.
+        """
+        with self._current_progress_lock:
+            partial = sum(p.bytes_done for p in self._current_downloads.values())
+        total = completed_bytes + partial
+
+        now = _time_mod.time()
+        self._global_speed_samples.append((now, total))
+
+        # Prune samples older than the window
+        cutoff = now - self._GLOBAL_SPEED_WINDOW
+        while (self._global_speed_samples
+               and self._global_speed_samples[0][0] < cutoff):
+            self._global_speed_samples.pop(0)
+
+    def get_global_speed(self) -> float:
+        """Calculate global download speed in bytes/sec over recent window.
+
+        Returns 0.0 if fewer than 2 samples are available.
+        """
+        if len(self._global_speed_samples) < 2:
+            return 0.0
+        oldest_time, oldest_bytes = self._global_speed_samples[0]
+        newest_time, newest_bytes = self._global_speed_samples[-1]
+        elapsed = newest_time - oldest_time
+        if elapsed <= 0:
+            return 0.0
+        return (newest_bytes - oldest_bytes) / elapsed
 
     def _worker(self, slot: int):
         """Worker thread: dequeue, download, report, repeat.
@@ -605,6 +650,9 @@ class DownloadCoordinator:
                 if result.success:
                     completed_bytes += result.item.size
 
+                # Update global speed tracker (used when per-slot speed is 0)
+                self.update_global_speed(completed_bytes)
+
                 if progress_callback:
                     # Get all slots status for consistent multi-line display
                     slots_status = self.get_all_slots_status()
@@ -621,7 +669,8 @@ class DownloadCoordinator:
                             total_bytes,
                             first_prog.bytes_done,
                             first_prog.bytes_total,
-                            slots_status  # Pass all slots (active and inactive)
+                            slots_status,  # Pass all slots (active and inactive)
+                            self.get_global_speed()
                         )
                     else:
                         # No more active downloads - just show completion
@@ -640,6 +689,9 @@ class DownloadCoordinator:
                     logger.warning(f"Workers finished early: got {len(results)}/{total_items} results")
                     break
 
+                # Update global speed tracker even when no result arrived
+                self.update_global_speed(completed_bytes)
+
                 # Report real-time progress for all active downloads
                 if progress_callback:
                     slots_status = self.get_all_slots_status()
@@ -657,7 +709,8 @@ class DownloadCoordinator:
                             total_bytes,
                             first_prog.bytes_done,
                             first_prog.bytes_total,
-                            slots_status  # Pass all slots (active and inactive)
+                            slots_status,  # Pass all slots (active and inactive)
+                            self.get_global_speed()
                         )
                         last_active_name = first_prog.name
                     else:
@@ -933,6 +986,13 @@ class Downloader:
         # Active download slots per server (guard-rail for max_per_server).
         self._server_active_slots: Dict[int, int] = {}
         self._server_slots_lock = threading.Lock()
+
+        # Pending cache registrations — collected from worker threads,
+        # flushed on the main thread after all downloads complete.
+        # This avoids "database is locked" errors from concurrent SQLite
+        # writes during parallel downloads.
+        self._pending_cache_registrations: List[Tuple[DownloadItem, Path]] = []
+        self._pending_cache_lock = threading.Lock()
 
 
     def get_cache_path(self, item: DownloadItem) -> Path:
@@ -1248,7 +1308,11 @@ class Downloader:
                             logger.info(
                                 f"Downloaded {item.filename} from "
                                 f"{server['name']}")
-                            self._register_cache_file(item, cache_path)
+                            # Defer cache registration to main thread
+                            # to avoid SQLite "database is locked" errors
+                            with self._pending_cache_lock:
+                                self._pending_cache_registrations.append(
+                                    (item, cache_path))
                             return DownloadResult(
                                 item=item,
                                 success=True,
@@ -1325,7 +1389,10 @@ class Downloader:
                     last_error = rpm_error
                     break  # Don't retry, server is probably broken
 
-                self._register_cache_file(item, cache_path)
+                # Defer cache registration to main thread
+                with self._pending_cache_lock:
+                    self._pending_cache_registrations.append(
+                        (item, cache_path))
                 return DownloadResult(
                     item=item,
                     success=True,
@@ -1446,7 +1513,10 @@ class Downloader:
                         host=peer.host, port=peer.port,
                         reason="bad signature"))
 
-            self._register_cache_file(item, cache_path)
+            # Defer cache registration to main thread
+            with self._pending_cache_lock:
+                self._pending_cache_registrations.append(
+                    (item, cache_path))
 
             return DownloadResult(
                 item=item, success=True, path=cache_path,
@@ -1567,7 +1637,8 @@ class Downloader:
         # We need to offset by cached_count and cached bytes
         if progress_callback:
             def coordinator_progress(name, pkg_num, pkg_total, dl_bytes, dl_total,
-                                     item_bytes=None, item_total=None, active_downloads=None):
+                                     item_bytes=None, item_total=None,
+                                     active_downloads=None, coordinator_speed=0.0):
                 # Offset by cached items
                 progress_callback(
                     name,
@@ -1577,7 +1648,8 @@ class Downloader:
                     total_bytes,
                     item_bytes,  # Per-item progress (optional)
                     item_total,
-                    active_downloads  # All active downloads
+                    active_downloads,  # All active downloads
+                    coordinator_speed  # Global speed from coordinator
                 )
             coord_callback = coordinator_progress
         else:
@@ -1591,6 +1663,17 @@ class Downloader:
 
         t_dl_end = _time.time()
         logger.debug(f"Downloads completed in {t_dl_end - t_dl_start:.2f}s")
+
+        # Flush deferred cache registrations on the main thread.
+        # Workers collected (item, cache_path) tuples instead of writing
+        # to SQLite directly, avoiding "database is locked" errors.
+        if self._pending_cache_registrations:
+            registered = 0
+            for reg_item, reg_path in self._pending_cache_registrations:
+                self._register_cache_file(reg_item, reg_path)
+                registered += 1
+            logger.debug(f"Registered {registered} cache files")
+            self._pending_cache_registrations.clear()
 
         # Merge results
         results.extend(dl_results)

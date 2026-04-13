@@ -449,13 +449,18 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
         num_workers=get_settings().download.parallel)
 
     def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
-                 item_bytes=None, item_total=None, slots_status=None):
-        # Calculate global speed from all active downloads
+                 item_bytes=None, item_total=None, slots_status=None,
+                 coordinator_speed=0.0):
+        # Calculate global speed from all active downloads.
+        # Fall back to coordinator-level global speed when per-slot
+        # speeds are unavailable (small packages finish too fast).
         global_speed = 0.0
         if slots_status:
             for slot, prog in slots_status:
                 if prog is not None:
                     global_speed += prog.get_speed()
+        if global_speed == 0.0:
+            global_speed = coordinator_speed
 
         progress_display.update(
             pkg_num, pkg_total, bytes_done, bytes_total,
