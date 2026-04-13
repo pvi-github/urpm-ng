@@ -412,16 +412,17 @@ def verify_media_match(candidate_url: str, media: dict,
     if not rpath:
         return False
 
+    # If this is the first server for the media there is nothing to
+    # compare against — accept it directly.  MD5 verification will
+    # kick in when a second server tries to link.
+    linked_servers = db.get_servers_for_media(media['id'])
+    if not linked_servers:
+        return True
+
     # Fetch candidate's synthesis MD5
     candidate_md5 = _fetch_synthesis_md5(candidate_url, rpath)
     if not candidate_md5:
         return False
-
-    # Get servers already linked to this media
-    linked_servers = db.get_servers_for_media(media['id'])
-    if not linked_servers:
-        # No reference — first server for this media, accept it
-        return True
 
     max_attempts = 3
     attempts = 0

@@ -565,7 +565,13 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                     country=_mirror_country.get(candidate.get('full_url', '')) or None,
                 )
                 print(_("  {name} (id={id})").format(name=server_name, id=server_id))
-                servers_added.append({'id': server_id, 'name': server_name})
+                servers_added.append({
+                    'id': server_id,
+                    'name': server_name,
+                    'protocol': candidate['scheme'],
+                    'host': candidate['host'],
+                    'base_path': candidate['base_path'],
+                })
                 break
             except Exception as e:
                 if 'UNIQUE constraint' in str(e) and 'name' in str(e):
@@ -611,7 +617,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 url=None
             )
             print(_("  {name} (id={id})").format(name=name, id=media_id))
-            media_added.append({'id': media_id, 'name': name, 'short_name': short_name})
+            media_added.append({'id': media_id, 'name': name, 'short_name': short_name, 'relative_path': relative_path})
         except Exception as e:
             print(colors.error(_("  Failed to add {name}: {error}").format(name=name, error=e)))
 
