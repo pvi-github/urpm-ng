@@ -345,6 +345,9 @@ def create_parser() -> argparse.ArgumentParser:
         description=_('''Initialize a new urpm setup with standard Mageia media.
 
 Used for creating chroot environments or bootstrapping new systems.
+Mirrors are selected from the Mageia mirror API; the [server] section
+in /etc/urpm/conf.d/10-server.cfg controls geographic filtering
+(country/continent whitelist/blacklist).
 
 Examples:
   urpm --urpm-root /tmp/rootfs init --release 10
@@ -1463,10 +1466,13 @@ Examples:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=_('''Auto-configure all official Mageia media for a release.
 
-Uses the official mirrorlist to discover mirrors and adds all standard media:
+Uses the Mageia mirror API to discover mirrors and adds all standard media:
 - core/release, core/updates
 - nonfree/release, nonfree/updates
 - tainted/release, tainted/updates
+
+Geographic filtering (country/continent whitelist/blacklist) is applied
+from the [server] section in /etc/urpm/conf.d/10-server.cfg.
 
 Examples:
   urpm media autoconfig --release 10 --arch x86_64
@@ -1662,7 +1668,14 @@ Examples:
 
     server_autoconfig = server_subparsers.add_parser(
         'autoconfig', aliases=['auto'],
-        help=_('Auto-discover and add servers from Mageia mirrorlist')
+        help=_('Auto-discover and add servers from Mageia mirrorlist'),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_('''Auto-discover and add servers from the Mageia mirror API.
+
+Geographic filtering (country/continent whitelist/blacklist) is applied
+from the [server] section in /etc/urpm/conf.d/10-server.cfg.
+Set auto_add = false to disable all automatic server addition.
+''')
     )
     server_autoconfig.add_argument(
         '--dry-run', '-n',
