@@ -53,9 +53,16 @@ class PoolCheckResult:
     added: List[tuple] = field(default_factory=list)
 
 
-def minimum_servers_for(parallel: int) -> int:
-    """Minimum number of enabled servers for *parallel* download slots."""
-    return math.ceil(parallel * 1.5)
+def minimum_servers_for(parallel: int, pool_ratio: float = 1.5) -> int:
+    """Minimum number of enabled official servers for *parallel* slots.
+
+    With ``parallel == 1`` a single server is always enough.
+    With ``parallel > 1`` the pool must have ``ceil(parallel * pool_ratio)``
+    servers so that download slots are spread across distinct mirrors.
+    """
+    if parallel <= 1:
+        return 1
+    return math.ceil(parallel * pool_ratio)
 
 
 def ensure_minimum_servers(db: 'PackageDatabase',
@@ -69,7 +76,9 @@ def ensure_minimum_servers(db: 'PackageDatabase',
     Returns:
         PoolCheckResult describing what happened.
     """
-    min_needed = minimum_servers_for(parallel)
+    from .settings import get_settings
+    server_cfg = get_settings().server
+    min_needed = minimum_servers_for(parallel, server_cfg.pool_ratio)
 
     # Detect version/arch early — needed for both backfill and pool expansion.
     version = _detect_version()
@@ -83,26 +92,28 @@ def ensure_minimum_servers(db: 'PackageDatabase',
         backfill_server_countries(db, version, arch)
 
     existing = db.list_servers(enabled_only=True)
+    # Only count official mirrors toward the pool minimum — community or
+    # manually-added servers don't serve the official Mageia media.
+    official_count = sum(1 for s in existing if s.get('is_official'))
 
-    if len(existing) >= min_needed:
-        return PoolCheckResult(sufficient=True, had=len(existing),
+    if official_count >= min_needed:
+        return PoolCheckResult(sufficient=True, had=official_count,
                                needed=min_needed)
 
     # Respect [server] auto_add = false
-    from .settings import get_settings
-    if not get_settings().server.auto_add:
+    if not server_cfg.auto_add:
         logger.info("Server pool too small (%d/%d) but auto_add is disabled",
-                     len(existing), min_needed)
-        return PoolCheckResult(sufficient=False, had=len(existing),
+                     official_count, min_needed)
+        return PoolCheckResult(sufficient=False, had=official_count,
                                needed=min_needed)
 
-    to_add = min_needed - len(existing)
+    to_add = min_needed - official_count
     logger.info("Server pool too small (%d/%d) for %d parallel downloads, "
-                "adding %d mirrors", len(existing), min_needed, parallel, to_add)
+                "adding %d mirrors", official_count, min_needed, parallel, to_add)
 
     if not version:
         logger.warning("Cannot detect Mageia version, skipping server auto-add")
-        return PoolCheckResult(sufficient=False, had=len(existing),
+        return PoolCheckResult(sufficient=False, had=official_count,
                                needed=min_needed)
 
     # Build duplicate sets — keyed by (host, base_path) so that the same

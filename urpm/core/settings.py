@@ -148,6 +148,16 @@ class ServerSettings:
     Takes precedence over :attr:`continent_blacklist`.
     """
 
+    pool_ratio: float = 1.5
+    """Server-to-slot ratio for parallel downloads.
+
+    When ``parallel > 1``, the pool must contain at least
+    ``ceil(parallel * pool_ratio)`` official mirrors.  Below that
+    threshold, ``ensure_minimum_servers`` auto-adds mirrors from the
+    Mageia mirrorlist.  Has no effect when ``parallel == 1`` (a single
+    server is always enough for serial downloads).
+    """
+
 
 @dataclass
 class Settings:
@@ -324,6 +334,10 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
             try:
                 if key == "auto_add":
                     settings.server.auto_add = _as_bool(raw)
+                elif key == "pool_ratio":
+                    val = float(raw)
+                    if val >= 1.0:
+                        settings.server.pool_ratio = val
                 elif key in (
                     "country_blacklist",
                     "country_whitelist",
@@ -415,6 +429,7 @@ def format_settings(settings: Settings = None) -> str:
     lines.append("")
     lines.append("[server]")
     lines.append(f"auto_add = {str(settings.server.auto_add).lower()}")
+    lines.append(f"pool_ratio = {settings.server.pool_ratio}")
     lines.append(f"country_blacklist = {', '.join(settings.server.country_blacklist)}")
     lines.append(f"country_whitelist = {', '.join(settings.server.country_whitelist)}")
     lines.append(f"continent_blacklist = {', '.join(settings.server.continent_blacklist)}")

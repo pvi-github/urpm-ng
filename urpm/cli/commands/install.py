@@ -832,7 +832,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             len(_pool.added)).format(count=len(_pool.added))))
         for name, latency in _pool.added:
             print(colors.dim(f"    {name} ({latency}ms)"))
-    elif not _pool.sufficient:
+    elif not _pool.sufficient and get_settings().download.parallel > 1:
         print(colors.warning("\n  " + _(
             "Not enough mirrors for {n} parallel downloads "
             "(have {had}, need {needed})").format(
