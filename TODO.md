@@ -62,6 +62,10 @@
   - Garder les anciens noms comme alias cachés pendant une release
     pour ne pas casser les scripts existants
   - Mettre à jour README, man pages, complétion bash
+- [ ] Sélection interactive depuis les résultats de recherche
+  - Liste numérotée + prompt "Install which one?" après `urpm search`
+  - Permettrait d'installer directement depuis les résultats sans retaper le nom
+  - Ref: spécification dans `doc/archives/urpm_modern_cli.md`
 
 ### Contrôle des serveurs (feedback utilisateur 2026-04-12)
 - [ ] Contrôle de l'auto-ajout de serveurs
@@ -135,6 +139,26 @@
   - API interne : `debug_log(domain, level, msg)` — ne loggue que si level ≤ niveau configuré pour ce domaine
 - [ ] Uniformiser l'activation du debug dans tous les modules (remplacer les DEBUG_* bool par l'API centralisée)
 - [ ] S'assurer que chaque domaine a des logs utiles à chaque niveau
+
+### Cache (commandes manquantes)
+- [ ] `urpm cache verify` : vérifier l'intégrité du cache (checksums, fichiers corrompus)
+- [ ] `urpm cache optimize` : VACUUM de la base SQLite pour récupérer l'espace et améliorer les perfs
+- [ ] `urpm cache stats` : statistiques détaillées (hit rate, taille, temps de requête moyen)
+- Ref: spécification dans `doc/archives/urpm_modern_cli.md`
+
+### Vérification et diagnostic
+- [ ] `urpm verify [<package>]` : vérifier l'intégrité des paquets installés
+  - Options : `--all`, `--dependencies`, `--files`, `--checksums`
+  - Détecter dépendances cassées, fichiers manquants/modifiés
+- [ ] `urpm doctor` : diagnostic complet du système avec suggestions de correction
+  - Vérifie : dépendances cassées, orphelins, fichiers modifiés, config invalide, cache corrompu
+  - Propose des commandes de résolution (`urpm autoremove`, `urpm update --all`, etc.)
+- Ref: spécification dans `doc/archives/urpm_modern_cli.md`
+
+### Historique (compléments)
+- [ ] `urpm history redo <id>` : refaire une transaction précédemment annulée
+  - Symétrique de `urpm history undo`
+  - Ref: spécification dans `doc/archives/urpm_modern_cli.md`
 
 ### system-upgrade
 - [ ] Updates préliminaires
@@ -296,6 +320,14 @@ Les utilisateurs comparent défavorablement à GNOME Software sur d'autres distr
 - [ ] Afficher stats par serveur/peer à la fin du téléchargement (résumé post-install)
 - [ ] Déprioriser automatiquement les serveurs lents ou instables (seuil configurable)
 - [ ] Réinitialiser les stats si le serveur redevient rapide (fenêtre glissante)
+
+### Synthesis : support `@recommends@` (Recommends vs Suggests)
+- [ ] Supporter le tag `@recommends@` dans le parser synthesis
+  - Actuellement genhdlist2 mappe les Recommends RPM vers `@suggests@` (format legacy)
+  - libsolv n'installe automatiquement que `SOLVABLE_RECOMMENDS`, pas `SOLVABLE_SUGGESTS`
+  - Conséquence : tous les Recommends sont silencieusement ignorés en production
+  - Solution : supporter `@recommends@` (via upanier ou extension synthesis) et le mapper vers `SOLVABLE_RECOMMENDS`
+  - Ref: analyse détaillée dans `doc/archives/TESTS_INSTALL_DEBUG.md` (test_auto_select_h)
 
 ### Explications upgrade/remove
 - [ ] Expliquer POURQUOI un paquet est supprimé
