@@ -273,17 +273,22 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             print(colors.error(_("Failed to initialize chroot")))
             return ret
 
-        # Mount /proc and /sys for scriptlets that need them
-        proc_path = os.path.join(tmpdir, 'proc')
-        sys_path = os.path.join(tmpdir, 'sys')
-        os.makedirs(proc_path, exist_ok=True)
-        os.makedirs(sys_path, exist_ok=True)
-        subprocess.run(['mount', '-t', 'proc', 'proc', proc_path], check=True)
-        subprocess.run(['mount', '-t', 'sysfs', 'sysfs', sys_path], check=True)
+        # Mount /proc and /sys for scriptlets (root only — in rootless mode
+        # scriptlets are disabled via --noscripts so the mounts are unnecessary)
+        if os.geteuid() == 0:
+            proc_path = os.path.join(tmpdir, 'proc')
+            sys_path = os.path.join(tmpdir, 'sys')
+            os.makedirs(proc_path, exist_ok=True)
+            os.makedirs(sys_path, exist_ok=True)
+            subprocess.run(['mount', '-t', 'proc', 'proc', proc_path], check=True)
+            subprocess.run(['mount', '-t', 'sysfs', 'sysfs', sys_path], check=True)
 
         # 2. Install packages
         # Use noscripts when not root (user namespace) - scriptlets often fail
         use_noscripts = os.geteuid() != 0
+
+        # Suppress systemd D-Bus warnings in chroot (no systemd running)
+        os.environ['SYSTEMD_OFFLINE'] = '1'
 
         # Install setup+filesystem with --noscripts to avoid "group shadow does not exist"
         # The scriptlets of glibc (dependency) run before setup's files are in place
@@ -311,10 +316,23 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
             no_readme=True,  # Suppress README.urpmi display in mkimage
         )
+        # Pre-create system accounts that %pre scriptlets would normally add
+        # (rpm, messagebus, shadow, systemd-journal, utempter…)
+        # Must run before step 2 so setup's own files find the groups they need.
+        if use_noscripts:
+            added = _ensure_system_accounts(tmpdir)
+            if added:
+                print(colors.dim(_("  Pre-created {n} system accounts").format(n=added)))
+
         ret = cmd_install(setup_args, chroot_db)
         if ret != 0:
             print(colors.error(_("Failed to install setup")))
             return ret
+
+        # Re-create system accounts: config_policy='replace' moved setup's
+        # pristine /etc/group over our enriched version.  Re-populate it.
+        if use_noscripts:
+            _ensure_system_accounts(tmpdir)
 
         # Install filesystem to create directory structure and symlinks
         if use_noscripts:
@@ -605,6 +623,11 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         else:
             print(colors.success(_("  urpm installed from repositories")))
 
+        # Run essential post-install fixups (compensate for --noscripts)
+        if use_noscripts:
+            print(colors.dim(_("  Post-install fixups (--noscripts)...")))
+            _run_chroot_fixups(tmpdir, use_unshare=True)
+
         # 4. Cleanup chroot to reduce image size
         print(_("\n[7/8] Cleaning up chroot..."))
         # Ensure database is closed (may already be closed before urpm install)
@@ -665,6 +688,114 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             shutil.rmtree(tmpdir, ignore_errors=True)
         else:
             print(_("\nChroot kept at: {path}").format(path=tmpdir))
+
+
+def _ensure_system_accounts(chroot: str) -> None:
+    """Pre-create system users/groups that packages expect in --noscripts mode.
+
+    When scriptlets are disabled, %pre scripts that normally create system
+    accounts (rpm, dbus, systemd…) don't run.  Pre-creating them prevents
+    RPM warnings like "user rpm does not exist - using root".
+    """
+    # Standard Mageia system accounts (stable across releases)
+    _SYSTEM_USERS = [
+        # (name, uid, gid, comment, home, shell)
+        ('rpm', 992, 992, 'RPM user', '/var/lib/rpm', '/bin/false'),
+        ('messagebus', 999, 999, 'D-Bus message bus', '/', '/sbin/nologin'),
+    ]
+    _SYSTEM_GROUPS = [
+        # (name, gid)
+        ('shadow', 25),
+        ('messagebus', 999),
+        ('systemd-journal', 190),
+        ('utempter', 35),
+        ('rpm', 992),
+    ]
+
+    passwd_path = os.path.join(chroot, 'etc/passwd')
+    group_path = os.path.join(chroot, 'etc/group')
+
+    # Read existing entries
+    existing_users: set[str] = set()
+    try:
+        with open(passwd_path) as f:
+            for line in f:
+                if ':' in line:
+                    existing_users.add(line.split(':')[0])
+    except FileNotFoundError:
+        pass
+
+    existing_groups: set[str] = set()
+    try:
+        with open(group_path) as f:
+            for line in f:
+                if ':' in line:
+                    existing_groups.add(line.split(':')[0])
+    except FileNotFoundError:
+        pass
+
+    # Append missing entries
+    added = 0
+    with open(passwd_path, 'a') as f:
+        for name, uid, gid, comment, home, shell in _SYSTEM_USERS:
+            if name not in existing_users:
+                f.write(f'{name}:x:{uid}:{gid}:{comment}:{home}:{shell}\n')
+                added += 1
+
+    with open(group_path, 'a') as f:
+        for name, gid in _SYSTEM_GROUPS:
+            if name not in existing_groups:
+                f.write(f'{name}:x:{gid}:\n')
+                added += 1
+
+    return added
+
+
+def _run_chroot_fixups(chroot: str, use_unshare: bool) -> None:
+    """Run essential commands in the chroot to compensate for --noscripts.
+
+    Executes post-install triggers that scriptlets would normally handle:
+    update-ca-trust (SSL certificates) and ldconfig (shared library cache).
+    """
+    from .. import colors
+
+    fixups = [
+        ('update-ca-trust', _("CA certificates")),
+        ('ldconfig', _("shared library cache")),
+    ]
+
+    for cmd, desc in fixups:
+        # Locate the command in the chroot
+        cmd_path = None
+        for d in ('usr/bin', 'usr/sbin', 'sbin', 'bin'):
+            p = os.path.join(chroot, d, cmd)
+            if os.path.isfile(p):
+                cmd_path = f'/{d}/{cmd}'
+                break
+
+        if not cmd_path:
+            continue
+
+        print(colors.dim(f"    {desc}..."), end='', flush=True)
+
+        try:
+            if use_unshare:
+                result = subprocess.run(
+                    ['podman', 'unshare', 'chroot', chroot, cmd_path],
+                    capture_output=True, text=True, timeout=30,
+                )
+            else:
+                result = subprocess.run(
+                    ['chroot', chroot, cmd_path],
+                    capture_output=True, text=True, timeout=30,
+                )
+
+            if result.returncode == 0:
+                print(colors.dim(" ok"))
+            else:
+                print(colors.dim(f" {_('skipped')}"))
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            print(colors.dim(f" {_('skipped')}"))
 
 
 def _cleanup_chroot_for_image(root: str):

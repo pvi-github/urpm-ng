@@ -720,15 +720,30 @@ queue._child_process_standalone()
             # Wait for subprocess to finish
             # In sync mode, show a message since scriptlets may take time.
             # Always wait — proc.returncode is None until wait() is called.
+            if progress_callback and hasattr(progress_callback, 'cleanup'):
+                progress_callback.cleanup()
             if full_sync:
-                print("\033[33m  Waiting for scriptlets to complete...\033[0m", flush=True)
+                # Newline to close the progress display before the wait message
+                print(f"\n\033[33m  Waiting for scriptlets to complete...\033[0m",
+                      flush=True)
             proc.wait()
 
             # Collect stderr (RPM warnings, systemd inhibition messages, etc.)
+            # Filter out benign chroot/userns warnings that clutter the output
             stderr_output = proc.stderr.read().decode('utf-8').strip() if proc.stderr else ""
             if stderr_output:
-                import sys
-                print(f"\033[33m  [userns stderr]:\n{stderr_output}\033[0m", file=sys.stderr, flush=True)
+                _benign = (
+                    'Unable to get systemd shutdown inhibition lock',
+                    'Failed to connect to bus',
+                )
+                filtered = '\n'.join(
+                    line for line in stderr_output.splitlines()
+                    if not any(pat in line for pat in _benign)
+                ).strip()
+                if filtered:
+                    import sys
+                    print(f"\033[33m  [userns stderr]:\n{filtered}\033[0m",
+                          file=sys.stderr, flush=True)
 
             # Only treat as error if the child process actually failed
             if proc.returncode != 0:

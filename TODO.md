@@ -26,6 +26,10 @@
   - Actuellement positionné seulement en interne par `build.py`/`mkimage.py` via `argparse.Namespace(..., allow_no_root=True)`
   - Permettrait à un utilisateur final de piloter un chroot user-owned depuis la CLI (user namespaces)
   - Le code backend gère déjà tout (InstallLock avec root alternatif, `use_userns`, etc.) — il manque juste l'exposition
+- [ ] mkimage rootless avec scriptlets via `unshare --user --mount --pid --fork --map-root-user`
+  - Actuellement rootless = `--noscripts` (pas de /proc ni /sys, pas de scriptlets)
+  - Évolution : wrapper la phase d'install dans un user namespace pour monter /proc+/sys et exécuter les scriptlets
+  - Permettrait des images conteneur 100% identiques root vs rootless
 - [ ] Modification d'une image existante (chroot user-owned)
   - `urpm upgrade --root /path/to/image` : mettre à jour les paquets d'un chroot déjà construit
   - `urpm install --root /path/to/image <pkgs>` : ajouter des paquets a posteriori
@@ -51,9 +55,7 @@
     ré-introduire quand le flag sera réellement implémenté
 
 ### Ergonomie CLI
-- [ ] Renommer `urpm server autoconf` en `urpm server autoconfig` (alias `ac`)
-  - Aligner le nommage avec `urpm media autoconfig`
-  - Garder `autoconf` comme alias caché pendant une release
+- [x] ~~Renommer `urpm server autoconf` en `urpm server autoconfig`~~ (déjà fait)
 - [ ] Renommer `urpm media discover --with` / `--without` en
   `--enabled` / `--disabled`
   - `--with` / `--without` laissent croire à un filtrage sur les paquets
