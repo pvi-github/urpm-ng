@@ -297,8 +297,8 @@ Listet alle Server auf, auch deaktivierte.
 .B add \fIName\fR \fIURL\fR
 Fuegt einen neuen Server hinzu.
 .TP
-.B remove \fIName\fR
-Entfernt einen Server.
+.B remove \fIName\fR [\fIName\fR ...]
+Einen oder mehrere Server entfernen.
 .TP
 .B enable \fIName\fR
 Aktiviert einen Server.
@@ -328,6 +328,15 @@ Statistiken werden automatisch nach jedem Download und jeder Metadaten-Synchroni
 Erkennt und fuegt automatisch die schnellsten Server aus der Mageia-Spiegelliste hinzu.
 Testet die Latenz aller Kandidaten und behaelt die N besten.
 Die gemessene Latenz wird gespeichert, damit die Serverreihenfolge ab dem ersten Download sinnvoll ist.
+.sp
+Geografische Filterung (Whitelist/Blacklist nach Land oder Kontinent)
+wird aus dem Abschnitt
+.B [server]
+in
+.IR /etc/urpm/conf.d/10\-server.cfg
+angewendet. Mit
+.B auto_add = false
+wird das automatische Hinzufuegen von Servern deaktiviert.
 .RE
 .SS P2P und Cache
 .TP
@@ -505,6 +514,19 @@ SQLite-Datenbank fuer Paketmetadaten und Verlauf.
 .TP
 .I /var/lib/urpm/medias/
 Cache fuer heruntergeladene Pakete.
+.TP
+.I /etc/urpm/urpm.cfg
+Hauptkonfigurationsdatei.
+.TP
+.I /etc/urpm/conf.d/*.cfg
+Konfigurationsueberschreibungen (alphabetisch nach urpm.cfg geladen).
+Der Abschnitt
+.B [server]
+in
+.I 10\-server.cfg
+steuert das automatische Hinzufuegen von Spiegeln und die geografische
+Filterung (country_blacklist, country_whitelist, continent_blacklist,
+continent_whitelist, auto_add).
 .TP
 .I /etc/bash_completion.d/urpm
 Bash-Vervollstaendigungsskript.

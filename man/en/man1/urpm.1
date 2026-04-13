@@ -297,8 +297,8 @@ Lists all servers showing also those disabled
 .B add \fIname\fR \fIurl\fR
 Add a new server.
 .TP
-.B remove \fIname\fR
-Remove a server.
+.B remove \fIname\fR [\fIname\fR ...]
+Remove one or more servers.
 .TP
 .B enable \fIname\fR
 Enable a server.
@@ -324,9 +324,18 @@ past downloads), latency, success/failure counts, and last check time.
 Statistics are updated automatically after each download and metadata sync.
 .TP
 .B autoconfig
-Auto-discover and add the fastest servers from the Mageia mirrorlist.
+Auto-discover and add the fastest servers from the Mageia mirror API.
 Tests latency to all candidates and keeps the N best.
 Saves measured latency so server ordering is meaningful from the first download.
+.sp
+Geographic filtering (country/continent whitelist or blacklist) is applied
+from the
+.B [server]
+section in
+.IR /etc/urpm/conf.d/10\-server.cfg .
+Set
+.B auto_add = false
+to disable all automatic server addition.
 .RE
 .SS P2P and Cache
 .TP
@@ -504,6 +513,18 @@ SQLite database for package metadata and history.
 .TP
 .I /var/lib/urpm/medias/
 Downloaded packages cache.
+.TP
+.I /etc/urpm/urpm.cfg
+Main configuration file.
+.TP
+.I /etc/urpm/conf.d/*.cfg
+Drop-in configuration overrides (loaded alphabetically after urpm.cfg).
+The
+.B [server]
+section in
+.I 10\-server.cfg
+controls automatic mirror addition and geographic filtering
+(country_blacklist, country_whitelist, continent_blacklist, continent_whitelist, auto_add).
 .TP
 .I /etc/bash_completion.d/urpm
 Bash completion script.

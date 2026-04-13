@@ -298,8 +298,8 @@ Liste tous les serveurs y compris ceux désactivés.
 .B add \fInom\fR \fIurl\fR
 Ajoute un nouveau serveur.
 .TP
-.B remove \fInom\fR
-Supprime un serveur.
+.B remove \fInom\fR [\fInom\fR ...]
+Supprime un ou plusieurs serveurs.
 .TP
 .B enable \fInom\fR
 Active un serveur.
@@ -331,6 +331,15 @@ Decouvre et ajoute automatiquement les serveurs les plus rapides depuis la
 mirrorlist Mageia. Teste la latence de tous les candidats et conserve les N
 meilleurs. La latence mesuree est sauvegardee pour que le tri des serveurs
 soit pertinent des le premier telechargement.
+.sp
+Le filtrage geographique (liste blanche/noire par pays ou continent) est
+applique depuis la section
+.B [server]
+dans
+.IR /etc/urpm/conf.d/10\-server.cfg .
+Mettre
+.B auto_add = false
+pour desactiver tout ajout automatique de serveurs.
 .RE
 .SS P2P et cache
 .TP
@@ -508,6 +517,18 @@ Base de donnees SQLite pour les metadonnees et l'historique.
 .TP
 .I /var/lib/urpm/medias/
 Cache des paquets telecharges.
+.TP
+.I /etc/urpm/urpm.cfg
+Fichier de configuration principal.
+.TP
+.I /etc/urpm/conf.d/*.cfg
+Surcharges de configuration (chargees alphabetiquement apres urpm.cfg).
+La section
+.B [server]
+dans
+.I 10\-server.cfg
+controle l'ajout automatique de miroirs et le filtrage geographique
+(country_blacklist, country_whitelist, continent_blacklist, continent_whitelist, auto_add).
 .TP
 .I /etc/bash_completion.d/urpm
 Script de completion Bash.

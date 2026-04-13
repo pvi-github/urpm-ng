@@ -297,8 +297,8 @@ Lijst alle servers, inclusief uitgeschakelde.
 .B add \fInaam\fR \fIurl\fR
 Voeg een nieuwe server toe.
 .TP
-.B remove \fInaam\fR
-Verwijder een server.
+.B remove \fInaam\fR [\fInaam\fR ...]
+Eén of meerdere servers verwijderen.
 .TP
 .B enable \fInaam\fR
 Schakel een server in.
@@ -327,6 +327,15 @@ Statistieken worden automatisch bijgewerkt na elke download en metadatasynchroni
 Ontdek en voeg automatisch de snelste servers toe vanuit de Mageia-mirrorlist.
 Test de latentie van alle kandidaten en behoudt de N beste.
 De gemeten latentie wordt opgeslagen zodat de servervolgorde vanaf de eerste download relevant is.
+.sp
+Geografische filtering (whitelist/blacklist per land of continent) wordt
+toegepast vanuit de sectie
+.B [server]
+in
+.IR /etc/urpm/conf.d/10\-server.cfg .
+Stel
+.B auto_add = false
+in om automatisch toevoegen van servers uit te schakelen.
 .RE
 .SS P2P en cache
 .TP
@@ -504,6 +513,18 @@ SQLite-database voor pakketmetadata en geschiedenis.
 .TP
 .I /var/lib/urpm/medias/
 Cache van gedownloade pakketten.
+.TP
+.I /etc/urpm/urpm.cfg
+Hoofdconfiguratiebestand.
+.TP
+.I /etc/urpm/conf.d/*.cfg
+Configuratie-overschrijvingen (alfabetisch geladen na urpm.cfg).
+De sectie
+.B [server]
+in
+.I 10\-server.cfg
+regelt het automatisch toevoegen van mirrors en geografische filtering
+(country_blacklist, country_whitelist, continent_blacklist, continent_whitelist, auto_add).
 .TP
 .I /etc/bash_completion.d/urpm
 Bash-aanvulscript.
