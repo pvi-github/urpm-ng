@@ -116,6 +116,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     from urllib.error import URLError, HTTPError
     from urllib.parse import urlparse
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from ...core.mirrorlist import fetch_mirrors
     import re
     import time
     import platform
@@ -430,29 +431,48 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     # Fetch mirrorlist
     print(_("Fetching mirrorlist..."), end=' ', flush=True)
 
-    try:
-        req = Request(mirrorlist_url, headers={'User-Agent': 'urpm/0.1'})
-        with urlopen(req, timeout=60) as response:
-            content = response.read().decode('utf-8').strip()
-            lines = [line.strip() for line in content.split('\n') if line.strip()]
-    except (URLError, HTTPError) as e:
-        print(colors.error(_("failed: {error}").format(error=e)))
-        return 1
+    use_custom_url = bool(args.mirrorlist)
+    if use_custom_url:
+        # Custom --mirrorlist URL: fetch inline (unknown format)
+        try:
+            req = Request(mirrorlist_url, headers={'User-Agent': 'urpm-ng'})
+            with urlopen(req, timeout=60) as response:
+                content = response.read().decode('utf-8').strip()
+                lines = [line.strip() for line in content.split('\n') if line.strip()]
+        except (URLError, HTTPError) as e:
+            print(colors.error(_("failed: {error}").format(error=e)))
+            return 1
 
-    if not lines:
-        print(colors.warning(_("empty")))
-        print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
-        return 1
+        if not lines:
+            print(colors.warning(_("empty")))
+            print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
+            return 1
 
-    # Parse mirrorlist format: key=value,key=value,...,url=https://...
-    # Example: continent=EU,zone=FR,...,url=https://ftp.belnet.be/mageia/distrib/10/x86_64
-    mirror_urls = []
-    for line in lines:
-        # Extract url= field from CSV-like format
-        for field in line.split(','):
-            if field.startswith('url='):
-                mirror_urls.append(field[4:])  # Remove 'url=' prefix
-                break
+        # Parse key=value CSV format
+        mirror_urls = []
+        _mirror_country = {}
+        for line in lines:
+            for field in line.split(','):
+                if field.startswith('url='):
+                    url = field[4:]
+                    if url.startswith('http://') or url.startswith('https://'):
+                        mirror_urls.append(url)
+                    break
+    else:
+        # Default: use shared helper (with geo filtering)
+        try:
+            mirrors = fetch_mirrors(version, arch, timeout=30)
+        except (URLError, HTTPError) as e:
+            print(colors.error(_("failed: {error}").format(error=e)))
+            return 1
+
+        if not mirrors:
+            print(colors.warning(_("empty")))
+            print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
+            return 1
+
+        mirror_urls = [m.url for m in mirrors]
+        _mirror_country = {m.url: m.country for m in mirrors}
 
     print(ngettext("{count} mirror", "{count} mirrors", len(mirror_urls)).format(count=len(mirror_urls)))
 
@@ -541,7 +561,8 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                     base_path=candidate['base_path'],
                     is_official=True,
                     enabled=True,
-                    priority=50
+                    priority=50,
+                    country=_mirror_country.get(candidate.get('full_url', '')) or None,
                 )
                 print(_("  {name} (id={id})").format(name=server_name, id=server_id))
                 servers_added.append({'id': server_id, 'name': server_name})
@@ -1911,6 +1932,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     from urllib.error import URLError, HTTPError
     from urllib.parse import urlparse
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from ...core.mirrorlist import fetch_mirrors
     import platform
     import time
     import re
@@ -1941,40 +1963,21 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
             ('tainted', 'updates', 'Tainted Updates'),
         ])
 
-    # Fetch mirrorlist to get a good server
-    # Format: key=value,key=value,...,url=<url>
-    mirrorlist_url = f"https://mirrors.mageia.org/api/mageia.{release}.{arch}.list"
-    print(_("Fetching mirrorlist from {url}...").format(url=mirrorlist_url), end=' ', flush=True)
+    # Fetch mirror list (with geo filtering from [server] settings)
+    print(_("Fetching mirrorlist..."), end=' ', flush=True)
 
     try:
-        req = Request(mirrorlist_url)
-        req.add_header('User-Agent', 'urpm-ng')
-        with urlopen(req, timeout=30) as response:
-            content = response.read().decode('utf-8').strip()
-            lines = [line.strip() for line in content.split('\n') if line.strip()]
+        mirrors = fetch_mirrors(release, arch, timeout=30)
     except (URLError, HTTPError) as e:
         print(colors.error(_("failed: {error}").format(error=e)))
         return 1
 
-    if not lines:
-        print(colors.warning(_("empty mirrorlist")))
-        return 1
-
-    # Parse mirrorlist format: continent=XX,zone=XX,...,url=<url>
-    mirror_urls = []
-    for line in lines:
-        # Extract url= field
-        url_match = re.search(r'url=(.+)$', line)
-        if url_match:
-            url = url_match.group(1)
-            # Only keep http/https
-            if url.startswith('http://') or url.startswith('https://'):
-                mirror_urls.append(url)
-
-    if not mirror_urls:
+    if not mirrors:
         print(colors.warning(_("no http/https mirrors found")))
         return 1
 
+    mirror_urls = [m.url for m in mirrors]
+    _mirror_country = {m.url: m.country for m in mirrors}
     print(ngettext("{count} http(s) mirror", "{count} http(s) mirrors", len(mirror_urls)).format(count=len(mirror_urls)))
 
     # Test a few mirrors to find a fast one
@@ -2041,6 +2044,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
         base_url = extract_base_url(mirror_url, release, arch)
         parsed = urlparse(base_url)
         server_name = parsed.hostname
+        country = _mirror_country.get(mirror_url) or None
 
         # Check if server already exists
         existing_server = db.get_server(server_name)
@@ -2051,7 +2055,8 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
                 name=server_name,
                 protocol=parsed.scheme,
                 host=parsed.hostname,
-                base_path=parsed.path
+                base_path=parsed.path,
+                country=country,
             )
             print(_("  Added server: {name}").format(name=server_name))
             server_to_use = db.get_server(server_name)

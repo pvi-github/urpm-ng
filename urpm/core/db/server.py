@@ -14,7 +14,7 @@ class ServerMixin:
 
     def add_server(self, name: str, protocol: str, host: str, base_path: str = '',
                    is_official: bool = True, enabled: bool = True,
-                   priority: int = 50) -> int:
+                   priority: int = 50, country: Optional[str] = None) -> int:
         """Add a new server.
 
         Args:
@@ -25,16 +25,18 @@ class ServerMixin:
             is_official: True for official Mageia mirrors
             enabled: Whether the server is enabled
             priority: Manual priority (higher = preferred)
+            country: ISO 3166 two-letter country code (e.g. 'FR'),
+                or None if unknown.
 
         Returns:
             Server ID
         """
         cursor = self.conn.execute("""
             INSERT INTO server (name, protocol, host, base_path, is_official,
-                               enabled, priority, added_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                               enabled, priority, country, added_timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (name, protocol, host, base_path, int(is_official),
-              int(enabled), priority, int(time.time())))
+              int(enabled), priority, country, int(time.time())))
         self.conn.commit()
         return cursor.lastrowid
 
@@ -56,11 +58,14 @@ class ServerMixin:
 
     def get_server_by_location(self, protocol: str, host: str,
                                 base_path: str = '') -> Optional[Dict]:
-        """Get server by protocol/host/base_path (unique key for upsert)."""
+        """Get server by host/base_path (unique key).
+
+        *protocol* is accepted for call-site convenience but is **not**
+        part of the lookup — the unique constraint is ``(host, base_path)``.
+        """
         cursor = self.conn.execute(
-            """SELECT * FROM server
-               WHERE protocol = ? AND host = ? AND base_path = ?""",
-            (protocol, host, base_path)
+            "SELECT * FROM server WHERE host = ? AND base_path = ?",
+            (host, base_path)
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -95,6 +100,23 @@ class ServerMixin:
         self.conn.execute(
             "UPDATE server SET priority = ? WHERE name = ?",
             (priority, name)
+        )
+        self.conn.commit()
+
+    def set_server_country_by_id(self, server_id: int, country: str):
+        """Set the ISO 3166 country code for a server.
+
+        Used by :func:`~urpm.core.mirrorlist.backfill_server_countries`
+        to populate the ``country`` column for servers added before geo
+        filtering was available.
+
+        Args:
+            server_id: Server ID.
+            country: Two-letter ISO 3166 country code (e.g. ``'FR'``).
+        """
+        self.conn.execute(
+            "UPDATE server SET country = ? WHERE id = ?",
+            (country, server_id)
         )
         self.conn.commit()
 

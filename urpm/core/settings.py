@@ -108,6 +108,48 @@ class DaemonSettings:
 
 
 @dataclass
+class ServerSettings:
+    """Server selection and auto-add behaviour."""
+
+    auto_add: bool = True
+    """Allow automatic addition of mirror servers.
+
+    When False, only servers explicitly added by the user are used.
+    Commands like ``urpm init``, ``urpm media autoconfig``,
+    ``urpm server autoconf``, and background pool expansion are
+    disabled.
+    """
+
+    country_blacklist: list = field(default_factory=list)
+    """ISO 3166 country codes to exclude (e.g. ``['UA', 'RU']``).
+
+    Mirrors whose ``country`` field matches any code in this list are
+    filtered out during mirror discovery.  Mutually exclusive with
+    :attr:`country_whitelist` — if both are set, whitelist wins.
+    """
+
+    country_whitelist: list = field(default_factory=list)
+    """ISO 3166 country codes to accept exclusively.
+
+    When non-empty, only mirrors whose ``country`` field matches a code
+    in this list are kept.  Takes precedence over :attr:`country_blacklist`.
+    """
+
+    continent_blacklist: list = field(default_factory=list)
+    """Continent codes to exclude (``EU``, ``NA``, ``SA``, ``AS``, ``AF``, ``OC``).
+
+    Mutually exclusive with :attr:`continent_whitelist` — if both are
+    set, whitelist wins.
+    """
+
+    continent_whitelist: list = field(default_factory=list)
+    """Continent codes to accept exclusively.
+
+    Takes precedence over :attr:`continent_blacklist`.
+    """
+
+
+@dataclass
 class Settings:
     """Top-level urpm-ng settings, assembled from config files."""
 
@@ -115,6 +157,7 @@ class Settings:
     download: DownloadSettings = field(default_factory=DownloadSettings)
     transaction: TransactionSettings = field(default_factory=TransactionSettings)
     daemon: DaemonSettings = field(default_factory=DaemonSettings)
+    server: ServerSettings = field(default_factory=ServerSettings)
 
     # Path that was actually loaded (for diagnostics / ``urpm config show``)
     _config_dir: Path = field(default=SYSTEM_CONFIG_DIR, repr=False)
@@ -140,6 +183,17 @@ def _as_bool(value: str) -> bool:
 def _as_int(value: str) -> int:
     """Convert a config string to int."""
     return int(value.strip())
+
+
+def _as_code_list(value: str) -> list:
+    """Parse a comma-separated list of uppercase codes (country/continent).
+
+    Example: ``"UA, RU, BY"`` → ``['UA', 'RU', 'BY']``
+    Empty or whitespace-only strings return an empty list.
+    """
+    if not value or not value.strip():
+        return []
+    return [c.strip().upper() for c in value.split(",") if c.strip()]
 
 
 # ─── Config loading ─────────────────────────────────────────────────────
@@ -264,6 +318,23 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
     # [transaction] — reserved for future settings; mode fields removed
     # (smart sync is now the default, --sync forces full sync)
 
+    # [server]
+    if cp.has_section("server"):
+        for key, raw in cp.items("server"):
+            try:
+                if key == "auto_add":
+                    settings.server.auto_add = _as_bool(raw)
+                elif key in (
+                    "country_blacklist",
+                    "country_whitelist",
+                    "continent_blacklist",
+                    "continent_whitelist",
+                ):
+                    codes = _as_code_list(raw)
+                    setattr(settings.server, key, codes)
+            except ValueError:
+                pass
+
 
 # ─── Public API ─────────────────────────────────────────────────────────
 
@@ -340,5 +411,13 @@ def format_settings(settings: Settings = None) -> str:
     lines.append("")
     lines.append("[daemon]")
     lines.append(f"discovery_interfaces = {settings.daemon.discovery_interfaces}")
+
+    lines.append("")
+    lines.append("[server]")
+    lines.append(f"auto_add = {str(settings.server.auto_add).lower()}")
+    lines.append(f"country_blacklist = {', '.join(settings.server.country_blacklist)}")
+    lines.append(f"country_whitelist = {', '.join(settings.server.country_whitelist)}")
+    lines.append(f"continent_blacklist = {', '.join(settings.server.continent_blacklist)}")
+    lines.append(f"continent_whitelist = {', '.join(settings.server.continent_whitelist)}")
 
     return "\n".join(lines)

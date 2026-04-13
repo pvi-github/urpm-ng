@@ -29,6 +29,12 @@ _MIRRORLIST_URL = (
     "https://www.mageia.org/mirrorlist/"
     "?release={version}&arch={arch}&section=core&repo=release"
 )
+"""Legacy mirrorlist endpoint (plain URLs, no geo metadata).
+
+Kept as fallback constant but :func:`_fetch_and_filter` now uses
+:func:`~urpm.core.mirrorlist.fetch_mirrors` (the API endpoint with
+continent/country metadata) so that geo filtering works.
+"""
 
 
 @dataclass
@@ -64,23 +70,40 @@ def ensure_minimum_servers(db: 'PackageDatabase',
         PoolCheckResult describing what happened.
     """
     min_needed = minimum_servers_for(parallel)
+
+    # Detect version/arch early — needed for both backfill and pool expansion.
+    version = _detect_version()
+    arch = platform.machine() if version else ''
+
+    # Backfill country data for servers added before geo filtering existed.
+    # Must run before the pool-size check: backfill may disable servers
+    # that fail the geo filter, changing the enabled count.
+    if version:
+        from .mirrorlist import backfill_server_countries
+        backfill_server_countries(db, version, arch)
+
     existing = db.list_servers(enabled_only=True)
 
     if len(existing) >= min_needed:
         return PoolCheckResult(sufficient=True, had=len(existing),
                                needed=min_needed)
 
+    # Respect [server] auto_add = false
+    from .settings import get_settings
+    if not get_settings().server.auto_add:
+        logger.info("Server pool too small (%d/%d) but auto_add is disabled",
+                     len(existing), min_needed)
+        return PoolCheckResult(sufficient=False, had=len(existing),
+                               needed=min_needed)
+
     to_add = min_needed - len(existing)
     logger.info("Server pool too small (%d/%d) for %d parallel downloads, "
                 "adding %d mirrors", len(existing), min_needed, parallel, to_add)
 
-    # Detect version and arch
-    version = _detect_version()
     if not version:
         logger.warning("Cannot detect Mageia version, skipping server auto-add")
         return PoolCheckResult(sufficient=False, had=len(existing),
                                needed=min_needed)
-    arch = platform.machine()
 
     # Build duplicate sets — keyed by (host, base_path) so that the same
     # hostname with different base paths (e.g. corporate mirror hosting
@@ -122,7 +145,8 @@ def ensure_minimum_servers(db: 'PackageDatabase',
         try:
             server_id = db.add_server(
                 name, candidate['scheme'], candidate['host'],
-                candidate['base_path'])
+                candidate['base_path'],
+                country=candidate.get('country'))
             db.update_server_stats(server_id, latency_ms=int(latency),
                                    bandwidth_kbps=avg_kbps)
             existing_names.add(name)
@@ -239,32 +263,62 @@ def dedup_mirror_urls(mirror_urls, suffix_pattern, existing_host_paths=None):
 
 
 def _fetch_and_filter(version, arch, existing_host_paths):
-    """Fetch mirrorlist and return deduplicated candidates.
+    """Fetch mirrors from the Mageia API and return deduplicated candidates.
+
+    Uses :func:`~urpm.core.mirrorlist.fetch_mirrors` (the API endpoint
+    with geo metadata) so that ``[server]`` country/continent filters
+    are applied automatically.
 
     Args:
         version: Mageia version string (e.g. "9", "10").
         arch: Architecture string (e.g. "x86_64").
-        existing_host_paths: Set of (host, base_path) tuples already in DB.
+        existing_host_paths: Set of ``(host, base_path)`` tuples already
+            in the database.
 
     Returns:
-        List of candidate dicts with scheme/host/base_path/full_url.
+        List of candidate dicts with keys ``scheme``, ``host``,
+        ``base_path``, ``full_url``, ``country``.
     """
-    url = _MIRRORLIST_URL.format(version=version, arch=arch)
+    from .mirrorlist import fetch_mirrors, dedup_mirrors
+
     try:
-        with urlopen(url, timeout=10) as resp:
-            content = resp.read().decode('utf-8').strip()
-    except (URLError, HTTPError) as e:
+        mirrors = fetch_mirrors(version, arch, timeout=10)
+    except Exception as e:
         logger.warning("Failed to fetch mirrorlist: %s", e)
         return []
 
-    if not content:
+    if not mirrors:
         return []
 
-    suffix_re = re.compile(
-        rf'{re.escape(version)}/{re.escape(arch)}/media/core/release/?$')
+    # Dedup by (host, base_path), preferring HTTPS
+    suffix = f"/{version}/{arch}"
+    mirrors = dedup_mirrors(mirrors, strip_suffix=suffix)
 
-    return dedup_mirror_urls(
-        content.split('\n'), suffix_re, existing_host_paths)
+    # Convert to candidate dicts (expected by _test_latency et al.)
+    # Filter by host — same host with different paths still shares
+    # the same bandwidth, so adding both wouldn't help parallelism.
+    existing_hosts = {hp[0] for hp in existing_host_paths}
+    candidates = []
+    seen_hosts = set()
+    for m in mirrors:
+        if m.host in existing_hosts or m.host in seen_hosts:
+            continue
+        seen_hosts.add(m.host)
+
+        base_path = m.base_path
+        if base_path.endswith(suffix):
+            base_path = base_path[: -len(suffix)]
+        base_path = base_path.rstrip("/")
+
+        candidates.append({
+            "scheme": m.scheme,
+            "host": m.host,
+            "base_path": base_path,
+            "full_url": m.url.rstrip("/") + "/media/core/release/",
+            "country": m.country or None,
+        })
+
+    return candidates
 
 
 def _test_latency(candidates, max_workers=10, timeout=5):

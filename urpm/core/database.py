@@ -18,7 +18,7 @@ from .db import (
 )
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 26
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS server (
     enabled INTEGER DEFAULT 1,
     priority INTEGER DEFAULT 50,            -- Manual preference (V1: only sort criteria)
     ip_mode TEXT DEFAULT 'auto',            -- 'auto', 'ipv4', 'ipv6', 'dual' (dual = prefer ipv4)
+    country TEXT,                           -- ISO 3166 two-letter code (FR, DE, UA, ...), NULL for unknown
     -- Qualimetry (post-V1, NULL for now)
     latency_ms INTEGER,
     bandwidth_kbps INTEGER,
@@ -191,7 +192,7 @@ CREATE TABLE IF NOT EXISTS server (
     success_count INTEGER DEFAULT 0,
     last_check INTEGER,
     added_timestamp INTEGER,
-    UNIQUE(protocol, host, base_path)
+    UNIQUE(host, base_path)
 );
 
 -- N:M link between servers and media
@@ -625,6 +626,49 @@ MIGRATIONS = {
         INSERT INTO packages_fts(rowid, name, summary, description)
             SELECT id, name, COALESCE(summary, ''), COALESCE(description, '')
             FROM packages;
+    """),
+    24: (25, """
+        -- Migration v24 -> v25: country column for geo filtering
+        ALTER TABLE server ADD COLUMN country TEXT;
+    """),
+    25: (26, """
+        -- Migration v25 -> v26: unique constraint (host, base_path) instead of
+        -- (protocol, host, base_path) — same host with HTTP/HTTPS is one server.
+        CREATE TABLE server_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            protocol TEXT NOT NULL DEFAULT 'https',
+            host TEXT NOT NULL,
+            base_path TEXT NOT NULL DEFAULT '',
+            is_official INTEGER DEFAULT 1,
+            enabled INTEGER DEFAULT 1,
+            priority INTEGER DEFAULT 50,
+            ip_mode TEXT DEFAULT 'auto',
+            country TEXT,
+            latency_ms INTEGER,
+            bandwidth_kbps INTEGER,
+            failure_count INTEGER DEFAULT 0,
+            success_count INTEGER DEFAULT 0,
+            last_check INTEGER,
+            added_timestamp INTEGER,
+            UNIQUE(host, base_path)
+        );
+        -- Copy data with explicit columns — ALTER TABLE puts country at
+        -- the end, but server_new has it after ip_mode. SELECT * would
+        -- silently shift values.  INSERT OR REPLACE deduplicates rows
+        -- that share (host, base_path) but differ by protocol.
+        INSERT OR REPLACE INTO server_new
+            (id, name, protocol, host, base_path, is_official, enabled,
+             priority, ip_mode, country, latency_ms, bandwidth_kbps,
+             failure_count, success_count, last_check, added_timestamp)
+            SELECT id, name, protocol, host, base_path, is_official, enabled,
+                   priority, ip_mode, country, latency_ms, bandwidth_kbps,
+                   failure_count, success_count, last_check, added_timestamp
+            FROM server ORDER BY id;
+        DROP TABLE server;
+        ALTER TABLE server_new RENAME TO server;
+        CREATE INDEX IF NOT EXISTS idx_server_host ON server(host);
+        CREATE INDEX IF NOT EXISTS idx_server_enabled ON server(enabled);
     """),
 }
 

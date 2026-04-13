@@ -1608,7 +1608,7 @@ Examples:
         'remove', aliases=['r', 'rm'],
         help=_('Remove a server')
     )
-    server_remove.add_argument('name', help=_('Server name'))
+    server_remove.add_argument('name', nargs='+', help=_('Server name(s)'))
 
     # server enable / e
     server_enable = server_subparsers.add_parser(

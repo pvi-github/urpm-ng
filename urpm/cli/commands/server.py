@@ -24,14 +24,14 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
 
     # Header
     print(f"\n{_('Name'):<{name_width}} {_('Protocol'):<8} {_('Host'):<{host_width}}"
-          f" {_('Pri'):>4} {_('IP'):>6}"
+          f" {'Pays':>4} {_('Pri'):>4} {_('IP'):>6}"
           f" {_('BW'):>10} {_('Lat'):>6}"
           f" {_('Status'):<8}")
-    print("-" * (name_width + host_width + 55))
+    print("-" * (name_width + host_width + 62))
 
     for srv in servers:
         status = colors.success(_("enabled")) if srv['enabled'] else colors.dim(_("disabled"))
-        ip_mode = srv.get('ip_mode', 'auto')
+        ip_mode = srv.get('ip_mode') or 'auto'
         # Pad first, then colorize (ANSI codes break alignment)
         ip_padded = f"{ip_mode:>6}"
         if ip_mode == 'dual':
@@ -42,6 +42,12 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
             ip_str = colors.dim(ip_padded)
         else:
             ip_str = ip_padded
+
+        # Country
+        country = srv.get('country') or '—'
+        country_padded = f"{country:>4}"
+        if country == '—':
+            country_padded = colors.dim(country_padded)
 
         # Bandwidth and latency
         # Pad first, then colorize (ANSI codes break alignment)
@@ -65,8 +71,9 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
         if not lat_ms:
             lat_padded = colors.dim(lat_padded)
 
+        pri = srv['priority'] if srv['priority'] is not None else 50
         print(f"{srv['name']:<{name_width}} {srv['protocol']:<8} {srv['host']:<{host_width}}"
-              f" {srv['priority']:>4} {ip_str}"
+              f" {country_padded} {pri:>4} {ip_str}"
               f" {bw_padded} {lat_padded}"
               f" {status}")
 
@@ -224,14 +231,16 @@ def cmd_server_remove(args, db: 'PackageDatabase') -> int:
     """Handle server remove command."""
     from .. import colors
 
-    server = db.get_server(args.name)
-    if not server:
-        print(colors.error(_("Server not found: {name}").format(name=args.name)))
-        return 1
-
-    db.remove_server(args.name)
-    print(colors.success(_("Removed server: {name}").format(name=args.name)))
-    return 0
+    ret = 0
+    for name in args.name:
+        server = db.get_server(name)
+        if not server:
+            print(colors.error(_("Server not found: {name}").format(name=name)))
+            ret = 1
+            continue
+        db.remove_server(name)
+        print(colors.success(_("Removed server: {name}").format(name=name)))
+    return ret
 
 
 def cmd_server_enable(args, db: 'PackageDatabase') -> int:
@@ -423,16 +432,13 @@ def cmd_server_stats(args, db: 'PackageDatabase') -> int:
 def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     """Handle server autoconfig command - auto-discover servers from Mageia mirrorlist."""
     from .. import colors
-    from ..helpers.media import generate_server_name as _generate_server_name
     from urllib.request import urlopen, Request
-    from urllib.error import URLError, HTTPError
-    from urllib.parse import urlparse
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    import re
     import time
 
     from ...core.settings import get_settings
     from ...core.server_pool import minimum_servers_for
+    from ...core.mirrorlist import fetch_mirrors, dedup_mirrors
     TARGET_SERVERS = minimum_servers_for(get_settings().download.parallel)
 
     # Get system version and arch
@@ -467,46 +473,54 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     needed = TARGET_SERVERS - existing_count
     print(_("Have {count} enabled servers, need {needed} more to reach {target}").format(count=existing_count, needed=needed, target=TARGET_SERVERS))
 
-    # Get all servers for duplicate check — keyed by (host, base_path)
-    # so http and https for the same mirror are treated as duplicates,
-    # but the same host with different base paths (e.g. corporate mirror
-    # hosting multiple repos) is treated as distinct.
+    # Duplicate check by host — for autoconfig we want at most one entry
+    # per physical mirror (same host with different paths still shares
+    # the same bandwidth, so adding both wouldn't improve parallelism).
     all_servers = db.list_servers()
-    existing_host_paths = set()
-    existing_names = set()
-    for s in all_servers:
-        existing_host_paths.add((s['host'], s.get('base_path', '').rstrip('/')))
-        existing_names.add(s['name'])
+    existing_hosts = {s['host'] for s in all_servers}
+    existing_names = {s['name'] for s in all_servers}
 
-    # Fetch mirrorlist
-    mirrorlist_url = f"https://www.mageia.org/mirrorlist/?release={version}&arch={arch}&section=core&repo=release"
-
+    # Fetch mirror list (with geo filtering from [server] settings)
     print(_("Fetching mirrorlist for Mageia {version} ({arch})...").format(version=version, arch=arch), end=' ', flush=True)
 
     try:
-        with urlopen(mirrorlist_url, timeout=60) as response:
-            content = response.read().decode('utf-8').strip()
-            mirror_urls = content.split('\n') if content else []
-    except (URLError, HTTPError) as e:
+        mirrors = fetch_mirrors(version, arch, timeout=30)
+    except Exception as e:
         print(colors.error(_("failed: {error}").format(error=e)))
         return 1
 
-    if not mirror_urls or not any(u.strip() for u in mirror_urls):
+    if not mirrors:
         print(colors.warning(_("empty")))
         print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
         return 0
 
-    print(ngettext("{count} mirror", "{count} mirrors", len(mirror_urls)).format(count=len(mirror_urls)))
+    print(ngettext("{count} mirror", "{count} mirrors", len(mirrors)).format(count=len(mirrors)))
 
-    # Pattern to strip from URLs: {version}/{arch}/media/core/release/
-    suffix_pattern = re.compile(rf'{re.escape(version)}/{re.escape(arch)}/media/core/release/?$')
+    # Dedup and convert to candidate dicts for latency testing
+    suffix = f"/{version}/{arch}"
+    mirrors = dedup_mirrors(mirrors, strip_suffix=suffix)
+    total_mirrors = len(mirrors)
 
-    # Parse and deduplicate candidates
-    from ...core.server_pool import dedup_mirror_urls
-    total_urls = len([u for u in mirror_urls if u.strip()])
-    candidates = dedup_mirror_urls(
-        mirror_urls, suffix_pattern, existing_host_paths)
-    skipped = total_urls - len(candidates)
+    candidates = []
+    seen_hosts = set()
+    for m in mirrors:
+        if m.host in existing_hosts or m.host in seen_hosts:
+            continue
+        seen_hosts.add(m.host)
+
+        base_path = m.base_path
+        if base_path.endswith(suffix):
+            base_path = base_path[: -len(suffix)]
+        base_path = base_path.rstrip("/")
+
+        candidates.append({
+            "scheme": m.scheme,
+            "host": m.host,
+            "base_path": base_path,
+            "full_url": m.url.rstrip("/") + "/media/core/release/",
+            "country": m.country or None,
+        })
+    skipped = total_mirrors - len(candidates)
 
     if not candidates:
         print(_("No new servers to add"))
@@ -566,7 +580,8 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
 
         try:
             server_id = db.add_server(
-                shortname, candidate['scheme'], candidate['host'], candidate['base_path']
+                shortname, candidate['scheme'], candidate['host'],
+                candidate['base_path'], country=candidate.get('country'),
             )
             # Persist latency + seed bandwidth with the average of existing
             # servers so the download planner gives new mirrors a fair share
