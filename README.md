@@ -464,14 +464,15 @@ urpm media add --custom "RPM Fusion" rpmfusion https://download1.rpmfusion.org/f
 Servers are mirror sources that can serve multiple media. urpm supports multiple servers per media for load balancing and failover.
 
 ```bash
-urpm server list              # List configured servers
+urpm server list              # List configured servers (with country)
 urpm server add <name> <url>  # Add a server (tests IP and scans media)
-urpm server remove <name>     # Remove a server
+urpm server remove <name> ... # Remove one or more servers
 urpm server enable <name>     # Enable a server
 urpm server disable <name>    # Disable a server
 urpm server priority <name> <n>  # Set server priority (higher = preferred)
 urpm server test [name]       # Test connectivity and detect IP mode
 urpm server ip-mode <name> <mode>  # Set IP mode (auto/ipv4/ipv6/dual)
+urpm server autoconfig        # Auto-add servers from Mageia mirror API
 urpm server stats [name]      # Show performance statistics for a server
 ```
 
@@ -506,6 +507,26 @@ kept in memory so the ordering adapts in real time without waiting for the next 
 
 `urpm server autoconfig` measures latency to all mirror candidates and persists
 the results, so server ordering is meaningful from the very first download.
+
+### Geographic filtering
+
+Servers discovered from the Mageia mirror API carry country and continent
+metadata.  The `[server]` configuration section (see below) lets you
+restrict which mirrors are accepted:
+
+```ini
+# /etc/urpm/conf.d/10-server.cfg
+[server]
+country_blacklist = UA, RU        # Exclude specific countries
+continent_whitelist = EU          # Only European mirrors
+```
+
+Filtering is applied when mirrors are added (`urpm init`, `urpm media
+autoconfig`, `urpm server autoconfig`, and background pool expansion).
+Servers already in the database are backfilled with their country on
+first run; those that fail the filter are disabled automatically.
+
+Set `auto_add = false` to prevent all automatic mirror addition.
 
 Use `urpm server stats [name]` to inspect the collected metrics:
 
@@ -627,6 +648,23 @@ urpm config redlist remove <pkg>
 urpm config kernel-keep       # Show how many kernels to keep
 urpm config kernel-keep <n>   # Set number of kernels to keep
 ```
+
+### Server selection
+
+The `[server]` section in `/etc/urpm/conf.d/10-server.cfg` controls
+automatic mirror selection:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `auto_add` | `true` | Allow automatic addition of mirrors |
+| `country_blacklist` | *(empty)* | Comma-separated ISO 3166 codes to exclude (e.g. `UA, RU`) |
+| `country_whitelist` | *(empty)* | Only accept these countries (overrides blacklist) |
+| `continent_blacklist` | *(empty)* | Continent codes to exclude (`EU`, `NA`, `SA`, `AS`, `AF`, `OC`) |
+| `continent_whitelist` | *(empty)* | Only accept these continents (overrides blacklist) |
+
+A mirror must pass **both** the continent and country filter.  Whitelist
+wins over blacklist at each level.  Use `urpm config show` to see the
+effective settings.
 
 ## GPG Keys
 
