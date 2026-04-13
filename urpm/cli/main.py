@@ -1314,7 +1314,7 @@ For legacy mode (non-Mageia URL with explicit name):
         'remove', aliases=['r'],
         help=_('Remove media source')
     )
-    media_remove.add_argument('name', help=_('Media name'))
+    media_remove.add_argument('name', nargs='+', help=_('Media name(s)'))
 
     # media enable / e
     media_enable = media_subparsers.add_parser(

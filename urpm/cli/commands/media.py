@@ -880,15 +880,15 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
 
 def cmd_media_remove(args, db: 'PackageDatabase') -> int:
     """Handle media remove command."""
-    name = args.name
-
-    if not db.get_media(name):
-        print(_("Media '{name}' not found").format(name=name))
-        return 1
-
-    db.remove_media(name)
-    print(_("Removed media '{name}'").format(name=name))
-    return 0
+    rc = 0
+    for name in args.name:
+        if not db.get_media(name):
+            print(_("Media '{name}' not found").format(name=name))
+            rc = 1
+            continue
+        db.remove_media(name)
+        print(_("Removed media '{name}'").format(name=name))
+    return rc
 
 
 def cmd_media_enable(args, db: 'PackageDatabase') -> int:
