@@ -22,6 +22,16 @@
   - Cause probable : mauvais ordre d'installation des RPMs, ou RPM manquant (ex. setup, shadow-utils)
   - La bonne solution peut être : corriger l'ordre d'install, ajouter des RPMs au profil, ou les deux
   - Ne pas masquer les erreurs : les comprendre et les corriger à la racine
+- [ ] Exposer `--allow-no-root` en flag CLI pour install/upgrade/erase
+  - Actuellement positionné seulement en interne par `build.py`/`mkimage.py` via `argparse.Namespace(..., allow_no_root=True)`
+  - Permettrait à un utilisateur final de piloter un chroot user-owned depuis la CLI (user namespaces)
+  - Le code backend gère déjà tout (InstallLock avec root alternatif, `use_userns`, etc.) — il manque juste l'exposition
+- [ ] Modification d'une image existante (chroot user-owned)
+  - `urpm upgrade --root /path/to/image` : mettre à jour les paquets d'un chroot déjà construit
+  - `urpm install --root /path/to/image <pkgs>` : ajouter des paquets a posteriori
+  - `urpm erase --root /path/to/image <pkgs>` : retirer des paquets
+  - Pré-requis : voir le point `--allow-no-root` ci-dessus
+  - Cas d'usage : itérer sur une image de dev sans la reconstruire depuis zéro
 
 ### Import urpmi.cfg
 - [x] Parser configs avec `mirrorlist: $MIRRORLIST`
@@ -41,6 +51,9 @@
     ré-introduire quand le flag sera réellement implémenté
 
 ### Ergonomie CLI
+- [ ] Renommer `urpm server autoconf` en `urpm server autoconfig` (alias `ac`)
+  - Aligner le nommage avec `urpm media autoconfig`
+  - Garder `autoconf` comme alias caché pendant une release
 - [ ] Renommer `urpm media discover --with` / `--without` en
   `--enabled` / `--disabled`
   - `--with` / `--without` laissent croire à un filtrage sur les paquets
@@ -50,9 +63,29 @@
     pour ne pas casser les scripts existants
   - Mettre à jour README, man pages, complétion bash
 
+### Contrôle des serveurs (feedback utilisateur 2026-04-12)
+- [ ] Contrôle de l'auto-ajout de serveurs
+  - Option dans `/etc/urpm/urpm.conf` (ou dropin) :
+    `server_auto_add = true | false | ask`
+  - `true` = comportement actuel (défaut, rétrocompatible)
+  - `false` = seuls les serveurs ajoutés manuellement sont utilisés
+  - `ask` = confirmation interactive (CLI) / notification (GUI/daemon)
+  - Use-case : "je veux utiliser MON miroir local, rien d'autre"
+- [ ] Filtrage géographique des serveurs
+  - `server_country_blacklist = UA, RU` (codes ISO 3166)
+  - `server_country_whitelist = FR, DE, NL` (mutuellement exclusif)
+  - Si les deux renseignées : whitelist gagne
+  - Filtre au `discover` et au tri des miroirs, pas en supprimant
+    des serveurs déjà ajoutés
+  - Use-case : ne pas surcharger l'infra d'un pays en crise,
+    contraintes RGPD (rester en EU)
+  - Pré-requis : les miroirs Mageia exposent le pays dans
+    `mirrors.json` / `media.cfg` — vérifier la couverture
+
 ### needs-restarting
-- [ ] Détecter reboot nécessaire (kernel, glibc, systemd)
-- [ ] Lister services à redémarrer
+- [x] Détecter reboot nécessaire (kernel, glibc, systemd)
+- [x] Lister services à redémarrer
+- Intégré dans `cmd_install` et `cmd_upgrade` via `check_needs_restart_from_provides`
 
 ### daemon
 - [ ] Fichier `/etc/urpm/daemon.conf`
@@ -78,6 +111,13 @@
 ---
 
 ## Phase 2 : Fonctionnalités avancées
+
+### Système de priorités serveurs (basse prio)
+- [ ] Revoir le système `urpm server priority` : pas de borne, pas de
+  presets, quasiment pas utilisé malgré la doc
+  - Options à discuter : presets nommés (`high/normal/low/fallback`),
+    bornage, meilleure doc, ou laisser tel quel
+  - À traiter après le contrôle auto-ajout + filtrage géo (Phase 1)
 
 ### Internationalisation CLI
 - [ ] Audit des chaînes non wrappées dans `urpm/cli/` — certaines strings échappent encore à `_()`
