@@ -516,3 +516,56 @@ class AppStreamManager:
             xml_path.unlink()
             return True
         return False
+
+    # ─── Generation API (used by urpm.genmedia) ──────────────
+
+    def extract_from_rpm(self, metadata, cache_dir: Path) -> Optional[str]:
+        """Extract AppStream metainfo XML from a single RPM.
+
+        Looks for embedded ``/usr/share/metainfo/*.metainfo.xml`` or
+        ``*.appdata.xml`` files inside the RPM.  If none found, generates
+        a minimal component from RPM header fields (name, summary,
+        description, group, url).
+
+        Also handles ``.desktop`` file parsing and icon extraction.
+
+        Args:
+            metadata: A :class:`~urpm.genmedia.RpmMetadata` instance.
+            cache_dir: Directory to cache extracted metainfo and icons.
+
+        Returns:
+            Path to the cached metainfo XML file, or None on failure.
+        """
+        raise NotImplementedError(
+            "extract_from_rpm() is a stub — implementation needed."
+        )
+
+    def build_catalog(
+        self,
+        cache_dir: Path,
+        output_path: Path,
+        *,
+        compression_filter: str = 'xz -7',
+    ) -> int:
+        """Build an AppStream catalog from cached metainfo files.
+
+        Collects all ``*.xml`` files from *cache_dir*, parses each into
+        a ``<component>`` element, wraps them in a
+        ``<components version="0.15">`` root, and compresses the result
+        to *output_path* (typically ``appstream.xml.lzma``).
+
+        Uses :data:`GROUP_TO_CATEGORY` for RPM group → freedesktop
+        category mapping (shared with :meth:`generate_for_media`).
+
+        Args:
+            cache_dir: Directory containing per-RPM metainfo XML files.
+            output_path: Destination file (e.g.
+                ``media_info/appstream.xml.lzma``).
+            compression_filter: Compressor and level.
+
+        Returns:
+            Number of components included in the catalog.
+        """
+        raise NotImplementedError(
+            "build_catalog() is a stub — implementation needed."
+        )

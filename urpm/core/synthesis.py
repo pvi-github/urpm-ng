@@ -217,3 +217,44 @@ def parse_synthesis_to_list(filename: Path) -> List[Dict[str, Any]]:
         List of package dictionaries
     """
     return list(parse_synthesis(filename))
+
+
+# ─── Write API (used by urpm.genmedia) ────────────────────────────
+
+
+def write_synthesis(
+    output_path: Path,
+    packages,
+    *,
+    compression_filter: str = 'xz -7',
+) -> int:
+    """Write a synthesis.hdlist.cz file from RPM metadata.
+
+    Output format is the standard ``@field@value`` line-delimited text,
+    compressed with LZMA/XZ.  Fields per package (in order):
+
+    - ``@requires@dep1@dep2@...``
+    - ``@suggests@...``
+    - ``@obsoletes@...``
+    - ``@conflicts@...``
+    - ``@provides@...``
+    - ``@summary@text``
+    - ``@filesize@size``
+    - ``@info@NEVRA@epoch@size@group``
+
+    Dependencies use the ``name[op version]`` format, e.g.
+    ``foo[>= 1.0]``.  The ``@info`` line terminates each package
+    entry.
+
+    Args:
+        output_path: Destination file
+            (e.g. ``media_info/tmp/synthesis.hdlist.cz``).
+        packages: Iterable of :class:`~urpm.genmedia.RpmMetadata`.
+        compression_filter: Compressor and level, e.g. ``"xz -7"``.
+
+    Returns:
+        Number of packages written.
+    """
+    raise NotImplementedError(
+        "write_synthesis() is a stub — implementation needed."
+    )

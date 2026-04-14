@@ -286,3 +286,52 @@ def parse_hdlist_to_list(filename: Path) -> List[Dict[str, Any]]:
         List of package dictionaries
     """
     return [hdr.to_dict() for hdr in parse_hdlist(filename)]
+
+
+# ─── Write API (used by urpm.genmedia) ────────────────────────────
+
+
+def write_hdlist(
+    output_path: Path,
+    packages,
+    *,
+    compression_filter: str = 'gzip -9',
+    block_size: int = 400 * 1024,
+    incremental: bool = False,
+    old_hdlist_path: Optional[Path] = None,
+) -> int:
+    """Write an hdlist.cz archive from RPM metadata.
+
+    Each package's ``header_bytes`` (raw ``hdr.unload()`` output) is
+    accumulated into blocks of *block_size* bytes.  Blocks are compressed
+    individually with *compression_filter*.  A table of contents (TOC) is
+    appended at the end of the file so readers can seek to individual
+    headers.
+
+    In incremental mode, blocks whose every member is unchanged (same
+    ``header_sha256``) are copied verbatim from *old_hdlist_path*.
+
+    Args:
+        output_path: Destination file (e.g. ``media_info/tmp/hdlist.cz``).
+        packages: Iterable of :class:`~urpm.genmedia.RpmMetadata`.
+        compression_filter: Compressor and level, e.g. ``"gzip -9"`` or
+            ``"xz -7"``.
+        block_size: Maximum uncompressed bytes per block.
+        incremental: If True, reuse unchanged blocks from *old_hdlist_path*.
+        old_hdlist_path: Path to the previous hdlist (required when
+            *incremental* is True).
+
+    Returns:
+        Number of packages written.
+
+    Implementation notes:
+
+    - Block format: concatenated raw header bytes, compressed as a unit.
+    - TOC format at end of file: directory entries, symlink entries,
+      file entries with ``(coff, csize, off, size)`` packed as
+      big-endian ``>4i``, then a footer ``cz[0...0]cz``.
+    - Use :func:`parse_hdlist` to read *old_hdlist_path* for incremental.
+    """
+    raise NotImplementedError(
+        "write_hdlist() is a stub — implementation needed."
+    )

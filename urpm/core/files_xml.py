@@ -224,3 +224,107 @@ def extract_nevras_from_files_xml(path: Path) -> Set[str]:
 
     logger.debug(f"Extracted {len(nevras)} NEVRAs from {path}")
     return nevras
+
+
+# ─── Write API (used by urpm.genmedia) ────────────────────────────
+
+
+def write_files_xml(
+    output_path: Path,
+    packages,
+    *,
+    compression_filter: str = 'xz -7',
+) -> int:
+    """Write a files.xml.lzma file from RPM metadata.
+
+    Output format::
+
+        <media_info>
+          <files fn="package-1.0-1.mga10.x86_64.rpm">
+            /usr/bin/foo
+            /usr/lib/libfoo.so
+          </files>
+          ...
+        </media_info>
+
+    Compressed with LZMA/XZ.
+
+    Args:
+        output_path: Destination file
+            (e.g. ``media_info/tmp/files.xml.lzma``).
+        packages: Iterable of :class:`~urpm.genmedia.RpmMetadata`.
+        compression_filter: Compressor and level, e.g. ``"xz -7"``.
+
+    Returns:
+        Number of packages written.
+    """
+    raise NotImplementedError(
+        "write_files_xml() is a stub — implementation needed."
+    )
+
+
+def write_info_xml(
+    output_path: Path,
+    packages,
+    *,
+    compression_filter: str = 'xz -7',
+) -> int:
+    """Write an info.xml.lzma file from RPM metadata.
+
+    Output format::
+
+        <media_info>
+          <info fn='package.rpm' sourcerpm='...' url='...' license='...'>
+            Description text
+          </info>
+          ...
+        </media_info>
+
+    Compressed with LZMA/XZ.
+
+    Args:
+        output_path: Destination file.
+        packages: Iterable of :class:`~urpm.genmedia.RpmMetadata`.
+        compression_filter: Compressor and level.
+
+    Returns:
+        Number of packages written.
+    """
+    raise NotImplementedError(
+        "write_info_xml() is a stub — implementation needed."
+    )
+
+
+def write_changelog_xml(
+    output_path: Path,
+    packages,
+    *,
+    compression_filter: str = 'xz -7',
+) -> int:
+    """Write a changelog.xml.lzma file from RPM metadata.
+
+    Output format::
+
+        <media_info>
+          <changelogs fn='package.rpm'>
+            <log time='1234567890'>
+              <log_name>Author Name</log_name>
+              <log_text>Change description</log_text>
+            </log>
+          </changelogs>
+          ...
+        </media_info>
+
+    Compressed with LZMA/XZ.
+
+    Args:
+        output_path: Destination file.
+        packages: Iterable of :class:`~urpm.genmedia.RpmMetadata`.
+        compression_filter: Compressor and level.
+
+    Returns:
+        Number of packages written.
+    """
+    raise NotImplementedError(
+        "write_changelog_xml() is a stub — implementation needed."
+    )
