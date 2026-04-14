@@ -118,6 +118,7 @@ from .commands.depends import (
 )
 from .commands.build import (
     cmd_cleanup, cmd_mkimage, cmd_build,
+    cmd_image_list, cmd_image_delete, cmd_image_update,
 )
 from .commands.appstream import (
     cmd_appstream,
@@ -570,15 +571,25 @@ Examples:
     )
 
     # =========================================================================
-    # mkimage - Create minimal Docker/Podman image for RPM builds
+    # image / img - Container image management
     # =========================================================================
-    mkimage_parser = subparsers.add_parser(
-        'mkimage',
+    image_parser = subparsers.add_parser(
+        'image', aliases=['img'],
+        help=_('Manage container images (make, update, list, delete)'),
+    )
+    image_subparsers = image_parser.add_subparsers(
+        dest='image_command',
+        metavar='<subcommand>',
+    )
+
+    # image make / m (formerly mkimage)
+    image_make = image_subparsers.add_parser(
+        'make', aliases=['m'],
         help=_('Create a minimal Docker/Podman image for RPM builds'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=_('''Create a minimal Mageia Docker/Podman image for RPM builds.
 
-The image contains a minimal system with urpmi configured to use
+The image contains a minimal system with urpm configured to use
 the official Mageia mirrors. Use with 'urpm build' for isolated builds.
 
 Profiles are loaded from:
@@ -586,48 +597,133 @@ Profiles are loaded from:
   /etc/urpm/profiles/*.yaml (local additions)
 
 Examples:
-  urpm mkimage --release 10 --tag mageia:10-build
-  urpm mkimage --release 10 --tag mageia:10-ci --profile ci
-  urpm mkimage --release cauldron --tag mageia:cauldron-build --runtime podman
+  urpm image make --release 10 --tag mageia:10-build
+  urpm image make -r 10 -t mga10-build --buildrequires SPECS/foo.spec
+  urpm image make -r cauldron -t mga-cauldron --profile ci
 ''')
     )
-    mkimage_parser.add_argument(
+    image_make.add_argument(
         '--release', '-r',
         required=True,
         help=_('Mageia release (e.g., 10, cauldron)')
     )
-    mkimage_parser.add_argument(
+    image_make.add_argument(
         '--tag', '-t',
         required=True,
         help=_('Docker/Podman image tag (e.g., mageia:10-build)')
     )
-    mkimage_parser.add_argument(
+    image_make.add_argument(
         '--profile',
         default='build',
         help=_('Package profile (default: build). See /usr/share/urpm/profiles/')
     )
-    mkimage_parser.add_argument(
+    image_make.add_argument(
         '--arch',
         help=_('Target architecture (default: host arch)')
     )
-    mkimage_parser.add_argument(
+    image_make.add_argument(
         '--packages', '-p',
         help=_('Additional packages to install (comma-separated)')
     )
-    mkimage_parser.add_argument(
+    image_make.add_argument(
+        '--buildrequires',
+        metavar='SPEC_OR_SRPM',
+        help=_('Pre-install BuildRequires from a .spec or .src.rpm file')
+    )
+    image_make.add_argument(
         '--runtime',
         choices=['docker', 'podman'],
         help=_('Container runtime (default: auto-detect, prefers podman)')
     )
-    mkimage_parser.add_argument(
+    image_make.add_argument(
         '--keep-chroot',
         action='store_true',
         help=_('Keep temporary chroot directory after image creation')
     )
-    mkimage_parser.add_argument(
+    image_make.add_argument(
         '--workdir', '-w',
         help=_('Working directory for chroot (default: ~/.cache/urpm/mkimage)')
     )
+
+    # image update / u
+    image_update = image_subparsers.add_parser(
+        'update', aliases=['u'],
+        help=_('Update an existing image (sync media + upgrade packages)'),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_('''Update a container image in-place.
+
+Starts a temporary container, syncs media and upgrades packages,
+then commits the result as the same tag (replaces the old image).
+
+Examples:
+  urpm image update mga10-build
+''')
+    )
+    image_update.add_argument(
+        'tag',
+        help=_('Image tag to update')
+    )
+    image_update.add_argument(
+        '--runtime',
+        choices=['docker', 'podman'],
+        help=_('Container runtime (default: auto-detect, prefers podman)')
+    )
+
+    # image list / l / ls
+    image_list = image_subparsers.add_parser(
+        'list', aliases=['l', 'ls'],
+        help=_('List container images'),
+    )
+    image_list.add_argument(
+        '--runtime',
+        choices=['docker', 'podman'],
+        help=_('Container runtime (default: auto-detect, prefers podman)')
+    )
+
+    # image delete / d / rm
+    image_delete = image_subparsers.add_parser(
+        'delete', aliases=['d', 'rm'],
+        help=_('Delete container image(s)'),
+    )
+    image_delete.add_argument(
+        'tags', nargs='+',
+        help=_('Image tag(s) to delete')
+    )
+    image_delete.add_argument(
+        '--force', '-f',
+        action='store_true',
+        help=_('Force removal')
+    )
+    image_delete.add_argument(
+        '--runtime',
+        choices=['docker', 'podman'],
+        help=_('Container runtime (default: auto-detect, prefers podman)')
+    )
+
+    # mkimage kept as top-level alias for backward compatibility
+    mkimage_parser = subparsers.add_parser(
+        'mkimage',
+        help=_('Alias for "image make" (deprecated)'),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_('Deprecated: use "urpm image make" instead.\n\nSee: urpm image make --help')
+    )
+    mkimage_parser.add_argument('--release', '-r', required=True,
+                                help=_('Mageia release'))
+    mkimage_parser.add_argument('--tag', '-t', required=True,
+                                help=_('Image tag'))
+    mkimage_parser.add_argument('--profile', default='build',
+                                help=_('Package profile'))
+    mkimage_parser.add_argument('--arch', help=_('Target architecture'))
+    mkimage_parser.add_argument('--packages', '-p',
+                                help=_('Additional packages (comma-separated)'))
+    mkimage_parser.add_argument('--buildrequires', metavar='SPEC_OR_SRPM',
+                                help=_('Pre-install BuildRequires from .spec/.src.rpm'))
+    mkimage_parser.add_argument('--runtime', choices=['docker', 'podman'],
+                                help=_('Container runtime'))
+    mkimage_parser.add_argument('--keep-chroot', action='store_true',
+                                help=_('Keep chroot'))
+    mkimage_parser.add_argument('--workdir', '-w',
+                                help=_('Working directory'))
 
     # =========================================================================
     # build - Build RPM packages in isolated container
@@ -639,7 +735,8 @@ Examples:
         description=_('''Build RPM packages in isolated containers.
 
 Each build runs in a fresh container that is destroyed after completion,
-ensuring a clean build environment.
+ensuring a clean build environment. Media and packages are updated
+automatically before building (use --no-update to skip).
 
 Output locations:
   - .spec files: results go to workspace/RPMS/ and workspace/SRPMS/
@@ -655,9 +752,8 @@ Examples:
   # Build with local dependencies (e.g., libfoo built previously)
   urpm build -i mageia:10-build SPECS/bar.spec -w 'RPMS/x86_64/libfoo*.rpm'
 
-  # Multiple local dependencies
-  urpm build -i mageia:10-build SPECS/app.spec \\
-      -w 'RPMS/x86_64/libfoo*.rpm' -w 'RPMS/x86_64/libbar*.rpm'
+  # Skip auto-update (image is already up to date)
+  urpm build -i mageia:10-build --no-update SPECS/foo.spec
 ''')
     )
     build_parser.add_argument(
@@ -680,6 +776,11 @@ Examples:
         default=[],
         metavar='PATTERN',
         help=_('Pre-install local RPMs in container before build (glob pattern, repeatable)')
+    )
+    build_parser.add_argument(
+        '--no-update',
+        action='store_true',
+        help=_('Skip media sync and package update before building')
     )
     build_parser.add_argument(
         '--runtime',
@@ -2258,7 +2359,20 @@ def main(argv=None) -> int:
         elif args.command in ('download', 'dl'):
             return cmd_download(args, db)
 
+        elif args.command in ('image', 'img'):
+            if args.image_command in ('make', 'm'):
+                return cmd_mkimage(args, db)
+            elif args.image_command in ('update', 'u'):
+                return cmd_image_update(args, db)
+            elif args.image_command in ('list', 'l', 'ls', None):
+                return cmd_image_list(args, db)
+            elif args.image_command in ('delete', 'd', 'rm'):
+                return cmd_image_delete(args, db)
+            else:
+                return cmd_not_implemented(args, db)
+
         elif args.command == 'mkimage':
+            # Backward compatibility alias for 'image make'
             return cmd_mkimage(args, db)
 
         elif args.command == 'build':

@@ -211,6 +211,32 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     if extra_packages:
         packages.extend(extra_packages.split(','))
 
+    # Add BuildRequires from spec or src.rpm if --buildrequires given
+    buildrequires_src = getattr(args, 'buildrequires', None)
+    if buildrequires_src:
+        br_packages = _extract_buildrequires(buildrequires_src)
+        if br_packages is None:
+            print(colors.error(
+                _("Failed to extract BuildRequires from {path}").format(
+                    path=buildrequires_src)))
+            return 1
+        # Add rpm-build too (needed for rpmbuild)
+        packages.append('rpm-build')
+        packages.extend(br_packages)
+        # Deduplicate while preserving order
+        seen = set()
+        deduped = []
+        for p in packages:
+            if p not in seen:
+                seen.add(p)
+                deduped.append(p)
+        packages = deduped
+        print(_("  BuildRequires from: {path}").format(path=buildrequires_src))
+        print("  " + ngettext(
+            "  {count} extra build dependency",
+            "  {count} extra build dependencies",
+            len(br_packages)).format(count=len(br_packages)))
+
     print(_("\nCreating image: {tag}").format(tag=tag))
     print("  " + _("Release: {release}").format(release=release))
     print("  " + _("Architecture: {arch}").format(arch=arch))
@@ -751,11 +777,84 @@ def _ensure_system_accounts(chroot: str) -> None:
     return added
 
 
+def _replay_alternatives(chroot: str, use_unshare: bool) -> None:
+    """Extract and replay update-alternatives --install from installed RPMs.
+
+    When packages are installed with --noscripts, their %post scriptlets
+    don't run.  Many packages (gcc, g++, cpp, java, vim…) use
+    update-alternatives in %post to create symlinks.  This function
+    reads all post-install scripts from the chroot's RPM database,
+    extracts the ``update-alternatives --install`` calls, and replays
+    them so that the expected commands (gcc, g++, etc.) are available.
+    """
+    import re
+    from .. import colors
+
+    print(colors.dim(f"    {_('alternatives')}..."), end='', flush=True)
+
+    # Query all post-install scripts from the chroot's RPM database
+    try:
+        result = subprocess.run(
+            ['rpm', '--root', chroot, '-qa', '--scripts'],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        print(colors.dim(f" {_('skipped')}"))
+        return
+
+    if result.returncode != 0:
+        print(colors.dim(f" {_('skipped')}"))
+        return
+
+    # Extract update-alternatives --install lines (with or without /usr/sbin/ prefix)
+    pattern = re.compile(
+        r'(?:/usr/sbin/)?update-alternatives\s+--install\s+.+'
+    )
+    commands = []
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        m = pattern.match(stripped)
+        if m:
+            commands.append(m.group())
+
+    if not commands:
+        print(colors.dim(" ok (none)"))
+        return
+
+    # Deduplicate (same command can appear in multiple package versions)
+    commands = list(dict.fromkeys(commands))
+
+    # Execute each in the chroot
+    success = 0
+    for cmd_line in commands:
+        # Normalize: ensure full path to update-alternatives
+        if not cmd_line.startswith('/'):
+            cmd_line = '/usr/sbin/' + cmd_line
+        try:
+            if use_unshare:
+                r = subprocess.run(
+                    ['podman', 'unshare', 'chroot', chroot, 'sh', '-c', cmd_line],
+                    capture_output=True, text=True, timeout=10,
+                )
+            else:
+                r = subprocess.run(
+                    ['chroot', chroot, 'sh', '-c', cmd_line],
+                    capture_output=True, text=True, timeout=10,
+                )
+            if r.returncode == 0:
+                success += 1
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    print(colors.dim(f" ok ({success}/{len(commands)})"))
+
+
 def _run_chroot_fixups(chroot: str, use_unshare: bool) -> None:
     """Run essential commands in the chroot to compensate for --noscripts.
 
     Executes post-install triggers that scriptlets would normally handle:
-    update-ca-trust (SSL certificates) and ldconfig (shared library cache).
+    update-ca-trust (SSL certificates), ldconfig (shared library cache),
+    and update-alternatives (gcc, g++, cpp, etc.).
     """
     from .. import colors
 
@@ -796,6 +895,9 @@ def _run_chroot_fixups(chroot: str, use_unshare: bool) -> None:
                 print(colors.dim(f" {_('skipped')}"))
         except (subprocess.TimeoutExpired, FileNotFoundError):
             print(colors.dim(f" {_('skipped')}"))
+
+    # Replay update-alternatives from all installed RPMs' %post scripts
+    _replay_alternatives(chroot, use_unshare)
 
 
 def _cleanup_chroot_for_image(root: str):
@@ -889,6 +991,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     parallel = getattr(args, 'parallel', 1)
     keep_container = getattr(args, 'keep_container', False)
     runtime_name = getattr(args, 'runtime', None)
+    no_update = getattr(args, 'no_update', False)
     with_rpms_patterns = getattr(args, 'with_rpms', []) or []
 
     # Expand glob patterns for --with-rpms
@@ -960,7 +1063,8 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     def build_one(source_path: Path) -> tuple:
         """Build a single package. Returns (source, success, message)."""
         return _build_single_package(
-            container, image, source_path, output_dir, keep_container, with_rpms
+            container, image, source_path, output_dir, keep_container,
+            with_rpms, no_update=no_update,
         )
 
     if parallel > 1 and len(valid_sources) > 1:
@@ -1047,7 +1151,8 @@ def _build_single_package(
     source_path: Path,
     output_dir: Path,
     keep_container: bool,
-    with_rpms: list = None
+    with_rpms: list = None,
+    no_update: bool = False,
 ) -> tuple:
     """Build a single package in a container.
 
@@ -1058,6 +1163,7 @@ def _build_single_package(
         output_dir: Output directory for SRPM builds
         keep_container: Keep container after build for debugging
         with_rpms: List of local RPM paths to install before build
+        no_update: Skip media sync and package update before building
 
     Returns:
         Tuple of (source_path, success, message)
@@ -1136,6 +1242,17 @@ def _build_single_package(
 
         else:
             return (source_path, False, f"Unsupported source type: {source_path.suffix}")
+
+        # 3b. Update media and packages (unless --no-update)
+        if not no_update:
+            print(_("  Updating media..."))
+            ret = container.exec_stream(cid, ['urpm', 'media', 'update'])
+            if ret != 0:
+                print(colors.warning(_("  Warning: media update failed, continuing...")))
+            print(_("  Updating packages..."))
+            ret = container.exec_stream(cid, ['urpm', 'update', '--auto'])
+            if ret != 0:
+                print(colors.warning(_("  Warning: package update failed, continuing...")))
 
         # 4. Install rpm-build (provides rpmbuild)
         print(_("  Installing rpm-build..."))
@@ -1229,4 +1346,233 @@ def _build_single_package(
     finally:
         # Always cleanup container unless --keep-container
         if cid and not keep_container:
+            container.rm(cid)
+
+
+def _extract_buildrequires(path: str) -> list[str] | None:
+    """Extract BuildRequires package names from a .spec or .src.rpm file.
+
+    Uses ``rpmspec --parse`` for .spec files and ``rpm -qp --requires``
+    for .src.rpm files, then strips version constraints to return bare
+    package names.
+
+    Returns:
+        List of package names, or None on failure.
+    """
+    import re
+
+    src = Path(path)
+    if not src.exists():
+        return None
+
+    try:
+        if src.suffix == '.spec':
+            # Parse spec to expand macros, then grep BuildRequires
+            result = subprocess.run(
+                ['rpmspec', '--parse', str(src)],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                return None
+            # Extract BuildRequires lines
+            br_re = re.compile(r'^BuildRequires:\s*(.+)', re.IGNORECASE)
+            raw_deps = []
+            for line in result.stdout.splitlines():
+                m = br_re.match(line.strip())
+                if m:
+                    raw_deps.append(m.group(1))
+
+        elif '.src.rpm' in src.name or src.name.endswith('.src.rpm'):
+            # Query SRPM for build requirements
+            result = subprocess.run(
+                ['rpm', '-qp', '--requires', str(src)],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                return None
+            raw_deps = result.stdout.strip().splitlines()
+
+        else:
+            return None
+
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+    # Parse: strip version constraints (>=, <=, =, >, <) and pkgconfig()
+    # "python3-devel >= 3.10" → "python3-devel"
+    # "pkgconfig(libsolv)" → "pkgconfig(libsolv)" (keep as-is, rpm resolves it)
+    packages = []
+    ver_re = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
+    for raw in raw_deps:
+        # BuildRequires can list multiple deps separated by commas
+        for dep in raw.split(','):
+            dep = dep.strip()
+            if not dep or dep.startswith('#'):
+                continue
+            # Strip version constraint
+            dep = ver_re.sub('', dep).strip()
+            if dep and dep != 'rpmlib(CompressedFileNames)':
+                packages.append(dep)
+
+    # Deduplicate
+    return list(dict.fromkeys(packages))
+
+
+def cmd_image_list(args, db: 'PackageDatabase') -> int:
+    """List available container images."""
+    from ...core.container import detect_runtime, Container
+    from .. import colors
+
+    runtime_name = getattr(args, 'runtime', None)
+
+    try:
+        runtime = detect_runtime(runtime_name)
+    except RuntimeError as e:
+        print(colors.error(str(e)))
+        return 1
+
+    container = Container(runtime)
+    images = container.images()
+
+    if not images:
+        print(_("No container images found."))
+        return 0
+
+    # Display as a table
+    print(f"{'TAG':<40} {'ID':<14} {'SIZE':>10}")
+    print(f"{'─' * 40} {'─' * 14} {'─' * 10}")
+    for img in images:
+        tag = img.get('tag', '<none>')
+        img_id = img.get('id', '')[:12]
+        size = img.get('size', '?')
+        print(f"{tag:<40} {img_id:<14} {size:>10}")
+
+    print(ngettext(
+        "\n{count} image",
+        "\n{count} images",
+        len(images)).format(count=len(images)))
+    return 0
+
+
+def cmd_image_delete(args, db: 'PackageDatabase') -> int:
+    """Delete a container image."""
+    from ...core.container import detect_runtime, Container
+    from .. import colors
+
+    runtime_name = getattr(args, 'runtime', None)
+    tags = args.tags
+    force = getattr(args, 'force', False)
+
+    try:
+        runtime = detect_runtime(runtime_name)
+    except RuntimeError as e:
+        print(colors.error(str(e)))
+        return 1
+
+    container = Container(runtime)
+    errors = 0
+
+    for tag in tags:
+        if not container.image_exists(tag):
+            print(colors.warning(
+                _("Image not found: {tag}").format(tag=tag)))
+            errors += 1
+            continue
+
+        if container.rmi(tag, force=force):
+            print(_("Deleted: {tag}").format(tag=tag))
+        else:
+            print(colors.error(
+                _("Failed to delete: {tag}").format(tag=tag)))
+            errors += 1
+
+    return 1 if errors else 0
+
+
+def cmd_image_update(args, db: 'PackageDatabase') -> int:
+    """Update a container image in-place (sync media + upgrade packages).
+
+    Starts a temporary container from the image, runs ``urpm media update``
+    and ``urpm update --auto``, then commits the result as the same tag,
+    replacing the old image.
+    """
+    from ...core.container import detect_runtime, Container
+    from .. import colors
+
+    tag = args.tag
+    runtime_name = getattr(args, 'runtime', None)
+
+    try:
+        runtime = detect_runtime(runtime_name)
+    except RuntimeError as e:
+        print(colors.error(str(e)))
+        return 1
+
+    container = Container(runtime)
+
+    if not container.image_exists(tag):
+        print(colors.error(
+            _("Image not found: {tag}").format(tag=tag)))
+        return 1
+
+    # Remember old image ID so we can prune it after commit
+    old_images = container.images(filter_name=tag)
+    old_id = old_images[0]['id'] if old_images else None
+
+    print(_("Updating image {tag}...").format(tag=tag))
+    cid = None
+    try:
+        # Start temporary container
+        cid = container.run(
+            tag, ['sleep', 'infinity'],
+            detach=True, rm=False, network='host',
+        )
+        print(_("  Container: {cid}").format(cid=cid[:12]))
+
+        # Sync media
+        print(_("  Updating media..."))
+        ret = container.exec_stream(cid, ['urpm', 'media', 'update'])
+        if ret != 0:
+            print(colors.warning(
+                _("  Warning: media update failed")))
+
+        # Upgrade packages
+        print(_("  Upgrading packages..."))
+        ret = container.exec_stream(cid, ['urpm', 'update', '--auto'])
+        if ret != 0:
+            print(colors.warning(
+                _("  Warning: package update returned {code}").format(
+                    code=ret)))
+
+        # Stop the container before committing
+        container.exec(cid, ['sh', '-c', 'kill 1 2>/dev/null || true'])
+
+        # Commit as same tag (overwrites)
+        print(_("  Committing..."), end='', flush=True)
+        if not container.commit(cid, tag):
+            print()
+            print(colors.error(_("Failed to commit image")))
+            return 1
+        print(_(" done"))
+
+        # Remove old image layer if ID changed
+        new_images = container.images(filter_name=tag)
+        new_id = new_images[0]['id'] if new_images else None
+        if old_id and new_id and old_id != new_id:
+            container.rmi(old_id, force=True)
+
+        # Show result
+        size = new_images[0]['size'] if new_images else '?'
+        print(colors.success(
+            _("\nImage {tag} updated ({size})").format(
+                tag=tag, size=size)))
+        return 0
+
+    except Exception as e:
+        print(colors.error(
+            _("Error: {error}").format(error=e)))
+        return 1
+
+    finally:
+        if cid:
             container.rm(cid)

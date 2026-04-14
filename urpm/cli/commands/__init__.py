@@ -95,6 +95,9 @@ from .build import (
     cmd_cleanup,
     cmd_mkimage,
     cmd_build,
+    cmd_image_list,
+    cmd_image_delete,
+    cmd_image_update,
 )
 from .appstream import (
     cmd_appstream,
@@ -183,6 +186,10 @@ __all__ = [
     'cmd_cleanup',
     'cmd_mkimage',
     'cmd_build',
+    # Image management commands
+    'cmd_image_list',
+    'cmd_image_delete',
+    'cmd_image_update',
     # AppStream command
     'cmd_appstream',
 ]

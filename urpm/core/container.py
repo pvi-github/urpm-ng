@@ -419,6 +419,24 @@ class Container:
 
         return True
 
+    def commit(self, container_id: str, tag: str) -> bool:
+        """Commit a container's changes as a new image.
+
+        Args:
+            container_id: Running or stopped container ID/name
+            tag: Image tag for the committed image
+
+        Returns:
+            True if successful
+        """
+        result = subprocess.run(
+            [self.cmd, 'commit', container_id, tag],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            logger.error(f"Commit failed: {result.stderr.strip()}")
+        return result.returncode == 0
+
     def rmi(self, image: str, force: bool = False) -> bool:
         """Remove an image.
 
