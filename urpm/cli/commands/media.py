@@ -112,13 +112,8 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     using mirrors from the provided mirrorlist URL.
     """
     from .. import colors
-    from urllib.request import urlopen, Request
-    from urllib.error import URLError, HTTPError
-    from urllib.parse import urlparse
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from ...core.mirrorlist import fetch_mirrors
+    from .server import autoconfig_servers
     import re
-    import time
     import platform
 
     mirrorlist_url = args.mirrorlist
@@ -428,158 +423,12 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
                 print(_("\nAborted"))
                 return 1
 
-    # Fetch mirrorlist
-    print(_("Fetching mirrorlist..."), end=' ', flush=True)
-
-    use_custom_url = bool(args.mirrorlist)
-    if use_custom_url:
-        # Custom --mirrorlist URL: fetch inline (unknown format)
-        try:
-            req = Request(mirrorlist_url, headers={'User-Agent': 'urpm-ng'})
-            with urlopen(req, timeout=60) as response:
-                content = response.read().decode('utf-8').strip()
-                lines = [line.strip() for line in content.split('\n') if line.strip()]
-        except (URLError, HTTPError) as e:
-            print(colors.error(_("failed: {error}").format(error=e)))
-            return 1
-
-        if not lines:
-            print(colors.warning(_("empty")))
-            print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
-            return 1
-
-        # Parse key=value CSV format
-        mirror_urls = []
-        _mirror_country = {}
-        for line in lines:
-            for field in line.split(','):
-                if field.startswith('url='):
-                    url = field[4:]
-                    if url.startswith('http://') or url.startswith('https://'):
-                        mirror_urls.append(url)
-                    break
-    else:
-        # Default: use shared helper (with geo filtering)
-        try:
-            mirrors = fetch_mirrors(version, arch, timeout=30)
-        except (URLError, HTTPError) as e:
-            print(colors.error(_("failed: {error}").format(error=e)))
-            return 1
-
-        if not mirrors:
-            print(colors.warning(_("empty")))
-            print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
-            return 1
-
-        mirror_urls = [m.url for m in mirrors]
-        _mirror_country = {m.url: m.country for m in mirrors}
-
-    print(ngettext("{count} mirror", "{count} mirrors", len(mirror_urls)).format(count=len(mirror_urls)))
-
-    if not mirror_urls:
-        print(colors.warning(_("No URLs found in mirrorlist")))
-        return 1
-
-    # Parse mirror URLs to extract base paths
-    # Mirror URLs look like: https://ftp.belnet.be/mageia/distrib/10/x86_64
-    # We need to extract the base: https://ftp.belnet.be/mageia/distrib/
-    # The suffix to strip is: {version}/{arch}
-    suffix_pattern = re.compile(rf'{re.escape(version)}/{re.escape(arch)}/?$')
-
-    # Parse and deduplicate candidates
-    from ...core.server_pool import dedup_mirror_urls
-    candidates = dedup_mirror_urls(mirror_urls, suffix_pattern)
-
-    if not candidates:
-        print(colors.error(_("No valid HTTP/HTTPS mirrors found")))
-        return 1
-
-    # Test latency to find best mirrors
-    print(_("Testing latency to {count} mirrors...").format(count=len(candidates)), end=' ', flush=True)
-
-    def test_latency(candidate):
-        test_url = candidate['full_url']
-        try:
-            start = time.time()
-            req = Request(test_url, method='HEAD')
-            with urlopen(req, timeout=5) as resp:
-                latency = (time.time() - start) * 1000
-                return (candidate, latency)
-        except Exception:
-            return (candidate, None)
-
-    results = []
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(test_latency, c): c for c in candidates}
-        for future in as_completed(futures):
-            candidate, latency = future.result()
-            if latency is not None:
-                results.append((candidate, latency))
-
-    print(_("{count} reachable").format(count=len(results)))
-
-    if not results:
-        print(colors.error(_("No reachable mirrors found")))
-        return 1
-
-    # Sort by latency and take best 3
-    results.sort(key=lambda x: x[1])
-    best_mirrors = results[:3]
-
-    print(_("\nBest mirrors:"))
-    for candidate, latency in best_mirrors:
-        print(_("  {host} ({latency:.0f}ms)").format(host=candidate['host'], latency=latency))
-
-    # Add servers
-    print(_("\nAdding servers..."))
-    servers_added = []
-
-    for candidate, latency in best_mirrors:
-        # Check if server already exists
-        existing = db.get_server_by_location(
-            candidate['scheme'],
-            candidate['host'],
-            candidate['base_path']
-        )
-        if existing:
-            print(_("  {host}: already exists").format(host=candidate['host']))
-            servers_added.append(existing)
-            continue
-
-        # Generate server name from hostname
-        server_name = _generate_server_name(candidate['scheme'], candidate['host'])
-
-        # Make name unique if needed
-        base_name = server_name
-        counter = 1
-        while True:
-            try:
-                server_id = db.add_server(
-                    name=server_name,
-                    protocol=candidate['scheme'],
-                    host=candidate['host'],
-                    base_path=candidate['base_path'],
-                    is_official=True,
-                    enabled=True,
-                    priority=50,
-                    country=_mirror_country.get(candidate.get('full_url', '')) or None,
-                )
-                print(_("  {name} (id={id})").format(name=server_name, id=server_id))
-                servers_added.append({
-                    'id': server_id,
-                    'name': server_name,
-                    'protocol': candidate['scheme'],
-                    'host': candidate['host'],
-                    'base_path': candidate['base_path'],
-                })
-                break
-            except Exception as e:
-                if 'UNIQUE constraint' in str(e) and 'name' in str(e):
-                    counter += 1
-                    server_name = f"{base_name}-{counter}"
-                else:
-                    print(colors.error(_("  Failed to add {host}: {error}").format(host=candidate['host'], error=e)))
-                    break
+    # Discover and add best mirrors via autoconfig_servers
+    servers_added = autoconfig_servers(
+        db, version, arch,
+        count=3,
+        custom_mirrorlist=getattr(args, 'mirrorlist', None) or None,
+    )
 
     if not servers_added:
         print(colors.error(_("No servers could be added")))

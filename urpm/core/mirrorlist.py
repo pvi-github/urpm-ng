@@ -196,6 +196,33 @@ def fetch_mirrors(
     return mirrors
 
 
+def parse_mirrorlist_content(content: str) -> List[MirrorInfo]:
+    """Parse raw mirrorlist text (key=value CSV lines) into MirrorInfo objects.
+
+    This handles the same ``key=value,...`` format used by the Mageia mirror
+    API.  Non-HTTP(S) entries and blank lines are silently ignored.
+
+    Useful for parsing the body of a custom mirrorlist URL that follows
+    the same format as the official API.
+
+    Args:
+        content: Raw text with one mirror per line, each line being
+            comma-separated ``key=value`` pairs (at minimum ``url=…``).
+
+    Returns:
+        List of :class:`MirrorInfo` for valid HTTP/HTTPS entries.
+    """
+    mirrors: List[MirrorInfo] = []
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        info = _parse_mirror_line(line)
+        if info is not None:
+            mirrors.append(info)
+    return mirrors
+
+
 def backfill_server_countries(
     db: 'PackageDatabase',
     release: str,

@@ -429,80 +429,114 @@ def cmd_server_stats(args, db: 'PackageDatabase') -> int:
     return 0
 
 
-def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
-    """Handle server autoconfig command - auto-discover servers from Mageia mirrorlist."""
+def autoconfig_servers(
+    db: 'PackageDatabase',
+    version: str,
+    arch: str,
+    count: int | None = None,
+    custom_mirrorlist: str | None = None,
+    dry_run: bool = False,
+) -> list[dict]:
+    """Discover and add servers from the Mageia mirrorlist.
+
+    Fetches the official mirror list (or a custom one), deduplicates by
+    host, tests latency in parallel, and adds the best candidates to the
+    database.
+
+    The function prints progress messages as it goes (fetch, latency test,
+    additions) so callers get live feedback.
+
+    Args:
+        db: Package database.
+        version: Mageia version (e.g. ``"10"``).
+        arch: Architecture (e.g. ``"x86_64"``).
+        count: Number of servers to add.  ``None`` means *auto*: compute
+            the gap between existing enabled servers and the minimum
+            required by pool settings.  When the pool is already full,
+            returns early with an empty list.
+        custom_mirrorlist: Custom mirrorlist URL.  ``None`` uses the
+            default Mageia API (with geo filtering).  The custom URL
+            must return the same ``key=value,...`` CSV format as the
+            official API.
+        dry_run: When ``True``, select candidates and return them
+            **without** adding anything to the database.  The returned
+            dicts include a ``latency_ms`` key for display purposes.
+
+    Returns:
+        List of added (or candidate, if *dry_run*) server dicts, each
+        containing ``id`` (``None`` when dry_run), ``name``, ``protocol``,
+        ``host``, ``base_path``, and ``latency_ms``.
+        Empty list if no servers could be added.
+    """
     from .. import colors
     from urllib.request import urlopen, Request
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import time
 
     from ...core.settings import get_settings
-    from ...core.server_pool import minimum_servers_for
-    from ...core.mirrorlist import fetch_mirrors, dedup_mirrors
-    TARGET_SERVERS = minimum_servers_for(get_settings().download.parallel)
+    from ...core.server_pool import minimum_servers_for, _average_bandwidth
+    from ...core.mirrorlist import (
+        fetch_mirrors, dedup_mirrors, parse_mirrorlist_content,
+    )
 
-    # Get system version and arch
-    version = getattr(args, 'release', None)
-    if not version:
-        try:
-            with open('/etc/os-release') as f:
-                for line in f:
-                    if line.startswith('VERSION_ID='):
-                        version = line.strip().split('=')[1].strip('"')
-                        break
-        except (IOError, OSError):
-            pass
-
-    if not version:
-        print(colors.error(_("Cannot detect Mageia version from /etc/os-release")))
-        print(colors.dim(_("Use --release to specify manually (e.g., --release 9)")))
-        return 1
-
-    import platform
-    arch = platform.machine()
-
-    # Count existing enabled servers
+    # ── Determine how many servers we need ────────────────────────────
     existing_servers = db.list_servers(enabled_only=True)
     existing_count = len(existing_servers)
 
-    if existing_count >= TARGET_SERVERS:
-        print(_("Already have {count} enabled servers (target: {target})").format(count=existing_count, target=TARGET_SERVERS))
-        print(colors.dim(_("Use 'urpm server remove' to remove some first if needed.")))
-        return 0
+    if count is not None:
+        needed = count
+    else:
+        target = minimum_servers_for(get_settings().download.parallel)
+        if existing_count >= target:
+            print(_("Already have {count} enabled servers (target: {target})").format(
+                count=existing_count, target=target))
+            print(colors.dim(_("Use 'urpm server remove' to remove some first if needed.")))
+            return []
+        needed = target - existing_count
+        print(_("Have {count} enabled servers, need {needed} more to reach {target}").format(
+            count=existing_count, needed=needed, target=target))
 
-    needed = TARGET_SERVERS - existing_count
-    print(_("Have {count} enabled servers, need {needed} more to reach {target}").format(count=existing_count, needed=needed, target=TARGET_SERVERS))
-
-    # Duplicate check by host — for autoconfig we want at most one entry
-    # per physical mirror (same host with different paths still shares
-    # the same bandwidth, so adding both wouldn't improve parallelism).
+    # ── Host-only dedup against existing DB entries ───────────────────
+    # For autoconfig we want at most one entry per physical mirror
+    # (same host with different paths still shares the same bandwidth,
+    # so adding both wouldn't improve parallelism).
     all_servers = db.list_servers()
     existing_hosts = {s['host'] for s in all_servers}
     existing_names = {s['name'] for s in all_servers}
 
-    # Fetch mirror list (with geo filtering from [server] settings)
-    print(_("Fetching mirrorlist for Mageia {version} ({arch})...").format(version=version, arch=arch), end=' ', flush=True)
+    # ── Fetch mirror list ─────────────────────────────────────────────
+    print(_("Fetching mirrorlist for Mageia {version} ({arch})...").format(
+        version=version, arch=arch), end=' ', flush=True)
 
     try:
-        mirrors = fetch_mirrors(version, arch, timeout=30)
+        if custom_mirrorlist:
+            # Custom URL — must return the same key=value CSV format
+            req = Request(custom_mirrorlist, headers={'User-Agent': 'urpm-ng'})
+            with urlopen(req, timeout=60) as response:
+                content = response.read().decode('utf-8').strip()
+            mirrors = parse_mirrorlist_content(content)
+        else:
+            # Default: Mageia API with geo filtering
+            mirrors = fetch_mirrors(version, arch, timeout=30)
     except Exception as e:
         print(colors.error(_("failed: {error}").format(error=e)))
-        return 1
+        return []
 
     if not mirrors:
         print(colors.warning(_("empty")))
         print(colors.dim(_("The mirrorlist may not be available yet for this version.")))
-        return 0
+        return []
 
-    print(ngettext("{count} mirror", "{count} mirrors", len(mirrors)).format(count=len(mirrors)))
+    print(ngettext("{count} mirror", "{count} mirrors", len(mirrors)).format(
+        count=len(mirrors)))
 
-    # Dedup and convert to candidate dicts for latency testing
+    # ── Dedup and build candidate list ────────────────────────────────
     suffix = f"/{version}/{arch}"
     mirrors = dedup_mirrors(mirrors, strip_suffix=suffix)
     total_mirrors = len(mirrors)
 
     candidates = []
-    seen_hosts = set()
+    seen_hosts: set[str] = set()
     for m in mirrors:
         if m.host in existing_hosts or m.host in seen_hosts:
             continue
@@ -525,12 +559,14 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     if not candidates:
         print(_("No new servers to add"))
         if skipped:
-            print(colors.dim("  " + _("({count} already configured or duplicates)").format(count=skipped)))
-        return 0
+            print(colors.dim("  " + _("({count} already configured or duplicates)").format(
+                count=skipped)))
+        return []
 
-    print(_("Testing latency to {count} candidates...").format(count=len(candidates)), end=' ', flush=True)
+    # ── Parallel latency testing ──────────────────────────────────────
+    print(_("Testing latency to {count} candidates...").format(
+        count=len(candidates)), end=' ', flush=True)
 
-    # Test latency to each candidate in parallel
     def test_latency(candidate):
         """Test latency with HEAD request, return (candidate, latency_ms) or (candidate, None)."""
         test_url = candidate['full_url']
@@ -555,20 +591,30 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
 
     if not results:
         print(colors.warning(_("No reachable mirrors found")))
-        return 0
+        return []
 
-    # Sort by latency and take the best N
+    # ── Sort by latency and take the best N ───────────────────────────
     results.sort(key=lambda x: x[1])
     best = results[:needed]
 
-    if args.dry_run:
-        print("\n" + ngettext("Would add {count} server:", "Would add {count} servers:", len(best)).format(count=len(best)))
-        for candidate, latency in best:
-            print(f"  {candidate['host']} ({latency:.0f}ms)")
-        return 0
+    if dry_run:
+        return [
+            {
+                "id": None,
+                "name": c['host'],
+                "protocol": c['scheme'],
+                "host": c['host'],
+                "base_path": c['base_path'],
+                "country": c.get('country'),
+                "latency_ms": latency,
+            }
+            for c, latency in best
+        ]
 
-    # Add best servers
-    added_servers = []
+    # ── Add best servers to the database ──────────────────────────────
+    added_servers: list[dict] = []
+    avg_kbps = _average_bandwidth(all_servers)
+
     for candidate, latency in best:
         shortname = candidate['host']
         # Ensure unique name
@@ -586,20 +632,76 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
             # Persist latency + seed bandwidth with the average of existing
             # servers so the download planner gives new mirrors a fair share
             # immediately.  The EWMA will converge after the first downloads.
-            from ...core.server_pool import _average_bandwidth
-            avg_kbps = _average_bandwidth(all_servers)
             db.update_server_stats(server_id, latency_ms=int(latency),
                                    bandwidth_kbps=avg_kbps)
-            print(colors.success("  " + _("Added: {name} ({latency}ms)").format(name=shortname, latency=f"{latency:.0f}")))
+            print(colors.success("  " + _("Added: {name} ({latency}ms)").format(
+                name=shortname, latency=f"{latency:.0f}")))
             existing_names.add(shortname)
-            added_servers.append((server_id, shortname))
+            added_servers.append({
+                "id": server_id,
+                "name": shortname,
+                "protocol": candidate['scheme'],
+                "host": candidate['host'],
+                "base_path": candidate['base_path'],
+                "country": candidate.get('country'),
+                "latency_ms": latency,
+            })
         except Exception as e:
-            print(colors.warning("  " + _("Failed to add {name}: {error}").format(name=shortname, error=e)))
+            print(colors.warning("  " + _("Failed to add {name}: {error}").format(
+                name=shortname, error=e)))
 
-    if not added_servers:
+    return added_servers
+
+
+def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
+    """Handle server autoconfig command - auto-discover servers from Mageia mirrorlist.
+
+    Detects the local Mageia version and architecture, delegates server
+    discovery and addition to :func:`autoconfig_servers`, then links the
+    newly added servers to enabled media via parallel HEAD probes.
+    """
+    from .. import colors
+    from urllib.request import urlopen, Request
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # ── Resolve version and arch ──────────────────────────────────────
+    version = getattr(args, 'release', None)
+    if not version:
+        try:
+            with open('/etc/os-release') as f:
+                for line in f:
+                    if line.startswith('VERSION_ID='):
+                        version = line.strip().split('=')[1].strip('"')
+                        break
+        except (IOError, OSError):
+            pass
+
+    if not version:
+        print(colors.error(_("Cannot detect Mageia version from /etc/os-release")))
+        print(colors.dim(_("Use --release to specify manually (e.g., --release 9)")))
+        return 1
+
+    import platform
+    arch = platform.machine()
+
+    # ── Discover and add (or preview) servers ─────────────────────────
+    dry_run = getattr(args, 'dry_run', False)
+    added = autoconfig_servers(db, version, arch, dry_run=dry_run)
+
+    if dry_run:
+        if added:
+            print("\n" + ngettext(
+                "Would add {count} server:",
+                "Would add {count} servers:",
+                len(added)).format(count=len(added)))
+            for srv in added:
+                print(f"  {srv['host']} ({srv['latency_ms']:.0f}ms)")
         return 0
 
-    # Scan enabled media to link with new servers
+    if not added:
+        return 0
+
+    # ── Link new servers to enabled media ─────────────────────────────
     all_media = db.list_media()
     enabled_media = [m for m in all_media if m.get('enabled', 1)]
     if not enabled_media:
@@ -612,14 +714,14 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     if not media_to_scan:
         return 0
 
-    print("\n" + _("Scanning {count} enabled media...").format(count=len(media_to_scan)), end=' ', flush=True)
+    print("\n" + _("Scanning {count} enabled media...").format(
+        count=len(media_to_scan)), end=' ', flush=True)
 
-    # For each new server, check which media it provides
     from ...core.config import build_server_url
 
     total_links = 0
-    for server_id, server_name in added_servers:
-        server = db.get_server(server_name)
+    for srv in added:
+        server = db.get_server(srv['name'])
         base_url = build_server_url(server)
 
         def check_media(media_id, media_name, relative_path):
@@ -637,17 +739,16 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
             for future in as_completed(futures):
                 media_id = future.result()
                 if media_id:
-                    db.link_server_media(server_id, media_id)
+                    db.link_server_media(srv['id'], media_id)
                     total_links += 1
 
     print(_("{count} links created").format(count=total_links))
 
-    # Summary
+    # ── Summary ───────────────────────────────────────────────────────
+    existing_count = len(db.list_servers(enabled_only=True)) - len(added)
     print("\n" + ngettext(
         "Added {added} server, now have {total} enabled",
         "Added {added} servers, now have {total} enabled",
-        len(added_servers)).format(added=len(added_servers), total=existing_count + len(added_servers)))
-    if skipped:
-        print(colors.dim(_("Skipped {count} (duplicates or other protocol)").format(count=skipped)))
+        len(added)).format(added=len(added), total=existing_count + len(added)))
 
     return 0

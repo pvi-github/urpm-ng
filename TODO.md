@@ -54,6 +54,11 @@
   - README mentionnait cette option à tort (retirée le 2026-04-10) : à
     ré-introduire quand le flag sera réellement implémenté
 
+### Tests
+- [ ] Corriger `test_simple_c_then_d` (TestHandleConflictDeps) qui échoue en sandbox userns
+  - `unshare process exited with code 1` — rpm dans user namespace ne fonctionne pas sur la VM de dev
+  - Diagnostiquer si c'est un problème de config VM (subuid/subgid, kernel) ou un bug du test harness
+
 ### Ergonomie CLI
 - [x] ~~Renommer `urpm server autoconf` en `urpm server autoconfig`~~ (déjà fait)
 - [ ] Renommer `urpm media discover --with` / `--without` en
