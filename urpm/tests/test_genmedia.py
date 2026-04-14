@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from urpm.genmedia import RpmMetadata, GenerateResult
-from urpm.genmedia.compress import parse_filter, open_compressed
+from urpm.genmedia.compress import parse_filter, compress_open
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────
@@ -173,26 +173,26 @@ class TestParseFilter:
             parse_filter('cz:gzip -9')
 
 
-class TestOpenCompressed:
+class TestCompressOpen:
     """Test compressed file opening for write."""
 
     def test_gzip_roundtrip(self, tmp_path):
         path = tmp_path / 'test.gz'
-        with open_compressed(path, 'gzip', 9) as f:
-            f.write(b'hello world')
-        with gzip.open(path, 'rb') as f:
-            assert f.read() == b'hello world'
+        with compress_open(path, 'gzip', 9) as f:
+            f.write('hello world')
+        with gzip.open(path, 'rt') as f:
+            assert f.read() == 'hello world'
 
     def test_xz_roundtrip(self, tmp_path):
         path = tmp_path / 'test.xz'
-        with open_compressed(path, 'xz', 7) as f:
-            f.write(b'hello world')
-        with lzma.open(path, 'rb') as f:
-            assert f.read() == b'hello world'
+        with compress_open(path, 'xz', 7) as f:
+            f.write('hello world')
+        with lzma.open(path, 'rt') as f:
+            assert f.read() == 'hello world'
 
     def test_unsupported(self, tmp_path):
         with pytest.raises(ValueError, match='Unsupported'):
-            open_compressed(tmp_path / 'x', 'brotli', 5)
+            compress_open(tmp_path / 'x', 'brotli', 5)
 
 
 # ─── Synthesis writer contract ────────────────────────────────────
@@ -274,7 +274,6 @@ class TestWriteSynthesis:
 class TestWriteFilesXml:
     """Contract tests for write_files_xml()."""
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_basic_output(self, sample_packages, tmp_path):
         from urpm.core.files_xml import write_files_xml
         out = tmp_path / 'files.xml.lzma'
@@ -286,15 +285,14 @@ class TestWriteFilesXml:
         assert 'fn="foo-1.0-1.mga10.x86_64.rpm"' in content
         assert '/usr/bin/foo' in content
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_roundtrip(self, sample_packages, tmp_path):
         """Write then read back with parse_files_xml."""
         from urpm.core.files_xml import write_files_xml, parse_files_xml
         out = tmp_path / 'files.xml.lzma'
         write_files_xml(out, sample_packages)
         parsed = dict(parse_files_xml(out))
-        assert 'foo-1.0-1.mga10.x86_64' in parsed
-        assert '/usr/bin/foo' in parsed['foo-1.0-1.mga10.x86_64']
+        assert 'foo-1.0-1.mga10.x86_64.rpm' in parsed
+        assert '/usr/bin/foo' in parsed['foo-1.0-1.mga10.x86_64.rpm']
 
 
 # ─── Info XML writer contract ────────────────────────────────────
@@ -303,7 +301,6 @@ class TestWriteFilesXml:
 class TestWriteInfoXml:
     """Contract tests for write_info_xml()."""
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_basic_output(self, sample_packages, tmp_path):
         from urpm.core.files_xml import write_info_xml
         out = tmp_path / 'info.xml.lzma'
@@ -323,7 +320,6 @@ class TestWriteInfoXml:
 class TestWriteChangelogXml:
     """Contract tests for write_changelog_xml()."""
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_basic_output(self, sample_packages, tmp_path):
         from urpm.core.files_xml import write_changelog_xml
         out = tmp_path / 'changelog.xml.lzma'
@@ -335,7 +331,6 @@ class TestWriteChangelogXml:
         assert '<changelogs' in content
         assert '<log_name>' in content
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_empty_changelog(self, tmp_path):
         """Package with no changelog entries should still appear."""
         from urpm.core.files_xml import write_changelog_xml
