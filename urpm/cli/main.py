@@ -2295,7 +2295,24 @@ def main(argv=None) -> int:
         return 1
 
     parser = create_parser()
-    args = parser.parse_args(argv)
+    # Use parse_known_args so unrecognized arguments don't trigger the
+    # root parser's generic usage.  If there are leftovers, re-parse with
+    # the full parser so the *subcommand* parser emits its own usage.
+    args, remaining = parser.parse_known_args(argv)
+    if remaining:
+        # Find the subcommand parser and let it report the error
+        cmd = getattr(args, 'command', None)
+        if cmd:
+            # Walk subparsers to find the right one
+            for action in parser._subparsers._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    sub_parser = action._name_parser_map.get(cmd)
+                    if sub_parser:
+                        sub_parser.error(
+                            _("unrecognized arguments: {args}").format(
+                                args=' '.join(remaining)))
+        # Fallback: let the root parser report
+        parser.parse_args(argv)
 
     # Configure logging based on verbose flag
     if getattr(args, 'verbose', False):
