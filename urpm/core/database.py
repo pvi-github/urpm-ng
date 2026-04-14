@@ -634,6 +634,12 @@ MIGRATIONS = {
     25: (26, """
         -- Migration v25 -> v26: unique constraint (host, base_path) instead of
         -- (protocol, host, base_path) — same host with HTTP/HTTPS is one server.
+        --
+        -- CRITICAL: disable foreign keys before DROP TABLE server, otherwise
+        -- ON DELETE CASCADE wipes server_media rows.  Belt-and-suspenders:
+        -- also backup server_media into a temp table.
+        PRAGMA foreign_keys=OFF;
+        CREATE TEMP TABLE _sm_bak AS SELECT * FROM server_media;
         CREATE TABLE server_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
@@ -669,6 +675,10 @@ MIGRATIONS = {
         ALTER TABLE server_new RENAME TO server;
         CREATE INDEX IF NOT EXISTS idx_server_host ON server(host);
         CREATE INDEX IF NOT EXISTS idx_server_enabled ON server(enabled);
+        -- Restore server_media links (ignore orphans from dedup)
+        INSERT OR IGNORE INTO server_media SELECT * FROM _sm_bak;
+        DROP TABLE IF EXISTS _sm_bak;
+        PRAGMA foreign_keys=ON;
     """),
 }
 
