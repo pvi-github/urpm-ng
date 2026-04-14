@@ -332,10 +332,13 @@ class Resolution:
     install_size: int = 0
     remove_size: int = 0
     alternatives: List[Alternative] = None  # Choices that need user input
+    obsoleted_names: set = None  # Package names replaced via Obsoletes
 
     def __post_init__(self):
         if self.alternatives is None:
             self.alternatives = []
+        if self.obsoleted_names is None:
+            self.obsoleted_names = set()
 
 
 class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
@@ -1063,6 +1066,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             debug.log_pool_stats(self.pool)
 
         jobs = []
+        will_be_obsoleted = set()
 
         if package_names:
             # Upgrade specific packages
@@ -1168,7 +1172,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
             if requested_names:
                 held_packages = self.db.get_held_packages_set()
-                obs_jobs, _, held_obs = self._scan_obsoletes(
+                obs_jobs, will_be_obsoleted, held_obs = self._scan_obsoletes(
                     held_packages, only_names=requested_names,
                 )
                 jobs += obs_jobs
@@ -1356,7 +1360,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             actions=actions,
             problems=[],
             install_size=install_size,
-            remove_size=remove_size
+            remove_size=remove_size,
+            obsoleted_names=will_be_obsoleted,
         )
 
     def resolve_remove(self, package_names: List[str], clean_deps: bool = True) -> Resolution:

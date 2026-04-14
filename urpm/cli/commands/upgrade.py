@@ -160,7 +160,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     orphans = []
     cancelled_new_versions: set = set()
     if not getattr(args, 'noerase_orphans', False):
-        plan = resolver.find_upgrade_orphans(result.actions)
+        plan = resolver.find_upgrade_orphans(
+            result.actions, obsoleted_names=result.obsoleted_names,
+        )
 
         # Pre-existing REMOVE actions already destined for erasure — don't
         # list the same name twice in the orphan summary.
@@ -197,6 +199,28 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     removes = [a for a in result.actions if a.action.value == 'remove']
     downgrades = [a for a in result.actions if a.action.value == 'downgrade']
 
+    # Build NEVRA list for packages replaced via Obsoletes.
+    # SHOW_ACTIVE hides them from result.actions, so we look up their
+    # installed version from the rpmdb.
+    obsoleted_nevras = []
+    if result.obsoleted_names:
+        try:
+            import rpm as _rpm
+            _ts = _rpm.TransactionSet()
+            for oname in sorted(result.obsoleted_names):
+                mi = _ts.dbMatch('name', oname)
+                for hdr in mi:
+                    epoch = hdr[_rpm.RPMTAG_EPOCH] or 0
+                    ver = hdr[_rpm.RPMTAG_VERSION] or ''
+                    rel = hdr[_rpm.RPMTAG_RELEASE] or ''
+                    arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
+                    if epoch and epoch > 0:
+                        obsoleted_nevras.append(f"{oname}-{epoch}:{ver}-{rel}.{arch}")
+                    else:
+                        obsoleted_nevras.append(f"{oname}-{ver}-{rel}.{arch}")
+        except ImportError:
+            obsoleted_nevras = sorted(result.obsoleted_names)
+
     # Show packages by category
     from .. import colors, display
     print("\n" + colors.bold(_("Transaction summary:")))
@@ -208,10 +232,11 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         print("\n  " + colors.success(_("Install ({count}) - new dependencies:").format(count=len(installs))))
         pkg_names = [a.nevra for a in sorted(installs, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.success)
-    if removes:
-        print("\n  " + colors.error(_("Remove ({count}) - obsoleted:").format(count=len(removes))))
-        pkg_names = [a.nevra for a in sorted(removes, key=lambda x: x.name.lower())]
-        display.print_package_list(pkg_names, indent=4, color_func=colors.error)
+    # Merge explicit REMOVE actions with Obsoletes-replaced packages
+    obsoleted_all = [a.nevra for a in sorted(removes, key=lambda x: x.name.lower())] + obsoleted_nevras
+    if obsoleted_all:
+        print("\n  " + colors.error(_("Remove ({count}) - obsoleted:").format(count=len(obsoleted_all))))
+        display.print_package_list(obsoleted_all, indent=4, color_func=colors.error)
     if downgrades:
         print("\n  " + colors.warning(_("Downgrade ({count}):").format(count=len(downgrades))))
         pkg_names = [a.nevra for a in sorted(downgrades, key=lambda x: x.name.lower())]

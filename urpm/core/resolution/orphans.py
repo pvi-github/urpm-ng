@@ -862,7 +862,8 @@ class OrphansMixin:
             cap = cap.split('[')[0]
         return cap
 
-    def find_upgrade_orphans(self, all_actions: list) -> "UpgradeOrphanPlan":
+    def find_upgrade_orphans(self, all_actions: list,
+                             obsoleted_names: set = None) -> "UpgradeOrphanPlan":
         """Find packages that become newly orphaned by a transaction.
 
         Implements the formal specification::
@@ -889,6 +890,10 @@ class OrphansMixin:
         Args:
             all_actions: All ``PackageAction`` instances in the
                 transaction (upgrades, installs, removes, downgrades).
+            obsoleted_names: Package names being replaced via Obsoletes.
+                These are removed implicitly by rpm (not in
+                ``all_actions`` with SHOW_ACTIVE) and must not be
+                classified as orphans.
 
         Returns:
             An :class:`UpgradeOrphanPlan` partitioning the new orphans
@@ -932,6 +937,14 @@ class OrphansMixin:
                 installed_names.add(action.name)
             elif action.action == TransactionType.REMOVE:
                 removed_names.add(action.name)
+
+        # Packages replaced via Obsoletes are removed implicitly by rpm
+        # but do not appear in all_actions (SHOW_ACTIVE hides them).
+        # Include them in removed_names so they are excluded from
+        # post_state, and track them separately to avoid misclassifying
+        # them as orphans.
+        if obsoleted_names:
+            removed_names |= obsoleted_names
 
         if not (upgraded_names or installed_names or removed_names):
             return UpgradeOrphanPlan()
