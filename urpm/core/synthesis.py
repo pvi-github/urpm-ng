@@ -6,6 +6,7 @@ Format: Tags (@provides, @requires, etc.) followed by @info which terminates
 each package definition.
 """
 
+import lzma
 import re
 from pathlib import Path
 from typing import Dict, Iterator, List, Any, Optional, Tuple
@@ -255,6 +256,37 @@ def write_synthesis(
     Returns:
         Number of packages written.
     """
-    raise NotImplementedError(
-        "write_synthesis() is a stub — implementation needed."
-    )
+    # Parse compression filter (e.g. "xz -7" → preset 7).
+    parts = compression_filter.strip().split()
+    preset = 7
+    for p in parts[1:]:
+        if p.startswith('-') and p[1:].isdigit():
+            preset = int(p[1:])
+
+    count = 0
+    with lzma.open(output_path, 'wt', preset=preset) as f:
+        for pkg in packages:
+            # @requires@dep1@dep2@...
+            if pkg.requires:
+                f.write('@requires@' + '@'.join(pkg.requires) + '\n')
+            # @suggests@...
+            if pkg.suggests:
+                f.write('@suggests@' + '@'.join(pkg.suggests) + '\n')
+            # @obsoletes@...
+            if pkg.obsoletes:
+                f.write('@obsoletes@' + '@'.join(pkg.obsoletes) + '\n')
+            # @conflicts@...
+            if pkg.conflicts:
+                f.write('@conflicts@' + '@'.join(pkg.conflicts) + '\n')
+            # @provides@...
+            if pkg.provides:
+                f.write('@provides@' + '@'.join(pkg.provides) + '\n')
+            # @summary@text
+            f.write(f'@summary@{pkg.summary}\n')
+            # @filesize@size
+            f.write(f'@filesize@{pkg.filesize}\n')
+            # @info@NEVRA@epoch@installed_size@group — terminates the entry
+            f.write(f'@info@{pkg.nevra}@{pkg.epoch}@{pkg.size}@{pkg.group}\n')
+            count += 1
+
+    return count

@@ -215,19 +215,16 @@ class TestWriteSynthesis:
             lines = f.read().splitlines()
         return count, lines
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_package_count(self, sample_packages, tmp_path):
         count, _ = self._write_and_read(sample_packages, tmp_path)
         assert count == 3
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_info_lines_present(self, sample_packages, tmp_path):
         """Each package must have exactly one @info line."""
         _, lines = self._write_and_read(sample_packages, tmp_path)
         info_lines = [l for l in lines if l.startswith('@info@')]
         assert len(info_lines) == 3
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_info_line_format(self, sample_packages, tmp_path):
         """@info line: @info@NEVRA@epoch@installed_size@group."""
         _, lines = self._write_and_read(sample_packages, tmp_path)
@@ -240,7 +237,6 @@ class TestWriteSynthesis:
         assert parts[3] == '12345'       # size
         assert parts[4] == 'Development/Tools'  # group
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_requires_format(self, sample_packages, tmp_path):
         """@requires line with versioned deps."""
         _, lines = self._write_and_read(sample_packages, tmp_path)
@@ -250,20 +246,17 @@ class TestWriteSynthesis:
         assert len(req_with_libbar) == 1
         assert 'libbar[>= 2.0]' in req_with_libbar[0]
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_suggests_format(self, sample_packages, tmp_path):
         _, lines = self._write_and_read(sample_packages, tmp_path)
         sug = [l for l in lines if l.startswith('@suggests@')]
         sug_baz = [l for l in sug if 'baz' in l]
         assert len(sug_baz) == 1
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_filesize_present(self, sample_packages, tmp_path):
         _, lines = self._write_and_read(sample_packages, tmp_path)
         fs = [l for l in lines if l.startswith('@filesize@')]
         assert len(fs) == 3
 
-    @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_roundtrip(self, sample_packages, tmp_path):
         """Write then read back with parse_synthesis — must match."""
         from urpm.core.synthesis import write_synthesis, parse_synthesis
