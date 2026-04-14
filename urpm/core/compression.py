@@ -259,3 +259,58 @@ def decompress_stream(filename: Union[str, Path]):
     
     else:
         return open(path, 'rb')
+
+
+# ─── Compression (write) ─────────────────────────────────────────
+
+
+def compress_open(path: Path, compressor: str, level: int = 9):
+    """Open a file for compressed binary writing.
+
+    Args:
+        path: Output file path.
+        compressor: One of ``"gzip"``, ``"xz"``, ``"lzma"``.
+        level: Compression level (0-9).
+
+    Returns:
+        A writable binary file-like object. Caller must close it.
+
+    Raises:
+        ValueError: If the compressor is not supported.
+    """
+    import gzip as _gzip
+    import lzma as _lzma
+
+    if compressor == 'gzip':
+        return _gzip.open(path, 'wt', compresslevel=level)
+    elif compressor in ('xz', 'lzma'):
+        return _lzma.open(path, 'wt', preset=level)
+    else:
+        raise ValueError(f"Unsupported compressor: {compressor!r}")
+
+
+def parse_compress_filter(filter_str: str):
+    """Parse a compression filter string (compressor + level).
+
+    Accepts either the full genhdlist3 format ``".ext:command -level"``
+    or the short form ``"command -level"`` (without extension).
+
+    Args:
+        filter_str: e.g. ``"xz -7"``, ``"gzip -9"``,
+            or ``".cz:gzip -9"``.
+
+    Returns:
+        Tuple of (compressor_name, level).  Example: ``("gzip", 9)``.
+    """
+    # Strip extension prefix if present (e.g. ".cz:gzip -9" → "gzip -9").
+    if ':' in filter_str:
+        filter_str = filter_str.split(':', 1)[1]
+
+    parts = filter_str.strip().split()
+    compressor = parts[0]
+    level = 9  # default
+    for part in parts[1:]:
+        if part.startswith('-') and part[1:].isdigit():
+            level = int(part[1:])
+
+    return compressor, level

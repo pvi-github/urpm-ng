@@ -6,7 +6,6 @@ Format: Tags (@provides, @requires, etc.) followed by @info which terminates
 each package definition.
 """
 
-import lzma
 import re
 from pathlib import Path
 from typing import Dict, Iterator, List, Any, Optional, Tuple
@@ -299,15 +298,11 @@ def write_synthesis(
     Returns:
         Number of packages written.
     """
-    # Parse compression filter (e.g. "xz -7" → preset 7).
-    parts = compression_filter.strip().split()
-    preset = 7
-    for p in parts[1:]:
-        if p.startswith('-') and p[1:].isdigit():
-            preset = int(p[1:])
+    from .compression import compress_open, parse_compress_filter
+    compressor, level = parse_compress_filter(compression_filter)
 
     count = 0
-    with lzma.open(output_path, 'wt', preset=preset) as f:
+    with compress_open(output_path, compressor, level) as f:
         for pkg in packages:
             # @requires@dep1@dep2@...
             if pkg.requires:
