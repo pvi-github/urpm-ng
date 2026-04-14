@@ -443,8 +443,15 @@ Sta extra architecturen toe (bijv. \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Containerbuildsysteem
 .TP
-.B mkimage \fB\-\-release\fR \fIversie\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInaam\fR]
-Maak een minimale Docker/Podman-image voor RPM-builds.
+.B image \fR[\fIsubopdracht\fR]
+Beheer container-images. Zonder subopdracht worden images weergegeven.
+Aliassen: \fBimg\fR.
+.RS
+.TP
+.B make \fB\-\-release\fR \fIversie\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInaam\fR]
+Maak een minimaal Docker/Podman-image voor RPM-builds.
+Aliassen: \fBm\fR.
+Het commando op het hoogste niveau \fBmkimage\fR is een verouderd alias voor \fBimage make\fR.
 .RS
 .TP
 .BR \-r ", " \-\-release " " \fIversie\fR
@@ -464,6 +471,9 @@ Doelarchitectuur (standaard: host).
 .BR \-p ", " \-\-packages " " \fIlijst\fR
 Extra pakketten (kommagescheiden).
 .TP
+.BR \-b ", " \-\-buildrequires " " \fIspec_or_srpm\fR
+Pre-installeer BuildRequires van een .spec- of .src.rpm-bestand in de image.
+.TP
 .B \-\-runtime " " docker|podman
 Containerruntime (standaard: automatische detectie).
 .TP
@@ -474,8 +484,40 @@ Bewaar de tijdelijke chroot na het aanmaken van de image.
 Werkmap voor de chroot (standaard: /tmp).
 .RE
 .TP
+.B update \fItag\fR [\fB\-\-runtime\fR \fIruntime\fR]
+Een bestaand image ter plekke bijwerken (media synchroniseren en pakketten bijwerken).
+Aliassen: \fBu\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Containerruntime (standaard: automatische detectie).
+.RE
+.TP
+.B list \fR[\fB\-\-runtime\fR \fIruntime\fR]
+Container-images weergeven.
+Aliassen: \fBl\fR, \fBls\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Containerruntime (standaard: automatische detectie).
+.RE
+.TP
+.B delete \fItags\fR ... [\fB\-\-force\fR] [\fB\-\-runtime\fR \fIruntime\fR]
+Container-image(s) verwijderen.
+Aliassen: \fBd\fR, \fBrm\fR.
+.RS
+.TP
+.BR \-f ", " \-\-force
+Verwijdering forceren zonder bevestiging.
+.TP
+.B \-\-runtime " " docker|podman
+Containerruntime (standaard: automatische detectie).
+.RE
+.RE
+.TP
 .B build \fB\-\-image\fR \fItag\fR \fIbron\fR ...
-Bouw RPM-pakketten in geïsoleerde containers.
+RPM-pakketten bouwen in geïsoleerde containers. Mediametadata en geïnstalleerde pakketten
+in de container worden automatisch bijgewerkt voor het bouwen.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR
@@ -489,6 +531,9 @@ Voor .spec-bestanden gaan de resultaten naar workspace/RPMS/ en workspace/SRPMS/
 Pre-installeer lokale RPM's in de container voor de build. Handig wanneer u
 een pakket bouwt dat afhankelijk is van een bibliotheek die u zojuist lokaal hebt gebouwd.
 Ondersteunt glob-patronen en kan herhaald worden. Voorbeeld: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+.TP
+.B \-\-no\-update
+Media-synchronisatie en pakketupdate voor het bouwen overslaan.
 .TP
 .B \-\-runtime " " docker|podman
 Containerruntime (standaard: automatische detectie).

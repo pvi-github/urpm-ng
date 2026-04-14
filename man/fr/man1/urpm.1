@@ -447,8 +447,15 @@ Autorise des architectures supplémentaires (ex: \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Systeme de build en conteneurs
 .TP
-.B mkimage \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInom\fR]
-Cree une image Docker/Podman minimale pour les builds RPM.
+.B image \fR[\fIsous-commande\fR]
+Gérer les images de conteneur. Sans sous-commande, liste les images.
+Alias : \fBimg\fR.
+.RS
+.TP
+.B make \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInom\fR]
+Créer une image Docker/Podman minimale pour les compilations RPM.
+Alias : \fBm\fR.
+La commande de premier niveau \fBmkimage\fR est un alias obsolète pour \fBimage make\fR.
 .RS
 .TP
 .BR \-r ", " \-\-release " " \fIversion\fR
@@ -460,39 +467,77 @@ Tag de l'image (ex: mageia:10-build).
 .B \-\-profile " " \fInom\fR
 Profil de paquets (défaut: build). Profils disponibles : build (environnement
 de build RPM), ci (CI/tests), minimal (système minimal avec urpm). Les profils
-sont charges depuis /usr/share/urpm/profiles/*.yaml et /etc/urpm/profiles/*.yaml.
+sont chargés depuis /usr/share/urpm/profiles/*.yaml et /etc/urpm/profiles/*.yaml.
 .TP
 .B \-\-arch " " \fIarch\fR
-Architecture cible (défaut: hote).
+Architecture cible (défaut: hôte).
 .TP
 .BR \-p ", " \-\-packages " " \fIliste\fR
-Paquets supplémentaires (separes par des virgules).
+Paquets supplémentaires (séparés par des virgules).
+.TP
+.BR \-b ", " \-\-buildrequires " " \fIspec_or_srpm\fR
+Pré-installer les BuildRequires depuis un fichier .spec ou .src.rpm dans l'image.
 .TP
 .B \-\-runtime " " docker|podman
 Runtime conteneur (défaut: auto-détection).
 .TP
 .B \-\-keep\-chroot
-Conserver le chroot temporaire apres la creation de l'image.
+Conserver le chroot temporaire après la création de l'image.
 .TP
 .BR \-w ", " \-\-workdir " " \fIchemin\fR
 Répertoire de travail pour le chroot (défaut: /tmp).
 .RE
 .TP
+.B update \fItag\fR [\fB\-\-runtime\fR \fIruntime\fR]
+Mettre à jour une image existante sur place (synchroniser les médias et mettre à jour les paquets).
+Alias : \fBu\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Runtime conteneur (défaut: auto-détection).
+.RE
+.TP
+.B list \fR[\fB\-\-runtime\fR \fIruntime\fR]
+Lister les images de conteneur.
+Alias : \fBl\fR, \fBls\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Runtime conteneur (défaut: auto-détection).
+.RE
+.TP
+.B delete \fItags\fR ... [\fB\-\-force\fR] [\fB\-\-runtime\fR \fIruntime\fR]
+Supprimer une ou plusieurs images de conteneur.
+Alias : \fBd\fR, \fBrm\fR.
+.RS
+.TP
+.BR \-f ", " \-\-force
+Forcer la suppression sans confirmation.
+.TP
+.B \-\-runtime " " docker|podman
+Runtime conteneur (défaut: auto-détection).
+.RE
+.RE
+.TP
 .B build \fB\-\-image\fR \fItag\fR \fIsource\fR ...
-Construit des paquets RPM dans des conteneurs isoles.
+Compiler des paquets RPM dans des conteneurs isolés. Les métadonnées des médias et
+les paquets installés dans le conteneur sont automatiquement mis à jour avant la compilation.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR
-Image Docker/Podman a utiliser.
+Image Docker/Podman à utiliser.
 .TP
 .BR \-o ", " \-\-output " " \fIrep\fR
 Répertoire de sortie pour les builds SRPM (défaut: ./build-output).
 Pour les fichiers .spec, les résultats vont dans workspace/RPMS/ et workspace/SRPMS/.
 .TP
 .BR \-w ", " \-\-with\-rpms " " \fImotif\fR
-Pre-installe des RPMs locaux dans le conteneur avant le build. Utile pour
-construire un paquet qui depend d'une bibliotheque que vous venez de compiler.
+Pré-installe des RPMs locaux dans le conteneur avant le build. Utile pour
+construire un paquet qui dépend d'une bibliothèque que vous venez de compiler.
 Supporte les patterns glob et peut être répété. Exemple: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+.TP
+.B \-\-no\-update
+Ne pas synchroniser les médias ni mettre à jour les paquets avant la compilation.
 .TP
 .B \-\-runtime " " docker|podman
 Runtime conteneur (défaut: auto-détection).
@@ -501,10 +546,10 @@ Runtime conteneur (défaut: auto-détection).
 Nombre de builds parallèles (défaut: 1).
 .TP
 .B \-\-keep\-container
-Conserver le conteneur apres le build (pour debug).
+Conserver le conteneur après le build (pour debug).
 .PP
 Les sources peuvent être des fichiers .src.rpm ou .spec. Pour les fichiers .spec,
-les sources sont automatiquement copiees depuis le répertoire SOURCES/ (supporte
+les sources sont automatiquement copiées depuis le répertoire SOURCES/ (supporte
 les arborescences workspace/SPECS/ et workspace/SOURCES/).
 .RE
 .SH FICHIERS

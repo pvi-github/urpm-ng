@@ -149,7 +149,7 @@ _URPM_COMMANDS="install i erase e upgrade u update up \
     depends d requires req rdepends rd whatrequires wr \
     recommends whatrecommends suggests whatsuggests why \
     download dl init cleanup autoremove ar cleandeps cd \
-    hold unhold mark progress readme mkimage build \
+    hold unhold mark progress readme mkimage build image img \
     history h rollback r undo \
     media m server srv config cfg peer cache c key k \
     appstream mirror proxy"
@@ -433,10 +433,76 @@ _urpm_build() {
     esac
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--image -i --output -o --with-rpms -w \
-            --runtime --parallel -j --keep-container" -- "$cur"))
+            --runtime --parallel -j --keep-container --no-update" -- "$cur"))
     else
         _filedir '@(spec|src.rpm)'
     fi
+}
+
+_urpm_image() {
+    # image / img — container image management (make, update, list, delete).
+    local image_subcmds="make m update u list l ls delete d rm"
+
+    if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$image_subcmds" -- "$cur"))
+        return
+    fi
+
+    local sub="${words[2]}"
+    case "$sub" in
+        make|m)
+            # Same options as mkimage + --buildrequires.
+            case "$prev" in
+                --release|-r)
+                    COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
+                    return
+                    ;;
+                --profile)
+                    COMPREPLY=($(compgen -W "$(_urpm_profile_names)" -- "$cur"))
+                    return
+                    ;;
+                --arch)
+                    COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+                    return
+                    ;;
+                --runtime)
+                    COMPREPLY=($(compgen -W "$_URPM_RUNTIME_CHOICES" -- "$cur"))
+                    return
+                    ;;
+                --workdir|-w)
+                    _filedir -d
+                    return
+                    ;;
+                --buildrequires|--br)
+                    _filedir '@(spec|src.rpm)'
+                    return
+                    ;;
+                --tag|-t|--packages|-p)
+                    return  # Free text.
+                    ;;
+            esac
+            COMPREPLY=($(compgen -W "--release -r --tag -t --profile --arch \
+                --packages -p --runtime --keep-chroot --workdir -w \
+                --buildrequires --br" -- "$cur"))
+            ;;
+        update|u)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--runtime" -- "$cur"))
+            fi
+            # Positional is a tag — free text.
+            ;;
+        list|l|ls)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--runtime" -- "$cur"))
+            fi
+            ;;
+        delete|d|rm)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--force -f --runtime" -- "$cur"))
+            fi
+            # Positionals are tags — free text.
+            ;;
+    esac
 }
 
 # ── Query / inspection commands ──────────────────────────────
@@ -1033,6 +1099,7 @@ _urpm() {
         readme)                                 _urpm_readme ;;
         mkimage)                                _urpm_mkimage ;;
         build)                                  _urpm_build ;;
+        image|img)                              _urpm_image ;;
 
         search|s|query|q)                       _urpm_search ;;
         show|sh|info)                           _urpm_show ;;

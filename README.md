@@ -30,7 +30,7 @@ urpm-ng is split into several packages for flexibility:
 | `urpm-ng-daemon` | Background daemon + P2P sharing |
 | `urpm-ng` | Standard install (core + daemon) |
 | `urpm-ng-desktop` | Desktop integration (Discover, GNOME Software) |
-| `urpm-ng-build` | Container build tools (mkimage, build) |
+| `urpm-ng-build` | Container build tools (image, build) |
 | `urpm-ng-all` | Everything |
 
 **Choose the right package:**
@@ -700,11 +700,27 @@ urpm ar -b                               # Short form
 
 urpm provides a complete container-based build system for RPM packages using Docker or Podman.
 
+### Image management
+
+```bash
+# List available build images
+urpm image list
+
+# Update an existing image (re-sync media + packages)
+urpm image update mageia:10-build
+
+# Delete one or more images
+urpm image delete mageia:10-build mageia:10-ci
+```
+
 ### Create build image
 
 ```bash
-urpm mkimage --release 10 --tag mageia:10-build
-urpm mkimage --release 10 --tag mageia:10-ci --profile ci
+urpm image make --release 10 --tag mageia:10-build
+urpm image make --release 10 --tag mageia:10-ci --profile ci
+
+# Build image for a .spec or .src.rpm (auto-installs BuildRequires)
+urpm image make --release 10 --tag mga:10-foo --buildrequires SPECS/foo.spec
 
 # Options
 -r, --release <version>       # Mageia version (e.g., 10, cauldron)
@@ -712,10 +728,13 @@ urpm mkimage --release 10 --tag mageia:10-ci --profile ci
 --profile <name>              # Package profile (default: build)
 --arch <arch>                 # Target architecture (default: host)
 -p, --packages <list>         # Additional packages (comma-separated)
+--buildrequires <spec|srpm>   # Install BuildRequires from a .spec or .src.rpm
 --runtime docker|podman       # Container runtime (default: auto-detect)
 --keep-chroot                 # Keep temporary chroot after image creation
 -w, --workdir <path>          # Working directory for chroot (default: /tmp)
 ```
+
+> **Backward compatibility:** `urpm mkimage` is kept as an alias for `urpm image make`.
 
 ### Profiles
 
@@ -733,12 +752,20 @@ Profiles are loaded from:
 
 ### Build packages
 
+By default, `urpm build` auto-updates media and packages inside the container
+before building, so that builds always run against the latest repository state.
+Use `--no-update` to skip this step when working offline or to speed up
+repeated builds.
+
 ```bash
 # Build from source RPM (output to ./build-output/)
 urpm build -i mageia:10-build foo-1.0-1.mga10.src.rpm
 
 # Build from spec file (output to workspace/RPMS/ and SRPMS/)
 urpm build -i mageia:10-build SPECS/foo.spec
+
+# Build without auto-updating media/packages first
+urpm build -i mga10-build --no-update SPECS/foo.spec
 
 # Build with local dependencies (e.g., libfoo built previously)
 urpm build -i mageia:10-build SPECS/bar.spec -w 'RPMS/x86_64/libfoo*.rpm'
@@ -754,6 +781,7 @@ urpm build -i mageia:10-build *.src.rpm --parallel 4
 -i, --image <tag>             # Docker/Podman image to use
 -o, --output <dir>            # Output directory for SRPM builds (default: ./build-output)
 -w, --with-rpms <pattern>     # Pre-install local RPMs before build (glob, repeatable)
+--no-update                   # Skip auto-update of media and packages before build
 --runtime docker|podman       # Container runtime (default: auto-detect)
 -j, --parallel <N>            # Number of parallel builds (default: 1)
 --keep-container              # Keep container after build (for debugging)
@@ -786,12 +814,15 @@ workspace/
 
 ```bash
 # 1. Create build image (once)
-urpm mkimage --release 10 --tag mga:10-build
+urpm image make --release 10 --tag mga:10-build
 
 # 2. Build a package
 urpm build --image mga:10-build ./mypackage.src.rpm
 
-# 3. Check results
+# 3. Later, update the image to pick up new repo packages
+urpm image update mga:10-build
+
+# 4. Check results
 ls ./build-output/
 ```
 

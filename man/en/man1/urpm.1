@@ -443,8 +443,15 @@ Allow additional architectures (e.g., \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Container Build System
 .TP
-.B mkimage \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fIname\fR]
+.B image \fR[\fIsubcommand\fR]
+Manage container images. Without subcommand, lists images.
+Aliases: \fBimg\fR.
+.RS
+.TP
+.B make \fB\-\-release\fR \fIversion\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fIname\fR]
 Create a minimal Docker/Podman image for RPM builds.
+Aliases: \fBm\fR.
+The top-level command \fBmkimage\fR is a deprecated alias for \fBimage make\fR.
 .RS
 .TP
 .BR \-r ", " \-\-release " " \fIversion\fR
@@ -464,6 +471,9 @@ Target architecture (default: host).
 .BR \-p ", " \-\-packages " " \fIlist\fR
 Additional packages (comma-separated).
 .TP
+.BR \-b ", " \-\-buildrequires " " \fIspec_or_srpm\fR
+Pre-install BuildRequires from a .spec or .src.rpm file into the image.
+.TP
 .B \-\-runtime " " docker|podman
 Container runtime (default: auto-detect).
 .TP
@@ -474,8 +484,40 @@ Keep temporary chroot after image creation.
 Working directory for chroot (default: /tmp).
 .RE
 .TP
+.B update \fItag\fR [\fB\-\-runtime\fR \fIruntime\fR]
+Update an existing image in-place (sync media and upgrade packages).
+Aliases: \fBu\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Container runtime (default: auto-detect).
+.RE
+.TP
+.B list \fR[\fB\-\-runtime\fR \fIruntime\fR]
+List container images.
+Aliases: \fBl\fR, \fBls\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Container runtime (default: auto-detect).
+.RE
+.TP
+.B delete \fItags\fR ... [\fB\-\-force\fR] [\fB\-\-runtime\fR \fIruntime\fR]
+Delete one or more container images.
+Aliases: \fBd\fR, \fBrm\fR.
+.RS
+.TP
+.BR \-f ", " \-\-force
+Force deletion without confirmation.
+.TP
+.B \-\-runtime " " docker|podman
+Container runtime (default: auto-detect).
+.RE
+.RE
+.TP
 .B build \fB\-\-image\fR \fItag\fR \fIsource\fR ...
-Build RPM packages in isolated containers.
+Build RPM packages in isolated containers. Media metadata and installed packages
+inside the container are automatically updated before building.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR
@@ -489,6 +531,9 @@ For .spec files, results go to workspace/RPMS/ and workspace/SRPMS/.
 Pre-install local RPMs in container before build. Useful when building
 a package that depends on a library you just built locally. Supports glob
 patterns and can be repeated. Example: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+.TP
+.B \-\-no\-update
+Skip media sync and package update before building.
 .TP
 .B \-\-runtime " " docker|podman
 Container runtime (default: auto-detect).

@@ -444,8 +444,15 @@ Erlaubt zusätzliche Architekturen (z.B. \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Container-Build-System
 .TP
-.B mkimage \fB\-\-release\fR \fIVersion\fR \fB\-\-tag\fR \fITag\fR [\fB\-\-profile\fR \fIName\fR]
-Erstellt ein minimales Docker/Podman-Image für RPM-Builds.
+.B image \fR[\fIUnterbefehl\fR]
+Container-Images verwalten. Ohne Unterbefehl werden Images aufgelistet.
+Alias: \fBimg\fR.
+.RS
+.TP
+.B make \fB\-\-release\fR \fIVersion\fR \fB\-\-tag\fR \fITag\fR [\fB\-\-profile\fR \fIName\fR]
+Ein minimales Docker/Podman-Image für RPM-Builds erstellen.
+Alias: \fBm\fR.
+Der Befehl \fBmkimage\fR auf oberster Ebene ist ein veralteter Alias für \fBimage make\fR.
 .RS
 .TP
 .BR \-r ", " \-\-release " " \fIVersion\fR
@@ -465,6 +472,9 @@ Zielarchitektur (Standard: Host).
 .BR \-p ", " \-\-packages " " \fIListe\fR
 Zusätzliche Pakete (kommagetrennt).
 .TP
+.BR \-b ", " \-\-buildrequires " " \fIspec_or_srpm\fR
+BuildRequires aus einer .spec- oder .src.rpm-Datei vorab im Image installieren.
+.TP
 .B \-\-runtime " " docker|podman
 Container-Laufzeitumgebung (Standard: automatische Erkennung).
 .TP
@@ -475,8 +485,40 @@ Temporäres Chroot nach der Image-Erstellung beibehalten.
 Arbeitsverzeichnis für das Chroot (Standard: /tmp).
 .RE
 .TP
+.B update \fITag\fR [\fB\-\-runtime\fR \fILaufzeit\fR]
+Ein bestehendes Image vor Ort aktualisieren (Medien synchronisieren und Pakete aktualisieren).
+Alias: \fBu\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Container-Laufzeitumgebung (Standard: automatische Erkennung).
+.RE
+.TP
+.B list \fR[\fB\-\-runtime\fR \fILaufzeit\fR]
+Container-Images auflisten.
+Alias: \fBl\fR, \fBls\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Container-Laufzeitumgebung (Standard: automatische Erkennung).
+.RE
+.TP
+.B delete \fITags\fR ... [\fB\-\-force\fR] [\fB\-\-runtime\fR \fILaufzeit\fR]
+Container-Image(s) löschen.
+Alias: \fBd\fR, \fBrm\fR.
+.RS
+.TP
+.BR \-f ", " \-\-force
+Entfernung erzwingen ohne Bestätigung.
+.TP
+.B \-\-runtime " " docker|podman
+Container-Laufzeitumgebung (Standard: automatische Erkennung).
+.RE
+.RE
+.TP
 .B build \fB\-\-image\fR \fITag\fR \fIQuelle\fR ...
-Erstellt RPM-Pakete in isolierten Containern.
+RPM-Pakete in isolierten Containern bauen. Medien-Metadaten und installierte Pakete
+im Container werden vor dem Build automatisch aktualisiert.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fITag\fR
@@ -484,12 +526,15 @@ Zu verwendendes Docker/Podman-Image.
 .TP
 .BR \-o ", " \-\-output " " \fIVerz\fR
 Ausgabeverzeichnis für SRPM-Builds (Standard: ./build-output).
-Fuer .spec-Dateien gehen die Ergebnisse nach workspace/RPMS/ und workspace/SRPMS/.
+Für .spec-Dateien gehen die Ergebnisse nach workspace/RPMS/ und workspace/SRPMS/.
 .TP
 .BR \-w ", " \-\-with\-rpms " " \fIMuster\fR
 Installiert lokale RPMs im Container vor dem Build. Nützlich, wenn ein Paket
 von einer Bibliothek abhängt, die Sie gerade lokal erstellt haben. Unterstützt
 Glob-Muster und kann wiederholt werden. Beispiel: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+.TP
+.B \-\-no\-update
+Mediensynchronisierung und Paketaktualisierung vor dem Build überspringen.
 .TP
 .B \-\-runtime " " docker|podman
 Container-Laufzeitumgebung (Standard: automatische Erkennung).

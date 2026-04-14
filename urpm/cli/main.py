@@ -626,7 +626,7 @@ Examples:
         help=_('Additional packages to install (comma-separated)')
     )
     image_make.add_argument(
-        '--buildrequires',
+        '--buildrequires', '--br',
         metavar='SPEC_OR_SRPM',
         help=_('Pre-install BuildRequires from a .spec or .src.rpm file')
     )
@@ -716,7 +716,7 @@ Examples:
     mkimage_parser.add_argument('--arch', help=_('Target architecture'))
     mkimage_parser.add_argument('--packages', '-p',
                                 help=_('Additional packages (comma-separated)'))
-    mkimage_parser.add_argument('--buildrequires', metavar='SPEC_OR_SRPM',
+    mkimage_parser.add_argument('--buildrequires', '--br', metavar='SPEC_OR_SRPM',
                                 help=_('Pre-install BuildRequires from .spec/.src.rpm'))
     mkimage_parser.add_argument('--runtime', choices=['docker', 'podman'],
                                 help=_('Container runtime'))

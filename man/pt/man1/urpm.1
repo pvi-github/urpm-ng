@@ -447,8 +447,15 @@ Permite arquitecturas adicionais (ex: \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Sistema de compilação em contentores
 .TP
-.B mkimage \fB\-\-release\fR \fIversão\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInome\fR]
-Cria uma imagem Docker/Podman mínima para compilações RPM.
+.B image \fR[\fIsubcomando\fR]
+Gerir imagens de contentor. Sem subcomando, lista as imagens.
+Alias: \fBimg\fR.
+.RS
+.TP
+.B make \fB\-\-release\fR \fIversão\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInome\fR]
+Criar uma imagem Docker/Podman mínima para compilações RPM.
+Alias: \fBm\fR.
+O comando de nível superior \fBmkimage\fR é um alias obsoleto para \fBimage make\fR.
 .RS
 .TP
 .BR \-r ", " \-\-release " " \fIversão\fR
@@ -459,14 +466,17 @@ Tag da imagem (ex: mageia:10-build).
 .TP
 .B \-\-profile " " \fInome\fR
 Perfil de pacotes (por omissão: build). Perfis disponíveis: build (ambiente
-de compilação RPM), ci (CI/testes), mínimal (sistema minimo com urpm). Os perfis
-sao carregados a partir de /usr/share/urpm/profiles/*.yaml e /etc/urpm/profiles/*.yaml.
+de compilação RPM), ci (CI/testes), minimal (sistema minimo com urpm). Os perfis
+são carregados a partir de /usr/share/urpm/profiles/*.yaml e /etc/urpm/profiles/*.yaml.
 .TP
 .B \-\-arch " " \fIarch\fR
 Arquitectura alvo (por omissão: anfitrião).
 .TP
 .BR \-p ", " \-\-packages " " \fIlista\fR
 Pacotes adicionais (separados por virgulas).
+.TP
+.BR \-b ", " \-\-buildrequires " " \fIspec_ou_srpm\fR
+Pré-instala as BuildRequires de um ficheiro .spec ou .src.rpm na imagem.
 .TP
 .B \-\-runtime " " docker|podman
 Runtime de contentores (por omissão: auto-deteção).
@@ -478,8 +488,40 @@ Manter o chroot temporário após a criação da imagem.
 Directório de trabalho para o chroot (por omissão: /tmp).
 .RE
 .TP
+.B update \fItag\fR [\fB\-\-runtime\fR \fIruntime\fR]
+Atualizar uma imagem existente no local (sincronizar mídia e atualizar pacotes).
+Alias: \fBu\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Runtime de contentores (por omissão: auto-deteção).
+.RE
+.TP
+.B list \fR[\fB\-\-runtime\fR \fIruntime\fR]
+Listar imagens de contentor.
+Alias: \fBl\fR, \fBls\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Runtime de contentores (por omissão: auto-deteção).
+.RE
+.TP
+.B delete \fItags\fR ... [\fB\-\-force\fR] [\fB\-\-runtime\fR \fIruntime\fR]
+Eliminar imagen(ns) de contentor.
+Alias: \fBd\fR, \fBrm\fR.
+.RS
+.TP
+.BR \-f ", " \-\-force
+Forçar remoção sem confirmação.
+.TP
+.B \-\-runtime " " docker|podman
+Runtime de contentores (por omissão: auto-deteção).
+.RE
+.RE
+.TP
 .B build \fB\-\-image\fR \fItag\fR \fIfonte\fR ...
-Compila pacotes RPM em contentores isolados.
+Compilar pacotes RPM em contentores isolados. Os metadados dos media e os pacotes
+instalados no contentor são automaticamente actualizados antes da compilação.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR
@@ -487,12 +529,15 @@ Imagem Docker/Podman a utilizar.
 .TP
 .BR \-o ", " \-\-output " " \fIdir\fR
 Directório de saída para compilações SRPM (por omissão: ./build-output).
-Para ficheiros .spec, os resultados vao para workspace/RPMS/ e workspace/SRPMS/.
+Para ficheiros .spec, os resultados vão para workspace/RPMS/ e workspace/SRPMS/.
 .TP
 .BR \-w ", " \-\-with\-rpms " " \fIpadrão\fR
-Pre-instala RPMs locais no contentor antes da compilação. Útil para
+Pré-instala RPMs locais no contentor antes da compilação. Útil para
 compilar um pacote que depende de uma biblioteca que acabou de compilar.
-Suporta padroes glob e pode ser repetido. Exemplo: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+Suporta padrões glob e pode ser repetido. Exemplo: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+.TP
+.B \-\-no\-update
+Ignorar sincronização de mídia e atualização de pacotes antes da compilação.
 .TP
 .B \-\-runtime " " docker|podman
 Runtime de contentores (por omissão: auto-deteção).

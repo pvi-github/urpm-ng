@@ -447,8 +447,15 @@ Permite arquitecturas adicionales (ej: \fB\-\-allow\-arch i686\fR).
 .RE
 .SS Sistema de compilación en contenedores
 .TP
-.B mkimage \fB\-\-release\fR \fIversión\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInombre\fR]
-Crea una imagen Docker/Podman mínima para compilaciones RPM.
+.B image \fR[\fIsubcomando\fR]
+Gestionar imágenes de contenedor. Sin subcomando, lista las imágenes.
+Alias: \fBimg\fR.
+.RS
+.TP
+.B make \fB\-\-release\fR \fIversión\fR \fB\-\-tag\fR \fItag\fR [\fB\-\-profile\fR \fInombre\fR]
+Crear una imagen Docker/Podman mínima para compilaciones RPM.
+Alias: \fBm\fR.
+El comando de nivel superior \fBmkimage\fR es un alias obsoleto de \fBimage make\fR.
 .RS
 .TP
 .BR \-r ", " \-\-release " " \fIversión\fR
@@ -468,6 +475,9 @@ Arquitectura destino (por defecto: la del sistema).
 .BR \-p ", " \-\-packages " " \fIlista\fR
 Paquetes adicionales (separados por comas).
 .TP
+.BR \-b ", " \-\-buildrequires " " \fIspec_o_srpm\fR
+Preinstalar BuildRequires desde un archivo .spec o .src.rpm en la imagen.
+.TP
 .B \-\-runtime " " docker|podman
 Motor de contenedores (por defecto: detección automática).
 .TP
@@ -478,8 +488,40 @@ Conservar el chroot temporal después de crear la imagen.
 Directorio de trabajo para el chroot (por defecto: /tmp).
 .RE
 .TP
+.B update \fItag\fR [\fB\-\-runtime\fR \fIruntime\fR]
+Actualizar una imagen existente en su lugar (sincronizar medios y actualizar paquetes).
+Alias: \fBu\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Motor de contenedores (por defecto: detección automática).
+.RE
+.TP
+.B list \fR[\fB\-\-runtime\fR \fIruntime\fR]
+Listar imágenes de contenedor.
+Alias: \fBl\fR, \fBls\fR.
+.RS
+.TP
+.B \-\-runtime " " docker|podman
+Motor de contenedores (por defecto: detección automática).
+.RE
+.TP
+.B delete \fItags\fR ... [\fB\-\-force\fR] [\fB\-\-runtime\fR \fIruntime\fR]
+Eliminar imagen(es) de contenedor.
+Alias: \fBd\fR, \fBrm\fR.
+.RS
+.TP
+.BR \-f ", " \-\-force
+Forzar eliminación sin confirmación.
+.TP
+.B \-\-runtime " " docker|podman
+Motor de contenedores (por defecto: detección automática).
+.RE
+.RE
+.TP
 .B build \fB\-\-image\fR \fItag\fR \fIfuente\fR ...
-Compila paquetes RPM en contenedores aislados.
+Compilar paquetes RPM en contenedores aislados. Los metadatos de medios y los
+paquetes instalados dentro del contenedor se actualizan automáticamente antes de compilar.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR
@@ -493,6 +535,9 @@ Para archivos .spec, los resultados van a workspace/RPMS/ y workspace/SRPMS/.
 Preinstala RPMs locales en el contenedor antes de compilar. Útil para
 compilar un paquete que depende de una biblioteca recién compilada localmente.
 Soporta patrones glob y puede repetirse. Ejemplo: \fB-w 'RPMS/x86_64/libfoo*.rpm'\fR.
+.TP
+.B \-\-no\-update
+Omitir sincronización de medios y actualización de paquetes antes de compilar.
 .TP
 .B \-\-runtime " " docker|podman
 Motor de contenedores (por defecto: detección automática).
