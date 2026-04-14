@@ -58,9 +58,9 @@ class FakeResolver:
         from urpm.core.resolution.orphans import OrphansMixin
         return OrphansMixin._extract_cap_name(self, cap)
 
-    def find_upgrade_orphans(self, all_actions):
+    def find_upgrade_orphans(self, all_actions, obsoleted_names=None):
         from urpm.core.resolution.orphans import OrphansMixin
-        return OrphansMixin.find_upgrade_orphans(self, all_actions)
+        return OrphansMixin.find_upgrade_orphans(self, all_actions, obsoleted_names=obsoleted_names)
 
 
 @pytest.fixture
