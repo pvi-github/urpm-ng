@@ -1250,7 +1250,7 @@ def _build_single_package(
             if ret != 0:
                 print(colors.warning(_("  Warning: media update failed, continuing...")))
             print(_("  Updating packages..."))
-            ret = container.exec_stream(cid, ['urpm', 'update', '--auto'])
+            ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto'])
             if ret != 0:
                 print(colors.warning(_("  Warning: package update failed, continuing...")))
 
@@ -1493,7 +1493,7 @@ def cmd_image_update(args, db: 'PackageDatabase') -> int:
     """Update a container image in-place (sync media + upgrade packages).
 
     Starts a temporary container from the image, runs ``urpm media update``
-    and ``urpm update --auto``, then commits the result as the same tag,
+    and ``urpm upgrade --auto``, then commits the result as the same tag,
     replacing the old image.
     """
     from ...core.container import detect_runtime, Container
@@ -1538,7 +1538,7 @@ def cmd_image_update(args, db: 'PackageDatabase') -> int:
 
         # Upgrade packages
         print(_("  Upgrading packages..."))
-        ret = container.exec_stream(cid, ['urpm', 'update', '--auto'])
+        ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto'])
         if ret != 0:
             print(colors.warning(
                 _("  Warning: package update returned {code}").format(
