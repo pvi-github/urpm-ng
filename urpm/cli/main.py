@@ -123,6 +123,9 @@ from .commands.build import (
 from .commands.appstream import (
     cmd_appstream,
 )
+from .commands.genmedia import (
+    cmd_genmedia,
+)
 
 
 # Debug flag for preferences matching - set to True to enable debug output
@@ -837,6 +840,78 @@ Examples:
                'rpm macro without touching the spec. When combined with '
                '--subrel, the %%subrel line is appended last so it takes '
                'precedence.')
+    )
+
+    # =========================================================================
+    # genmedia - Generate media metadata (hdlist, synthesis, XML, AppStream)
+    # =========================================================================
+    genmedia_parser = subparsers.add_parser(
+        'genmedia',
+        help=_('Generate media metadata from RPM directory'),
+    )
+    genmedia_parser.add_argument(
+        'rpms_dir',
+        help=_('Directory containing *.rpm files'),
+    )
+    genmedia_parser.add_argument(
+        '--media-info-dir', metavar='DIR',
+        help=_('Output directory (default: rpms_dir/media_info)'),
+    )
+    genmedia_parser.add_argument(
+        '--hdlist-filter', metavar='FILTER', default='.cz:gzip -9',
+        help=_('Compression filter for hdlist (default: .cz:gzip -9)'),
+    )
+    genmedia_parser.add_argument(
+        '--synthesis-filter', metavar='FILTER', default='.cz:xz -7',
+        help=_('Compression filter for synthesis (default: .cz:xz -7)'),
+    )
+    genmedia_parser.add_argument(
+        '--xml-info-filter', metavar='FILTER', default='.lzma:xz -7',
+        help=_('Compression filter for XML info (default: .lzma:xz -7)'),
+    )
+    genmedia_parser.add_argument(
+        '--no-hdlist', action='store_true',
+        help=_('Do not generate hdlist.cz'),
+    )
+    genmedia_parser.add_argument(
+        '--no-md5sum', action='store_true',
+        help=_('Do not generate MD5SUM'),
+    )
+    genmedia_parser.add_argument(
+        '--xml-info', action='store_true',
+        help=_('Force generation of XML info files'),
+    )
+    genmedia_parser.add_argument(
+        '--appstream-info', action='store_true',
+        help=_('Generate AppStream metadata'),
+    )
+    genmedia_parser.add_argument(
+        '--clean', action='store_true',
+        help=_('Full rebuild (do not use incremental mode)'),
+    )
+    genmedia_parser.add_argument(
+        '--versioned', action='store_true',
+        help=_('Prefix output files with timestamp'),
+    )
+    genmedia_parser.add_argument(
+        '--allow-empty-media', action='store_true',
+        help=_('Allow empty media (no RPMs)'),
+    )
+    genmedia_parser.add_argument(
+        '--nolock', action='store_true',
+        help=_('Do not lock media_info/ directory'),
+    )
+    genmedia_parser.add_argument(
+        '--no-bad-rpm', action='store_true',
+        help=_('Skip bad RPMs instead of failing'),
+    )
+    genmedia_parser.add_argument(
+        '--mageia-tree', action='store_true',
+        help=_('Walk Mageia tree (sections/type)'),
+    )
+    genmedia_parser.add_argument(
+        '-v', '--verbose', action='store_true',
+        help=_('Verbose output'),
     )
 
     # =========================================================================
@@ -2463,6 +2538,9 @@ def main(argv=None) -> int:
 
         elif args.command == 'build':
             return cmd_build(args, db)
+
+        elif args.command == 'genmedia':
+            return cmd_genmedia(args, db)
 
         elif args.command in ('erase', 'e'):
             return cmd_erase(args, db)

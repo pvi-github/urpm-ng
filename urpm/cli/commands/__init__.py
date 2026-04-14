@@ -101,6 +101,9 @@ from .build import (
 from .appstream import (
     cmd_appstream,
 )
+from .genmedia import (
+    cmd_genmedia,
+)
 
 __all__ = [
     # Cache commands
@@ -190,4 +193,6 @@ __all__ = [
     'cmd_image_update',
     # AppStream command
     'cmd_appstream',
+    # Genmedia command
+    'cmd_genmedia',
 ]
