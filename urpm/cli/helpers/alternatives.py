@@ -493,6 +493,45 @@ def _get_bloc_label(bloc_defining: dict) -> str:
     return "version"
 
 
+def _display_choices(items: list, indent: str = "  ") -> None:
+    """Display numbered choices, using columns when the list is long.
+
+    Short lists (≤ 8) use a single column. Longer lists are laid out in
+    multiple columns (column-first order, like ``ls``), sized to fit the
+    terminal width.
+
+    Args:
+        items: Choice labels (provider names, etc.)
+        indent: Whitespace prepended to every line
+    """
+    import shutil
+
+    if not items:
+        return
+
+    numbered = [f"{i}. {item}" for i, item in enumerate(items, 1)]
+
+    if len(items) <= 8:
+        for entry in numbered:
+            print(f"{indent}{entry}")
+        return
+
+    # Multi-column layout
+    max_entry = max(len(s) for s in numbered)
+    col_width = max_entry + 3  # inter-column gap
+    term_width = shutil.get_terminal_size().columns
+    num_cols = max(1, (term_width - len(indent)) // col_width)
+    num_rows = (len(numbered) + num_cols - 1) // num_cols
+
+    for row in range(num_rows):
+        line = indent
+        for col in range(num_cols):
+            idx = row + col * num_rows
+            if idx < len(numbered):
+                line += numbered[idx].ljust(col_width)
+        print(line.rstrip())
+
+
 def _ask_secondary_choice(capability: str, providers: list) -> str:
     """Ask user to choose between providers within the same bloc.
 
@@ -509,14 +548,11 @@ def _ask_secondary_choice(capability: str, providers: list) -> str:
     from .. import colors
 
     print(f"  {colors.info(capability)} " + _("provided by:"))
-    for i, prov in enumerate(providers[:8], 1):
-        print(f"    {i}. {prov}")
-    if len(providers) > 8:
-        print("    " + _("... and {count} more").format(count=len(providers) - 8))
+    _display_choices(providers, indent="    ")
 
     while True:
         try:
-            choice = input("  " + _("Choice?") + f" [1-{min(len(providers), 8)}] ")
+            choice = input("  " + _("Choice?") + f" [1-{len(providers)}] ")
             idx = int(choice) - 1
             if 0 <= idx < len(providers):
                 return providers[idx]
@@ -975,18 +1011,14 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                                   f"({_('required by')} {root_alt.required_by}):")
                         else:
                             print(f"\n{root_alt.capability}:")
-                        for i, prov in enumerate(candidates[:8], 1):
-                            print(f"  {i}. {prov}")
-                        if len(candidates) > 8:
-                            print("  " + _("... and {count} more").format(
-                                count=len(candidates) - 8))
+                        _display_choices(candidates)
 
                         chosen_pkg = None
                         while True:
                             try:
                                 choice = input(
                                     _("Choice?")
-                                    + f" [1-{min(len(candidates), 8)}] ")
+                                    + f" [1-{len(candidates)}] ")
                                 idx = int(choice) - 1
                                 if 0 <= idx < len(candidates):
                                     chosen_pkg = candidates[idx]
@@ -1049,14 +1081,11 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                         print(f"\n{alt.capability} ({_('required by')} {alt.required_by}):")
                     else:
                         print(f"\n{alt.capability}:")
-                    for i, provider in enumerate(candidates[:8], 1):
-                        print(f"  {i}. {provider}")
-                    if len(candidates) > 8:
-                        print("  " + _("... and {count} more").format(count=len(candidates) - 8))
+                    _display_choices(candidates)
 
                     while True:
                         try:
-                            choice = input(_("Choice?") + f" [1-{min(len(candidates), 8)}] ")
+                            choice = input(_("Choice?") + f" [1-{len(candidates)}] ")
                             idx = int(choice) - 1
                             if 0 <= idx < len(candidates):
                                 chosen_pkg = candidates[idx]
