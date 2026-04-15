@@ -1377,7 +1377,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             Resolution with success status and package actions
         """
         self._solvable_to_pkg = {}
-        self.pool = self._create_pool()
+        self.pool = self._create_system_pool()
 
         jobs = []
         not_found = []
@@ -1442,6 +1442,9 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         remove_size = 0
 
         for cl in trans.classify():
+            # Only process ERASE actions (type 0x10), skip any INSTALL (0x20)
+            if cl.type != solv.Transaction.SOLVER_TRANSACTION_ERASE:
+                continue
             for s in cl.solvables():
                 pkg_info = self._solvable_to_pkg.get(s.id, {})
                 size = pkg_info.get('size', 0)
