@@ -380,6 +380,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         self.urpm_root = urpm_root
         self.install_recommends = install_recommends
         self.ignore_installed = ignore_installed
+        self._preserve_pool = False  # When True, reuse pool across resolve calls
         # Default allowed architectures: system arch + compatible arches + noarch
         if allowed_arches is not None:
             self.allowed_arches = allowed_arches
@@ -466,11 +467,12 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         if local_packages is None:
             local_packages = set()
 
-        # Preserve pool only if it has @LocalRPMs repo (for local RPM installation)
+        # Preserve pool if it has @LocalRPMs repo or if _preserve_pool is set
+        # (used by depends command to avoid costly pool recreation in alternatives loop)
         has_local_rpms = self.pool is not None and any(
             r.name == '@LocalRPMs' for r in self.pool.repos
         )
-        if not has_local_rpms:
+        if not has_local_rpms and not (self._preserve_pool and self.pool is not None):
             self._solvable_to_pkg = {}
             self.pool = self._create_pool()
 

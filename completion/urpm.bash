@@ -583,7 +583,7 @@ _urpm_depends() {
     esac
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--tree --all -a --legacy --prefer \
-            --pager --no-libs --depth $_URPM_DISPLAY_FLAGS" -- "$cur"))
+            --pager --no-libs --depth --legend $_URPM_DISPLAY_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
@@ -599,7 +599,7 @@ _urpm_rdepends() {
             ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--tree --all -a --depth --hide-uninstalled $_URPM_DISPLAY_FLAGS" -- "$cur"))
+        COMPREPLY=($(compgen -W "--tree --all -a --depth --hide-uninstalled --legend $_URPM_DISPLAY_FLAGS" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi

@@ -1020,6 +1020,11 @@ Examples:
         default=5,
         help=_('Maximum tree depth (default: 5)')
     )
+    depends_parser.add_argument(
+        '--legend',
+        action='store_true',
+        help=_('Show symbol legend after tree display')
+    )
 
     # =========================================================================
     # rdepends / rd / whatrequires
@@ -1053,6 +1058,11 @@ Examples:
         '--hide-uninstalled',
         action='store_true',
         help=_('Only show installed packages in tree')
+    )
+    rdepends_parser.add_argument(
+        '--legend',
+        action='store_true',
+        help=_('Show symbol legend after tree display')
     )
 
     # =========================================================================
