@@ -1,6 +1,6 @@
 %define name urpm-ng
-%define version 0.7.4
-%define release 6
+%define version 0.7.5
+%define release 1
 
 Name:           %{name}
 Version:        %{version}
