@@ -15,8 +15,16 @@ from ..helpers.alternatives import (
 
 
 def cmd_depends(args, db: 'PackageDatabase') -> int:
-    """Handle depends command - show package dependencies."""
-    from ...core.resolver import Resolver
+    """Handle depends command - show package dependencies.
+
+    Uses libsolv SAT solver for accurate dependency resolution.
+    Modes:
+        - default: direct dependencies + unresolved alternatives
+        - --all: complete transitive dependency closure
+        - --tree: dependency tree with graph from solver
+        - --legacy: raw capability strings (unchanged)
+    """
+    from ...core.resolver import Resolver, TransactionType
     from .. import colors
 
     package = args.package
@@ -26,467 +34,234 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
     show_all = getattr(args, 'all', False)
     prefer_str = getattr(args, 'prefer', None)
 
-    # Parse --prefer using PreferencesMatcher
     preferences = PreferencesMatcher(prefer_str)
 
-    # Create resolver for provider lookups
-    resolver = Resolver(db)
-
-    # Get package requires using resolver
-    requires = resolver.get_package_requires(pkg_name)
-
-    if not requires:
-        # Fallback: try installed package via rpm
-        try:
-            import rpm
-            ts = rpm.TransactionSet()
-            mi = ts.dbMatch('name', pkg_name)
-            for hdr in mi:
-                req_names = hdr[rpm.RPMTAG_REQUIRENAME] or []
-                requires = [r for r in req_names
-                           if not r.startswith('/') and not r.startswith('rpmlib(')]
-                break
-        except:
-            pass
-
-    if not requires:
-        pkg = db.get_package_smart(package)
-        if not pkg:
-            print(_("Package '{package}' not found").format(package=package))
-            return 1
-        print(_("{package}: no dependencies").format(package=package))
-        return 0
-
-    # Build dependency info with providers
-    # dep_info: { capability: { 'providers': [...], 'chosen': str|None, 'is_alternative': bool } }
-    dep_info = {}
-    choices_made = {}  # Track choices for tree display
-
-    def match_preference(provider_name: str) -> bool:
-        """Check if a provider matches any preference."""
-        return preferences.match_provider_name(provider_name)
-
-    # First pass: identify capabilities that have multiple providers (alternatives)
-    alternative_caps = []
-
-    for cap in requires:
-        # Extract base capability (remove version constraints like [>= 1.0])
-        cap_base = cap.split('[')[0].split()[0] if '[' in cap else cap.split()[0]
-        # Don't strip () for library capabilities (.so files) - they need the full name
-        # e.g., libncursesw.so.6()(64bit) must stay as-is
-        if '(' in cap_base and '.so' not in cap_base:
-            cap_base = cap_base.split('(')[0]
-
-        providers = resolver.get_providers(cap_base, include_installed=True)
-        providers = [p for p in providers if p != pkg_name]
-
-        if not providers:
-            dep_info[cap_base] = {'providers': [], 'chosen': None, 'is_alternative': False}
-        elif len(providers) == 1:
-            dep_info[cap_base] = {'providers': providers, 'chosen': providers[0], 'is_alternative': False}
-        else:
-            dep_info[cap_base] = {'providers': providers, 'chosen': None, 'is_alternative': True}
-            alternative_caps.append(cap_base)
-
-    # For non-tree modes, apply preference matching to direct requires
-    # (Tree mode handles everything via _resolve_with_alternatives)
-    if not show_tree:
-        for cap_base, info in dep_info.items():
-            if info['is_alternative'] and not info['chosen']:
-                for prov in info['providers']:
-                    if match_preference(prov):
-                        info['chosen'] = prov
-                        choices_made[cap_base] = prov
-                        break
-
-    # Display based on mode
-    use_pager = getattr(args, 'pager', False)
-
     if legacy:
-        # --legacy: raw capabilities
-        print(_("Dependencies of {package} ({count}):").format(package=package, count=len(requires)))
+        # --legacy: raw capabilities from libsolv (no resolution)
+        resolver = Resolver(db)
+        requires = resolver.get_package_requires(pkg_name)
+
+        if not requires:
+            # Fallback: try installed package via rpm
+            try:
+                import rpm
+                ts = rpm.TransactionSet()
+                mi = ts.dbMatch('name', pkg_name)
+                for hdr in mi:
+                    req_names = hdr[rpm.RPMTAG_REQUIRENAME] or []
+                    requires = [r for r in req_names
+                               if not r.startswith('/') and not r.startswith('rpmlib(')]
+                    break
+            except Exception:
+                pass
+
+        if not requires:
+            pkg = db.get_package_smart(package)
+            if not pkg:
+                print(_("Package '{package}' not found").format(package=package))
+                return 1
+            print(_("{package}: no dependencies").format(package=package))
+            return 0
+
+        print(_("Dependencies of {package} ({count}):").format(
+            package=package, count=len(requires)))
         for cap in sorted(requires):
             print(f"  {cap}")
-    elif show_tree:
-        # --tree: show actual dependency tree (what the package requires)
-        no_libs = getattr(args, 'no_libs', False)
-        max_depth = getattr(args, 'depth', 5)
+        return 0
 
-        # Build set of installed packages for coloring
-        installed_pkgs = set()
-        try:
-            import rpm
-            ts = rpm.TransactionSet()
-            for hdr in ts.dbMatch():
-                installed_pkgs.add(hdr[rpm.RPMTAG_NAME])
-        except ImportError:
-            pass
+    # --- Solver-based resolution ---
+    # ignore_installed=True: resolve without @System for complete dependency closure
+    # _preserve_pool=True: avoid costly pool recreation in alternatives loop
+    resolver = Resolver(db, ignore_installed=True)
+    resolver._preserve_pool = True
 
-        def is_lib_package(name: str) -> bool:
-            """Check if package is a library package."""
-            return (name.startswith('lib') or
-                    name in ('glibc', 'glibc-devel', 'filesystem', 'setup', 'basesystem'))
+    if show_tree or show_all:
+        # --tree / --all: need complete resolution (interactive alternatives if needed)
+        choices = {}
+        result, aborted = _resolve_with_alternatives(
+            resolver, [pkg_name], choices,
+            auto_mode=False, preferences=preferences
+        )
 
-        def print_requires_tree(pkg: str, visited: set, prefix: str, depth: int):
-            """Recursively print package requirements as a tree."""
-            if depth > max_depth:
-                print(f"{prefix}└── {colors.dim('... ' + _('(max depth)'))}")
-                return
+        if aborted:
+            print(_("Aborted"))
+            return 1
 
-            pkg_requires = resolver.get_package_requires(pkg)
-            if not pkg_requires:
-                return
+        if not result or not result.success:
+            if result and result.problems:
+                for p in result.problems:
+                    print(colors.error(p))
+            return 1
 
-            # Resolve capabilities to package names
-            deps = []
-            for cap in pkg_requires:
-                cap_base = cap.split('[')[0].split()[0] if '[' in cap else cap.split()[0]
-                if '(' in cap_base and not cap_base.startswith('lib'):
-                    cap_base = cap_base.split('(')[0]
-                providers = resolver.get_providers(cap_base, include_installed=True)
-                providers = [p for p in providers if p != pkg]
-                if providers:
-                    # Choose provider based on preference or first
-                    chosen = None
-                    for p in providers:
-                        if match_preference(p):
-                            chosen = p
-                            break
-                    if not chosen:
-                        chosen = providers[0]
-                    if chosen not in deps:
-                        # Filter libs if --no-libs
-                        if no_libs and is_lib_package(chosen):
-                            continue
-                        deps.append(chosen)
+        dep_names = sorted({a.name for a in result.actions
+                           if a.action == TransactionType.INSTALL
+                           and a.name != pkg_name})
 
-            for i, dep in enumerate(sorted(deps)):
-                is_last = (i == len(deps) - 1)
-                connector = "└── " if is_last else "├── "
-                child_prefix = prefix + ("    " if is_last else "│   ")
-
-                # Color: green if installed, normal if not
-                if dep in installed_pkgs:
-                    dep_display = colors.success(dep)
-                else:
-                    dep_display = dep
-
-                if dep in visited:
-                    print(f"{prefix}{connector}{colors.dim(dep)} ⨂")
-                else:
-                    print(f"{prefix}{connector}{dep_display}")
-                    visited.add(dep)
-                    print_requires_tree(dep, visited, child_prefix, depth + 1)
-
-        def do_print_tree():
-            print(f"\n{pkg_name}")
-            print_requires_tree(pkg_name, {pkg_name}, "", 0)
-
-        if use_pager:
-            import io
-            import subprocess
-            old_stdout = sys.stdout
-            sys.stdout = buffer = io.StringIO()
-            try:
-                do_print_tree()
-            finally:
-                sys.stdout = old_stdout
-            output = buffer.getvalue()
-            try:
-                proc = subprocess.Popen(['less', '-R'], stdin=subprocess.PIPE)
-                proc.communicate(input=output.encode())
-            except (FileNotFoundError, BrokenPipeError):
-                print(output, end='')
+        if show_all:
+            print(ngettext(
+                "All dependencies of {package}: {count} package",
+                "All dependencies of {package}: {count} packages",
+                len(dep_names)
+            ).format(package=package, count=len(dep_names)) + "\n")
+            for name in dep_names:
+                print(f"  {name}")
         else:
-            do_print_tree()
-    elif show_all:
-        # --all: flat list of all recursive dependencies
-        all_deps = set()
-        for cap, info in dep_info.items():
-            if info['chosen']:
-                all_deps.add(info['chosen'])
+            # --tree: build graph and display as tree
+            graph = resolver.build_dependency_graph(result, [pkg_name])
+            no_libs = getattr(args, 'no_libs', False)
+            max_depth = getattr(args, 'depth', 5)
+            use_pager = getattr(args, 'pager', False)
 
-        visited = {pkg_name}
-        to_process = list(all_deps)
-
-        while to_process:
-            prov = to_process.pop(0)
-            if prov in visited:
-                continue
-            visited.add(prov)
-
-            sub_requires = resolver.get_package_requires(prov)
-            for cap in sub_requires:
-                cap_base = cap.split('[')[0].split()[0] if '[' in cap else cap.split()[0]
-                if '(' in cap_base:
-                    cap_base = cap_base.split('(')[0]
-
-                providers = resolver.get_providers(cap_base, include_installed=True)
-                providers = [p for p in providers if p not in visited]
-                if providers:
-                    # Use first provider or preference
-                    chosen = None
-                    for p in providers:
-                        if match_preference(p):
-                            chosen = p
-                            break
-                    if not chosen:
-                        chosen = providers[0]
-                    all_deps.add(chosen)
-                    to_process.append(chosen)
-
-        print(_("All dependencies of {package}: {count} packages").format(package=package, count=len(all_deps)) + "\n")
-        for prov in sorted(all_deps):
-            print(f"  {prov}")
+            _print_depends_tree(
+                pkg_name, graph, colors,
+                no_libs=no_libs, max_depth=max_depth, use_pager=use_pager
+            )
+            if getattr(args, 'legend', False):
+                _print_depends_legend(colors)
     else:
-        # Default: flat list with alternatives shown
-        single_providers = []
-        alternatives = []
+        # Default mode: direct deps from solver + unresolved alternatives shown separately
+        result = resolver.resolve_install([pkg_name])
 
-        for cap, info in sorted(dep_info.items()):
-            if not info['providers']:
-                continue
-            if info['is_alternative']:
-                alternatives.append((cap, info))
-            else:
-                single_providers.append(info['chosen'])
+        if result.problems and not result.actions:
+            for p in result.problems:
+                print(colors.error(p))
+            return 1
 
-        # Print single-provider deps
-        if single_providers:
-            unique_deps = sorted(set(single_providers))
-            print(_("Dependencies of {package}: {count} packages").format(package=package, count=len(unique_deps)) + "\n")
-            for prov in unique_deps:
-                print(f"  {prov}")
+        # Extract direct deps from solver graph
+        direct_deps = []
+        if result.actions:
+            graph = resolver.build_dependency_graph(result, [pkg_name])
+            direct_deps = sorted(graph.get(pkg_name, []))
 
-        # Print alternatives
-        if alternatives:
-            print("\n" + _("Alternatives ({count} capabilities with choices):").format(count=len(alternatives)) + "\n")
-            for cap, info in alternatives:
-                providers_str = ' | '.join(info['providers'][:5])
-                if len(info['providers']) > 5:
-                    providers_str += f" (+{len(info['providers']) - 5})"
-                print(f"  {colors.warning(cap)}")
+        if direct_deps:
+            print(ngettext(
+                "Dependencies of {package}: {count} package",
+                "Dependencies of {package}: {count} packages",
+                len(direct_deps)
+            ).format(package=package, count=len(direct_deps)) + "\n")
+            for dep in direct_deps:
+                print(f"  {dep}")
+        elif not result.alternatives:
+            pkg = db.get_package_smart(package)
+            if not pkg:
+                print(_("Package '{package}' not found").format(package=package))
+                return 1
+            print(_("{package}: no dependencies").format(package=package))
+
+        # Show unresolved alternatives
+        if result.alternatives:
+            if direct_deps:
+                print()
+            print(_("Alternatives ({count} capabilities with choices):").format(
+                count=len(result.alternatives)) + "\n")
+            for alt in result.alternatives:
+                providers_str = ' | '.join(alt.providers[:5])
+                if len(alt.providers) > 5:
+                    providers_str += f" (+{len(alt.providers) - 5})"
+                print(f"  {colors.warning(alt.capability)}")
+                if alt.required_by:
+                    print(f"    ({_('required by')} {alt.required_by})")
                 print(f"    → {colors.dim(providers_str)}")
 
     return 0
 
 
-def _resolve_for_tree(resolver, pkg_name: str, choices: dict,
-                      preferences: 'PreferencesMatcher'):
-    """Run resolution for tree display.
+def _print_depends_tree(pkg_name: str, graph: dict, colors,
+                        no_libs: bool = False, max_depth: int = 5,
+                        use_pager: bool = False):
+    """Print dependency tree from solver graph.
 
-    Returns:
-        Tuple of (result, graph, aborted)
-    """
-    # Run actual resolution with libsolv
-    result, aborted = _resolve_with_alternatives(
-        resolver, [pkg_name], choices, auto_mode=False, preferences=preferences
-    )
-
-    if aborted:
-        return None, None, True
-
-    if not result.success or not result.actions:
-        return result, None, False
-
-    # Build dependency graph from resolution
-    graph = resolver.build_dependency_graph(result, [pkg_name])
-
-    return result, graph, False
-
-
-def _print_dep_tree_from_resolution(resolver, pkg_name: str, choices: dict,
-                                     preferences):
-    """Print dependency tree using real libsolv resolution.
+    Uses the adjacency list from build_dependency_graph() for accurate
+    tree display. Packages are colored green if installed.
 
     Args:
-        resolver: Resolver instance
-        pkg_name: Package name to analyze
-        choices: Dict of choices made for alternatives
-        preferences: PreferencesMatcher instance
-    """
-    from .. import colors
-
-    result, graph, aborted = _resolve_for_tree(resolver, pkg_name, choices, preferences)
-
-    if aborted:
-        print(_("Aborted"))
-        return
-
-    if result is None:
-        print(colors.error(_("Error:")) + " " + _("Failed to resolve {package}").format(package=pkg_name))
-        return
-
-    if not result.success:
-        print(colors.error(_("Error:")) + " " + _("Resolution failed:"))
-        for prob in result.problems:
-            print(f"  {prob}")
-        return
-
-    if not graph:
-        print(_("{package}: no dependencies to install").format(package=pkg_name))
-        return
-
-    _print_dep_tree_from_graph(pkg_name, graph, choices)
-
-
-def _print_dep_tree_from_graph(pkg_name: str, graph: dict, choices: dict,
-                                max_depth: int = 10):
-    """Print dependency tree from a pre-computed graph.
-
-    Args:
-        pkg_name: Package name being analyzed
-        graph: Dependency graph from build_dependency_graph()
-        choices: Dict of choices made for alternatives
+        pkg_name: Root package name
+        graph: Adjacency list {pkg: [deps]} from build_dependency_graph
+        colors: Colors module for terminal output
+        no_libs: If True, hide library packages (lib*, glibc, etc.)
         max_depth: Maximum recursion depth
+        use_pager: If True, pipe output through less -R
     """
-    from .. import colors
+    # Build installed set for coloring
+    installed_pkgs = set()
+    try:
+        import rpm
+        ts = rpm.TransactionSet()
+        for hdr in ts.dbMatch():
+            installed_pkgs.add(hdr[rpm.RPMTAG_NAME])
+    except ImportError:
+        pass
 
-    if not graph:
-        print(_("{package}: no dependencies to install").format(package=pkg_name))
-        return
-
-    # Find which packages were alternatives (for coloring)
-    alternative_pkgs = set(choices.values()) if choices else set()
-
-    # Print tree starting from root package
-    print(f"\n{pkg_name}")
+    def is_lib_package(name: str) -> bool:
+        """Check if package is a library package."""
+        return (name.startswith('lib') or
+                name in ('glibc', 'glibc-devel', 'filesystem', 'setup', 'basesystem'))
 
     def print_tree(pkg: str, visited: set, prefix: str, depth: int):
-        if depth > max_depth:
-            print(f"{prefix}└── {colors.dim('... ' + _('(max depth)'))}")
-            return
+        """Recursively print package dependencies as a tree."""
+        deps = sorted(graph.get(pkg, []))
+        if no_libs:
+            deps = [d for d in deps if not is_lib_package(d)]
 
-        deps = graph.get(pkg, [])
-        if not deps:
-            return
-
-        # Sort deps and filter already visited
-        deps_to_show = [(d, d in alternative_pkgs) for d in sorted(deps) if d not in visited]
-
-        for i, (dep, is_alt) in enumerate(deps_to_show):
-            is_last = (i == len(deps_to_show) - 1)
-            connector = "└── " if is_last else "├── "
+        for i, dep in enumerate(deps):
+            is_last = (i == len(deps) - 1)
+            connector = "└⧐─ " if is_last else "├⧐─ "
             child_prefix = prefix + ("    " if is_last else "│   ")
 
-            # Color based on whether it's an alternative
-            if is_alt:
-                dep_display = colors.info(dep)  # Cyan for alternatives
+            # Color: green if installed, normal if not
+            if dep in installed_pkgs:
+                dep_display = colors.success(dep)
             else:
                 dep_display = dep
 
-            print(f"{prefix}{connector}{dep_display}")
+            if dep in visited:
+                # Already seen: show with cycle marker
+                print(f"{prefix}{connector}{colors.dim(dep)} 🔄")
+            elif depth >= max_depth:
+                print(f"{prefix}{connector}{dep_display} {colors.dim('▷▷')}")
+            else:
+                print(f"{prefix}{connector}{dep_display}")
+                visited.add(dep)
+                print_tree(dep, visited, child_prefix, depth + 1)
 
-            # Recurse
-            new_visited = visited | {dep}
-            print_tree(dep, new_visited, child_prefix, depth + 1)
+    def do_print_tree():
+        print(f"\n{pkg_name}")
+        print_tree(pkg_name, {pkg_name}, "", 0)
 
-    # Start tree
-    visited = {pkg_name}
-    print_tree(pkg_name, visited, "", 0)
-
-    # Legend
-    print("\n" + colors.dim(_("Legend:")) + " " + colors.info(_("cyan")) + " = " + _("chosen alternative"))
-
-
-def _print_dep_tree_packages(db: 'PackageDatabase', providers: list, find_provider, visited: set, prefix: str, max_depth: int, depth: int = 0):
-    """Recursively print dependency tree (packages only)."""
-    if depth > max_depth:
-        if providers:
-            print(f"{prefix}└── ... " + _("({count} packages, max depth reached)").format(count=len(providers)))
-        return
-
-    for i, provider in enumerate(providers):
-        is_last = (i == len(providers) - 1)
-        connector = "└── " if is_last else "├── "
-        child_prefix = prefix + ("    " if is_last else "│   ")
-
-        if provider in visited:
-            print(f"{prefix}{connector}{provider} " + _("(circular)"))
-            continue
-
-        visited.add(provider)
-
-        # Get sub-dependencies of this provider
-        sub_providers = []
-        sub_pkg = db.get_package(provider)
-        if sub_pkg and sub_pkg.get('requires'):
-            sub_deps = [d for d in sub_pkg['requires']
-                       if not d.startswith('/') and not d.startswith('rpmlib(')]
-
-            # Group sub-deps by provider
-            seen = set()
-            for dep in sub_deps:
-                sub_prov = find_provider(dep)
-                if sub_prov and sub_prov not in visited and sub_prov not in seen:
-                    sub_providers.append(sub_prov)
-                    seen.add(sub_prov)
-            sub_providers.sort()
-
-        if sub_providers:
-            print(f"{prefix}{connector}{provider} ({len(sub_providers)})")
-            _print_dep_tree_packages(db, sub_providers, find_provider, visited, child_prefix, max_depth, depth + 1)
-        else:
-            print(f"{prefix}{connector}{provider}")
+    if use_pager:
+        import io
+        import subprocess
+        old_stdout = sys.stdout
+        sys.stdout = buffer = io.StringIO()
+        try:
+            do_print_tree()
+        finally:
+            sys.stdout = old_stdout
+        output = buffer.getvalue()
+        try:
+            proc = subprocess.Popen(['less', '-R'], stdin=subprocess.PIPE)
+            proc.communicate(input=output.encode())
+        except (FileNotFoundError, BrokenPipeError):
+            print(output, end='')
+    else:
+        do_print_tree()
 
 
-def _print_dep_tree_legacy(db: 'PackageDatabase', by_provider: dict, find_provider, visited: set, prefix: str, max_depth: int, depth: int = 0):
-    """Recursively print dependency tree with capabilities detail."""
-    if depth > max_depth:
-        if by_provider:
-            print(f"{prefix}└── ... " + _("({count} packages, max depth reached)").format(count=len(by_provider)))
-        return
+def _print_depends_legend(colors):
+    """Print symbol legend for depends --tree output."""
+    print()
+    print(_("Legend:"))
+    print(f"  ├⧐─  {_('depends on (dependency arrow)')}")
+    print(f"  🔄   {_('already listed above (cycle)')}")
+    print(f"  ▷▷   {_('deeper dependencies exist (max depth)')}")
 
-    providers = sorted(by_provider.keys())
-    for i, provider in enumerate(providers):
-        is_last = (i == len(providers) - 1)
-        connector = "└── " if is_last else "├── "
-        child_prefix = prefix + ("    " if is_last else "│   ")
-        caps = by_provider[provider]
 
-        if provider in visited:
-            print(f"{prefix}{connector}{provider} " + _("(circular)"))
-            continue
-
-        visited.add(provider)
-
-        # Get sub-dependencies first to know if we have children
-        sub_by_provider = {}
-        sub_pkg = db.get_package(provider)
-        if sub_pkg and sub_pkg.get('requires'):
-            sub_deps = [d for d in sub_pkg['requires']
-                       if not d.startswith('/') and not d.startswith('rpmlib(')]
-
-            for dep in sub_deps:
-                sub_prov = find_provider(dep)
-                if sub_prov and sub_prov not in visited:
-                    if sub_prov not in sub_by_provider:
-                        sub_by_provider[sub_prov] = []
-                    sub_by_provider[sub_prov].append(dep)
-
-        has_children = bool(sub_by_provider)
-
-        # Print provider with its capabilities
-        if len(caps) == 1:
-            print(f"{prefix}{connector}{provider}: {caps[0]}")
-        else:
-            print(f"{prefix}{connector}{provider}:")
-            # Use child_prefix for capabilities to maintain vertical lines
-            caps_prefix = child_prefix
-            sorted_caps = sorted(caps)[:5]
-            for j, cap in enumerate(sorted_caps):
-                # Last cap only if no children AND it's the last cap
-                cap_last = (j == len(sorted_caps) - 1) and not has_children and len(caps) <= 5
-                cap_connector = "└── " if cap_last else "├── "
-                print(f"{caps_prefix}{cap_connector}{cap}")
-            if len(caps) > 5:
-                more_last = not has_children
-                more_connector = "└── " if more_last else "├── "
-                print(f"{caps_prefix}{more_connector}... " + _("+{count} more").format(count=len(caps) - 5))
-
-        # Print sub-dependencies
-        if sub_by_provider:
-            _print_dep_tree_legacy(db, sub_by_provider, find_provider, visited, child_prefix, max_depth, depth + 1)
+def _print_rdepends_legend(colors):
+    """Print symbol legend for rdepends --tree output."""
+    print()
+    print(_("Legend:"))
+    print(f"  ├⧏─  {_('is required by (reverse dependency)')}")
+    print(f"  ★    {_('already expanded above (truncated)')}")
 
 
 def _is_virtual_provide(provide: str) -> bool:
@@ -639,106 +414,126 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
     return rdeps
 
 
+def _get_rdeps_from_pool(pool, pkg_name: str, installed_only: bool = True,
+                         cache: dict = None) -> list:
+    """Get reverse dependencies of a package using the libsolv pool.
+
+    Finds all packages whose REQUIRES match any capability provided
+    by the target package. Uses the pool as single data source instead
+    of scanning RPM DB and urpmi DB separately.
+
+    Args:
+        pool: libsolv Pool instance (must have createwhatprovides() called)
+        pkg_name: Package name to find reverse deps for
+        installed_only: If True, only scan installed packages (@System)
+        cache: Optional cache dict for memoization
+
+    Returns:
+        Sorted list of package names that depend on pkg_name
+    """
+    if cache is not None and pkg_name in cache:
+        return cache[pkg_name]
+
+    import solv
+
+    # Get all capabilities provided by the target package
+    provides = {pkg_name}
+    sel = pool.select(pkg_name, solv.Selection.SELECTION_NAME)
+    for s in sel.solvables():
+        for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+            cap = str(dep).split()[0]
+            if not _is_virtual_provide(cap):
+                provides.add(cap)
+
+    # Choose which solvables to scan
+    if installed_only and pool.installed:
+        solvables = pool.installed.solvables
+    elif installed_only:
+        # No installed repo available
+        result = []
+        if cache is not None:
+            cache[pkg_name] = result
+        return result
+    else:
+        solvables = pool.solvables
+
+    # Find packages whose requires match our provides
+    rdeps = set()
+    for s in solvables:
+        if not s.repo or s.name == pkg_name or s.name == 'gpg-pubkey':
+            continue
+        for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+            req_cap = str(dep).split()[0]
+            if req_cap in provides:
+                rdeps.add(s.name)
+                break
+
+    result = sorted(rdeps)
+    if cache is not None:
+        cache[pkg_name] = result
+    return result
+
+
 def cmd_rdepends(args, db: 'PackageDatabase') -> int:
-    """Handle rdepends command - show reverse dependencies."""
+    """Handle rdepends command - show reverse dependencies.
+
+    Uses the libsolv pool to find packages whose REQUIRES match
+    capabilities provided by the target package.
+    """
     from .. import colors
     from ...core.resolver import Resolver
 
     package = args.package
     pkg_name = _extract_pkg_name(package)
     show_tree = getattr(args, 'tree', False)
+    show_all = getattr(args, 'all', False)
 
-    # Get set of installed packages for coloring
+    # Create resolver with @System for installed package awareness
+    resolver = Resolver(db)
+    resolver._preserve_pool = True
+    resolver.pool = resolver._create_pool()
+
+    pool = resolver.pool
+
+    # Build installed set from pool for coloring
     installed_pkgs = set()
-    try:
-        import rpm
-        ts = rpm.TransactionSet()
-        for hdr in ts.dbMatch():
-            installed_pkgs.add(hdr[rpm.RPMTAG_NAME])
-    except ImportError:
-        pass
+    if pool.installed:
+        for s in pool.installed.solvables:
+            installed_pkgs.add(s.name)
 
     # Get unrequested packages (auto-installed as deps)
-    resolver = Resolver(db)
     unrequested_pkgs = resolver._get_unrequested_packages()
 
-    # Cache for reverse deps lookup
+    # Cache for rdeps lookup
     rdeps_cache = {}
 
-    # For initial call, try to get specific version if NEVRA provided
-    initial_pkg = db.get_package_smart(package)
+    def get_rdeps(name: str) -> list:
+        """Get reverse deps via pool, with caching."""
+        return _get_rdeps_from_pool(pool, name, installed_only=True, cache=rdeps_cache)
 
-    def get_rdeps(pkg_name: str, pkg_override: dict = None) -> list:
-        """Get packages that depend on pkg_name."""
-        if pkg_name in rdeps_cache:
-            return rdeps_cache[pkg_name]
-
-        # Get what this package provides
-        pkg = pkg_override or db.get_package(pkg_name)
-        provides = [pkg_name]
-
-        if pkg and pkg.get('provides'):
-            for prov in pkg['provides']:
-                cap = prov.split('[')[0].strip()
-                # Skip virtual provides that don't represent real deps
-                if cap not in provides and not _is_virtual_provide(cap):
-                    provides.append(cap)
-
-        rdeps = set()
-
-        # Check installed packages
-        try:
-            import rpm
-            ts = rpm.TransactionSet()
-            for hdr in ts.dbMatch():
-                name = hdr[rpm.RPMTAG_NAME]
-                if name == pkg_name or name == 'gpg-pubkey':
-                    continue
-                requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
-                for req in requires:
-                    req_base = req.split('(')[0]
-                    if req_base in provides or req in provides:
-                        rdeps.add(name)
-                        break
-        except ImportError:
-            pass
-
-        # Check database
-        for cap in provides:
-            results = db.whatrequires(cap, limit=200)
-            for r in results:
-                if r['name'] != pkg_name:
-                    rdeps.add(r['name'])
-
-        rdeps_cache[pkg_name] = sorted(rdeps)
-        return rdeps_cache[pkg_name]
-
-    # Get first level (use initial_pkg if available for NEVRA support)
-    direct_rdeps = get_rdeps(pkg_name, initial_pkg)
+    # Get direct reverse deps
+    direct_rdeps = get_rdeps(pkg_name)
 
     if not direct_rdeps:
         print(_("No package depends on '{package}'").format(package=package))
         return 0
 
-    show_all = getattr(args, 'all', False)
-
     def format_pkg(name: str) -> str:
-        """Format package name: green if explicit, blue if auto-installed, dim if not installed."""
+        """Format package name with color based on install status."""
         if name in installed_pkgs:
             if name.lower() in unrequested_pkgs:
-                return colors.info(name)  # blue: auto-installed
-            return colors.success(name)   # green: explicit
-        return colors.dim(name)  # grey: not installed
+                return colors.info(name)    # blue: auto-installed
+            return colors.success(name)     # green: explicit
+        return colors.dim(name)             # grey: not installed
 
     if show_tree:
         # Recursive tree with reverse arrows
         max_depth = getattr(args, 'depth', 3)
         hide_uninstalled = getattr(args, 'hide_uninstalled', False)
 
-        # Pre-compute which packages lead to installed packages (for filtering)
+        # Pre-compute reachable set for --hide-uninstalled optimization
         reachable_cache = None
         if hide_uninstalled:
-            # Build rdeps graph once (fast single pass over RPM db)
             rdeps_graph = _build_rdeps_graph(db)
             reachable_cache = _build_installed_reachable_set(
                 direct_rdeps, rdeps_graph, installed_pkgs, max_depth, db)
@@ -747,8 +542,10 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
         _print_rdep_tree(direct_rdeps, get_rdeps, installed_pkgs, unrequested_pkgs,
                          visited={package}, prefix="", max_depth=max_depth,
                          hide_uninstalled=hide_uninstalled, reachable_cache=reachable_cache)
+        if getattr(args, 'legend', False):
+            _print_rdepends_legend(colors)
     elif show_all:
-        # Flat list of all recursive reverse dependencies
+        # Flat list of all recursive reverse dependencies (BFS)
         all_rdeps = set(direct_rdeps)
         visited = {package}
         to_process = list(direct_rdeps)
@@ -765,12 +562,14 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
                     all_rdeps.add(rdep)
                     to_process.append(rdep)
 
-        print(_("All packages that depend on {package}: {count}").format(package=package, count=len(all_rdeps)) + "\n")
+        print(_("All packages that depend on {package}: {count}").format(
+            package=package, count=len(all_rdeps)) + "\n")
         for rdep in sorted(all_rdeps):
             print(f"  {format_pkg(rdep)}")
     else:
         # Flat list of direct reverse dependencies
-        print(_("Packages that depend on {package}: {count}").format(package=package, count=len(direct_rdeps)) + "\n")
+        print(_("Packages that depend on {package}: {count}").format(
+            package=package, count=len(direct_rdeps)) + "\n")
         for rdep in direct_rdeps:
             print(f"  {format_pkg(rdep)}")
 
@@ -907,32 +706,31 @@ def _print_rdep_tree(rdeps: list, get_rdeps, installed_pkgs: set, unrequested_pk
 
     if depth > max_depth:
         if rdeps:
-            print(f"{prefix}╰◄─ ... " + _("({count} packages, max depth reached)").format(count=len(rdeps)))
+            print(f"{prefix}└⧏─ ... " + _("({count} packages, max depth reached)").format(count=len(rdeps)))
         return
 
     for i, pkg_name in enumerate(rdeps):
         is_last = (i == len(rdeps) - 1)
-        # Use reverse arrows: ◄ to show "depends on" direction
-        connector = "╰◄─ " if is_last else "├◄─ "
+        connector = "└⧏─ " if is_last else "├⧏─ "
         child_prefix = prefix + ("    " if is_last else "│   ")
 
         if pkg_name in visited:
-            print(f"{prefix}{connector}{format_pkg(pkg_name)} " + _("(circular)"))
-            continue
-
-        sub_rdeps = get_rdeps(pkg_name)
-        # Filter sub_rdeps to only those leading to installed packages
-        if hide_uninstalled and reachable_cache is not None:
-            sub_rdeps = [r for r in sub_rdeps if r in reachable_cache]
-
-        if sub_rdeps:
-            print(f"{prefix}{connector}{format_pkg(pkg_name)} ({len(sub_rdeps)})")
-            visited.add(pkg_name)
-            _print_rdep_tree(sub_rdeps, get_rdeps, installed_pkgs, unrequested_pkgs,
-                             visited, child_prefix, max_depth, depth + 1,
-                             hide_uninstalled=hide_uninstalled, reachable_cache=reachable_cache)
+            print(f"{prefix}{connector}{format_pkg(pkg_name)} ★")
         else:
-            print(f"{prefix}{connector}{format_pkg(pkg_name)}")
+            sub_rdeps = get_rdeps(pkg_name)
+            # Filter sub_rdeps to only those leading to installed packages
+            if hide_uninstalled and reachable_cache is not None:
+                sub_rdeps = [r for r in sub_rdeps if r in reachable_cache]
+
+            if sub_rdeps:
+                print(f"{prefix}{connector}{format_pkg(pkg_name)} ({len(sub_rdeps)})")
+                visited.add(pkg_name)
+                _print_rdep_tree(sub_rdeps, get_rdeps, installed_pkgs, unrequested_pkgs,
+                                 visited, child_prefix, max_depth, depth + 1,
+                                 hide_uninstalled=hide_uninstalled, reachable_cache=reachable_cache)
+            else:
+                print(f"{prefix}{connector}{format_pkg(pkg_name)}")
+
 
 
 def cmd_recommends(args, db: 'PackageDatabase') -> int:

@@ -280,12 +280,14 @@ urpm why <package>            # Explain why a package is installed
 # Options for depends
 --tree                        # Show dependency tree
 --prefer=<prefs>              # Filter by preferences (same syntax as install)
+--legend                      # Show symbol legend after tree display
 
 # Options for rdepends
 --tree                        # Show reverse dependency tree
 --all                         # Show all recursive reverse dependencies (flat)
 --depth=N                     # Maximum tree depth (default: 3)
 --hide-uninstalled            # Only show paths leading to installed packages
+--legend                      # Show symbol legend after tree display
 ```
 
 Example with preferences:
