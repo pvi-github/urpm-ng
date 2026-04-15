@@ -351,7 +351,8 @@ class UrpmDaemon:
 
     def register_peer(self, host: str, port: int, media: List[str],
                        mirror_enabled: bool = False, local_version: str = "",
-                       local_arch: str = "", served_media: List[Dict] = None) -> Dict[str, Any]:
+                       local_arch: str = "", served_media: List[Dict] = None,
+                       instance_id: str = "") -> Dict[str, Any]:
         """Register or update a peer."""
         if self.discovery:
             return self.discovery.register_peer(
@@ -359,7 +360,8 @@ class UrpmDaemon:
                 mirror_enabled=mirror_enabled,
                 local_version=local_version,
                 local_arch=local_arch,
-                served_media=served_media
+                served_media=served_media,
+                instance_id=instance_id,
             )
         return {'error': 'Discovery not initialized'}
 

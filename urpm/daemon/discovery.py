@@ -8,6 +8,7 @@ import threading
 import time
 import fcntl
 import struct
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, TYPE_CHECKING
@@ -40,6 +41,7 @@ class Peer:
     """Represents a discovered urpmd peer."""
     host: str
     port: int
+    instance_id: str = ""    # Ephemeral UUID, unique per daemon run
     media: List[str] = field(default_factory=list)
     last_seen: datetime = field(default_factory=datetime.now)
     version: str = ""
@@ -93,10 +95,15 @@ class PeerDiscovery:
         self.db_path = daemon.db_path
         self.dev_mode = dev_mode
 
+        # Ephemeral instance ID — random per daemon run, never persisted.
+        # Used to detect our own broadcasts and deduplicate peers across
+        # multiple network interfaces.
+        self._instance_id: str = uuid.uuid4().hex
+
         # Own database connection (created in listener thread)
         self._db: Optional['PackageDatabase'] = None
 
-        # Peers indexed by "host:port"
+        # Peers indexed by instance_id (one entry per physical peer)
         self.peers: Dict[str, Peer] = {}
         self._peers_lock = threading.Lock()
 
@@ -176,8 +183,14 @@ class PeerDiscovery:
 
     def register_peer(self, host: str, port: int, media: List[str],
                        mirror_enabled: bool = False, local_version: str = "",
-                       local_arch: str = "", served_media: List[dict] = None) -> dict:
+                       local_arch: str = "", served_media: List[dict] = None,
+                       instance_id: str = "") -> dict:
         """Register or update a peer (called when receiving HTTP announce).
+
+        Peers are keyed by ``instance_id`` when available (one entry per
+        physical daemon, regardless of how many network interfaces it
+        has).  Falls back to ``host:port`` for peers running older
+        versions without instance_id.
 
         Args:
             host: Peer host
@@ -187,25 +200,29 @@ class PeerDiscovery:
             local_version: Peer's local Mageia version
             local_arch: Peer's architecture
             served_media: List of {version, arch, types} dicts
+            instance_id: Ephemeral UUID of the peer daemon
         """
-        key = f"{host}:{port}"
+        key = instance_id or f"{host}:{port}"
         served_media = served_media or []
 
         with self._peers_lock:
             if key in self.peers:
-                # Update existing peer
+                # Update existing peer (host may change if seen on another interface)
                 peer = self.peers[key]
+                peer.host = host
+                peer.port = port
                 peer.media = media
                 peer.last_seen = datetime.now()
                 peer.mirror_enabled = mirror_enabled
                 peer.local_version = local_version
                 peer.local_arch = local_arch
                 peer.served_media = served_media
-                logger.debug(f"Updated peer: {key}")
+                logger.debug(f"Updated peer: {host}:{port}")
             else:
                 # New peer
                 peer = Peer(
-                    host=host, port=port, media=media,
+                    host=host, port=port, instance_id=instance_id,
+                    media=media,
                     mirror_enabled=mirror_enabled,
                     local_version=local_version,
                     local_arch=local_arch,
@@ -213,7 +230,7 @@ class PeerDiscovery:
                 )
                 self.peers[key] = peer
                 served_info = f", serves {len(served_media)} version(s)" if served_media else ""
-                logger.info(f"New peer discovered: {key} with {len(media)} media{served_info}")
+                logger.info(f"New peer discovered: {host}:{port} with {len(media)} media{served_info}")
 
         return {'status': 'ok', 'registered': True}
 
@@ -330,6 +347,7 @@ class PeerDiscovery:
                 'host': local_ip,
                 'port': self.daemon.port,
                 'version': __version__,
+                'instance_id': self._instance_id,
             }
 
             data = DISCOVERY_MAGIC + json.dumps(message).encode('utf-8')
@@ -378,22 +396,25 @@ class PeerDiscovery:
 
         peer_host = message.get('host', sender_ip)
         peer_port = message.get('port')
+        peer_instance = message.get('instance_id', '')
 
         if not peer_port:
             return
 
         # Don't register ourselves
-        if self._is_self(peer_host, peer_port):
+        if self._is_self(peer_instance, peer_host, peer_port):
             return
 
-        logger.debug(f"Received broadcast from {peer_host}:{peer_port}")
+        logger.debug(f"Received broadcast from {peer_host}:{peer_port} (instance={peer_instance[:8]}...)")
 
         # Contact peer via HTTP to get full info and register
-        self._contact_peer(peer_host, peer_port)
+        self._contact_peer(peer_host, peer_port, peer_instance)
 
-    def _contact_peer(self, host: str, port: int):
+    def _contact_peer(self, host: str, port: int, instance_id: str = ""):
         """Contact a peer via HTTP to exchange information."""
-        key = f"{host}:{port}"
+        # Use instance_id as key if available (dedup across interfaces),
+        # fall back to host:port for peers running older versions.
+        key = instance_id or f"{host}:{port}"
 
         # Check if we recently contacted this peer
         with self._peers_lock:
@@ -401,6 +422,8 @@ class PeerDiscovery:
                 peer = self.peers[key]
                 # Don't re-contact if seen recently
                 if datetime.now() - peer.last_seen < timedelta(seconds=self.broadcast_interval // 2):
+                    # Still update host in case a better interface was seen
+                    peer.host = host
                     return
 
         try:
@@ -416,13 +439,13 @@ class PeerDiscovery:
             media_list = [m['name'] for m in data.get('media', [])]
 
             # Register the peer locally
-            self.register_peer(host, port, media_list)
+            self.register_peer(host, port, media_list, instance_id=instance_id)
 
             # Announce ourselves to the peer
             self._announce_to_peer(host, port)
 
         except (URLError, HTTPError, json.JSONDecodeError, OSError) as e:
-            logger.debug(f"Could not contact peer {key}: {e}")
+            logger.debug(f"Could not contact peer {host}:{port}: {e}")
 
     def _announce_to_peer(self, host: str, port: int):
         """Send HTTP announce to a peer."""
@@ -468,6 +491,7 @@ class PeerDiscovery:
             payload = json.dumps({
                 'host': self._get_local_ip(),
                 'port': self.daemon.port,
+                'instance_id': self._instance_id,
                 'media': media_list,
                 'mirror_enabled': mirror_enabled,
                 'local_version': local_version,
@@ -485,19 +509,16 @@ class PeerDiscovery:
         except (URLError, HTTPError, OSError) as e:
             logger.debug(f"Could not announce to peer {host}:{port}: {e}")
 
-    def _is_self(self, host: str, port: int) -> bool:
-        """Check if host:port refers to ourselves."""
-        if port != self.daemon.port:
-            return False
+    def _is_self(self, instance_id: str, host: str, port: int) -> bool:
+        """Check if a broadcast came from ourselves.
 
-        if host in ('127.0.0.1', 'localhost', '::1'):
-            return True
-
-        # Check against all local interface IPs
-        for _ifname, _brd, local_ip in self._get_broadcast_targets():
-            if host == local_ip:
-                return True
-
+        Relies on instance_id (ephemeral UUID per daemon run) for
+        reliable detection regardless of network topology.  A peer
+        without instance_id is necessarily a different daemon (we
+        always include ours), so it is never "self".
+        """
+        if instance_id:
+            return instance_id == self._instance_id
         return False
 
     def _get_local_ip(self) -> str:
