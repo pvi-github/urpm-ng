@@ -193,6 +193,41 @@ class PoolMixin:
         debug.log_pool_stats(pool)
         return pool
 
+    def _create_system_pool(self) -> solv.Pool:
+        """Create a pool with only installed packages (@System).
+
+        Used by resolve_remove() to ensure the solver cascades reverse
+        dependencies instead of proposing replacements from available media.
+        """
+        from ..resolver import get_solver_debug
+
+        debug = get_solver_debug()
+
+        pool = solv.Pool()
+        pool.setdisttype(solv.Pool.DISTTYPE_RPM)
+        pool.setarch(self.arch)
+        debug.log(f"Creating system-only pool for arch={self.arch}, root={self.root}")
+
+        if self.root:
+            pool.set_rootdir(self.root)
+
+        installed = pool.add_repo("@System")
+        installed.appdata = {"type": "installed"}
+        pool.installed = installed
+
+        if HAS_RPM:
+            if self.root:
+                self._installed_count = self._load_rpmdb(pool, installed)
+            else:
+                installed.add_rpmdb()
+                self._installed_count = installed.nsolvables
+        else:
+            self._installed_count = 0
+
+        pool.createwhatprovides()
+        debug.log_pool_stats(pool)
+        return pool
+
     def _load_repo_packages(self, pool: solv.Pool, repo: solv.Repo, media_id: int):
         """Load packages from database into libsolv repo.
 
