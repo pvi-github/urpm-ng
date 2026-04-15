@@ -509,6 +509,7 @@ class UrpmdHandler(BaseHTTPRequestHandler):
         local_version = data.get('local_version', '')
         local_arch = data.get('local_arch', '')
         served_media = data.get('served_media', [])
+        instance_id = data.get('instance_id', '')
 
         if not host or not port:
             self.send_error_json(400, "Missing 'host' or 'port' in request")
@@ -520,7 +521,8 @@ class UrpmdHandler(BaseHTTPRequestHandler):
             mirror_enabled=mirror_enabled,
             local_version=local_version,
             local_arch=local_arch,
-            served_media=served_media
+            served_media=served_media,
+            instance_id=instance_id,
         )
         self.send_json(result)
 
