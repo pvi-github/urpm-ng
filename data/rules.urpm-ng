@@ -1,0 +1,15 @@
+#
+# Shorewall rules for urpm-ng P2P sharing
+# Installed by urpm-ng-daemon — do not edit manually.
+#
+# TCP 9876: urpmd HTTP API (peer-to-peer media exchange)
+# UDP 9878: urpmd LAN discovery (broadcast announce/listen)
+#
+
+# Inbound: allow peers to reach our daemon
+ACCEPT  all     $FW     tcp     9876
+ACCEPT  all     $FW     udp     9878
+
+# Outbound: allow our daemon to contact peers and send broadcasts
+ACCEPT  $FW     all     tcp     9876
+ACCEPT  $FW     all     udp     9878

@@ -1,6 +1,6 @@
 %define name urpm-ng
 %define version 0.7.4
-%define release 2
+%define release 6
 
 Name:           %{name}
 Version:        %{version}
@@ -223,6 +223,9 @@ cd ..
 
 # Install systemd services
 install -Dm644 data/urpmd.service %{buildroot}%{_unitdir}/urpmd.service
+
+# Install shorewall rules for P2P sharing
+install -Dm644 data/rules.urpm-ng %{buildroot}%{_sysconfdir}/shorewall/rules.urpm-ng
 install -Dm644 data/urpm-dbus.service %{buildroot}%{_unitdir}/urpm-dbus.service
 
 # Install D-Bus service and policy
@@ -288,23 +291,43 @@ install -m644 data/profiles/*.yaml %{buildroot}%{_datadir}/urpm/profiles/
 %post daemon
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
 
-if [ $1 -eq 1 ]; then
-    # First install
+# --- Shorewall firewall configuration ---
+# We ship /etc/shorewall/rules.urpm-ng as an include file.
+# The %post adds "INCLUDE rules.urpm-ng" to the main rules file,
+# and migrates old inline rules from previous versions.
+if [ -f /etc/shorewall/rules ]; then
+    _changed=0
 
-    # Configure shorewall firewall for P2P sharing
-    if [ -f /etc/shorewall/rules ]; then
-        if ! /usr/bin/grep -q 'urpmd' /etc/shorewall/rules 2>/dev/null; then
-            /usr/bin/cat >> /etc/shorewall/rules << 'EOF'
-
-# urpm-ng P2P sharing (added by urpm-ng-daemon package)
-ACCEPT  all     $FW     tcp     9876    # urpmd HTTP server
-ACCEPT  all     $FW     udp     9878    # urpmd P2P discovery
-EOF
-            /usr/bin/systemctl reload shorewall >/dev/null 2>&1 || :
-            echo "Firewall: ports 9876/tcp and 9878/udp opened for urpmd P2P sharing"
-        fi
+    # Migrate: remove old inline rules from versions < 0.7.5
+    if /usr/bin/grep -q '# urpm-ng P2P sharing' /etc/shorewall/rules 2>/dev/null; then
+        /usr/bin/sed -i '/# urpm-ng P2P sharing/d; /urpmd HTTP server/d; /urpmd P2P discovery/d' \
+            /etc/shorewall/rules 2>/dev/null || :
+        # Clean up blank lines left behind (at most one)
+        /usr/bin/sed -i '/^$/N;/^\n$/d' /etc/shorewall/rules 2>/dev/null || :
+        _changed=1
     fi
 
+    # Add INCLUDE right after INCLUDE rules.drakx, or before the first
+    # non-comment line if rules.drakx is absent.
+    if ! /usr/bin/grep -q 'rules\.urpm-ng' /etc/shorewall/rules 2>/dev/null; then
+        if /usr/bin/grep -q 'INCLUDE rules\.drakx' /etc/shorewall/rules 2>/dev/null; then
+            /usr/bin/sed -i '/INCLUDE rules\.drakx/a INCLUDE rules.urpm-ng' \
+                /etc/shorewall/rules 2>/dev/null || :
+        else
+            /usr/bin/sed -i '0,/^[^#]/{/^[^#]/i INCLUDE rules.urpm-ng
+            }' /etc/shorewall/rules 2>/dev/null || :
+        fi
+        _changed=1
+    fi
+
+    if [ "$_changed" -eq 1 ]; then
+        echo "Firewall: urpmd P2P rules installed (rules.urpm-ng)."
+        echo "  Run 'shorewall reload' to apply."
+    fi
+fi
+
+if [ $1 -eq 1 ]; then
+    # First install
     /usr/bin/systemctl enable urpmd.service >/dev/null 2>&1 || :
     /usr/bin/systemctl start urpmd.service >/dev/null 2>&1 || :
 fi
@@ -326,10 +349,12 @@ if [ $1 -eq 0 ]; then
     # Uninstall
     /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
 
-    # Remove firewall rules added by urpm-ng-daemon
+    # Remove INCLUDE line from shorewall rules
+    # (the rules.urpm-ng file itself is removed by RPM)
     if [ -f /etc/shorewall/rules ]; then
-        /usr/bin/sed -i '/# urpm-ng P2P sharing/d; /urpmd HTTP server/d; /urpmd P2P discovery/d' /etc/shorewall/rules 2>/dev/null || :
-        /usr/bin/systemctl reload shorewall >/dev/null 2>&1 || :
+        /usr/bin/sed -i '/INCLUDE rules\.urpm-ng/d' \
+            /etc/shorewall/rules 2>/dev/null || :
+        echo "Firewall: urpmd P2P rules removed. Run 'shorewall reload' to apply."
     fi
 fi
 
@@ -437,6 +462,7 @@ fi
 %files daemon
 %{_bindir}/urpmd
 %{_unitdir}/urpmd.service
+%config(noreplace) %{_sysconfdir}/shorewall/rules.urpm-ng
 %{_mandir}/man8/urpmd.8*
 %{_mandir}/*/man8/urpmd.8*
 
