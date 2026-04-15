@@ -53,7 +53,7 @@ from .helpers.resolver import (
 from .helpers.alternatives import (
     PreferencesMatcher,
     _resolve_with_alternatives,
-    _handle_bloc_choices,
+    _handle_bloc_choice,
 )
 from .helpers.media import (
     KNOWN_VERSIONS,

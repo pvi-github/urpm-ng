@@ -3,7 +3,7 @@
 This module provides:
 - PreferencesMatcher: Match packages against user preferences (--prefer)
 - _resolve_with_alternatives: Interactive resolution with alternative handling
-- _handle_bloc_choices: Handle bloc-based alternative choices
+- _handle_bloc_choice: Handle bloc version choice for alternatives
 """
 
 import re
@@ -284,9 +284,10 @@ class PreferencesMatcher:
     def filter_providers(self, providers: list) -> list:
         """Filter and sort providers based on preferences.
 
-        Removes providers that are incompatible with stated preferences,
-        and puts preferred providers first.
-        E.g., if --prefer=qt, puts qt-based providers first and removes gtk conflicts.
+        Removes providers that are:
+        - Explicitly disfavored (e.g., rejected bloc providers)
+        - Incompatible with stated name patterns (conflict rules)
+        Puts preferred providers first.
 
         Args:
             providers: List of provider names
@@ -294,6 +295,14 @@ class PreferencesMatcher:
         Returns:
             Filtered and sorted list (never empty - returns original if all filtered)
         """
+        # Always filter disfavored packages (from bloc choices or --prefer negatives)
+        if self.disfavored_packages:
+            filtered_by_disfavor = [p for p in providers
+                                    if p.lower() not in self.disfavored_packages]
+            # Never return empty - fallback to original if all filtered
+            if filtered_by_disfavor:
+                providers = filtered_by_disfavor
+
         if not self.name_patterns:
             return providers
 
@@ -344,22 +353,26 @@ class PreferencesMatcher:
 
 
 
-def _handle_bloc_choices(bloc_info: dict, preferences: 'PreferencesMatcher',
-                         choices_made: dict, interactive: bool) -> dict:
-    """Handle bloc-based choices for alternatives.
+def _handle_bloc_choice(bloc_info: dict, preferences: 'PreferencesMatcher',
+                        interactive: bool, remembered_bloc: str = None) -> tuple:
+    """Handle bloc version choice for alternatives.
 
-    Blocs are groups of packages that must be installed together (e.g., all php8.4-*
-    or all php8.5-* packages). Instead of asking about each capability separately,
-    we ask about the bloc once and apply the choice to all capabilities.
+    Blocs are groups of packages that share versioned dependencies (e.g., all
+    php8.4-* require php-common = 3:8.4 while php8.5-* require 3:8.5).
+    This function handles ONLY the top-level version choice. Per-capability
+    secondary choices (cgi vs fpm, apache vs nginx) are left to the normal
+    individual alternative handler after preferences are updated.
 
     Args:
         bloc_info: Dict from resolver.detect_blocs()
         preferences: PreferencesMatcher instance
-        choices_made: Dict to update with choices (modified in place)
-        interactive: If True, prompt user for choices
+        interactive: If True, prompt user for version choice
+        remembered_bloc: Bloc key from a previous iteration (auto-selects)
 
     Returns:
-        Dict of {bloc_key: {capability: chosen_provider}}
+        Tuple of (chosen_bloc_key, aborted).
+        chosen_bloc_key: string like "3:8.5", or None if no blocs.
+        aborted: True if user cancelled.
     """
     from .. import colors
 
@@ -367,30 +380,34 @@ def _handle_bloc_choices(bloc_info: dict, preferences: 'PreferencesMatcher',
     bloc_defining = bloc_info['bloc_defining_caps']
 
     if not blocs:
-        return {}
+        return (None, False)
 
-    result = {}  # {bloc_key: {cap: provider}}
-
-    # Determine which bloc to use based on preferences
     bloc_keys = sorted(blocs.keys())
     chosen_bloc = None
 
-    # Try to match preference to a bloc using version constraints
-    for bloc_key in bloc_keys:
-        if preferences.match_bloc_version(bloc_defining, bloc_key):
-            chosen_bloc = bloc_key
-            break
+    # Re-use bloc from previous iteration
+    if remembered_bloc and remembered_bloc in bloc_keys:
+        chosen_bloc = remembered_bloc
 
-    # If no preference matched and we need to ask, present bloc choice
+    # Try to match preference via version constraints
+    if not chosen_bloc:
+        for bloc_key in bloc_keys:
+            if preferences.match_bloc_version(bloc_defining, bloc_key):
+                chosen_bloc = bloc_key
+                break
+
+    # If no match and interactive, prompt user for version choice
     if not chosen_bloc and interactive and len(bloc_keys) > 1:
-        # Determine what the blocs represent
         bloc_label = _get_bloc_label(bloc_defining)
 
+        def _display_version(bk: str) -> str:
+            """Strip epoch from display (e.g., '3:8.4' -> '8.4')."""
+            return bk.split(':', 1)[-1] if ':' in bk else bk
+
         print(f"\n{colors.warning(bloc_label)} - {_('multiple versions available:')}")
-        for i, bloc_key in enumerate(bloc_keys, 1):
-            # Count providers in this bloc
-            provider_count = sum(len(providers) for providers in blocs[bloc_key].values())
-            print(f"  {i}. {bloc_key} ({provider_count} packages)")
+        for i, bk in enumerate(bloc_keys, 1):
+            count = sum(len(provs) for provs in blocs[bk].values())
+            print(f"  {i}. {_display_version(bk)} ({count} packages)")
 
         while True:
             try:
@@ -403,61 +420,62 @@ def _handle_bloc_choices(bloc_info: dict, preferences: 'PreferencesMatcher',
                 pass
             except (EOFError, KeyboardInterrupt):
                 print("\n" + _("Aborted"))
-                return None  # Signal abort
+                return (None, True)
         print()
 
-    # If still no choice, default to first (highest version usually)
+    # Default to highest version
     if not chosen_bloc:
-        chosen_bloc = bloc_keys[-1]  # Last = highest version
+        chosen_bloc = bloc_keys[-1]
 
-    # Now apply the bloc choice to all capabilities in that bloc
-    bloc_data = blocs[chosen_bloc]
+    return (chosen_bloc, False)
 
-    # Track providers already chosen - when we choose a provider for one capability,
-    # it may also provide other capabilities in the same bloc
-    chosen_providers = set()
 
-    for cap, providers in bloc_data.items():
-        if providers:
-            # First, check if a previously chosen provider can satisfy this capability
-            matching_chosen = [p for p in providers if p in chosen_providers]
-            if matching_chosen:
-                # Reuse the already-chosen provider
-                result.setdefault(chosen_bloc, {})[cap] = matching_chosen[0]
-                continue
+def _propagate_bloc_choice(bloc_info: dict, chosen_bloc: str,
+                           preferences: 'PreferencesMatcher', pool) -> None:
+    """Propagate bloc choice to preferences — equivalent to adding --prefer.
 
-            # Filter providers based on preferences (e.g., remove apache-* if --prefer=nginx)
-            filtered = preferences.filter_providers(providers)
+    Converts the interactive bloc choice into version constraints on the
+    PreferencesMatcher, then re-resolves patterns. This uses the exact same
+    mechanism as --prefer=php:8.5, ensuring consistent behavior.
 
-            if len(filtered) == 1:
-                # Only one provider after filtering - auto-select
-                chosen = filtered[0]
-            else:
-                # Multiple providers - narrow by preference match
-                pref_matches = [p for p in filtered if preferences.match_provider_name(p)]
+    Args:
+        bloc_info: Dict from resolver.detect_blocs()
+        chosen_bloc: The chosen bloc key (e.g., "3:8.5")
+        preferences: PreferencesMatcher instance (modified in place)
+        pool: libsolv Pool instance
+    """
+    bloc_defining = bloc_info['bloc_defining_caps']
+    bloc_keys = sorted(bloc_info['blocs'].keys())
 
-                if len(pref_matches) == 1:
-                    # Preference narrows to exactly one - auto-select
-                    chosen = pref_matches[0]
-                elif len(pref_matches) > 1 and interactive:
-                    # Preference matches multiple (e.g. cgi/cli/fpm in same bloc)
-                    # Ask user to choose among the matching subset
-                    chosen = _ask_secondary_choice(cap, pref_matches)
-                    if chosen is None:  # Aborted
-                        return None
-                elif not pref_matches and interactive:
-                    # No preference match - ask from full filtered list
-                    chosen = _ask_secondary_choice(cap, filtered)
-                    if chosen is None:  # Aborted
-                        return None
-                else:
-                    # Non-interactive fallback: first preference match or first filtered
-                    chosen = pref_matches[0] if pref_matches else filtered[0]
+    # Extract chosen version (strip epoch: "3:8.5" -> "8.5")
+    chosen_version = chosen_bloc.split(':', 1)[-1] if ':' in chosen_bloc else chosen_bloc
 
-            result.setdefault(chosen_bloc, {})[cap] = chosen
-            chosen_providers.add(chosen)
+    # Extract rejected versions
+    rejected_versions = []
+    for bk in bloc_keys:
+        if bk != chosen_bloc:
+            rejected_versions.append(bk.split(':', 1)[-1] if ':' in bk else bk)
 
-    return result
+    # Add version constraint for each bloc-defining capability base name.
+    # e.g., bloc_defining = {'php-common': [...]} -> constraint php:8.5
+    for cap in bloc_defining:
+        base = cap.split('-')[0].lower()
+        if base not in preferences.version_constraints:
+            preferences.version_constraints[base] = chosen_version
+
+    # Add rejected versions as negative patterns (disfavor php*8.4*)
+    for cap in bloc_defining:
+        base = cap.split('-')[0].lower()
+        for rv in rejected_versions:
+            neg = f"{base}*{rv}*"
+            if neg not in preferences.negative_patterns:
+                preferences.negative_patterns.append(neg)
+
+    # Re-resolve with new constraints — same code path as --prefer
+    preferences.resolved_packages.clear()
+    preferences._compatible_providers.clear()
+    preferences.disfavored_packages.clear()
+    preferences.resolve_patterns(pool)
 
 
 def _get_bloc_label(bloc_defining: dict) -> str:
@@ -510,6 +528,248 @@ def _ask_secondary_choice(capability: str, providers: list) -> str:
 
     return providers[0]
 
+
+
+def _get_hard_dep_provides(packages: list, pool, alternative_caps: set) -> set:
+    """Compute capabilities guaranteed by hard dependencies of requested packages.
+
+    For each requested package, scans its REQUIRES in the pool. Requires that
+    are NOT in the alternatives list (i.e., resolved without user input) are
+    hard dependencies — their providers and all provided capabilities are
+    collected into the returned set.
+
+    Example: kanboard requires 'apache' (not an alternative).
+    Apache provides {apache, webserver, apache-mod_*, ...}.
+    So the returned set includes 'webserver', meaning php8.5-cgi (which
+    requires 'webserver') is coherent with the transaction.
+
+    Args:
+        packages: List of requested package names
+        pool: libsolv Pool instance
+        alternative_caps: Set of capability names that are unresolved alternatives
+
+    Returns:
+        Set of capability names (lowercase) provided by hard dependencies
+    """
+    import solv
+
+    hard_provides = set()
+    alt_lower = {c.lower() for c in alternative_caps}
+
+    for pkg_name in packages:
+        sel = pool.select(pkg_name, solv.Selection.SELECTION_NAME)
+        for s in sel.solvables():
+            if s.repo and s.repo.name != '@System':
+                for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                    req_cap = str(dep).split()[0]
+                    if req_cap.startswith(('lib', 'rpmlib(', '/', 'config(')):
+                        continue
+                    if req_cap.lower() in alt_lower:
+                        continue  # Unresolved alternative, not a hard dep
+                    # Collect provides from all providers of this hard dep
+                    req_dep = pool.Dep(req_cap)
+                    for prov in pool.whatprovides(req_dep):
+                        if prov.repo:
+                            hard_provides.add(prov.name.lower())
+                            for p_dep in prov.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                                cap = str(p_dep).split()[0]
+                                if not cap.startswith(('lib', 'rpmlib(', '/')):
+                                    hard_provides.add(cap.lower())
+                break  # First non-system solvable is enough
+
+    return hard_provides
+
+
+def _filter_by_existing_choices(providers: list, choices: dict,
+                                pool, hard_dep_provides: set = None) -> list:
+    """Filter providers by sub-package relationship and hard-dep coherence.
+
+    Two successive filters, each with a safe fallback (never returns empty):
+
+    1. **Sub-package**: if a chosen package has sub-packages among candidates
+       (e.g., php8.5-fpm → php8.5-fpm-nginx/apache), keep only those.
+       If no sub-packages exist, all providers pass through unchanged.
+
+    2. **Hard-dep coherence**: among remaining candidates, check if their
+       REQUIRES reference a capability guaranteed by the requested packages'
+       hard dependencies. If some match and others don't, keep only coherent
+       ones. This avoids pulling nginx when apache is already a hard dep.
+
+    Examples:
+        choices['php'] = 'php8.5-fpm', kanboard hard deps provide apache/webserver:
+          [cgi, fpm-nginx, fpm-apache, mod_php]
+            → sub-pkg: [fpm-nginx, fpm-apache]
+            → coherence: [fpm-apache]  (requires apache ✓, nginx ✗)
+        choices['php'] = 'php8.5-cli', kanboard hard deps provide apache/webserver:
+          [cgi, fpm-nginx, fpm-apache, mod_php]
+            → sub-pkg: all (no cli sub-packages)
+            → coherence: [cgi, fpm-apache, mod_php]  (webserver/apache ✓)
+
+    Args:
+        providers: List of provider names to filter
+        choices: Dict mapping capability -> chosen package
+        pool: libsolv Pool instance
+        hard_dep_provides: Capabilities guaranteed by hard dependencies
+
+    Returns:
+        Filtered list (never empty — fallback at each step)
+    """
+    if not choices:
+        return providers
+
+    # --- Step 1: sub-package filter ---
+    chosen_names = {v.lower() for v in choices.values()}
+    extensions = [
+        p for p in providers
+        if any(p.lower().startswith(chosen + '-') for chosen in chosen_names)
+    ]
+    has_subpackages = bool(extensions)
+    providers = extensions if extensions else providers
+
+    # --- Step 2: hard-dep coherence ---
+    if not hard_dep_provides or pool is None or len(providers) <= 1:
+        return providers
+
+    import solv
+
+    coherent = []
+    for prov_name in providers:
+        sel = pool.select(prov_name, solv.Selection.SELECTION_NAME)
+        for s in sel.solvables():
+            if s.repo and s.repo.name != '@System':
+                for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                    req = str(dep).split()[0].lower()
+                    if req.startswith(('lib', 'rpmlib(', '/', 'config(')):
+                        continue
+                    if req in hard_dep_provides:
+                        coherent.append(prov_name)
+                        break
+                break  # First non-system solvable
+
+    # Contextual return:
+    # - With sub-packages (fpm → fpm-nginx/fpm-apache): reduce to 1 is OK
+    # - Without sub-packages (cli → cgi/fpm/mod_php): keep ≥ 2 for meaningful choice
+    if has_subpackages:
+        return coherent if coherent else providers
+    else:
+        return coherent if len(coherent) >= 2 else providers
+
+
+def _find_root_alternative(alternatives: list, bloc_info: dict):
+    """Find the alternative whose providers span the most version blocs.
+
+    This is THE fundamental question — choosing one provider here implicitly
+    selects the version AND the mode, making most other alternatives cascade.
+
+    Among alternatives present in 2+ blocs, the one with the most providers
+    wins (more providers = richer choice = more cascade).
+
+    Args:
+        alternatives: List of Alternative objects
+        bloc_info: Dict from resolver.detect_blocs()
+
+    Returns:
+        The root Alternative, or None if no alternative spans multiple blocs.
+    """
+    blocs = bloc_info['blocs']
+    if len(blocs) < 2:
+        return None
+
+    best = None
+    best_providers = 0
+
+    for alt in alternatives:
+        bloc_count = sum(
+            1 for caps in blocs.values()
+            if alt.capability in caps and caps[alt.capability]
+        )
+        if bloc_count >= 2 and len(alt.providers) > best_providers:
+            best = alt
+            best_providers = len(alt.providers)
+
+    return best
+
+
+def _match_provider_to_bloc(provider_name: str, bloc_info: dict) -> str:
+    """Find which bloc a chosen provider belongs to.
+
+    First checks direct bloc membership (provider listed in blocs dict).
+    Falls back to extracting the version from the package name if the
+    provider has no versioned requires (e.g., apache-mod_php8.4).
+
+    Args:
+        provider_name: Chosen package name
+        bloc_info: Dict from resolver.detect_blocs()
+
+    Returns:
+        Bloc key (e.g., "3:8.5") or None.
+    """
+    # Direct membership
+    for bloc_key, caps in bloc_info['blocs'].items():
+        for cap_providers in caps.values():
+            if provider_name in cap_providers:
+                return bloc_key
+
+    # Fallback: version from package name
+    import re
+    match = re.search(r'(\d+\.\d+)', provider_name)
+    if match:
+        pkg_version = match.group(1)
+        for bloc_key in bloc_info['blocs']:
+            bloc_ver = bloc_key.split(':', 1)[-1] if ':' in bloc_key else bloc_key
+            if pkg_version in bloc_ver or bloc_ver.endswith(pkg_version):
+                return bloc_key
+
+    return None
+
+
+def _sort_alternatives_by_cascade(alternatives: list, pool) -> None:
+    """Sort alternatives so the most cascading capability is asked first.
+
+    An alternative whose providers PROVIDE or REQUIRE other alternative
+    capabilities has a high cascade score — choosing it constrains or resolves
+    more downstream alternatives.  Asking it first gives the user the most
+    impactful choice early, and lets later alternatives auto-resolve.
+
+    Example: php-webinterface providers provide 'php' (another alt capability),
+    so webinterface gets a higher score and is asked before php.
+
+    Args:
+        alternatives: List of Alternative objects (sorted in place)
+        pool: libsolv Pool instance
+    """
+    if not pool or len(alternatives) <= 1:
+        return
+
+    import solv
+
+    alt_caps = {alt.capability.lower() for alt in alternatives}
+    scores = {}
+
+    for alt in alternatives:
+        score = 0
+        other_caps = alt_caps - {alt.capability.lower()}
+
+        for prov_name in alt.providers:
+            sel = pool.select(prov_name, solv.Selection.SELECTION_NAME)
+            for s in sel.solvables():
+                if s.repo and s.repo.name != '@System':
+                    for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+                        cap = str(dep).split()[0].lower()
+                        if cap in other_caps:
+                            score += 1
+                    for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                        req = str(dep).split()[0].lower()
+                        if req in other_caps:
+                            score += 1
+                    break
+
+        scores[alt.capability] = score
+
+    alternatives.sort(
+        key=lambda a: (scores.get(a.capability, 0), len(a.providers)),
+        reverse=True
+    )
 
 
 def _resolve_with_alternatives(resolver, packages: list, choices: dict,
@@ -572,10 +832,11 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                         continue
                     if '(' in req_cap or req_cap in choices:
                         continue
-                    # Find the provider for this require
+                    # Find the provider for this require (excluding disfavored)
                     req_dep = resolver.pool.Dep(req_cap)
                     providers = [p for p in resolver.pool.whatprovides(req_dep)
-                                if p.repo and p.repo.name != '@System']
+                                if p.repo and p.repo.name != '@System'
+                                and p.name.lower() not in preferences.disfavored_packages]
                     if len(providers) == 1:
                         # Only one provider - auto-select it
                         provider_name = providers[0].name
@@ -590,6 +851,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
 
     patterns_resolved = False
     preferences_applied = False
+    remembered_bloc = None  # Persists bloc choice across solver iterations
 
     while True:
         # First pass: create pool and resolve preferences
@@ -643,7 +905,14 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
 
         # Pass favored/disfavored to help solver make consistent choices
         # but don't pre-validate - let the iterative process handle conflicts
-        favored = preferences.resolved_packages | preferences._compatible_providers
+        # Only FAVOR when user gave explicit --prefer name patterns.
+        # Bloc-only choices rely on DISFAVOR to exclude rejected versions;
+        # FAVORing compatible providers would auto-resolve alternatives
+        # that the user should choose interactively.
+        if preferences.name_patterns:
+            favored = preferences.resolved_packages | preferences._compatible_providers
+        else:
+            favored = set()
         result = resolver.resolve_install(
             packages,
             choices=choices,
@@ -658,41 +927,105 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
             # Collect all alternative capabilities
             alt_caps = [alt.capability for alt in result.alternatives]
 
+            # Compute hard-dep provides for coherence filtering
+            hard_dep_provides = _get_hard_dep_provides(
+                packages, resolver.pool, set(alt_caps)
+            )
+
             # Detect blocs among alternatives
             bloc_info = resolver.detect_blocs(alt_caps)
 
-            if bloc_info['blocs'] and not auto_mode:
-                bloc_choices = _handle_bloc_choices(
-                    bloc_info, preferences, choices, interactive=True
-                )
+            # Root alternative: the ONE question that matters.
+            # Instead of asking "8.4 or 8.5?" abstractly, present the most
+            # impactful alternative with ALL its providers (both versions).
+            # The user's choice implicitly selects version + mode, and
+            # everything else cascades via expand_choice + disfavor.
+            if bloc_info['blocs'] and not remembered_bloc:
+                root_alt = _find_root_alternative(result.alternatives, bloc_info)
 
-                if bloc_choices:
-                    for bloc_key, cap_providers in bloc_choices.items():
-                        for cap, provider in cap_providers.items():
-                            choices[cap] = provider
-                            expand_choice(provider, choices)
-                continue
+                if root_alt and root_alt.capability not in choices:
+                    candidates = list(root_alt.providers)
 
-            elif bloc_info['blocs'] and auto_mode:
-                bloc_choices = _handle_bloc_choices(
-                    bloc_info, preferences, choices, interactive=False
-                )
-                if bloc_choices:
-                    for bloc_key, cap_providers in bloc_choices.items():
-                        for cap, provider in cap_providers.items():
-                            choices[cap] = provider
-                            expand_choice(provider, choices)
-                continue
+                    # Apply --prefer version filtering
+                    if preferences.version_constraints:
+                        ver_filtered = [
+                            p for p in candidates
+                            if any(v in p.lower()
+                                   for v in preferences.version_constraints.values())
+                        ]
+                        if ver_filtered:
+                            candidates = ver_filtered
 
-            # No blocs detected - handle alternatives individually
+                    # Apply --prefer name/disfavor filtering
+                    candidates = preferences.filter_providers(candidates)
+
+                    # Auto-select if preferences narrow to one
+                    pref_matches = [p for p in candidates if match_preference(p)]
+
+                    if len(pref_matches) == 1:
+                        chosen_pkg = pref_matches[0]
+                    elif len(candidates) == 1:
+                        chosen_pkg = candidates[0]
+                    elif auto_mode:
+                        chosen_pkg = candidates[0]
+                    else:
+                        # Ask user — the fundamental question
+                        if root_alt.required_by:
+                            print(f"\n{root_alt.capability} "
+                                  f"({_('required by')} {root_alt.required_by}):")
+                        else:
+                            print(f"\n{root_alt.capability}:")
+                        for i, prov in enumerate(candidates[:8], 1):
+                            print(f"  {i}. {prov}")
+                        if len(candidates) > 8:
+                            print("  " + _("... and {count} more").format(
+                                count=len(candidates) - 8))
+
+                        chosen_pkg = None
+                        while True:
+                            try:
+                                choice = input(
+                                    _("Choice?")
+                                    + f" [1-{min(len(candidates), 8)}] ")
+                                idx = int(choice) - 1
+                                if 0 <= idx < len(candidates):
+                                    chosen_pkg = candidates[idx]
+                                    break
+                            except ValueError:
+                                pass
+                            except (EOFError, KeyboardInterrupt):
+                                print("\n" + _("Aborted"))
+                                return result, True
+
+                    choices[root_alt.capability] = chosen_pkg
+
+                    # Propagate bloc disfavor FIRST so expand_choice sees
+                    # single-provider requires (e.g., php-fpm → php8.5-fpm only)
+                    matched_bloc = _match_provider_to_bloc(chosen_pkg, bloc_info)
+                    if matched_bloc:
+                        remembered_bloc = matched_bloc
+                        _propagate_bloc_choice(
+                            bloc_info, matched_bloc, preferences, resolver.pool)
+
+                    expand_choice(chosen_pkg, choices)
+
+                    continue  # Re-resolve with cascaded choices
+
+            # Reorder remaining alternatives: most cascading first
+            _sort_alternatives_by_cascade(result.alternatives, resolver.pool)
+
+            # Handle remaining alternatives individually
             if not auto_mode:
                 for alt in result.alternatives:
                     # Skip if already chosen
                     if alt.capability in choices:
                         continue
 
-                    # Filter providers based on preferences
+                    # Filter providers based on preferences, then by coherence
                     filtered = preferences.filter_providers(alt.providers)
+                    filtered = _filter_by_existing_choices(
+                        filtered, choices, resolver.pool, hard_dep_provides
+                    )
 
                     # If only one after filtering, auto-select
                     if len(filtered) == 1:
@@ -742,6 +1075,9 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                 # Auto mode without blocs: use preferences or first choice
                 for alt in result.alternatives:
                     filtered = preferences.filter_providers(alt.providers)
+                    filtered = _filter_by_existing_choices(
+                        filtered, choices, resolver.pool, hard_dep_provides
+                    )
                     pref_matches = [p for p in filtered if match_preference(p)]
                     chosen_pkg = pref_matches[0] if len(pref_matches) == 1 else filtered[0]
                     choices[alt.capability] = chosen_pkg
