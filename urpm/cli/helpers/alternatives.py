@@ -433,22 +433,26 @@ def _handle_bloc_choices(bloc_info: dict, preferences: 'PreferencesMatcher',
                 # Only one provider after filtering - auto-select
                 chosen = filtered[0]
             else:
-                # Multiple providers - try preference match first
-                chosen = None
-                for prov in filtered:
-                    if preferences.match_provider_name(prov):
-                        chosen = prov
-                        break
+                # Multiple providers - narrow by preference match
+                pref_matches = [p for p in filtered if preferences.match_provider_name(p)]
 
-                # If no match and interactive, ask user
-                if not chosen and interactive:
+                if len(pref_matches) == 1:
+                    # Preference narrows to exactly one - auto-select
+                    chosen = pref_matches[0]
+                elif len(pref_matches) > 1 and interactive:
+                    # Preference matches multiple (e.g. cgi/cli/fpm in same bloc)
+                    # Ask user to choose among the matching subset
+                    chosen = _ask_secondary_choice(cap, pref_matches)
+                    if chosen is None:  # Aborted
+                        return None
+                elif not pref_matches and interactive:
+                    # No preference match - ask from full filtered list
                     chosen = _ask_secondary_choice(cap, filtered)
                     if chosen is None:  # Aborted
                         return None
-
-                # Default to first
-                if not chosen:
-                    chosen = filtered[0]
+                else:
+                    # Non-interactive fallback: first preference match or first filtered
+                    chosen = pref_matches[0] if pref_matches else filtered[0]
 
             result.setdefault(chosen_bloc, {})[cap] = chosen
             chosen_providers.add(chosen)
@@ -696,34 +700,33 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                         expand_choice(filtered[0], choices)
                         continue
 
-                    # Try to match preference
-                    matched = None
-                    for prov in filtered:
-                        if match_preference(prov):
-                            matched = prov
-                            break
+                    # Try to narrow by preference
+                    pref_matches = [p for p in filtered if match_preference(p)]
 
-                    if matched:
-                        choices[alt.capability] = matched
-                        expand_choice(matched, choices)
+                    if len(pref_matches) == 1:
+                        # Preference narrows to exactly one - auto-select
+                        choices[alt.capability] = pref_matches[0]
+                        expand_choice(pref_matches[0], choices)
                         continue
 
-                    # No preference matched, ask user
+                    # Multiple preference matches or none: ask user
+                    candidates = pref_matches if len(pref_matches) > 1 else filtered
+
                     if alt.required_by:
                         print(f"\n{alt.capability} ({_('required by')} {alt.required_by}):")
                     else:
                         print(f"\n{alt.capability}:")
-                    for i, provider in enumerate(filtered[:8], 1):
+                    for i, provider in enumerate(candidates[:8], 1):
                         print(f"  {i}. {provider}")
-                    if len(filtered) > 8:
-                        print("  " + _("... and {count} more").format(count=len(filtered) - 8))
+                    if len(candidates) > 8:
+                        print("  " + _("... and {count} more").format(count=len(candidates) - 8))
 
                     while True:
                         try:
-                            choice = input(_("Choice?") + f" [1-{min(len(filtered), 8)}] ")
+                            choice = input(_("Choice?") + f" [1-{min(len(candidates), 8)}] ")
                             idx = int(choice) - 1
-                            if 0 <= idx < len(filtered):
-                                chosen_pkg = filtered[idx]
+                            if 0 <= idx < len(candidates):
+                                chosen_pkg = candidates[idx]
                                 choices[alt.capability] = chosen_pkg
                                 expand_choice(chosen_pkg, choices)
                                 break
@@ -739,12 +742,8 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                 # Auto mode without blocs: use preferences or first choice
                 for alt in result.alternatives:
                     filtered = preferences.filter_providers(alt.providers)
-                    matched = None
-                    for prov in filtered:
-                        if match_preference(prov):
-                            matched = prov
-                            break
-                    chosen_pkg = matched if matched else filtered[0]
+                    pref_matches = [p for p in filtered if match_preference(p)]
+                    chosen_pkg = pref_matches[0] if len(pref_matches) == 1 else filtered[0]
                     choices[alt.capability] = chosen_pkg
                     expand_choice(chosen_pkg, choices)
                 continue
