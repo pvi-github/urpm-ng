@@ -509,7 +509,7 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
 
     def get_rdeps(name: str) -> list:
         """Get reverse deps via pool, with caching."""
-        return _get_rdeps_from_pool(pool, name, installed_only=True, cache=rdeps_cache)
+        return _get_rdeps_from_pool(pool, name, installed_only=False, cache=rdeps_cache)
 
     # Get direct reverse deps
     direct_rdeps = get_rdeps(pkg_name)
