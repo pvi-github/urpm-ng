@@ -1402,7 +1402,7 @@ queue._child_process_standalone()
         #               key = triggering package name (e.g. "shared-mime-info").
         #               This is often the slowest phase (e.g. 39s for shared-mime-info).
         #
-        total = len(rpm_paths) + erased_count
+        total = len(rpm_paths)
         packages_done = [0]       # Unique packages with extraction complete
         seen_paths = set()        # Paths already counted (dedup multi-installed)
         extraction_error = [False]
