@@ -17,7 +17,7 @@
 - [x] Profils YAML pour mkimage (`build`, `ci`, `minimal`)
 - [x] Output workspace correct (`RPMS/x86_64/`, `SRPMS/`, `SPECS/log.<Name>`)
 - [ ] SSL `update-ca-trust` à intégrer dans mkimage (pas en post-build)
-- [ ] Diagnostiquer et corriger les erreurs lors de `urpm mkimage` / `urpm build` :
+- [x] Diagnostiquer et corriger les erreurs lors de `urpm mkimage` / `urpm build` :
   - Erreurs "groupe manquant dans /etc/group" ou "utilisateur manquant dans /etc/passwd"
   - Cause probable : mauvais ordre d'installation des RPMs, ou RPM manquant (ex. setup, shadow-utils)
   - La bonne solution peut être : corriger l'ordre d'install, ajouter des RPMs au profil, ou les deux
@@ -75,14 +75,14 @@
   - Ref: spécification dans `doc/archives/urpm_modern_cli.md`
 
 ### Contrôle des serveurs (feedback utilisateur 2026-04-12)
-- [ ] Contrôle de l'auto-ajout de serveurs
+- [x] Contrôle de l'auto-ajout de serveurs
   - Option dans `/etc/urpm/urpm.conf` (ou dropin) :
     `server_auto_add = true | false | ask`
   - `true` = comportement actuel (défaut, rétrocompatible)
   - `false` = seuls les serveurs ajoutés manuellement sont utilisés
   - `ask` = confirmation interactive (CLI) / notification (GUI/daemon)
   - Use-case : "je veux utiliser MON miroir local, rien d'autre"
-- [ ] Filtrage géographique des serveurs
+- [x] Filtrage géographique des serveurs
   - `server_country_blacklist = UA, RU` (codes ISO 3166)
   - `server_country_whitelist = FR, DE, NL` (mutuellement exclusif)
   - Si les deux renseignées : whitelist gagne
@@ -226,7 +226,7 @@
 - [ ] Pas de sélection/désélection globale des mises à jour (tout cocher / tout décocher)
 
 **Résilience téléchargement**
-- [ ] RPM corrompu (signature invalide ou download partiel) bloque l'update mais le fichier reste en cache
+- [x] RPM corrompu (signature invalide ou download partiel) bloque l'update mais le fichier reste en cache
   - L'utilisateur novice se retrouve coincé (il faut supprimer manuellement les fichiers)
   - En cas de fail d'install : supprimer ou déplacer les fichiers corrompus automatiquement
   - Au prochain essai, le re-téléchargement doit se faire naturellement
@@ -329,7 +329,7 @@ Les utilisateurs comparent défavorablement à GNOME Software sur d'autres distr
 - [ ] Réinitialiser les stats si le serveur redevient rapide (fenêtre glissante)
 
 ### Synthesis : support `@recommends@` (Recommends vs Suggests)
-- [ ] Supporter le tag `@recommends@` dans le parser synthesis
+- [x] Supporter le tag `@recommends@` dans le parser synthesis
   - Actuellement genhdlist2 mappe les Recommends RPM vers `@suggests@` (format legacy)
   - libsolv n'installe automatiquement que `SOLVABLE_RECOMMENDS`, pas `SOLVABLE_SUGGESTS`
   - Conséquence : tous les Recommends sont silencieusement ignorés en production
