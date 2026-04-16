@@ -38,6 +38,32 @@ _BOUNCE_WIDTH = 6
 _ANIM_INTERVAL = 0.15
 
 
+def _detect_term_width() -> int:
+    """Detect terminal width, robust to stdout being redirected.
+
+    ``os.get_terminal_size()`` defaults to stdout; when stdout is piped
+    (``| tee``, ``| less``, …) the ioctl fails and we lose the real
+    terminal width, collapsing bars to the 79-column fallback even
+    though the user's terminal is much wider. Probe stderr and
+    ``/dev/tty`` before giving up.
+    """
+    for fd in (1, 2):
+        try:
+            return os.get_terminal_size(fd).columns - 1
+        except OSError:
+            continue
+    try:
+        with open('/dev/tty') as tty:
+            return os.get_terminal_size(tty.fileno()).columns - 1
+    except (OSError, FileNotFoundError):
+        pass
+    try:
+        cols = int(os.environ.get('COLUMNS', '80'))
+        return max(cols - 1, 20)
+    except ValueError:
+        return 79
+
+
 def make_progress_callback(
     header_template: str,
     total: int | None = None,
@@ -53,10 +79,7 @@ def make_progress_callback(
     Returns:
         A callable ``(TransactionProgress) -> None``.
     """
-    try:
-        term_width = os.get_terminal_size().columns - 1
-    except OSError:
-        term_width = 79
+    term_width = _detect_term_width()
 
     _state = {
         'header': None,
