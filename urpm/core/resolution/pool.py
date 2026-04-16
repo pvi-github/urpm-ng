@@ -1,5 +1,6 @@
 """Pool creation and loading operations."""
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import Dict, List
@@ -11,6 +12,125 @@ try:
     HAS_RPM = True
 except ImportError:
     HAS_RPM = False
+
+logger = logging.getLogger(__name__)
+
+
+def _supplement_repo_requires(pool: solv.Pool, repo: solv.Repo, synthesis_path: str) -> int:
+    """Workaround libsolv ``add_mdk`` dropping requires for some packages.
+
+    libsolv's native synthesis parser silently drops the ``@requires`` block
+    for roughly 7 % of packages whose synthesis shape confuses it (verified
+    empirically on Mageia synthesis files — e.g. ``lib64rocm6.4-opencl-runtime``
+    ends up with 0 requires in libsolv vs. 42 in synthesis).  This causes the
+    resolver and the orphan detector to take wrong decisions and, on upgrade,
+    ``rpm ts.check()`` fails with missing dependencies.
+
+    Workaround: re-parse the synthesis via our Python parser and, for each
+    solvable missing requires, rebuild the SOLVABLE_REQUIRES deparray from
+    scratch.  The rebuild is mandatory — experimentation showed that
+    ``s.add_deparray()`` on a solvable populated by ``add_mdk`` silently drops
+    most of the appended ids (the pre-existing offset left behind by the C
+    parser appears to corrupt further writes).  Calling ``s.unset()`` first
+    resets that offset and ``add_deparray()`` then behaves normally.
+
+    Args:
+        pool: libsolv Pool owning ``repo``.
+        repo: libsolv Repo that was just populated via ``repo.add_mdk()``.
+        synthesis_path: Filesystem path to the (already-decompressed or still
+            compressed) synthesis file to re-parse.  Must still exist on disk.
+
+    Returns:
+        Number of solvables whose requires were patched.
+    """
+    from ..synthesis import parse_synthesis
+    from ..resolver import parse_capability, get_solver_debug
+
+    debug = get_solver_debug()
+
+    # Index synthesis requires by (name, version, release, arch).  libsolv's
+    # EVR stores epoch only when non-zero, so we key on version/release/arch
+    # instead of EVR to avoid mismatches.
+    py_pkgs: Dict = {}
+    for pkg in parse_synthesis(Path(synthesis_path)):
+        key = (pkg['name'], pkg['version'], pkg['release'], pkg['arch'])
+        py_pkgs[key] = pkg.get('requires', [])
+
+    patched = 0
+    scanned = 0
+    misses = 0
+
+    for s in repo.solvables:
+        scanned += 1
+        # s.evr is "[epoch:]version-release"; drop the epoch, then split
+        # off the release from the right.
+        evr = s.evr
+        if ':' in evr:
+            evr = evr.split(':', 1)[1]
+        if '-' in evr:
+            version, release = evr.rsplit('-', 1)
+        else:
+            version, release = evr, ''
+
+        key = (s.name, version, release, s.arch)
+        py_reqs = py_pkgs.get(key)
+        if py_reqs is None:
+            misses += 1
+            continue
+        if not py_reqs:
+            continue
+
+        # Capture existing deps as stable Dep objects (safe to re-add after
+        # unset) and the set of bare capability names they cover.  We dedup
+        # on name only so we don't override the version constraints libsolv
+        # already has — we only want to fill in the ones that were dropped.
+        existing_deps = list(s.lookup_deparray(solv.SOLVABLE_REQUIRES))
+        covered = {str(d).split(None, 1)[0] for d in existing_deps}
+
+        missing: List = []
+        for req_str in py_reqs:
+            bare = req_str.split('[', 1)[0].split(None, 1)[0]
+            if bare in covered:
+                continue
+            covered.add(bare)  # dedup within this package too
+            missing.append((req_str, bare))
+
+        if not missing:
+            continue
+
+        # Reset the buggy offset, then rewrite the full deparray:
+        # existing deps first (preserves their version constraints), then
+        # the missing ones parsed from synthesis.
+        s.unset(solv.SOLVABLE_REQUIRES)
+        for dep in existing_deps:
+            s.add_deparray(solv.SOLVABLE_REQUIRES, dep)
+
+        added_here = 0
+        for req_str, bare in missing:
+            try:
+                dep = parse_capability(pool, req_str)
+            except Exception:
+                try:
+                    dep = pool.Dep(bare)
+                except Exception:
+                    continue
+            s.add_deparray(solv.SOLVABLE_REQUIRES, dep)
+            added_here += 1
+
+        if added_here:
+            patched += 1
+            if added_here >= 10:
+                debug.log(
+                    f"Pool supplement: {s.name}-{s.evr}.{s.arch} "
+                    f"gained {added_here} missing requires"
+                )
+
+    debug.log(
+        f"Pool supplement {repo.name!r}: scanned={scanned}, "
+        f"patched={patched}, key_misses={misses}"
+    )
+
+    return patched
 
 
 class PoolMixin:
@@ -150,6 +270,22 @@ class PoolMixin:
                     f = solv.xfopen(tmp_path)
                     repo.add_mdk(f)
                     f.close()
+
+                    # Workaround libsolv bug: add_mdk silently drops
+                    # requires for ~7% of packages.  Re-parse synthesis
+                    # via our Python parser and inject the missing ones.
+                    # Must run BEFORE unlinking tmp_path (parse_synthesis
+                    # needs it) but the .cz source is still on disk too;
+                    # we re-parse the decompressed copy to save a round.
+                    try:
+                        _supplement_repo_requires(pool, repo, tmp_path)
+                    except Exception as supp_err:
+                        # Never block pool creation on a supplement failure.
+                        logger.warning(
+                            "Pool supplement failed for %s: %s",
+                            media['name'], supp_err,
+                        )
+
                     Path(tmp_path).unlink()
 
                     # genhdlist2 maps RPM Recommends to @suggests@ in
