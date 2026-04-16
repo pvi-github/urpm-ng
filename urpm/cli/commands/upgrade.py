@@ -314,16 +314,11 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
                      item_bytes=None, item_total=None, slots_status=None,
                      coordinator_speed=0.0):
-            global_speed = 0.0
-            if slots_status:
-                for slot, prog in slots_status:
-                    if prog is not None:
-                        global_speed += prog.get_speed()
-            if global_speed == 0.0:
-                global_speed = coordinator_speed
+            # Use the coordinator's time-windowed cumulative speed —
+            # see comment in install.py progress callback.
             progress_display.update(
                 pkg_num, pkg_total, bytes_done, bytes_total,
-                slots_status or [], global_speed
+                slots_status or [], coordinator_speed
             )
 
         download_start = time.time()
