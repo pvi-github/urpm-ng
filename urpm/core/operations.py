@@ -656,6 +656,26 @@ class PackageOperations:
 
         return transaction_id
 
+    def record_scriptlet_output(self, transaction_id: int, queue_result):
+        """Persist captured scriptlet outputs to history for later review."""
+        import json
+        raw = getattr(queue_result, 'scriptlet_output', '')
+        if not raw:
+            return
+        try:
+            script_dict = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return
+        errors = set(getattr(queue_result, 'script_error_packages', None) or [])
+        for pkg_name, output in script_dict.items():
+            text = output.strip()
+            if not text:
+                continue
+            self.db.record_scriptlet_output(
+                transaction_id, pkg_name, text,
+                is_error=(pkg_name in errors),
+            )
+
     def complete_transaction(self, transaction_id: int):
         """Mark a transaction as successfully completed."""
         self.db.complete_transaction(transaction_id)

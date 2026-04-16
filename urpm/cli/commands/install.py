@@ -1089,6 +1089,10 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             if rpmnew_files:
                 _apply_config_policy(rpmnew_files, install_opts.config_policy)
 
+        # Persist scriptlet output to history DB before completing
+        if qr is not None:
+            ops.record_scriptlet_output(transaction_id, qr)
+
         ops.complete_transaction(transaction_id)
 
         # Display README messages (post-install, files now on disk)
@@ -1133,7 +1137,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
         # Display captured scriptlet output (ldconfig, mime-db rebuild, etc.)
         from ..helpers.progress import display_scriptlet_output
-        display_scriptlet_output(qr, verbose=getattr(args, 'verbose', False))
+        display_scriptlet_output(qr, verbose=getattr(args, 'verbose', False),
+                                 transaction_id=transaction_id)
 
         # Display restart recommendations
         if restart_info:

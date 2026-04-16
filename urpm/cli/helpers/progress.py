@@ -302,7 +302,8 @@ def make_progress_callback(
     return _callback
 
 
-def display_scriptlet_output(queue_result, verbose: bool = False) -> None:
+def display_scriptlet_output(queue_result, verbose: bool = False,
+                             transaction_id: int | None = None) -> None:
     """Display captured scriptlet output after a transaction.
 
     In verbose mode, shows all output grouped by package.  In normal mode,
@@ -314,6 +315,8 @@ def display_scriptlet_output(queue_result, verbose: bool = False) -> None:
             string mapping package names to their output) and
             ``script_error_packages`` (list of names that errored).
         verbose: If True, show all output; otherwise show only errors.
+        transaction_id: If set, include in the hint so users can review
+            output later via ``urpm history --detail``.
     """
     import json
     from .. import colors
@@ -383,11 +386,16 @@ def display_scriptlet_output(queue_result, verbose: bool = False) -> None:
         # Summary for normal (non-error) packages that had output
         normal_count = len(normal_with_output)
         if normal_count > 0:
+            if transaction_id is not None:
+                hint = _("use --verbose to see, or urpm history --detail {tid}").format(
+                    tid=transaction_id)
+            else:
+                hint = _("use --verbose to see")
             summary = ngettext(
-                "{count} package had scriptlet output (use --verbose to see)",
-                "{count} packages had scriptlet output (use --verbose to see)",
+                "{count} package had scriptlet output ({hint})",
+                "{count} packages had scriptlet output ({hint})",
                 normal_count,
-            ).format(count=normal_count)
+            ).format(count=normal_count, hint=hint)
             if has_error_display:
                 print(colors.dim(f"    {summary}"))
             else:

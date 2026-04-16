@@ -72,6 +72,26 @@ class HistoryMixin:
                 else:
                     raise
 
+    def record_scriptlet_output(self, transaction_id: int, pkg_name: str,
+                                output: str, is_error: bool = False):
+        """Record a package's scriptlet output for later review."""
+        self.conn.execute("""
+            INSERT INTO history_scriptlet_output
+            (history_id, pkg_name, is_error, output)
+            VALUES (?, ?, ?, ?)
+        """, (transaction_id, pkg_name, 1 if is_error else 0, output))
+
+    def get_scriptlet_output(self, transaction_id: int) -> List[Dict]:
+        """Retrieve scriptlet outputs for a transaction."""
+        cursor = self.conn.execute("""
+            SELECT pkg_name, is_error, output
+            FROM history_scriptlet_output
+            WHERE history_id = ?
+            ORDER BY id
+        """, (transaction_id,))
+        return [{'pkg_name': r[0], 'is_error': bool(r[1]), 'output': r[2]}
+                for r in cursor.fetchall()]
+
     def complete_transaction(self, transaction_id: int, return_code: int = 0):
         """Mark a transaction as complete."""
         self.conn.execute("""

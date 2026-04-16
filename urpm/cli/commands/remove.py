@@ -341,9 +341,11 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             "{count} packages erased",
             erased_count).format(count=erased_count)))
 
-        # Display captured scriptlet output
+        # Persist and display captured scriptlet output
+        ops.record_scriptlet_output(transaction_id, queue_result)
         from ..helpers.progress import display_scriptlet_output
-        display_scriptlet_output(queue_result, verbose=getattr(args, 'verbose', False))
+        display_scriptlet_output(queue_result, verbose=getattr(args, 'verbose', False),
+                                 transaction_id=transaction_id)
 
         ops.complete_transaction(transaction_id)
 

@@ -18,7 +18,7 @@ from .db import (
 )
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -232,6 +232,16 @@ CREATE TABLE IF NOT EXISTS history_packages (
 CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp);
 CREATE INDEX IF NOT EXISTS idx_history_status ON history(status);
 CREATE INDEX IF NOT EXISTS idx_history_pkg_name ON history_packages(pkg_name);
+
+-- Scriptlet output captured during transactions
+CREATE TABLE IF NOT EXISTS history_scriptlet_output (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    history_id INTEGER NOT NULL,
+    pkg_name TEXT NOT NULL,
+    is_error INTEGER DEFAULT 0,
+    output TEXT NOT NULL,
+    FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
+);
 
 -- Configuration
 CREATE TABLE IF NOT EXISTS config (
@@ -679,6 +689,16 @@ MIGRATIONS = {
         INSERT OR IGNORE INTO server_media SELECT * FROM _sm_bak;
         DROP TABLE IF EXISTS _sm_bak;
         PRAGMA foreign_keys=ON;
+    """),
+    26: (27, """
+        CREATE TABLE IF NOT EXISTS history_scriptlet_output (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id INTEGER NOT NULL,
+            pkg_name TEXT NOT NULL,
+            is_error INTEGER DEFAULT 0,
+            output TEXT NOT NULL,
+            FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
+        );
     """),
 }
 

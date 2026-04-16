@@ -130,6 +130,21 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
             if dep_count > 20 and not show_all:
                 print(colors.dim("    " + _("... and {count} more").format(count=dep_count - 20)))
 
+        # Scriptlet outputs (persisted since v0.7.7)
+        try:
+            scriptlet_outputs = db.get_scriptlet_output(trans_id)
+        except Exception:
+            scriptlet_outputs = []
+        if scriptlet_outputs:
+            print("\n  " + colors.bold(
+                _("Scriptlet output ({count}):").format(count=len(scriptlet_outputs))))
+            for entry in scriptlet_outputs:
+                color_fn = colors.error if entry['is_error'] else colors.dim
+                label = entry['pkg_name'] or _("(pre-install)")
+                print(color_fn(f"    {label}:"))
+                for line in entry['output'].splitlines():
+                    print(color_fn(f"      {line}"))
+
         print()
         return 0
 

@@ -566,9 +566,13 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                 len(orphan_names)).format(count=len(orphan_names))))
             resolver.unmark_packages(orphan_names)
 
+        # Persist scriptlet output to history DB before completing
+        ops.record_scriptlet_output(transaction_id, queue_result)
+
         # Display captured scriptlet output (ldconfig, mime-db rebuild, etc.)
         from ..helpers.progress import display_scriptlet_output
-        display_scriptlet_output(queue_result, verbose=getattr(args, 'verbose', False))
+        display_scriptlet_output(queue_result, verbose=getattr(args, 'verbose', False),
+                                 transaction_id=transaction_id)
 
         # Display restart recommendations
         if restart_info:
