@@ -24,6 +24,7 @@ tarball: version
 	# Main tarball (Python package)
 	$(TAR) czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
 		--transform "s,^,$(NAME)-$(VERSION)/," \
+		--exclude='urpm/tests' \
 		urpm pyproject.toml README.md QUICKSTART.md CHANGELOG.md LICENSE doc completion man data VERSION po
 	# PackageKit backend tarball
 	$(TAR) czf rpmbuild/SOURCES/pk-backend-urpm.tar.gz \

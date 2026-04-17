@@ -45,6 +45,7 @@ Repository = "https://github.com/mageia/urpm-ng"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["urpm*"]
+exclude = ["urpm.tests", "urpm.tests.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["urpm/tests"]
