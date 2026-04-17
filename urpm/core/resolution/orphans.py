@@ -1094,7 +1094,7 @@ class OrphansMixin:
                         existing_prov.add(name)
             except Exception as exc:
                 logger.debug(
-                    "[orphan-diag] pool merge for %s failed: %s",
+                    "Pool merge for %s failed: %s",
                     pkg_name, exc,
                 )
 
@@ -1262,11 +1262,6 @@ class OrphansMixin:
                 from ..resolver import get_solver_debug
                 _debug = get_solver_debug()
 
-                _debug.log(
-                    f"[orphan-diag] pool cross-check: "
-                    f"pool_id=0x{id(self.pool):x}"
-                )
-
                 txn_names = {
                     a.name for a in all_actions
                     if a.action in (
@@ -1274,41 +1269,14 @@ class OrphansMixin:
                         TransactionType.DOWNGRADE, TransactionType.REINSTALL,
                     )
                 }
-                # Collect capability names required by transaction packages
                 txn_req_caps: set = set()
-                # Track per-txn-package contributions so we can diagnose
-                # when a candidate-requirer is expected but missing.
-                txn_req_by_pkg: Dict[str, set] = {}
                 for tname in txn_names:
                     sel = self.pool.select(
                         tname, solv.Selection.SELECTION_NAME,
                     )
-                    caps_for_tname: set = set()
-                    n_solvables = 0
                     for s in sel.solvables():
-                        n_solvables += 1
-                        req_deps = lookup_all_requires(s)
-                        for dep in req_deps:
-                            cap = str(dep).split()[0]
-                            txn_req_caps.add(cap)
-                            caps_for_tname.add(cap)
-                        # Targeted witness: dump everything we see for the
-                        # package that fails rpm ts.check() to confirm whether
-                        # the pool supplement actually reaches this lookup.
-                        if tname == 'lib64rocm6.4-opencl-runtime':
-                            repo_name = (
-                                s.repo.name if s.repo else '<no-repo>'
-                            )
-                            _debug.log(
-                                f"[orphan-diag] witness {tname} sol#{n_solvables} "
-                                f"repo={repo_name!r} evr={s.evr} arch={s.arch} "
-                                f"req_count={len(req_deps)}"
-                            )
-                            _debug.log(
-                                f"[orphan-diag]   requires: "
-                                f"{sorted(str(d).split()[0] for d in req_deps)}"
-                            )
-                    txn_req_by_pkg[tname] = caps_for_tname
+                        for dep in lookup_all_requires(s):
+                            txn_req_caps.add(str(dep).split()[0])
 
                 # Widen the capability set with requires from packages that
                 # remain installed unchanged (not in any txn action). Without
@@ -1318,87 +1286,40 @@ class OrphansMixin:
                 # as orphan, and rpm's ts.check() later fails.
                 # post_state already holds their requires (rpmdb-derived for
                 # unchanged packages, pool-merged for upgraded/installed ones).
-                stayed_req_caps_added = 0
                 for _pname, _pinfo in post_state.items():
                     if _pname in txn_names or _pname in removed_names:
                         continue
                     for _req_name, _sense, _req_evr in _pinfo.get(
                         'requires', []
                     ):
-                        if _req_name not in txn_req_caps:
-                            txn_req_caps.add(_req_name)
-                            stayed_req_caps_added += 1
-                _debug.log(
-                    f"[orphan-diag] widened txn_req_caps with "
-                    f"{stayed_req_caps_added} caps from "
-                    f"{len(post_state) - len(txn_names)} packages that "
-                    f"remain installed"
-                )
+                        txn_req_caps.add(_req_name)
 
                 # Protect candidates whose provides satisfy a txn require
                 pool_protected: set = set()
-                unprotected_diag: list = []
                 for oname in orphan_candidates:
                     sel = self.pool.select(
                         oname, solv.Selection.SELECTION_NAME,
                     )
-                    cand_provs: set = set()
                     for s in sel.solvables():
                         for dep in s.lookup_deparray(
                             solv.SOLVABLE_PROVIDES,
                         ):
-                            cap = str(dep).split()[0]
-                            cand_provs.add(cap)
-                            if cap in txn_req_caps:
+                            if str(dep).split()[0] in txn_req_caps:
                                 pool_protected.add(oname)
                                 break
                         if oname in pool_protected:
                             break
-                    if oname not in pool_protected:
-                        unprotected_diag.append((oname, sorted(cand_provs)))
 
                 if pool_protected:
                     _debug.log(
-                        f"[orphan-diag] pool cross-check protected "
-                        f"{len(pool_protected)} candidates: "
-                        f"{sorted(pool_protected)}"
+                        f"Pool cross-check protected "
+                        f"{len(pool_protected)} candidates"
                     )
                     orphan_candidates -= pool_protected
-                if unprotected_diag:
-                    _debug.log(
-                        f"[orphan-diag] pool cross-check DID NOT protect "
-                        f"{len(unprotected_diag)} candidates"
-                    )
-                    # Surface a handful to avoid spam; prioritise names
-                    # that look library-ish (lib*) or contain "ldconfig".
-                    for oname, provs in unprotected_diag[:20]:
-                        _debug.log(
-                            f"[orphan-diag]   {oname!r} provides: {provs}"
-                        )
-                    # Helpful: is the unprotected name ITSELF required by
-                    # anything in the txn?  If yes → txn_req_caps is fine
-                    # but the provides-name differs; if no → the requirer
-                    # never contributed the capability (pool/synthesis bug).
-                    for oname, _ in unprotected_diag[:20]:
-                        requirers = [
-                            t for t, caps in txn_req_by_pkg.items()
-                            if oname in caps
-                        ]
-                        _debug.log(
-                            f"[orphan-diag]   txn packages whose pool "
-                            f"requires include {oname!r}: {requirers[:10]}"
-                            + ("..." if len(requirers) > 10 else "")
-                        )
             except Exception as exc:
                 logger.debug(
-                    "[orphan-diag] pool cross-check failed: %s", exc,
+                    "Pool cross-check failed: %s", exc,
                 )
-
-        logger.debug(
-            "[orphan-diag] pre=%d post=%d unrequested=%d new_orphans=%d: %s",
-            len(pre_state), len(post_state), len(effective_unrequested),
-            len(orphan_candidates), sorted(orphan_candidates)[:20],
-        )
 
         # Build the plan: rpmdb-side removes and cancelled new versions.
         plan = UpgradeOrphanPlan()
