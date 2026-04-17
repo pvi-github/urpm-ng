@@ -235,7 +235,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         pkg_names = [a.nevra for a in sorted(installs, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.success)
     # Merge explicit REMOVE actions with Obsoletes-replaced packages
-    obsoleted_all = [a.nevra for a in sorted(removes, key=lambda x: x.name.lower())] + obsoleted_nevras
+    _obs_names = result.obsoleted_names or set()
+    non_obs_removes = [a for a in removes if a.name not in _obs_names]
+    obsoleted_all = [a.nevra for a in sorted(non_obs_removes, key=lambda x: x.name.lower())] + obsoleted_nevras
     if obsoleted_all:
         print("\n  " + colors.error(_("Remove ({count}) - obsoleted:").format(count=len(obsoleted_all))))
         display.print_package_list(obsoleted_all, indent=4, color_func=colors.error)
