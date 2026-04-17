@@ -176,8 +176,10 @@ class PoolMixin:
         from ..config import get_media_local_path, get_base_dir, get_system_version
         from ..compression import decompress_stream
         from ..resolver import get_solver_debug, parse_capability, VersionConflictError
+        import time as _time
 
         debug = get_solver_debug()
+        _pool_t0 = _time.monotonic()
 
         pool = solv.Pool()
         pool.setdisttype(solv.Pool.DISTTYPE_RPM)
@@ -297,7 +299,14 @@ class PoolMixin:
                     # needs it) but the .cz source is still on disk too;
                     # we re-parse the decompressed copy to save a round.
                     try:
-                        _supplement_repo_requires(pool, repo, tmp_path)
+                        import time as _time
+                        _t0 = _time.monotonic()
+                        _patched = _supplement_repo_requires(pool, repo, tmp_path)
+                        _elapsed = _time.monotonic() - _t0
+                        debug.log_timing(
+                            f"supplement {media['name']}: "
+                            f"patched={_patched}, {_elapsed:.3f}s"
+                        )
                     except Exception as supp_err:
                         # Never block pool creation on a supplement failure.
                         logger.warning(
@@ -345,6 +354,8 @@ class PoolMixin:
                 self._load_repo_packages(pool, repo, media['id'])
 
         pool.createwhatprovides()
+        _pool_elapsed = _time.monotonic() - _pool_t0
+        debug.log_timing(f"pool creation total: {_pool_elapsed:.3f}s")
         debug.log_pool_stats(pool)
         return pool
 

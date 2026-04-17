@@ -314,7 +314,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--debug',
         type=str,
         metavar='COMPONENT',
-        help=_('Enable debug output (solver, tsrun, download, all)')
+        help=_('Enable debug output (solver, tsrun, download, timing, all)')
     )
     debug_parent.add_argument(
         '--watched',

@@ -100,8 +100,10 @@ class SolverDebug:
         debug.watch("pkg1", "Found installed", "1.0-1.mga10")
     """
 
-    def __init__(self, enabled: bool = False, watched: List[str] = None):
+    def __init__(self, enabled: bool = False, watched: List[str] = None,
+                 timing: bool = False):
         self.enabled = enabled
+        self.timing = timing
         self.watched = set(w.lower() for w in (watched or []))
 
     def log(self, msg: str, indent: int = 0):
@@ -119,6 +121,11 @@ class SolverDebug:
     def is_watched(self, pkg_name: str) -> bool:
         """Check if a package is being watched."""
         return pkg_name.lower() in self.watched
+
+    def log_timing(self, msg: str):
+        """Print a timing measurement."""
+        if self.timing:
+            print(f"[TIMING] {msg}")
 
     def log_pool_stats(self, pool):
         """Log pool statistics."""
@@ -200,10 +207,11 @@ class SolverDebug:
 _solver_debug = SolverDebug()
 
 
-def set_solver_debug(enabled: bool = False, watched: List[str] = None):
+def set_solver_debug(enabled: bool = False, watched: List[str] = None,
+                     timing: bool = False):
     """Set global solver debug options."""
     global _solver_debug, DEBUG_RESOLVER
-    _solver_debug = SolverDebug(enabled=enabled, watched=watched)
+    _solver_debug = SolverDebug(enabled=enabled, watched=watched, timing=timing)
     if enabled:
         DEBUG_RESOLVER = True
 

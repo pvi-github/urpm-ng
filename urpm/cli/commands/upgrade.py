@@ -45,13 +45,15 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     _debug = getattr(args, 'debug', None) or ''
     _debug_parts = {d.strip() for d in _debug.split(',')} if _debug else set()
     if 'all' in _debug_parts:
-        _debug_parts.update(('solver', 'tsrun'))
+        _debug_parts.update(('solver', 'tsrun', 'timing'))
     debug_solver = 'solver' in _debug_parts
+    debug_timing = 'timing' in _debug_parts
     watched_pkgs = getattr(args, 'watched', None)
     if watched_pkgs:
         watched_pkgs = [p.strip() for p in watched_pkgs.split(',')]
-    if debug_solver or watched_pkgs:
-        set_solver_debug(enabled=debug_solver, watched=watched_pkgs)
+    if debug_solver or watched_pkgs or debug_timing:
+        set_solver_debug(enabled=debug_solver, watched=watched_pkgs,
+                         timing=debug_timing)
     if 'tsrun' in _debug_parts:
         from ...core.transaction_queue import set_tsrun_debug
         set_tsrun_debug(enabled=True)
