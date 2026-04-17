@@ -5,6 +5,8 @@ from typing import Dict, List
 
 import solv
 
+from urpm.core.resolution.pool import lookup_all_requires
+
 
 class QueriesMixin:
     """Mixin providing capability and dependency query operations.
@@ -54,7 +56,7 @@ class QueriesMixin:
         requires = []
 
         for s in sel.solvables():
-            for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+            for dep in lookup_all_requires(s):
                 dep_str = str(dep)
                 # Skip rpmlib deps and file deps
                 if not dep_str.startswith('rpmlib(') and not dep_str.startswith('/'):
@@ -116,7 +118,7 @@ class QueriesMixin:
         major.minor version patterns, which typically define blocs.
         """
         versioned = {}
-        for dep in solvable.lookup_deparray(solv.SOLVABLE_REQUIRES):
+        for dep in lookup_all_requires(solvable):
             dep_str = str(dep)
 
             # Skip noise (libraries, config, rpmlib, file paths)

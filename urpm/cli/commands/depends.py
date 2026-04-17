@@ -435,6 +435,7 @@ def _get_rdeps_from_pool(pool, pkg_name: str, installed_only: bool = True,
         return cache[pkg_name]
 
     import solv
+    from ...core.resolution.pool import lookup_all_requires
 
     # Get all capabilities provided by the target package
     provides = {pkg_name}
@@ -462,7 +463,7 @@ def _get_rdeps_from_pool(pool, pkg_name: str, installed_only: bool = True,
     for s in solvables:
         if not s.repo or s.name == pkg_name or s.name == 'gpg-pubkey':
             continue
-        for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+        for dep in lookup_all_requires(s):
             req_cap = str(dep).split()[0]
             if req_cap in provides:
                 rdeps.add(s.name)

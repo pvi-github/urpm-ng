@@ -5,6 +5,8 @@ from typing import Dict, List, Optional, Tuple
 
 import solv
 
+from urpm.core.resolution.pool import lookup_all_requires
+
 
 class AlternativesMixin:
     """Mixin providing alternative selection operations.
@@ -105,7 +107,8 @@ class AlternativesMixin:
             # APPROACH 2: Check what this package REQUIRES (and RECOMMENDS)
             dep_types = [solv.SOLVABLE_REQUIRES, solv.SOLVABLE_RECOMMENDS]
             for dep_type in dep_types:
-                for dep in s.lookup_deparray(dep_type):
+                _deps = lookup_all_requires(s) if dep_type == solv.SOLVABLE_REQUIRES else s.lookup_deparray(dep_type)
+                for dep in _deps:
                     cap_str = str(dep)
 
                     if cap_str in seen_caps:
@@ -142,7 +145,8 @@ class AlternativesMixin:
                         # names one of the providers: e.g., 'a' requires both 'bb'
                         # and 'b2', and b2 provides bb → no user choice needed.
                         covered_by_named_dep = False
-                        for other_dep in s.lookup_deparray(dep_type):
+                        _other_deps = lookup_all_requires(s) if dep_type == solv.SOLVABLE_REQUIRES else s.lookup_deparray(dep_type)
+                        for other_dep in _other_deps:
                             other_name = str(other_dep).split()[0]
                             if other_name == base_cap:
                                 continue
@@ -625,7 +629,7 @@ class AlternativesMixin:
         Returns:
             True if the solvable requires a rejected package
         """
-        for dep in solvable.lookup_deparray(solv.SOLVABLE_REQUIRES):
+        for dep in lookup_all_requires(solvable):
             # Check if any provider of this dependency is rejected
             providers = self.pool.whatprovides(dep)
             provider_names = {p.name.lower() for p in providers}

@@ -1042,6 +1042,7 @@ class OrphansMixin:
                 return
             try:
                 import solv
+                from urpm.core.resolution.pool import lookup_all_requires
                 sel = pool.select(pkg_name, solv.Selection.SELECTION_NAME)
                 # Iterate ALL non-System solvables — adding extra deps
                 # from a wrong-version solvable is safe.
@@ -1050,7 +1051,7 @@ class OrphansMixin:
                 for s in sel.solvables():
                     if s.repo.name == '@System':
                         continue
-                    for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                    for dep in lookup_all_requires(s):
                         dep_str = str(dep)
                         if dep_str.startswith('rpmlib('):
                             continue
@@ -1257,6 +1258,7 @@ class OrphansMixin:
         if getattr(self, 'pool', None) and orphan_candidates:
             try:
                 import solv
+                from urpm.core.resolution.pool import lookup_all_requires
                 from ..resolver import get_solver_debug
                 _debug = get_solver_debug()
 
@@ -1285,9 +1287,7 @@ class OrphansMixin:
                     n_solvables = 0
                     for s in sel.solvables():
                         n_solvables += 1
-                        req_deps = s.lookup_deparray(
-                            solv.SOLVABLE_REQUIRES,
-                        )
+                        req_deps = lookup_all_requires(s)
                         for dep in req_deps:
                             cap = str(dep).split()[0]
                             txn_req_caps.add(cap)

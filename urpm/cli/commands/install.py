@@ -102,6 +102,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     """Handle install command."""
     import signal
     import solv
+    from ...core.resolution.pool import lookup_all_requires
     from ...core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction, TransactionType
     from ...core.operations import PackageOperations, InstallOptions
     from ...core.background_install import (
@@ -599,7 +600,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     sel = resolver.pool.select(s.name, solv.Selection.SELECTION_NAME)
                     for solv_pkg in sel.solvables():
                         if solv_pkg.repo and solv_pkg.repo.name != '@System':
-                            for dep in solv_pkg.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                            for dep in lookup_all_requires(solv_pkg):
                                 dep_str = str(dep).split()[0]
                                 if dep_str.startswith(('rpmlib(', '/', 'config(')):
                                     continue

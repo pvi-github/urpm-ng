@@ -16,6 +16,25 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def lookup_all_requires(solvable) -> list:
+    """Return all SOLVABLE_REQUIRES including prereq-marked deps.
+
+    ``add_mdk`` (libsolv's synthesis parser) places ``[*]``-marked deps
+    after a ``SOLVABLE_PREREQMARKER`` in the deparray.  A plain
+    ``lookup_deparray(SOLVABLE_REQUIRES)`` only returns deps *before*
+    the marker — missing all prereqs and any normal deps that follow
+    them in the synthesis line.  This helper queries both sections.
+
+    Safe to call on rpmdb solvables too: ``add_rpmdb`` never inserts
+    the marker, so the prereq query returns an empty list.
+    """
+    normal = solvable.lookup_deparray(solv.SOLVABLE_REQUIRES)
+    prereq = solvable.lookup_deparray(
+        solv.SOLVABLE_REQUIRES, solv.SOLVABLE_PREREQMARKER,
+    )
+    return list(normal) + list(prereq)
+
+
 def _supplement_repo_requires(pool: solv.Pool, repo: solv.Repo, synthesis_path: str) -> int:
     """Workaround libsolv ``add_mdk`` dropping requires for some packages.
 
@@ -84,7 +103,7 @@ def _supplement_repo_requires(pool: solv.Pool, repo: solv.Repo, synthesis_path: 
         # unset) and the set of bare capability names they cover.  We dedup
         # on name only so we don't override the version constraints libsolv
         # already has — we only want to fill in the ones that were dropped.
-        existing_deps = list(s.lookup_deparray(solv.SOLVABLE_REQUIRES))
+        existing_deps = lookup_all_requires(s)
         covered = {str(d).split(None, 1)[0] for d in existing_deps}
 
         missing: List = []

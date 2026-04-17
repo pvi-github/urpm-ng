@@ -148,6 +148,7 @@ class PreferencesMatcher:
         Also filters by version to only include packages matching the preferred versions.
         """
         import solv
+        from ...core.resolution.pool import lookup_all_requires
         import re
 
         if not self.resolved_packages:
@@ -192,7 +193,7 @@ class PreferencesMatcher:
             # Get this package's requires and provides
             pkg_requires = set()
             pkg_provides = set()
-            for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+            for dep in lookup_all_requires(s):
                 pkg_requires.add(str(dep).split()[0])
             for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
                 cap = str(dep).split()[0]
@@ -588,6 +589,7 @@ def _get_hard_dep_provides(packages: list, pool, alternative_caps: set) -> set:
         Set of capability names (lowercase) provided by hard dependencies
     """
     import solv
+    from ...core.resolution.pool import lookup_all_requires
 
     hard_provides = set()
     alt_lower = {c.lower() for c in alternative_caps}
@@ -596,7 +598,7 @@ def _get_hard_dep_provides(packages: list, pool, alternative_caps: set) -> set:
         sel = pool.select(pkg_name, solv.Selection.SELECTION_NAME)
         for s in sel.solvables():
             if s.repo and s.repo.name != '@System':
-                for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                for dep in lookup_all_requires(s):
                     req_cap = str(dep).split()[0]
                     if req_cap.startswith(('lib', 'rpmlib(', '/', 'config(')):
                         continue
@@ -667,13 +669,14 @@ def _filter_by_existing_choices(providers: list, choices: dict,
         return providers
 
     import solv
+    from ...core.resolution.pool import lookup_all_requires
 
     coherent = []
     for prov_name in providers:
         sel = pool.select(prov_name, solv.Selection.SELECTION_NAME)
         for s in sel.solvables():
             if s.repo and s.repo.name != '@System':
-                for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                for dep in lookup_all_requires(s):
                     req = str(dep).split()[0].lower()
                     if req.startswith(('lib', 'rpmlib(', '/', 'config(')):
                         continue
@@ -778,6 +781,7 @@ def _sort_alternatives_by_cascade(alternatives: list, pool) -> None:
         return
 
     import solv
+    from ...core.resolution.pool import lookup_all_requires
 
     alt_caps = {alt.capability.lower() for alt in alternatives}
     scores = {}
@@ -794,7 +798,7 @@ def _sort_alternatives_by_cascade(alternatives: list, pool) -> None:
                         cap = str(dep).split()[0].lower()
                         if cap in other_caps:
                             score += 1
-                    for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                    for dep in lookup_all_requires(s):
                         req = str(dep).split()[0].lower()
                         if req in other_caps:
                             score += 1
@@ -829,6 +833,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
         local_packages = set()
     from .. import colors
     import solv
+    from ...core.resolution.pool import lookup_all_requires
 
     if preferences is None:
         preferences = PreferencesMatcher()
@@ -862,7 +867,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
 
                 # Propagate required packages to choices
                 new_choices = []
-                for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                for dep in lookup_all_requires(s):
                     req_cap = str(dep).split()[0]
                     if req_cap.startswith(('lib', '/', 'pkgconfig(', 'rpmlib(')):
                         continue

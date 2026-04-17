@@ -7,6 +7,7 @@ Uses the SAT-based libsolv library for fast, correct dependency resolution.
 import re
 import solv
 from pathlib import Path
+from urpm.core.resolution.pool import lookup_all_requires
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -531,7 +532,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             # Get package's requires and provides
             pkg_requires = set()
             pkg_provides = set()
-            for dep in solvable.lookup_deparray(solv.SOLVABLE_REQUIRES):
+            for dep in lookup_all_requires(solvable):
                 pkg_requires.add(str(dep).split()[0].lower())
             for dep in solvable.lookup_deparray(solv.SOLVABLE_PROVIDES):
                 pkg_provides.add(str(dep).split()[0].lower())
@@ -889,7 +890,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             for s in sel.solvables():
                 if s.repo and s.repo.name != '@System':
                     # Get requires
-                    for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
+                    for dep in lookup_all_requires(s):
                         dep_str = str(dep)
                         cap = dep_str.split()[0]  # Remove version constraints
 
