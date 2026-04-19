@@ -452,7 +452,10 @@ def get_compatible_arches(arch: str) -> list:
     return [arch, 'noarch']
 
 
-def get_accepted_versions(db, system_version: str = None) -> tuple:
+_AUTO_DETECT_SYSTEM_VERSION = object()
+
+
+def get_accepted_versions(db, system_version=_AUTO_DETECT_SYSTEM_VERSION) -> tuple:
     """Determine which media versions to accept based on configured media.
 
     Implements smart version filtering:
@@ -462,7 +465,12 @@ def get_accepted_versions(db, system_version: str = None) -> tuple:
 
     Args:
         db: PackageDatabase instance
-        system_version: System version (from get_system_version), or None to auto-detect
+        system_version: System version (from get_system_version). Omit to
+            auto-detect from the host. Pass ``None`` explicitly to indicate
+            "no system version available" (e.g. a freshly bootstrapped chroot
+            with no /etc/os-release yet) — the fallback must NOT silently
+            read the host's os-release in that case, or cross-version image
+            builds (mga9 chroot on mga10 host) would filter out every media.
 
     Returns:
         Tuple of (accepted_versions: set or None, needs_user_choice: bool, conflict_info: dict)
@@ -470,7 +478,7 @@ def get_accepted_versions(db, system_version: str = None) -> tuple:
         - needs_user_choice: True if user must choose between versions
         - conflict_info: dict with 'system_version', 'cauldron_media', 'numeric_media' for UI
     """
-    if system_version is None:
+    if system_version is _AUTO_DETECT_SYSTEM_VERSION:
         system_version = get_system_version()
 
     # Get all enabled media with their versions
