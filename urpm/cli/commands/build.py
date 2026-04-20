@@ -728,6 +728,7 @@ def _ensure_system_accounts(chroot: str) -> None:
         # (name, uid, gid, comment, home, shell)
         ('rpm', 992, 992, 'RPM user', '/var/lib/rpm', '/bin/false'),
         ('messagebus', 999, 999, 'D-Bus message bus', '/', '/sbin/nologin'),
+        ('polkitd', 997, 997, 'PolicyKit daemon', '/', '/sbin/nologin'),
     ]
     _SYSTEM_GROUPS = [
         # (name, gid)
@@ -736,6 +737,7 @@ def _ensure_system_accounts(chroot: str) -> None:
         ('systemd-journal', 190),
         ('utempter', 35),
         ('rpm', 992),
+        ('polkitd', 997),
     ]
 
     passwd_path = os.path.join(chroot, 'etc/passwd')
