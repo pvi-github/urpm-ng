@@ -2010,6 +2010,83 @@ class TestOrphansKernels(BaseUrpmiTest):
         )
 
 
+class TestSupplements(BaseUrpmiTest):
+    """Reverse weak-dep (``Supplements:``) handling in the orphan detector.
+
+    The ``supplements-1`` medium ships two packages:
+
+    * ``supp-app`` — trivial, no deps, no Supplements.
+    * ``supp-plugin`` — declares ``Supplements: supp-app`` and nothing
+      else: no hard Requires, no Recommends.  Its only anchor onto
+      anything else is the reverse weak-dep.
+
+    The two tests below pin both directions of the semantics, mirroring
+    the xdg-desktop-portal-kde real-world case that motivated the fix:
+
+    * target installed ⇒ plugin is protected from orphan autoremoval;
+    * target gone     ⇒ plugin is orphaned and removed.
+    """
+
+    MEDIUM = "supplements-1"
+
+    def prepare(self):
+        super().prepare()
+        ret, _ = self._addmedia()
+        assert ret, f"addmedia failed for {self.MEDIUM}"
+        self._reset_unrequested_list()
+
+    def _mark_unrequested(self, *names):
+        """Write the unrequested list directly.
+
+        There is no CLI helper for ``urpm mark dep`` in the test base;
+        the orphan detector reads this list from disk, so writing it
+        is equivalent to the real runtime state.
+        """
+        from urpm.core.resolution.orphans import OrphansMixin
+        om = OrphansMixin()
+        om.root = self.root
+        om._save_unrequested_packages({name.lower() for name in names})
+
+    @pytest.mark.stable
+    def test_supplements_protects_plugin(self):
+        """``Supplements:`` target installed ⇒ plugin is not an orphan.
+
+        Regression for the xdg-desktop-portal-kde bug: a plugin whose
+        only anchor is ``Supplements: X`` must stay installed as long
+        as ``X`` is present, even when the plugin is flagged as
+        unrequested.  Before the fix, Supplements was ignored in the
+        reverse-dep graph and such a plugin looked orphan from the
+        first day, yet was spared only by the ``pre ∧ orphan(pre)``
+        clause — i.e. kept forever regardless of ``X``'s fate.
+        """
+        self.prepare()
+        assert self._install("supp-app", "supp-plugin") == 0
+        self.check_installed_names(["supp-app", "supp-plugin"])
+
+        self._mark_unrequested("supp-plugin")
+        self._urpme_auto_orphans()  # GC only: no erase target
+
+        self.check_installed_names(["supp-app", "supp-plugin"], remove=True)
+
+    @pytest.mark.stable
+    def test_plugin_orphaned_after_target_removed(self):
+        """``Supplements:`` target removed ⇒ plugin becomes orphan.
+
+        Scenario: both installed, plugin marked unrequested, user
+        erases the target.  The plugin must now be reported as orphan
+        (its only in-edge vanished) and removed in the same
+        ``urpme --auto-orphans`` call.
+        """
+        self.prepare()
+        assert self._install("supp-app", "supp-plugin") == 0
+        self.check_installed_names(["supp-app", "supp-plugin"])
+
+        self._mark_unrequested("supp-plugin")
+        self._urpme_auto_orphans("supp-app")  # erase target + GC
+
+        self.check_nothing_installed()
+
+
 class TestPrefer2(BaseUrpmiTest):
     """Tests for provider preference when multiple packages satisfy a dependency.
 

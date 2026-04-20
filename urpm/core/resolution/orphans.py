@@ -557,11 +557,12 @@ class OrphansMixin:
         ts = rpm.TransactionSet(self.root or '/')
 
         # Single-pass: build provides map, reverse deps, and collect headers
-        installed_pkgs = {}  # name -> hdr
-        provides_map = {}    # capability -> set of package names
-        reverse_deps = {}    # name -> set of names that require/recommend it
-        pkg_requires = {}    # name -> list of capability names
-        pkg_recommends = {}  # name -> list of capability names
+        installed_pkgs = {}   # name -> hdr
+        provides_map = {}     # capability -> set of package names
+        reverse_deps = {}     # name -> set of names that require/recommend/supplement it
+        pkg_requires = {}     # name -> list of capability names
+        pkg_recommends = {}   # name -> list of capability names
+        pkg_supplements = {}  # name -> list of capability names (reverse weak dep)
 
         for hdr in ts.dbMatch():
             name = hdr[rpm.RPMTAG_NAME]
@@ -579,8 +580,28 @@ class OrphansMixin:
                 if not r.startswith('rpmlib(') and not r.startswith('/')
             ]
             pkg_recommends[name] = list(hdr[rpm.RPMTAG_RECOMMENDNAME] or [])
+            pkg_supplements[name] = list(hdr[rpm.RPMTAG_SUPPLEMENTNAME] or [])
 
-        # Build reverse dependency graph from cached requires/recommends
+        # Build the reverse-dep graph used for orphan DFS.  ``reverse_deps[X]``
+        # is the set of packages whose presence protects ``X`` from being
+        # classified as orphan — the DFS walks from ``X`` through these
+        # entries until it either reaches a non-unrequested package (``X``
+        # is kept alive) or exhausts the tree (``X`` is orphan).
+        #
+        # * Requires / Recommends: ``name`` depends on ``provider``; if
+        #   ``name`` is explicit the whole chain is kept alive, so we record
+        #   ``reverse_deps[provider].add(name)`` — walking up from
+        #   ``provider`` we find its dependents.
+        # * Supplements: ``name`` supplements a capability that ``provider``
+        #   delivers; semantically ``provider`` is the *trigger* that keeps
+        #   ``name`` alive, so the protective edge points the other way —
+        #   ``reverse_deps[name].add(provider)``.  DFS from ``name`` walks
+        #   to ``provider`` (and, transitively, to whoever keeps
+        #   ``provider`` alive).
+        # * Boolean Supplements (``(A and B)``): rpmdb exposes the operands
+        #   as independent capability names, which we treat as OR
+        #   (conservative: may keep a package that strict AND would drop,
+        #   but never drops one that strict AND would keep).
         for name in installed_pkgs:
             for req in pkg_requires[name]:
                 for provider in provides_map.get(req, set()):
@@ -590,6 +611,10 @@ class OrphansMixin:
                 for provider in provides_map.get(rec, set()):
                     if provider != name:
                         reverse_deps[provider].add(name)
+            for supp in pkg_supplements[name]:
+                for provider in provides_map.get(supp, set()):
+                    if provider != name:
+                        reverse_deps[name].add(provider)
 
         # Builddep packages block orphan detection
         builddeps_set = set(self._get_builddep_packages().keys())
@@ -952,9 +977,9 @@ class OrphansMixin:
         logger = logging.getLogger(__name__)
 
         def _collect_from_header(hdr):
-            """Extract versioned requires/recommends/provides from a header.
+            """Extract versioned requires/recommends/supplements/provides from a header.
 
-            Returns ``(requires, provides)`` where:
+            Returns ``(requires, provides, supplements)`` where:
 
             * ``requires`` is a ``list[(name, sense, evr)]`` — an edge
               is only satisfied by a provider whose EVR matches the
@@ -962,6 +987,9 @@ class OrphansMixin:
               because they are real dependency edges for orphan
               computation.
             * ``provides`` is a ``list[(name, evr)]``.
+            * ``supplements`` is a ``list[(name, sense, evr)]`` — each
+              entry is a capability that, if satisfied by any installed
+              package, keeps this package alive (reverse weak dep).
 
             ``rpmlib(…)`` build-time capabilities are stripped.
             """
@@ -991,7 +1019,16 @@ class OrphansMixin:
                 ver = prov_vers[i] if i < len(prov_vers) else ''
                 provs.append((prov_name, ver or ''))
 
-            return reqs, provs
+            supps: List[Tuple[str, int, str]] = []
+            supp_names = hdr[rpm.RPMTAG_SUPPLEMENTNAME] or []
+            supp_vers = hdr[rpm.RPMTAG_SUPPLEMENTVERSION] or []
+            supp_flags = hdr[rpm.RPMTAG_SUPPLEMENTFLAGS] or []
+            for i, supp_name in enumerate(supp_names):
+                ver = supp_vers[i] if i < len(supp_vers) else ''
+                flag_raw = supp_flags[i] if i < len(supp_flags) else 0
+                supps.append((supp_name, flag_raw & _SENSE_MASK, ver or ''))
+
+            return reqs, provs, supps
 
         def _collect_from_synthesis(pkg):
             """Extract versioned requires/recommends/provides from a synthesis dict.
@@ -1003,8 +1040,9 @@ class OrphansMixin:
             """
             reqs: List[Tuple[str, int, str]] = []
             provs: List[Tuple[str, str]] = []
+            supps: List[Tuple[str, int, str]] = []
             if not pkg:
-                return reqs, provs
+                return reqs, provs, supps
 
             for r in pkg.get('requires', []):
                 name, sense, evr = _parse_synthesis_cap(r)
@@ -1017,8 +1055,11 @@ class OrphansMixin:
             for p in pkg.get('provides', []):
                 name, _sense, evr = _parse_synthesis_cap(p)
                 provs.append((name, evr))
+            for r in pkg.get('supplements', []):
+                name, sense, evr = _parse_synthesis_cap(r)
+                supps.append((name, sense, evr))
 
-            return reqs, provs
+            return reqs, provs, supps
 
         def _pkg_self_evr(pkg):
             """Build the EVR string for a synthesis pkg dict (may be empty)."""
@@ -1060,32 +1101,44 @@ class OrphansMixin:
                 else f"{version}-{release}"
             )
 
-            rpm_reqs, rpm_provs = _collect_from_header(hdr)
+            rpm_reqs, rpm_provs, rpm_supps = _collect_from_header(hdr)
             rpm_provs.append((name, self_evr))
-            pre_state[name] = {'requires': rpm_reqs, 'provides': rpm_provs}
+            pre_state[name] = {
+                'requires': rpm_reqs,
+                'provides': rpm_provs,
+                'supplements': rpm_supps,
+            }
 
             if name in removed_names:
                 continue
 
             if name in upgraded_names:
                 new_pkg = self.db.get_package(name)
-                new_reqs, new_provs = _collect_from_synthesis(new_pkg)
+                new_reqs, new_provs, new_supps = _collect_from_synthesis(new_pkg)
                 new_provs.append((name, _pkg_self_evr(new_pkg)))
                 post_state[name] = {
-                    'requires': new_reqs, 'provides': new_provs,
+                    'requires': new_reqs,
+                    'provides': new_provs,
+                    'supplements': new_supps,
                 }
             else:
                 post_state[name] = {
-                    'requires': rpm_reqs, 'provides': rpm_provs,
+                    'requires': rpm_reqs,
+                    'provides': rpm_provs,
+                    'supplements': rpm_supps,
                 }
 
         for name in installed_names:
             if name in post_state:
                 continue
             new_pkg = self.db.get_package(name)
-            reqs, provs = _collect_from_synthesis(new_pkg)
+            reqs, provs, supps = _collect_from_synthesis(new_pkg)
             provs.append((name, _pkg_self_evr(new_pkg)))
-            post_state[name] = {'requires': reqs, 'provides': provs}
+            post_state[name] = {
+                'requires': reqs,
+                'provides': provs,
+                'supplements': supps,
+            }
 
         def _build_reverse_deps(state):
             """Build a reverse-dependency graph with version-constraint filtering.
@@ -1098,6 +1151,20 @@ class OrphansMixin:
             detect a virtual rename such as ``tt1`` (``Provides: tt =
             1``) → ``tt2`` (``Provides: tt = 2``) against a
             ``Requires: tt >= 2``.
+
+            Supplements are handled with the protective semantics
+            of a reverse weak-dep: if ``B`` supplements a capability
+            that ``P`` provides, then ``P`` is the *trigger* keeping
+            ``B`` alive.  ``reverse_deps[X]`` is the set of packages
+            whose presence protects ``X`` during DFS, so we record
+            ``reverse_deps[B].add(P)`` — walking up from ``B`` leads
+            to ``P`` and, transitively, to whatever keeps ``P`` alive.
+            Boolean expressions such as ``Supplements: (A and B)``
+            are stored as independent capabilities in both synthesis
+            and libsolv; we protect if any of them is satisfied
+            (conservative OR), which may occasionally keep a package
+            that strict AND would drop, but never removes a package
+            that strict AND would keep.
             """
             cap_providers: dict = {}
             for name, info in state.items():
@@ -1114,6 +1181,12 @@ class OrphansMixin:
                             continue
                         if _provider_satisfies(prov_evr, req_sense, req_evr):
                             rev[provider].add(name)
+                for supp_name, supp_sense, supp_evr in info.get('supplements', ()):
+                    for provider, prov_evr in cap_providers.get(supp_name, ()):
+                        if provider == name:
+                            continue
+                        if _provider_satisfies(prov_evr, supp_sense, supp_evr):
+                            rev[name].add(provider)
             return rev
 
         pre_reverse = _build_reverse_deps(pre_state)
@@ -1251,6 +1324,7 @@ class OrphansMixin:
         pkg_requires = {}  # name -> set of capability names (raw, not resolved)
         pkg_recommends = {}  # name -> set of recommended capability names
         pkg_suggests = {}  # name -> set of suggested capability names
+        pkg_supplements = {}  # name -> set of supplemented capability names
         cap_to_pkg = {}    # capability -> set of package names providing it
         name_to_original = {}  # lowercase name -> original case name
         pkg_headers = {}   # name -> rpm header
@@ -1293,6 +1367,19 @@ class OrphansMixin:
                 if not sug.startswith('rpmlib(') and not sug.startswith('/'):
                     suggests.add(self._extract_cap_name(sug))
             pkg_suggests[name] = suggests
+
+            # Collect SUPPLEMENTS — reverse weak-dep: ``name`` is pulled
+            # in by the presence of any installed package providing one
+            # of these capabilities.  Used both to extend the dep_tree
+            # (a plugin anchored only by Supplements onto an erased
+            # target must be considered for removal) and to protect a
+            # candidate at iteration time (Supplements target still
+            # installed ⇒ keep the plugin).
+            supplements = set()
+            for supp in (hdr[rpm.RPMTAG_SUPPLEMENTNAME] or []):
+                if not supp.startswith('rpmlib(') and not supp.startswith('/'):
+                    supplements.add(self._extract_cap_name(supp))
+            pkg_supplements[name] = supplements
 
         # Helper: resolve a capability to the installed package that provides it
         def resolve_cap_to_pkg(cap: str) -> Optional[str]:
@@ -1353,6 +1440,14 @@ class OrphansMixin:
                         cap_needed_by[cap] = []
                     cap_needed_by[cap].append((pkg_name, 'S'))
 
+        # Reverse index for Supplements: capability -> packages that declare
+        # ``Supplements: <cap>``.  Walking this index from an erased package's
+        # provides yields the plugins that would be losing their anchor.
+        cap_supplemented_by = {}  # cap -> [pkg1, pkg2, ...]
+        for pkg_name, supps in pkg_supplements.items():
+            for cap in supps:
+                cap_supplemented_by.setdefault(cap, []).append(pkg_name)
+
         # Normalize erase_names to original case
         erase_set_original = set()
         for name in erase_names:
@@ -1371,6 +1466,17 @@ class OrphansMixin:
                 if dep not in dep_tree:
                     dep_tree.add(dep)
                     to_process.append(dep)
+            # Reverse weak-dep extension: any installed package whose
+            # ``Supplements:`` targets one of ``pkg``'s provided
+            # capabilities is anchored by ``pkg`` — becomes a candidate
+            # once ``pkg`` is being erased.  The iteration loop below
+            # still gets the last word (a remaining Supplements target
+            # will protect the plugin).
+            for cap in pkg_provides.get(pkg, set()):
+                for supp_pkg in cap_supplemented_by.get(cap, ()):
+                    if supp_pkg not in dep_tree:
+                        dep_tree.add(supp_pkg)
+                        to_process.append(supp_pkg)
 
         # STEP 2: Find orphans
         # A package is an orphan if:
@@ -1468,6 +1574,21 @@ class OrphansMixin:
                             break
                     if dominated:
                         break
+
+                # Supplements protection: ``pkg_name`` is anchored by any
+                # ``Supplements:`` capability still provided by a package
+                # that won't be removed.  Boolean ``Supplements: (A and B)``
+                # is stored as two independent caps — any surviving one is
+                # enough to keep ``pkg_name`` (conservative OR).
+                if not dominated:
+                    for cap in pkg_supplements.get(pkg_name, set()):
+                        providers = cap_to_pkg.get(cap, set())
+                        remaining = [p for p in providers
+                                     if p.lower() not in candidates_lower]
+                        if remaining:
+                            dominated = True
+                            blocker_info = (remaining[0], 'Supp', cap)
+                            break
 
                 if dominated:
                     candidates.remove(pkg_name)

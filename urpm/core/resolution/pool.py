@@ -760,6 +760,12 @@ class PoolMixin:
             for cap in info.get('suggests', []):
                 if cap:
                     s.add_deparray(solv.SOLVABLE_SUGGESTS, parse_capability(self.pool, cap))
+            for cap in info.get('supplements', []):
+                if cap:
+                    s.add_deparray(solv.SOLVABLE_SUPPLEMENTS, parse_capability(self.pool, cap))
+            for cap in info.get('enhances', []):
+                if cap:
+                    s.add_deparray(solv.SOLVABLE_ENHANCES, parse_capability(self.pool, cap))
 
             # Store metadata including the local path
             self._solvable_to_pkg[s.id] = {

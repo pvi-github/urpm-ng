@@ -218,8 +218,10 @@ rpm = pytest.importorskip('rpm')
 
 
 def _fake_hdr(name, requires=(), recommends=(), provides=(),
+              supplements=(),
               require_vers=(), require_flags=(),
               recommend_vers=(), recommend_flags=(),
+              supplement_vers=(), supplement_flags=(),
               provide_vers=(),
               epoch=0, version='1', release='1', arch='noarch', size=0):
     """Build a minimal fake rpm header that supports ``hdr[rpm.RPMTAG_*]``.
@@ -238,6 +240,9 @@ def _fake_hdr(name, requires=(), recommends=(), provides=(),
         rpm.RPMTAG_RECOMMENDNAME: list(recommends),
         rpm.RPMTAG_RECOMMENDVERSION: list(recommend_vers),
         rpm.RPMTAG_RECOMMENDFLAGS: list(recommend_flags),
+        rpm.RPMTAG_SUPPLEMENTNAME: list(supplements),
+        rpm.RPMTAG_SUPPLEMENTVERSION: list(supplement_vers),
+        rpm.RPMTAG_SUPPLEMENTFLAGS: list(supplement_flags),
         rpm.RPMTAG_PROVIDENAME: list(provides),
         rpm.RPMTAG_PROVIDEVERSION: list(provide_vers),
         rpm.RPMTAG_EPOCH: epoch,
@@ -567,3 +572,90 @@ class TestFindUpgradeOrphansSpec:
         # And critically, ``ff2`` must NOT appear in ``removes`` — that
         # was the silent-no-op bug the refactor exists to fix.
         assert 'ff2' not in {o.name for o in plan.removes}
+
+    # -- Supplements regression tests --------------------------------------
+    #
+    # The two scenarios below pin the fix for the
+    # xdg-desktop-portal-kde-style bug: a plugin ``B`` carrying
+    # ``Supplements: A`` must stay alive as long as ``A`` is installed and
+    # must become orphan when ``A`` disappears.  Before the fix, Supplements
+    # was silently ignored in the reverse-dep graph, so such plugins were
+    # either kept forever (no in-edge ⇒ orphan in pre-state ⇒ excluded by
+    # the pre-orphan clause) or removed on the wrong trigger.
+
+    def test_supplements_removed_target_emits_orphan(self, resolver):
+        """Target of Supplements is removed ⇒ supplementing package is orphan.
+
+        Scenario: ``plugin`` Supplements ``app``.  Both installed,
+        ``plugin`` unrequested.  The user explicitly removes ``app``.
+        ``plugin`` must be emitted as a new orphan because in post-state
+        it has no remaining supplements target (and no Requires /
+        Recommends in-edge either).
+
+        Without the fix, ``plugin`` had no in-edge in either pre or post
+        state, was orphan in both, and the pre-orphan clause filtered it
+        out — leaving it lingering forever.
+        """
+        from urpm.core.resolver import TransactionType
+
+        resolver._save_unrequested_packages({'plugin'})
+        resolver.db.get_package.side_effect = lambda name: {
+            'app':    {'requires': [], 'recommends': [], 'provides': ['app']},
+            'plugin': {
+                'requires': [], 'recommends': [],
+                'supplements': ['app'], 'provides': ['plugin'],
+            },
+        }.get(name)
+
+        headers = [
+            _fake_hdr('app', provides=['app']),
+            _fake_hdr('plugin', supplements=['app'], provides=['plugin']),
+        ]
+        actions = [
+            _make_action('app', TransactionType.REMOVE),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+        assert {o.name for o in plan.removes} == {'plugin'}
+
+    def test_supplements_target_kept_protects_package(self, resolver):
+        """Target of Supplements stays installed ⇒ supplementing package is safe.
+
+        Scenario: ``plugin`` Supplements ``app``.  Both installed,
+        ``plugin`` unrequested.  ``app`` is upgraded in place.  ``plugin``
+        must NOT be flagged as orphan in the post-state — the supplements
+        edge onto the upgraded ``app`` keeps it alive.
+
+        This mirrors the xdg-desktop-portal-kde case: on an LXQt system
+        where ``plasma-workspace`` is installed, the portal pulled by
+        ``Supplements: plasma-workspace`` must not be torn down by an
+        unrelated upgrade.
+        """
+        from urpm.core.resolver import TransactionType
+
+        resolver._save_unrequested_packages({'plugin'})
+        resolver.db.get_package.side_effect = lambda name: {
+            'app': {
+                'name': 'app', 'epoch': 0, 'version': '2', 'release': '1',
+                'requires': [], 'recommends': [],
+                'provides': ['app[= 2-1]'],
+            },
+            'plugin': {
+                'requires': [], 'recommends': [],
+                'supplements': ['app'], 'provides': ['plugin'],
+            },
+        }.get(name)
+
+        headers = [
+            _fake_hdr('app', provides=['app']),
+            _fake_hdr('plugin', supplements=['app'], provides=['plugin']),
+        ]
+        actions = [
+            _make_action('app', TransactionType.UPGRADE),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+        assert not plan, (
+            "plugin is kept alive by Supplements: app — must not be "
+            "flagged when app is merely upgraded"
+        )
