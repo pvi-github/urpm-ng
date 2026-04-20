@@ -32,12 +32,20 @@ class MockSolvable:
         self._requires = requires or []
         self._suggests = suggests or []
 
-    def lookup_deparray(self, dep_type):
+    def lookup_deparray(self, dep_type, marker=None):
         """Return dependencies based on type.
+
+        The optional ``marker`` parameter mirrors libsolv's
+        ``Solvable.lookup_deparray`` signature.  A mock solvable has no
+        prereq section, so the marker branch simply returns an empty
+        list — matching how rpmdb-derived solvables behave for callers
+        that iterate requires in two passes (normal + prereq).
 
         Suggests are returned for both SOLVABLE_SUGGESTS and SOLVABLE_RECOMMENDS
         to handle the suggests_as_recommends compatibility mode.
         """
+        if marker is not None:
+            return []
         if dep_type in (solv.SOLVABLE_SUGGESTS, solv.SOLVABLE_RECOMMENDS):
             return [MockDep(s) for s in self._suggests]
         elif dep_type == solv.SOLVABLE_REQUIRES:
