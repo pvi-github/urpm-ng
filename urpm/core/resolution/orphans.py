@@ -1020,84 +1020,6 @@ class OrphansMixin:
 
             return reqs, provs
 
-        def _merge_pool_requires(pkg_name, reqs, provs):
-            """Supplement synthesis requires/provides with pool data.
-
-            Synthesis strips library requires (``lib*.so`` sonames),
-            which breaks the post-state reverse-dep graph and causes
-            spurious orphan-on-arrival classifications for newly
-            installed libraries.  The solver pool has the full RPM
-            metadata.
-
-            We only ADD missing capabilities — synthesis is the trusted
-            baseline.  If the pool returns a wrong-version solvable
-            (multiple versions across media), extra requires/provides
-            are harmless (they can only protect more packages from
-            orphan status, which is the safe direction).
-
-            Mutates ``reqs`` and ``provs`` in place.
-            """
-            pool = getattr(self, 'pool', None)
-            if not pool:
-                return
-            try:
-                import solv
-                from urpm.core.resolution.pool import lookup_all_requires
-                sel = pool.select(pkg_name, solv.Selection.SELECTION_NAME)
-                # Iterate ALL non-System solvables — adding extra deps
-                # from a wrong-version solvable is safe.
-                existing_req = {r[0] for r in reqs}
-                existing_prov = {p[0] for p in provs}
-                for s in sel.solvables():
-                    if s.repo.name == '@System':
-                        continue
-                    for dep in lookup_all_requires(s):
-                        dep_str = str(dep)
-                        if dep_str.startswith('rpmlib('):
-                            continue
-                        parts = dep_str.split(None, 2)
-                        name = parts[0]
-                        if name in existing_req:
-                            continue
-                        if len(parts) >= 3:
-                            reqs.append((
-                                name,
-                                _SYNTHESIS_SENSE_MAP.get(parts[1], 0),
-                                parts[2],
-                            ))
-                        else:
-                            reqs.append((name, 0, ''))
-                        existing_req.add(name)
-                    for dep in s.lookup_deparray(solv.SOLVABLE_RECOMMENDS):
-                        dep_str = str(dep)
-                        parts = dep_str.split(None, 2)
-                        name = parts[0]
-                        if name in existing_req:
-                            continue
-                        if len(parts) >= 3:
-                            reqs.append((
-                                name,
-                                _SYNTHESIS_SENSE_MAP.get(parts[1], 0),
-                                parts[2],
-                            ))
-                        else:
-                            reqs.append((name, 0, ''))
-                        existing_req.add(name)
-                    for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
-                        dep_str = str(dep)
-                        parts = dep_str.split(None, 2)
-                        name = parts[0]
-                        if name in existing_prov:
-                            continue
-                        evr = parts[2] if len(parts) >= 3 else ''
-                        provs.append((name, evr))
-                        existing_prov.add(name)
-            except Exception as exc:
-                logger.debug(
-                    "Pool merge for %s failed: %s",
-                    pkg_name, exc,
-                )
-
         def _pkg_self_evr(pkg):
             """Build the EVR string for a synthesis pkg dict (may be empty)."""
             if not pkg:
@@ -1149,14 +1071,6 @@ class OrphansMixin:
                 new_pkg = self.db.get_package(name)
                 new_reqs, new_provs = _collect_from_synthesis(new_pkg)
                 new_provs.append((name, _pkg_self_evr(new_pkg)))
-                # Supplement with pool data — synthesis strips library
-                # requires (lib* deps), which breaks the reverse-dep
-                # graph and causes spurious orphan-on-arrival for new
-                # libs pulled in by upgrades.  We MERGE rather than
-                # replace: synthesis has non-library requires reliably,
-                # pool may pick a wrong version when multiple exist
-                # across media.
-                _merge_pool_requires(name, new_reqs, new_provs)
                 post_state[name] = {
                     'requires': new_reqs, 'provides': new_provs,
                 }
@@ -1171,7 +1085,6 @@ class OrphansMixin:
             new_pkg = self.db.get_package(name)
             reqs, provs = _collect_from_synthesis(new_pkg)
             provs.append((name, _pkg_self_evr(new_pkg)))
-            _merge_pool_requires(name, reqs, provs)
             post_state[name] = {'requires': reqs, 'provides': provs}
 
         def _build_reverse_deps(state):
@@ -1247,79 +1160,6 @@ class OrphansMixin:
             if name in pre_state and _is_orphan(name, pre_reverse):
                 continue
             orphan_candidates.add(name)
-
-        # Safety net: synthesis data (used for post_state) strips library
-        # requires (lib* deps).  A new dependency like lib64bind9.20.22
-        # can appear orphaned because bind-utils's require for
-        # libdns-9.20.22.so()(64bit) is absent from synthesis.
-        # Cross-check orphan candidates against the solver pool's full
-        # metadata: if any transaction package requires a capability
-        # that a candidate provides, it is not truly orphaned.
-        if getattr(self, 'pool', None) and orphan_candidates:
-            try:
-                import solv
-                from urpm.core.resolution.pool import lookup_all_requires
-                from ..resolver import get_solver_debug
-                _debug = get_solver_debug()
-
-                txn_names = {
-                    a.name for a in all_actions
-                    if a.action in (
-                        TransactionType.INSTALL, TransactionType.UPGRADE,
-                        TransactionType.DOWNGRADE, TransactionType.REINSTALL,
-                    )
-                }
-                txn_req_caps: set = set()
-                for tname in txn_names:
-                    sel = self.pool.select(
-                        tname, solv.Selection.SELECTION_NAME,
-                    )
-                    for s in sel.solvables():
-                        for dep in lookup_all_requires(s):
-                            txn_req_caps.add(str(dep).split()[0])
-
-                # Widen the capability set with requires from packages that
-                # remain installed unchanged (not in any txn action). Without
-                # this, an installed package that still depends on a candidate
-                # via a synthesis-stripped capability (e.g. `devel(libSM(64bit))`
-                # required by `lib64xt-devel`) lets the candidate be removed
-                # as orphan, and rpm's ts.check() later fails.
-                # post_state already holds their requires (rpmdb-derived for
-                # unchanged packages, pool-merged for upgraded/installed ones).
-                for _pname, _pinfo in post_state.items():
-                    if _pname in txn_names or _pname in removed_names:
-                        continue
-                    for _req_name, _sense, _req_evr in _pinfo.get(
-                        'requires', []
-                    ):
-                        txn_req_caps.add(_req_name)
-
-                # Protect candidates whose provides satisfy a txn require
-                pool_protected: set = set()
-                for oname in orphan_candidates:
-                    sel = self.pool.select(
-                        oname, solv.Selection.SELECTION_NAME,
-                    )
-                    for s in sel.solvables():
-                        for dep in s.lookup_deparray(
-                            solv.SOLVABLE_PROVIDES,
-                        ):
-                            if str(dep).split()[0] in txn_req_caps:
-                                pool_protected.add(oname)
-                                break
-                        if oname in pool_protected:
-                            break
-
-                if pool_protected:
-                    _debug.log(
-                        f"Pool cross-check protected "
-                        f"{len(pool_protected)} candidates"
-                    )
-                    orphan_candidates -= pool_protected
-            except Exception as exc:
-                logger.debug(
-                    "Pool cross-check failed: %s", exc,
-                )
 
         # Build the plan: rpmdb-side removes and cancelled new versions.
         plan = UpgradeOrphanPlan()
