@@ -644,6 +644,19 @@ Examples:
         '--workdir', '-w',
         help=_('Working directory for chroot (default: ~/.cache/urpm/mkimage)')
     )
+    image_make.add_argument(
+        '--addmedia',
+        action='append',
+        nargs=2,
+        metavar=('NAME', 'URL'),
+        default=[],
+        help=_('Add a custom media in phase 2 (repeatable): --addmedia NAME URL')
+    )
+    image_make.add_argument(
+        '--import-key',
+        action='store_true',
+        help=_('Automatically import GPG keys for --addmedia repositories')
+    )
 
     # image update / u
     image_update = image_subparsers.add_parser(
@@ -724,6 +737,11 @@ Examples:
                                 help=_('Keep chroot'))
     mkimage_parser.add_argument('--workdir', '-w',
                                 help=_('Working directory'))
+    mkimage_parser.add_argument('--addmedia', action='append', nargs=2,
+                                metavar=('NAME', 'URL'), default=[],
+                                help=_('Add a custom media in phase 2 (repeatable)'))
+    mkimage_parser.add_argument('--import-key', action='store_true',
+                                help=_('Auto-import GPG keys for --addmedia'))
 
     # =========================================================================
     # build - Build RPM packages in isolated container

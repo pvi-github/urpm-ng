@@ -159,20 +159,24 @@ def cmd_cleanup(args, db: 'PackageDatabase') -> int:
 
 
 def cmd_mkimage(args, db: 'PackageDatabase') -> int:
-    """Create a minimal Docker/Podman image for RPM builds."""
+    """Create a minimal Docker/Podman image for RPM builds (two-phase)."""
     from ...core.container import detect_runtime, Container
-    from ...core.database import PackageDatabase
     from .. import colors
 
-    # Set locale to C to avoid perl warnings in scriptlets
+    # Locale + systemd hint for scriptlets inside phase 1 chroot
     os.environ['LC_ALL'] = 'C'
     os.environ['LANGUAGE'] = 'C'
+    os.environ['SYSTEMD_OFFLINE'] = '1'
 
     release = args.release
     arch = getattr(args, 'arch', None) or platform.machine()
     tag = args.tag
-    keep_chroot = getattr(args, 'keep_chroot', False)
     runtime_name = getattr(args, 'runtime', None)
+    profile_name = getattr(args, 'profile', None) or 'build'
+    extras_str = getattr(args, 'packages', None) or ''
+    buildrequires_src = getattr(args, 'buildrequires', None)
+    addmedia = getattr(args, 'addmedia', None) or []
+    import_key = getattr(args, 'import_key', False)
 
     # Detect container runtime
     try:
@@ -182,80 +186,298 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         return 1
 
     container = Container(runtime)
-    print(_("Using {name} {version}").format(name=runtime.name, version=runtime.version))
 
-    # Check if image already exists
+    # Refuse to clobber an existing final image
     if container.image_exists(tag):
-        print(colors.error(_("\nError: Image '{tag}' already exists.").format(tag=tag)))
-        print(_("\nTo replace it, first remove the existing image:"))
-        print(f"  {runtime.name} rmi {tag}")
-        print(_("\nThen run mkimage again."))
+        print(colors.error(
+            _("Image {tag} already exists (remove with: {rt} rmi {tag})").format(
+                tag=tag, rt=runtime.name)))
         return 1
 
-    # Load profile
-    profile_name = getattr(args, 'profile', 'build')
+    # Resolve requested profile -> package list
     profiles = load_profiles()
-
     if profile_name not in profiles:
-        print(colors.error(_("Error: unknown profile '{name}'").format(name=profile_name)))
-        print(_("\nAvailable profiles:"))
-        for name, info in sorted(profiles.items()):
-            print(f"  {name}: {info['description']}")
+        print(colors.error(
+            _("Unknown profile: {p}").format(p=profile_name)))
         return 1
 
-    profile = profiles[profile_name]
-    packages = list(profile['packages'])  # Copy to avoid modifying original
+    requested_packages = list(profiles[profile_name].get('packages', []))
 
-    # Add extra packages if specified
-    extra_packages = getattr(args, 'packages', None)
-    if extra_packages:
-        packages.extend(extra_packages.split(','))
+    # Append --packages extras (comma-separated)
+    for extra in extras_str.split(','):
+        extra = extra.strip()
+        if extra:
+            requested_packages.append(extra)
 
-    # Add BuildRequires from spec or src.rpm if --buildrequires given
-    buildrequires_src = getattr(args, 'buildrequires', None)
+    # Append BuildRequires from spec/srpm if asked
     if buildrequires_src:
-        br_packages = _extract_buildrequires(buildrequires_src)
-        if br_packages is None:
-            print(colors.error(
-                _("Failed to extract BuildRequires from {path}").format(
-                    path=buildrequires_src)))
+        br = _extract_buildrequires(buildrequires_src)
+        if br:
+            requested_packages.extend(br)
+        requested_packages.append('rpm-build')
+
+    # Deduplicate preserving order
+    seen = set()
+    deduped = []
+    for p in requested_packages:
+        if p not in seen:
+            seen.add(p)
+            deduped.append(p)
+    requested_packages = deduped
+
+    # Compute phase 2 extras = requested minus bootstrap set
+    bootstrap_profile = profiles.get('bootstrap', {})
+    bootstrap_packages = list(bootstrap_profile.get('packages', []))
+    bootstrap_set = set(bootstrap_packages)
+    phase2_packages = [p for p in requested_packages if p not in bootstrap_set]
+
+    minimal_tag = f"{release}-minimal"
+
+    # Phase 1: bootstrap chroot -> minimal image (cached across runs)
+    if not container.image_exists(minimal_tag):
+        print(colors.bold(_(
+            "[Phase 1/2] Building bootstrap chroot \u2192 {tag}").format(tag=minimal_tag)))
+        rc = _phase1_bootstrap_chroot(
+            args, release, arch, minimal_tag, container, db,
+            bootstrap_packages=bootstrap_packages,
+        )
+        if rc != 0:
+            return rc
+    else:
+        print(colors.dim(_(
+            "[Phase 1/2] Reusing cached {tag} (remove with: podman rmi {tag})").format(tag=minimal_tag)))
+
+    # Phase 2: promote minimal image to the final build image
+    print(colors.bold(_(
+        "[Phase 2/2] Promoting {src} \u2192 {dst}").format(src=minimal_tag, dst=tag)))
+    return _phase2_container_promote(
+        container, minimal_tag, tag, addmedia, import_key,
+        phase2_packages, buildrequires_src,
+    )
+
+
+def _phase2_container_promote(
+    container: 'Container',
+    minimal_tag: str,
+    final_tag: str,
+    addmedia: list,
+    import_key: bool,
+    extra_packages: list,
+    buildrequires_src: str | None,
+) -> int:
+    """Promote a minimal bootstrap image into a full build image.
+
+    Boots the minimal image in a throwaway container with scriptlets active,
+    adds custom media if requested, runs a full `urpm upgrade` (rejoue les
+    scriptlets non tournés en Phase 1), installs the requested extras plus
+    any BuildRequires, then commits the result as ``final_tag``.
+    """
+    from .. import colors
+
+    cid = None
+    try:
+        print(_("  Booting minimal image {tag}...").format(tag=minimal_tag))
+        cid = container.run(
+            minimal_tag, ['sleep', 'infinity'],
+            detach=True, rm=False, network='host',
+        )
+        print(_("  Container: {cid}").format(cid=cid[:12]))
+
+        for name, url in addmedia:
+            print(_("  Adding media {name}...").format(name=name))
+            add_cmd = ['urpm', 'media', 'add', '--custom', name, name, url]
+            if import_key:
+                add_cmd.append('--import-key')
+            ret = container.exec_stream(cid, add_cmd)
+            if ret != 0:
+                print(colors.error(
+                    _("Failed to add media {name} ({url})").format(
+                        name=name, url=url)))
+                return 1
+
+        print(_("  Updating media..."))
+        ret = container.exec_stream(cid, ['urpm', 'media', 'update'])
+        if ret != 0:
+            print(colors.warning(_("  Warning: media update returned {code}").format(code=ret)))
+
+        # Note: bootstrap scriptlets are NOT replayed in bulk here. A blanket
+        # `rpm -Uvh --replacepkgs` over the bootstrap set breaks on packages
+        # that own system-critical directories (e.g. filesystem owns /proc,
+        # which cannot be rewritten while mounted). Phase 1 already bootstraps
+        # the TLS trust store via `update-ca-trust extract`, which is the only
+        # scriptlet known to be load-bearing for Phase 2 operations. The
+        # `urpm upgrade` below will naturally replay scriptlets for any
+        # bootstrap package that has a newer version available.
+        print(_("  Upgrading packages (picks up any newer versions)..."))
+        ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto'])
+        if ret != 0:
+            print(colors.warning(_("  Warning: upgrade returned {code}").format(code=ret)))
+
+        if extra_packages:
+            print(_("  Installing {n} extra packages...").format(n=len(extra_packages)))
+            ret = container.exec_stream(
+                cid, ['urpm', 'install', '--auto', *extra_packages])
+            if ret != 0:
+                print(colors.error(_("Failed to install extra packages")))
+                return 1
+
+        if buildrequires_src:
+            src_path = Path(buildrequires_src).resolve()
+            if not src_path.exists():
+                print(colors.error(_("BuildRequires source not found: {p}").format(p=src_path)))
+                return 1
+            dst_in_container = f"/tmp/{src_path.name}"
+            print(_("  Copying {name} into container...").format(name=src_path.name))
+            if not container.cp(str(src_path), f"{cid}:{dst_in_container}"):
+                print(colors.error(_("Failed to copy BuildRequires source")))
+                return 1
+            print(_("  Installing BuildRequires..."))
+            ret = container.exec_stream(
+                cid, ['urpm', 'install', '--auto', '--buildrequires', dst_in_container])
+            if ret != 0:
+                print(colors.error(_("Failed to install BuildRequires")))
+                return 1
+
+        # Stop any lingering processes before commit
+        container.exec(cid, ['sh', '-c', 'kill 1 2>/dev/null || true'])
+
+        print(_("  Committing image {tag}...").format(tag=final_tag), end='', flush=True)
+        if not container.commit(cid, final_tag):
+            print()
+            print(colors.error(_("Failed to commit image")))
             return 1
-        # Add rpm-build too (needed for rpmbuild)
-        packages.append('rpm-build')
-        packages.extend(br_packages)
-        # Deduplicate while preserving order
-        seen = set()
-        deduped = []
-        for p in packages:
-            if p not in seen:
-                seen.add(p)
-                deduped.append(p)
-        packages = deduped
-        print(_("  BuildRequires from: {path}").format(path=buildrequires_src))
-        print("  " + ngettext(
-            "  {count} extra build dependency",
-            "  {count} extra build dependencies",
-            len(br_packages)).format(count=len(br_packages)))
+        print(_(" done"))
+        return 0
 
-    print(_("\nCreating image: {tag}").format(tag=tag))
-    print("  " + _("Release: {release}").format(release=release))
-    print("  " + _("Architecture: {arch}").format(arch=arch))
-    print("  " + _("Profile: {name} ({description})").format(
-        name=profile_name, description=profile['description']))
-    print("  " + ngettext(
-        "Packages: {count}",
-        "Packages: {count}",
-        len(packages)).format(count=len(packages)))
+    except Exception as e:
+        print(colors.error(_("Phase 2 failed: {error}").format(error=e)))
+        return 1
 
-    # Determine working directory (default: ~/.cache/urpm/mkimage)
+    finally:
+        if cid:
+            container.rm(cid, force=True)
+
+
+def _find_local_urpm_rpm() -> Path | None:
+    """Search standard locations for a local urpm-ng RPM (fallback when
+    urpm-ng isn't yet in official repos)."""
+    search_dirs = [
+        Path.home() / 'Downloads',
+        Path('./rpmbuild/RPMS'),
+        Path.home() / 'rpmbuild/RPMS',
+        Path('.'),
+    ]
+    for search_dir in search_dirs:
+        if search_dir.exists():
+            candidates = list(search_dir.glob('**/urpm-ng-core-*.rpm'))
+            if not candidates:
+                candidates = list(search_dir.glob('**/urpm-ng-*.rpm'))
+            if candidates:
+                return max(candidates, key=lambda p: p.stat().st_mtime)
+    return None
+
+
+def _ensure_system_accounts(chroot: str) -> None:
+    """Pre-seed /etc/passwd and /etc/group with system accounts needed by
+    bootstrap packages installed in --noscripts mode.
+
+    Entries follow Mageia UID/GID conventions. Idempotent: lines are only
+    appended when the name is not already present. No systemd dependency —
+    plain text file manipulation only.
+    """
+    passwd_path = Path(chroot) / 'etc/passwd'
+    group_path = Path(chroot) / 'etc/group'
+    passwd_path.parent.mkdir(parents=True, exist_ok=True)
+    if not passwd_path.exists():
+        passwd_path.write_text(
+            'root:x:0:0:root:/root:/bin/bash\n'
+            'bin:x:1:1:bin:/bin:/sbin/nologin\n'
+            'daemon:x:2:2:daemon:/sbin:/sbin/nologin\n'
+        )
+    if not group_path.exists():
+        group_path.write_text('root:x:0:\nbin:x:1:\ndaemon:x:2:\n')
+
+    # (name, uid, gid, gecos, home, shell) — matches Mageia rpm-mageia-setup
+    users = [
+        ('rpm',         37, 37, 'RPM database owner', '/var/lib/rpm', '/sbin/nologin'),
+        ('messagebus',  81, 81, 'D-Bus system daemon', '/',            '/sbin/nologin'),
+        ('polkitd',    997, 997, 'PolicyKit daemon',   '/',            '/sbin/nologin'),
+    ]
+    # (name, gid, members) — groups without a matching user
+    groups = [
+        ('shadow',          15, ''),
+        ('utempter',        35, ''),
+        ('systemd-journal', 190, ''),
+    ]
+
+    passwd_text = passwd_path.read_text()
+    existing_users = {line.split(':', 1)[0] for line in passwd_text.splitlines() if line}
+    new_passwd = []
+    new_group_members = {}
+    for name, uid, gid, gecos, home, shell in users:
+        if name in existing_users:
+            continue
+        new_passwd.append(f"{name}:x:{uid}:{gid}:{gecos}:{home}:{shell}")
+        new_group_members[name] = gid
+
+    if new_passwd:
+        with passwd_path.open('a') as f:
+            f.write('\n'.join(new_passwd) + '\n')
+
+    group_text = group_path.read_text()
+    existing_groups = {line.split(':', 1)[0] for line in group_text.splitlines() if line}
+    new_group = []
+    for name, gid in new_group_members.items():
+        if name not in existing_groups:
+            new_group.append(f"{name}:x:{gid}:")
+    for name, gid, members in groups:
+        if name not in existing_groups:
+            new_group.append(f"{name}:x:{gid}:{members}")
+
+    if new_group:
+        with group_path.open('a') as f:
+            f.write('\n'.join(new_group) + '\n')
+
+
+def _phase1_bootstrap_chroot(
+    args,
+    release: str,
+    arch: str,
+    minimal_tag: str,
+    container: 'Container',
+    db: 'PackageDatabase',
+    bootstrap_packages: list | None = None,
+) -> int:
+    """Build a minimal bootstrap chroot and import it as ``minimal_tag``.
+
+    Phase 1 of mkimage. Installs only the packages from the ``bootstrap``
+    profile with ``--noscripts`` (setup, filesystem, glibc, bash,
+    coreutils, grep/sed/awk/findutils, util-linux, shadow-utils, rpm,
+    urpmi, ca-certificates, curl). Then installs urpm-ng separately
+    (repo first, local RPM fallback) since it is not yet in Mageia's
+    official repos. Phase 2 will boot this image and rejoue les
+    scriptlets via `urpm upgrade` before installing any extras.
+    """
+    from ...core.database import PackageDatabase
+    from .. import colors
+
+    if bootstrap_packages is None:
+        bootstrap = load_profiles().get('bootstrap')
+        if bootstrap is None:
+            print(colors.error(_("Error: 'bootstrap' profile not found")))
+            return 1
+        bootstrap_packages = list(bootstrap['packages'])
+    else:
+        bootstrap_packages = list(bootstrap_packages)
+
+    keep_chroot = getattr(args, 'keep_chroot', False)
+
     workdir = getattr(args, 'workdir', None)
     if not workdir:
-        # Use XDG cache directory as default (better than /tmp for large builds)
         xdg_cache = os.environ.get('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
         workdir = os.path.join(xdg_cache, 'urpm', 'mkimage')
         os.makedirs(workdir, exist_ok=True)
 
-    # Check available disk space (require at least 2 GB)
     MIN_SPACE_GB = 2
     try:
         stat = os.statvfs(workdir)
@@ -264,43 +486,29 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             print(colors.error(_("Insufficient disk space in {path}").format(path=workdir)))
             print(colors.error(_("  Available: {available:.1f} GB, required: {required} GB").format(
                 available=free_gb, required=MIN_SPACE_GB)))
-            print(colors.dim(_("  Use --workdir to specify a different location")))
             return 1
     except OSError as e:
         print(colors.warning(_("Could not check disk space: {error}").format(error=e)))
 
-    # Create temporary directory for chroot
     tmpdir = tempfile.mkdtemp(prefix='urpm-mkimage-', dir=workdir)
-    print(_("\nBuilding chroot in {path}...").format(path=tmpdir))
+    print(_("  Bootstrap chroot: {path}").format(path=tmpdir))
 
     try:
-        # Create tmp dir in chroot
-        chroot_tmp_path = Path(tmpdir) / "tmp"
-        chroot_tmp_path.mkdir(parents=True, exist_ok=True)
-        # Create a PackageDatabase specific to the chroot
-        # This ensures media configuration is stored IN the chroot, not on the host
+        (Path(tmpdir) / "tmp").mkdir(parents=True, exist_ok=True)
         chroot_db_path = Path(tmpdir) / "var/lib/urpm/packages.db"
         chroot_db_path.parent.mkdir(parents=True, exist_ok=True)
         chroot_db = PackageDatabase(db_path=chroot_db_path)
 
-        # 1. Initialize chroot with urpm
-        print(_("\n[1/8] Initializing chroot..."))
+        print(_("  Initializing chroot media..."))
         init_args = argparse.Namespace(
-            urpm_root=tmpdir,
-            release=release,
-            arch=arch,
-            mirrorlist=None,
-            auto=True,
-            no_sync=False,
-            no_mount=True,  # Skip mount operations - we mount /proc and /sys ourselves below
+            urpm_root=tmpdir, release=release, arch=arch,
+            mirrorlist=None, auto=True, no_sync=False, no_mount=True,
         )
         ret = cmd_init(init_args, chroot_db)
         if ret != 0:
             print(colors.error(_("Failed to initialize chroot")))
             return ret
 
-        # Mount /proc and /sys for scriptlets (root only — in rootless mode
-        # scriptlets are disabled via --noscripts so the mounts are unnecessary)
         if os.geteuid() == 0:
             proc_path = os.path.join(tmpdir, 'proc')
             sys_path = os.path.join(tmpdir, 'sys')
@@ -309,597 +517,122 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
             subprocess.run(['mount', '-t', 'proc', 'proc', proc_path], check=True)
             subprocess.run(['mount', '-t', 'sysfs', 'sysfs', sys_path], check=True)
 
-        # 2. Install packages
-        # Use noscripts when not root (user namespace) - scriptlets often fail
-        use_noscripts = os.geteuid() != 0
-
-        # Suppress systemd D-Bus warnings in chroot (no systemd running)
         os.environ['SYSTEMD_OFFLINE'] = '1'
 
-        # Install setup+filesystem with --noscripts to avoid "group shadow does not exist"
-        # The scriptlets of glibc (dependency) run before setup's files are in place
-        print(_("\n[2/8] Installing setup (--noscripts)..."))
-        setup_args = argparse.Namespace(
-            urpm_root=tmpdir,
-            root=tmpdir,
-            packages=['setup'],
-            auto=True,
-            without_recommends=True,
-            with_suggests=False,
-            download_only=False,
-            nodeps=False,
-            nosignature=False,
-            noscripts=True,  # Always noscripts for bootstrap to avoid group warnings
-            force=False,
-            reinstall=False,
-            debug=None,
-            watched=None,
-            prefer=None,
-            all=False,
-            test=False,
-            sync=True,
-            allow_no_root=True,
-            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
-            no_readme=True,  # Suppress README.urpmi display in mkimage
-        )
-        # Pre-create system accounts that %pre scriptlets would normally add
-        # (rpm, messagebus, shadow, systemd-journal, utempter…)
-        # Must run before step 2 so setup's own files find the groups they need.
-        if use_noscripts:
-            added = _ensure_system_accounts(tmpdir)
-            if added:
-                print(colors.dim(_("  Pre-created {n} system accounts").format(n=added)))
-
-        ret = cmd_install(setup_args, chroot_db)
-        if ret != 0:
-            print(colors.error(_("Failed to install setup")))
-            return ret
-
-        # Re-create system accounts: config_policy='replace' moved setup's
-        # pristine /etc/group over our enriched version.  Re-populate it.
-        if use_noscripts:
-            _ensure_system_accounts(tmpdir)
-
-        # Install filesystem to create directory structure and symlinks
-        if use_noscripts:
-            print(_("\n[3/8] Installing filesystem (--noscripts)..."))
-        else:
-            print(_("\n[3/8] Installing filesystem..."))
-        fs_args = argparse.Namespace(
-            urpm_root=tmpdir,
-            root=tmpdir,
-            packages=['filesystem'],
-            auto=True,
-            without_recommends=True,
-            with_suggests=False,
-            download_only=False,
-            nodeps=False,
-            nosignature=False,
-            noscripts=use_noscripts,
-            force=False,
-            reinstall=False,
-            debug=None,
-            watched=None,
-            prefer=None,
-            all=False,
-            test=False,
-            sync=True,
-            allow_no_root=True,
-            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
-            no_readme=True,  # Suppress README.urpmi display in mkimage
-        )
-        ret = cmd_install(fs_args, chroot_db)
-        if ret != 0:
-            print(colors.error(_("Failed to install filesystem")))
-            return ret
-
-        # DEBUG: Verify filesystem is actually installed
-        rpm_db_dir = Path(tmpdir) / 'var/lib/rpm'
-        if DEBUG_MKIMAGE:
-            print(colors.dim(f"  DEBUG: RPM db dir: {rpm_db_dir}"))
-        if rpm_db_dir.exists():
-            db_files = list(rpm_db_dir.iterdir())
-            if DEBUG_MKIMAGE:
-                print(colors.dim(f"  DEBUG: RPM db files: {[f.name for f in db_files]}"))
-            # Check if rpmdb.sqlite exists and has content
-            rpmdb_sqlite = rpm_db_dir / 'rpmdb.sqlite'
-            if rpmdb_sqlite.exists():
-                if DEBUG_MKIMAGE:
-                    print(colors.dim(f"  DEBUG: rpmdb.sqlite size: {rpmdb_sqlite.stat().st_size} bytes"))
-        else:
-            if DEBUG_MKIMAGE:
-                print(colors.error(f"  DEBUG: RPM db dir does not exist!"))
-
-        check = subprocess.run(
-            ['rpm', '--root', tmpdir, '-q', 'filesystem'],
-            capture_output=True, text=True
-        )
-        if check.returncode != 0:
-            if DEBUG_MKIMAGE:
-                print(colors.error(f"  DEBUG: filesystem NOT installed! rpm -q says: {check.stderr}"))
-            # Also try rpm -qa to see what IS installed
-            qa_result = subprocess.run(
-                ['rpm', '--root', tmpdir, '-qa'],
-                capture_output=True, text=True
+        def _noscripts_install(pkgs: list, label: str, nosig: bool = False) -> int:
+            print(_("  Installing {label}...").format(label=label))
+            ns = argparse.Namespace(
+                urpm_root=tmpdir, root=tmpdir,
+                packages=pkgs, auto=True,
+                without_recommends=True, with_suggests=False,
+                download_only=False, nodeps=False, nosignature=nosig,
+                noscripts=True, force=False, reinstall=False,
+                debug=None, watched=None, prefer=None,
+                all=False, test=False, sync=True,
+                allow_no_root=True, config_policy='replace', no_readme=True,
             )
-            pkg_count = len(qa_result.stdout.strip().split('\n')) if qa_result.stdout.strip() else 0
-            if DEBUG_MKIMAGE:
-                print(colors.dim(f"  DEBUG: rpm -qa shows {pkg_count} packages"))
-                if pkg_count > 0 and pkg_count < 10:
-                    print(colors.dim(f"  DEBUG: packages: {qa_result.stdout.strip()}"))
-        else:
-            if DEBUG_MKIMAGE:
-                print(colors.success(f"  DEBUG: filesystem installed: {check.stdout.strip()}"))
+            return cmd_install(ns, chroot_db)
 
-        # Check symlinks
-        bin_path = Path(tmpdir) / 'bin'
-        if bin_path.is_symlink():
-            if DEBUG_MKIMAGE:
-                print(colors.success(f"  DEBUG: /bin is symlink -> {bin_path.resolve()}"))
-        elif bin_path.exists():
-            if DEBUG_MKIMAGE:
-                print(colors.error(f"  DEBUG: /bin exists but is NOT a symlink!"))
-            # Mageia 9: /bin is a real directory, create /bin/false and /bin/true
-            # for useradd scriptlets that run before coreutils is installed
-            for cmd, exitcode in [('false', 1), ('true', 0)]:
-                cmd_path = bin_path / cmd
-                if not cmd_path.exists():
-                    usr_cmd = Path(tmpdir) / 'usr' / 'bin' / cmd
-                    if usr_cmd.exists():
-                        cmd_path.symlink_to(f'/usr/bin/{cmd}')
-                    else:
-                        with open(cmd_path, 'w') as f:
-                            f.write(f'#!/bin/sh\nexit {exitcode}\n')
-                        os.chmod(cmd_path, 0o755)
-            for cmd, exitcode in [('false', 1), ('true', 0)]:
-                cmd_path = bin_path / cmd
-                if not cmd_path.exists():
-                    usr_cmd = Path(tmpdir) / 'usr' / 'bin' / cmd
-                    if usr_cmd.exists():
-                        cmd_path.symlink_to(f'/usr/bin/{cmd}')
-                    else:
-                        with open(cmd_path, 'w') as f:
-                            f.write(f'#!/bin/sh\nexit {exitcode}\n')
-                        os.chmod(cmd_path, 0o755)
-            if DEBUG_MKIMAGE:
-                print(colors.dim(f"  DEBUG: Created /bin/false and /bin/true stubs"))
-            # Mageia 9: when /bin is real dir, provide /bin/bash and /bin/grep early
-            for cmd in ['bash', 'grep', 'sh']:
-                usr_cmd = Path(tmpdir) / 'usr' / 'bin' / cmd
-                if not usr_cmd.exists():
-                    cmd_path = bin_path / cmd
-                    if cmd_path.exists():
-                        usr_cmd.symlink_to(f'/bin/{cmd}')
-                    else:
-                        # Fallback minimal wrapper
-                        with open(usr_cmd, 'w') as f:
-                            f.write('#!/bin/sh\nexec /bin/' + cmd + ' "$@"\n')
-                        os.chmod(cmd_path, 0o755)
-            if DEBUG_MKIMAGE:
-                print(colors.dim(f"  DEBUG: Created /usr/bin/grep and /usr/bin/bash stubs"))
-        else:
-            if DEBUG_MKIMAGE:
-                print(colors.error(f"  DEBUG: /bin does not exist!"))
-
-        # Install coreutils separately to ensure basename/dirname are available
-        # for other packages' scriptlets
-        print(_("\n[4/8] Installing coreutils..."))
-        coreutils_args = argparse.Namespace(
-            urpm_root=tmpdir,
-            root=tmpdir,
-            packages=['coreutils'],
-            auto=True,
-            without_recommends=True,
-            with_suggests=False,
-            download_only=False,
-            nodeps=False,
-            nosignature=False,
-            noscripts=use_noscripts,
-            force=False,
-            reinstall=False,
-            debug=None,
-            watched=None,
-            prefer=None,
-            all=False,
-            test=False,
-            sync=True,
-            allow_no_root=True,
-            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
-            no_readme=True,  # Suppress README.urpmi display in mkimage
-        )
-        ret = cmd_install(coreutils_args, chroot_db)
-        if ret != 0:
+        # Pre-seed system accounts that subsequent packages ship files owned by.
+        # With --noscripts, the %pre of `setup` and friends does not run, so rpm
+        # warns "user X does not exist - using root" and chowns to root. The
+        # entries below match Mageia conventions; they are idempotent (skipped
+        # if already present). Systemd-independent on purpose: no sysusers call.
+        # Must run BEFORE the setup install: files shipped by packages pulled in
+        # as deps of setup (e.g. shadow group references) also need these.
+        _ensure_system_accounts(tmpdir)
+        if _noscripts_install(['setup'], 'setup') != 0:
+            print(colors.error(_("Failed to install setup")))
+            return 1
+        # The setup package ships /etc/passwd and overwrites ours on first
+        # install (config file, no previous version to diff against). Re-seed
+        # so subsequent package extractions resolve rpm/messagebus/polkitd.
+        _ensure_system_accounts(tmpdir)
+        if _noscripts_install(['filesystem'], 'filesystem') != 0:
+            print(colors.error(_("Failed to install filesystem")))
+            return 1
+        if _noscripts_install(['coreutils'], 'coreutils') != 0:
             print(colors.error(_("Failed to install coreutils")))
-            return ret
+            return 1
 
-        # Now install remaining packages
-        remaining_packages = [p for p in packages if p not in ('setup', 'filesystem', 'coreutils')]
-        if use_noscripts:
-            print(_("\n[5/8] Installing packages (--noscripts for user namespace)..."))
-        else:
-            print(_("\n[5/8] Installing packages..."))
-        install_args = argparse.Namespace(
-            urpm_root=tmpdir,
-            root=tmpdir,
-            packages=remaining_packages,
-            auto=True,
-            without_recommends=True,
-            with_suggests=False,
-            download_only=False,
-            nodeps=False,
-            nosignature=False,
-            noscripts=use_noscripts,
-            force=False,
-            reinstall=False,
-            debug=None,
-            watched=None,
-            prefer=None,
-            all=False,
-            test=False,
-            sync=True,  # Wait for all scriptlets to complete
-            allow_no_root=True,  # Installing to user-owned chroot
-            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
-            no_readme=True,  # Suppress README.urpmi display in mkimage
-        )
-        ret = cmd_install(install_args, chroot_db)
-        if ret != 0:
-            print(colors.error(_("Failed to install packages")))
-            return ret
-
-        # 3. Install urpm (this project)
-        print(_("\n[6/8] Installing urpm..."))
-
-        # First try from repos (for when it's officially available)
-        # Use noscripts=True because urpm-ng's post-install runs autoconfig
-        # which would conflict with the config already set up by cmd_init
-        urpm_install_args = argparse.Namespace(
-            urpm_root=tmpdir,
-            root=tmpdir,
-            packages=['urpm'],
-            auto=True,
-            without_recommends=True,
-            with_suggests=False,
-            download_only=False,
-            nodeps=False,
-            nosignature=False,
-            noscripts=True,  # Skip post-install autoconfig (already done by cmd_init)
-            force=False,
-            reinstall=False,
-            debug=None,
-            watched=None,
-            prefer=None,
-            all=False,
-            test=False,
-            sync=True,  # Wait for all scriptlets to complete
-            allow_no_root=True,  # Installing to user-owned chroot
-            config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
-            no_readme=True,  # Suppress README.urpmi display in mkimage
-        )
-        ret = cmd_install(urpm_install_args, chroot_db)
-
-        if ret != 0:
-            # urpm not in repos - look for local RPM
-            print(_("  urpm not found in repositories, looking for local RPM..."))
-
-            # Search common locations (all architectures)
-            search_dirs = [
-                Path.home() / 'Downloads',
-                Path('./rpmbuild/RPMS'),
-                Path.home() / 'rpmbuild/RPMS',
-                Path('.'),
-            ]
-
-            urpm_rpm = None
-            for search_dir in search_dirs:
-                if search_dir.exists():
-                    # Search recursively for urpm-ng-core or urpm-ng RPMs
-                    candidates = list(search_dir.glob('**/urpm-ng-core-*.rpm'))
-                    if not candidates:
-                        candidates = list(search_dir.glob('**/urpm-ng-*.rpm'))
-                    if candidates:
-                        # Take most recent
-                        urpm_rpm = max(candidates, key=lambda p: p.stat().st_mtime)
-                        break
-
-            if urpm_rpm:
-                default_path = str(urpm_rpm)
-                prompt = f"  Found: {default_path}\n  Press Enter to use, or provide another path: "
-            else:
-                default_path = ""
-                prompt = "  Path to urpm RPM file: "
-
-            user_input = input(prompt).strip()
-            rpm_path = Path(user_input) if user_input else (Path(default_path) if default_path else None)
-
-            if not rpm_path or not rpm_path.exists():
-                print(colors.error(_("No urpm RPM provided or file not found")))
-                print(_("  Build it with: make rpm"))
+        remaining = [p for p in bootstrap_packages
+                     if p not in ('setup', 'filesystem', 'coreutils')]
+        if remaining:
+            label = _("bootstrap remainder ({n} pkgs)").format(n=len(remaining))
+            if _noscripts_install(remaining, label) != 0:
+                print(colors.error(_("Failed to install bootstrap packages")))
                 return 1
 
-            # Install RPM using urpm with noscripts (post-install autoconfig
-            # would conflict with config already set up by cmd_init)
-            urpm_local_args = argparse.Namespace(
-                urpm_root=tmpdir,
-                root=tmpdir,
-                packages=[str(rpm_path.resolve())],
-                auto=True,
-                without_recommends=True,
-                with_suggests=False,
-                download_only=False,
-                nodeps=False,
-                nosignature=True,  # Local build, no signature
-                noscripts=True,  # Skip post-install autoconfig (already done by cmd_init)
-                force=False,
-                reinstall=False,
-                debug=None,
-                watched=None,
-                prefer=None,
-                all=False,
-                test=False,
-                sync=True,  # Wait for all scriptlets to complete
-                allow_no_root=True,  # Installing to user-owned chroot
-                config_policy='replace',  # Replace config files in mkimage (no .rpmnew)
-            no_readme=True,  # Suppress README.urpmi display in mkimage
-            )
-            ret = cmd_install(urpm_local_args, chroot_db)
-            if ret != 0:
-                print(colors.error(_("Failed to install urpm")))
-                return ret
+        # urpm-ng: try repos, fallback to local RPM
+        print(_("  Installing urpm-ng..."))
+        if _noscripts_install(['urpm-ng'], 'urpm-ng from repos') != 0:
+            print(_("    repos failed, looking for local urpm-ng RPM..."))
+            local_rpm = _find_local_urpm_rpm()
+            if local_rpm is not None:
+                prompt = _("  Found: {path}\n  Press Enter to use, or provide another path: "
+                           ).format(path=local_rpm)
+                default_path = str(local_rpm)
+            else:
+                prompt = _("  Path to urpm-ng RPM file: ")
+                default_path = ""
+            user_input = input(prompt).strip()
+            rpm_path = Path(user_input) if user_input else (Path(default_path) if default_path else None)
+            if not rpm_path or not rpm_path.exists():
+                print(colors.error(_("No urpm-ng RPM provided or file not found")))
+                print(_("  Build it with: make rpm"))
+                return 1
+            if _noscripts_install([str(rpm_path.resolve())],
+                                  _("urpm-ng from {name}").format(name=rpm_path.name),
+                                  nosig=True) != 0:
+                print(colors.error(_("Failed to install urpm-ng")))
+                return 1
             print(colors.success(_("  Installed {name}").format(name=rpm_path.name)))
+
+        # Bootstrap the TLS trust store inside the chroot so the committed
+        # `<release>-minimal` image can do HTTPS out of the box (Phase 2's
+        # own replay would otherwise face a chicken-and-egg: downloading the
+        # RPMs to re-run ca scriptlets itself needs HTTPS). This is the ONLY
+        # exec-in-chroot we allow in Phase 1 — it's the exact command the
+        # `rootcerts` %post runs, and keeps the minimal image self-sufficient.
+        print(_("  Bootstrapping TLS trust store..."))
+        uct_bin = Path(tmpdir) / 'usr/bin/update-ca-trust'
+        if uct_bin.exists():
+            chroot_cmd = ['chroot', tmpdir, '/usr/bin/update-ca-trust', 'extract']
+            if os.geteuid() != 0:
+                chroot_cmd = ['podman', 'unshare'] + chroot_cmd
+            uct = subprocess.run(chroot_cmd, capture_output=True, text=True)
+            if uct.returncode != 0:
+                print(colors.warning(_(
+                    "  Warning: update-ca-trust returned {rc}: {err}").format(
+                    rc=uct.returncode, err=uct.stderr.strip())))
         else:
-            print(colors.success(_("  urpm installed from repositories")))
+            print(colors.warning(_(
+                "  Warning: update-ca-trust not found in chroot (TLS may fail)")))
 
-        # Run essential post-install fixups (compensate for --noscripts)
-        if use_noscripts:
-            print(colors.dim(_("  Post-install fixups (--noscripts)...")))
-            _run_chroot_fixups(tmpdir, use_unshare=True)
-
-        # 4. Cleanup chroot to reduce image size
-        print(_("\n[7/8] Cleaning up chroot..."))
-        # Ensure database is closed (may already be closed before urpm install)
+        print(_("  Cleaning up chroot..."))
         chroot_db.close()
         _cleanup_chroot_for_image(tmpdir)
+        cmd_cleanup(argparse.Namespace(urpm_root=tmpdir), None)
 
-        # Unmount any filesystems
-        cleanup_args = argparse.Namespace(urpm_root=tmpdir)
-        cmd_cleanup(cleanup_args, db)
-
-        # 5. Create container image
-        print(_("\n[8/8] Creating container image {tag}...").format(tag=tag))
-        # Estimate chroot size for user feedback
-        try:
-            total_size = sum(
-                os.path.getsize(os.path.join(dirpath, filename))
-                for dirpath, dirnames, filenames in os.walk(tmpdir)
-                for filename in filenames
-                if os.path.isfile(os.path.join(dirpath, filename))
-            )
-            size_mb = total_size / (1024 * 1024)
-            print(_("  Chroot size: {size:.1f} MB").format(size=size_mb))
-        except Exception:
-            pass
-        print(_("  Archiving and importing (this may take a moment)..."), end='', flush=True)
-        # Use podman unshare for import when not root (same UID/GID mapping as install)
-        if not container.import_from_dir(tmpdir, tag, use_unshare=use_noscripts):
-            print()  # newline after "..."
-            print(colors.error(_("Failed to create container image")))
+        print(_("  Importing as {tag}...").format(tag=minimal_tag), end='', flush=True)
+        if not container.import_from_dir(tmpdir, minimal_tag,
+                                          use_unshare=(os.geteuid() != 0)):
+            print()
+            print(colors.error(_("Failed to import minimal image")))
             return 1
         print(_(" done"))
-
-        # Get image size
-        images = container.images(filter_name=tag)
-        size = images[0]['size'] if images else 'unknown'
-
-        print(colors.success(f"\n{'='*60}"))
-        print(colors.success(_("Image created successfully!")))
-        print(colors.success(f"{'='*60}"))
-        print("  " + _("Tag:  {tag}").format(tag=tag))
-        print("  " + _("Size: {size}").format(size=size))
-        print(_("\nUsage:"))
-        print(f"  {runtime.name} run -it {tag} /bin/bash")
-        print(f"  urpm build --image {tag} ./package.src.rpm")
-
         return 0
 
     except Exception as e:
-        print(colors.error(_("Error: {error}").format(error=e)))
+        print(colors.error(_("Phase 1 failed: {error}").format(error=e)))
         return 1
 
     finally:
         if not keep_chroot:
-            # Unmount /proc and /sys before removing the chroot tree
-            cleanup_args = argparse.Namespace(urpm_root=tmpdir)
-            cmd_cleanup(cleanup_args, db)
-            print(_("\nCleaning up temporary directory..."))
+            cmd_cleanup(argparse.Namespace(urpm_root=tmpdir), None)
             shutil.rmtree(tmpdir, ignore_errors=True)
         else:
-            print(_("\nChroot kept at: {path}").format(path=tmpdir))
-
-
-def _ensure_system_accounts(chroot: str) -> None:
-    """Pre-create system users/groups that packages expect in --noscripts mode.
-
-    When scriptlets are disabled, %pre scripts that normally create system
-    accounts (rpm, dbus, systemd…) don't run.  Pre-creating them prevents
-    RPM warnings like "user rpm does not exist - using root".
-    """
-    # Standard Mageia system accounts (stable across releases)
-    _SYSTEM_USERS = [
-        # (name, uid, gid, comment, home, shell)
-        ('rpm', 992, 992, 'RPM user', '/var/lib/rpm', '/bin/false'),
-        ('messagebus', 999, 999, 'D-Bus message bus', '/', '/sbin/nologin'),
-        ('polkitd', 997, 997, 'PolicyKit daemon', '/', '/sbin/nologin'),
-    ]
-    _SYSTEM_GROUPS = [
-        # (name, gid)
-        ('shadow', 25),
-        ('messagebus', 999),
-        ('systemd-journal', 190),
-        ('utempter', 35),
-        ('rpm', 992),
-        ('polkitd', 997),
-    ]
-
-    passwd_path = os.path.join(chroot, 'etc/passwd')
-    group_path = os.path.join(chroot, 'etc/group')
-
-    # Read existing entries
-    existing_users: set[str] = set()
-    try:
-        with open(passwd_path) as f:
-            for line in f:
-                if ':' in line:
-                    existing_users.add(line.split(':')[0])
-    except FileNotFoundError:
-        pass
-
-    existing_groups: set[str] = set()
-    try:
-        with open(group_path) as f:
-            for line in f:
-                if ':' in line:
-                    existing_groups.add(line.split(':')[0])
-    except FileNotFoundError:
-        pass
-
-    # Append missing entries
-    added = 0
-    with open(passwd_path, 'a') as f:
-        for name, uid, gid, comment, home, shell in _SYSTEM_USERS:
-            if name not in existing_users:
-                f.write(f'{name}:x:{uid}:{gid}:{comment}:{home}:{shell}\n')
-                added += 1
-
-    with open(group_path, 'a') as f:
-        for name, gid in _SYSTEM_GROUPS:
-            if name not in existing_groups:
-                f.write(f'{name}:x:{gid}:\n')
-                added += 1
-
-    return added
-
-
-def _replay_alternatives(chroot: str, use_unshare: bool) -> None:
-    """Extract and replay update-alternatives --install from installed RPMs.
-
-    When packages are installed with --noscripts, their %post scriptlets
-    don't run.  Many packages (gcc, g++, cpp, java, vim…) use
-    update-alternatives in %post to create symlinks.  This function
-    reads all post-install scripts from the chroot's RPM database,
-    extracts the ``update-alternatives --install`` calls, and replays
-    them so that the expected commands (gcc, g++, etc.) are available.
-    """
-    import re
-    from .. import colors
-
-    print(colors.dim(f"    {_('alternatives')}..."), end='', flush=True)
-
-    # Query all post-install scripts from the chroot's RPM database
-    try:
-        result = subprocess.run(
-            ['rpm', '--root', chroot, '-qa', '--scripts'],
-            capture_output=True, text=True, timeout=60,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        print(colors.dim(f" {_('skipped')}"))
-        return
-
-    if result.returncode != 0:
-        print(colors.dim(f" {_('skipped')}"))
-        return
-
-    # Extract update-alternatives --install lines (with or without /usr/sbin/ prefix)
-    pattern = re.compile(
-        r'(?:/usr/sbin/)?update-alternatives\s+--install\s+.+'
-    )
-    commands = []
-    for line in result.stdout.splitlines():
-        stripped = line.strip()
-        m = pattern.match(stripped)
-        if m:
-            commands.append(m.group())
-
-    if not commands:
-        print(colors.dim(" ok (none)"))
-        return
-
-    # Deduplicate (same command can appear in multiple package versions)
-    commands = list(dict.fromkeys(commands))
-
-    # Execute each in the chroot
-    success = 0
-    for cmd_line in commands:
-        # Normalize: ensure full path to update-alternatives
-        if not cmd_line.startswith('/'):
-            cmd_line = '/usr/sbin/' + cmd_line
-        try:
-            if use_unshare:
-                r = subprocess.run(
-                    ['podman', 'unshare', 'chroot', chroot, 'sh', '-c', cmd_line],
-                    capture_output=True, text=True, timeout=10,
-                )
-            else:
-                r = subprocess.run(
-                    ['chroot', chroot, 'sh', '-c', cmd_line],
-                    capture_output=True, text=True, timeout=10,
-                )
-            if r.returncode == 0:
-                success += 1
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-    print(colors.dim(f" ok ({success}/{len(commands)})"))
-
-
-def _run_chroot_fixups(chroot: str, use_unshare: bool) -> None:
-    """Run essential commands in the chroot to compensate for --noscripts.
-
-    Executes post-install triggers that scriptlets would normally handle:
-    update-ca-trust (SSL certificates), ldconfig (shared library cache),
-    and update-alternatives (gcc, g++, cpp, etc.).
-    """
-    from .. import colors
-
-    fixups = [
-        ('update-ca-trust', _("CA certificates")),
-        ('ldconfig', _("shared library cache")),
-    ]
-
-    for cmd, desc in fixups:
-        # Locate the command in the chroot
-        cmd_path = None
-        for d in ('usr/bin', 'usr/sbin', 'sbin', 'bin'):
-            p = os.path.join(chroot, d, cmd)
-            if os.path.isfile(p):
-                cmd_path = f'/{d}/{cmd}'
-                break
-
-        if not cmd_path:
-            continue
-
-        print(colors.dim(f"    {desc}..."), end='', flush=True)
-
-        try:
-            if use_unshare:
-                result = subprocess.run(
-                    ['podman', 'unshare', 'chroot', chroot, cmd_path],
-                    capture_output=True, text=True, timeout=30,
-                )
-            else:
-                result = subprocess.run(
-                    ['chroot', chroot, cmd_path],
-                    capture_output=True, text=True, timeout=30,
-                )
-
-            if result.returncode == 0:
-                print(colors.dim(" ok"))
-            else:
-                print(colors.dim(f" {_('skipped')}"))
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            print(colors.dim(f" {_('skipped')}"))
-
-    # Replay update-alternatives from all installed RPMs' %post scripts
-    _replay_alternatives(chroot, use_unshare)
+            print(_("Chroot kept at: {path}").format(path=tmpdir))
 
 
 def _cleanup_chroot_for_image(root: str):

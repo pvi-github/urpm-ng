@@ -1,0 +1,26 @@
+# mkimage profile: bootstrap
+# Minimal irreducible set installable with --noscripts in phase 1 of mkimage.
+# The chroot must be bootable, have network access, and allow a full urpm
+# install (scriptlets active) to run cleanly in phase 2 (container promote).
+
+description: Minimal bootable chroot for mkimage phase 1 (noscripts bootstrap)
+
+packages:
+  - setup
+  - filesystem
+  - basesystem-minimal
+  - glibc
+  - bash
+  - coreutils
+  - findutils
+  - grep
+  - sed
+  - gawk
+  - util-linux
+  - shadow-utils
+  - rpm
+  - urpmi
+  # urpm-ng is installed separately by Phase 1 (local RPM fallback until
+  # it lands in official Mageia repos)
+  - rootcerts
+  - curl
