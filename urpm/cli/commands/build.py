@@ -327,6 +327,10 @@ def _phase2_container_promote(
                 print(colors.error(_("BuildRequires source not found: {p}").format(p=src_path)))
                 return 1
             dst_in_container = f"/tmp/{src_path.name}"
+            # Ensure /tmp exists (some minimal images lack it — filesystem's
+            # %post didn't run in --noscripts Phase 1, and _cleanup_chroot_for_image
+            # wiped tmp/* contents).
+            container.exec(cid, ['mkdir', '-p', '/tmp'])
             print(_("  Copying {name} into container...").format(name=src_path.name))
             if not container.cp(str(src_path), f"{cid}:{dst_in_container}"):
                 print(colors.error(_("Failed to copy BuildRequires source")))
@@ -540,6 +544,25 @@ def _phase1_bootstrap_chroot(
         # if already present). Systemd-independent on purpose: no sysusers call.
         # Must run BEFORE the setup install: files shipped by packages pulled in
         # as deps of setup (e.g. shadow group references) also need these.
+        # UsrMove: pre-create /bin, /sbin, /lib, /lib64 as symlinks into /usr/*
+        # before the filesystem package runs. On distributions that still
+        # ship %pretrans to perform this move (e.g. mga9), --noscripts skips
+        # it and the chroot ends up with /bin and /usr/bin as separate dirs,
+        # breaking any tool that hardcodes /usr/bin/<foo>. By establishing the
+        # symlinks first, rpm extracts /bin/<foo> files straight into /usr/bin.
+        # On systems where the filesystem package already ships the symlinks
+        # (e.g. mga10), this is a no-op since the targets will match.
+        root_path = Path(tmpdir)
+        (root_path / 'usr/bin').mkdir(parents=True, exist_ok=True)
+        (root_path / 'usr/sbin').mkdir(parents=True, exist_ok=True)
+        (root_path / 'usr/lib').mkdir(parents=True, exist_ok=True)
+        (root_path / 'usr/lib64').mkdir(parents=True, exist_ok=True)
+        for name, target in [('bin', 'usr/bin'), ('sbin', 'usr/sbin'),
+                             ('lib', 'usr/lib'), ('lib64', 'usr/lib64')]:
+            link = root_path / name
+            if not link.exists() and not link.is_symlink():
+                link.symlink_to(target)
+
         _ensure_system_accounts(tmpdir)
         if _noscripts_install(['setup'], 'setup') != 0:
             print(colors.error(_("Failed to install setup")))
