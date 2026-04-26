@@ -606,6 +606,68 @@ Expliquer pourquoi un paquet est installe :
 .TP
 Mettre à jour les métadonnées :
 .B urpm m u
+.SH TRANSACTIONS PARTIELLES
+.B urpm upgrade
+fonctionne en mode best-effort par défaut : les paquets dont les
+dépendances ne peuvent pas être satisfaites sont écartés de la
+transaction et listés à la fin avec leur raison (dépendance manquante,
+version incompatible, cascade SRPM, etc.). L'option
+.B --atomic
+bascule en mode strict (recommandé sur les serveurs) : tout paquet non
+résolu annule la transaction entière.
+.PP
+.B urpm install
+est atomique par défaut : si un paquet demandé ne peut pas être
+installé, la transaction entière est annulée. L'option
+.B --no-atomic
+permet de basculer ce verbe en mode best-effort.
+.PP
+Une préférence
+.B --prefer
+est traitée comme un groupe : si sa requête associée ne peut pas être
+satisfaite, le groupe entier est écarté avec un avertissement
+explicite. La préférence n'est jamais silencieusement annulée seule.
+.PP
+Les paquets construits depuis le même SRPM sont écartés ensemble : si
+.I kwin
+est écarté,
+.I kwin-common
+et
+.I lib64kwin5
+le seront aussi, pour éviter les incompatibilités ABI à l'exécution.
+.PP
+Les rdeps maintenus silencieusement par le résolveur (par exemple, un
+paquet dont la nouvelle version requiert un sibling qui vient d'être
+écarté) sont explicitement listés avec leur exigence non satisfaite,
+jamais masqués.
+.PP
+Utiliser
+.B -v
+pour afficher la raison complète par paquet (chaque
+.B Requires
+classifié et chaque saut de cascade). Sans
+.BR -v ,
+chaque entrée est tronquée aux 3 premières lignes.
+.PP
+Pour relancer les opérations écartées plus tard, exécuter
+.B urpm upgrade <paquet>
+ou
+.B urpm install <paquet>
+sur les noms concernés une fois le bug d'empaquetage corrigé.
+.SH CODES DE SORTIE
+.TP
+.B 0
+Transaction terminée avec succès, aucun paquet écarté.
+.TP
+.B 1
+Échec dur : transaction annulée (mode atomic, erreur réseau, erreur de
+permission, etc.).
+.TP
+.B 2
+Transaction partielle : terminée avec succès, mais au moins un paquet a
+été écarté. Les paquets écartés sont listés avec leur raison. Test
+scriptable :
+.BR "[ $? -eq 2 ]" .
 .SH VOIR AUSSI
 .BR urpmd (8),
 .BR rpm (8),

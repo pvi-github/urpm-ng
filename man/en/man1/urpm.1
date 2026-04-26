@@ -602,6 +602,69 @@ Show why a package is installed:
 .TP
 Update media metadata:
 .B urpm m u
+.SH PARTIAL TRANSACTIONS
+.B urpm upgrade
+runs in best-effort mode by default: packages whose dependencies cannot be
+satisfied are dropped from the transaction and listed at the end of the
+run with their reason (missing dependency, version mismatch, SRPM sibling
+cascade, etc.). Pass
+.B --atomic
+to switch to strict mode (recommended on servers): any unsolvable
+package aborts the whole transaction.
+.PP
+.B urpm install
+is atomic by default: if any requested package cannot be installed, the
+entire transaction is rolled back. Pass
+.B --no-atomic
+to opt into best-effort mode for the install path.
+.PP
+A
+.B --prefer
+preference is treated as a unit: if its companion request cannot be
+satisfied, the whole hint group is dropped together with an explicit
+warning. The preference is never silently reverted on its own.
+.PP
+SRPM siblings (packages built from the same source) are dropped as a
+group: skipping
+.I kwin
+will also drop
+.I kwin-common
+and
+.I lib64kwin5
+to prevent ABI mismatches at runtime.
+.PP
+Reverse-dependency packages held back silently by the solver (for
+example, a package whose new version requires a sibling that was just
+dropped) are surfaced explicitly with their unsatisfied requirement,
+not hidden.
+.PP
+Use
+.B -v
+to print the full per-package reason (every classified broken
+.B Requires
+and every cascade hop). Without
+.BR -v ,
+each entry is capped at the first 3 lines.
+.PP
+To retry the dropped operations later, run
+.B urpm upgrade <package>
+or
+.B urpm install <package>
+on the affected names once the upstream packaging issue is fixed.
+.SH EXIT CODES
+.TP
+.B 0
+Transaction completed successfully, no package skipped.
+.TP
+.B 1
+Hard failure: transaction aborted (atomic mode, network error,
+permission error, etc.).
+.TP
+.B 2
+Partial transaction: completed successfully, but at least one package
+was dropped. The skipped packages are listed on stderr with their
+reason. Scriptable check:
+.BR "[ $? -eq 2 ]" .
 .SH SEE ALSO
 .BR urpmd (8),
 .BR rpm (8),
