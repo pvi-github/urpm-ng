@@ -497,3 +497,66 @@ class DownloadProgressDisplay:
             # Move back up so next print starts at the right place
             print(f"\033[{self.last_lines_count}F", end='', flush=True)
         self.last_lines_count = 0
+
+
+def print_skipped_jobs(skipped: list, *, verbose: bool = False,
+                       command_hint: str = "urpm upgrade") -> None:
+    """Print the ``Non mis à jour`` block from a partial transaction.
+
+    Each :class:`urpm.core.resolver.SkippedJob` is rendered with its
+    name, EVR, and the resolver's reason text.  Reasons are truncated
+    to the first 3 lines unless ``verbose`` is ``True`` — in which
+    case the full reason (every classified broken Require, every
+    cascade hop) is shown.  This matches the contract: nothing is
+    hidden, the user can always demand the full picture.
+
+    Args:
+        skipped: ``Resolution.skipped`` (list of :class:`SkippedJob`).
+            Empty list = no output.
+        verbose: When ``True``, print every line of every reason.
+            When ``False``, cap each entry at 3 lines and add a
+            ``... (-v pour le détail)`` hint.
+        command_hint: Verb to mention in the rerun-tip footer.
+            Defaults to ``"urpm upgrade"``; pass ``"urpm install"``
+            for the install path.
+    """
+    if not skipped:
+        return
+
+    from .colors import colors
+    from ..i18n import _, ngettext
+
+    n = len(skipped)
+    title = ngettext(
+        "Non mis à jour ({n}) :",
+        "Non mis à jour ({n}) :",
+        n,
+    ).format(n=n)
+    print()
+    print(colors.warning(title))
+
+    for sj in skipped:
+        head = sj.name
+        if sj.evr:
+            head = f"{sj.name} ({sj.evr})"
+        kind_tag = ""
+        if sj.kind == "srpm_sibling":
+            kind_tag = _(" [sibling SRPM]")
+        elif sj.kind == "held_silently_by_libsolv":
+            kind_tag = _(" [silencieusement maintenu]")
+        elif sj.kind == "hint":
+            kind_tag = _(" [préférence annulée]")
+        print(f"  - {colors.warning(head)}{colors.dim(kind_tag)}")
+
+        reason_lines = (sj.reason or "").splitlines() or [""]
+        if not verbose and len(reason_lines) > 3:
+            shown = reason_lines[:3]
+            shown.append(_("... (-v pour le détail complet)"))
+        else:
+            shown = reason_lines
+        for line in shown:
+            print(colors.dim(f"      {line}"))
+
+    print()
+    print(colors.dim(_("Pour relancer ces opérations plus tard : {cmd} <paquet>")
+                     .format(cmd=command_hint)))

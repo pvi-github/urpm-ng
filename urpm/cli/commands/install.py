@@ -396,7 +396,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         local_pkg_names = {info['name'] for info in local_rpm_infos}
         result, aborted = _resolve_with_alternatives(
             resolver, resolved_packages, choices, args.auto, preferences,
-            local_packages=local_pkg_names
+            local_packages=local_pkg_names,
+            atomic=not getattr(args, 'no_atomic', False),
         )
     if aborted:
         return 1
@@ -406,6 +407,17 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         for p in result.problems:
             print(f"  {p}")
         return 1
+
+    # Render skipped-jobs report (--no-atomic).  Exit code 2 surfaces
+    # "transaction completed but at least one package was dropped" —
+    # see ``urpm.1`` ``EXIT CODES``.
+    from .. import display as _display
+    _display.print_skipped_jobs(
+        list(result.skipped or []),
+        verbose=getattr(args, 'verbose', False),
+        command_hint="urpm install",
+    )
+    partial_exit = 2 if result.skipped else 0
 
     # Handle --reinstall for local RPMs that are already installed at same version
     reinstall_mode = getattr(args, 'reinstall', False)
@@ -441,7 +453,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             if user_requested:
                 resolver.mark_as_explicit(user_requested)
         print(_("Nothing to do"))
-        return 0
+        return partial_exit
 
     # Categorize packages by install reason
     rec_pkgs = [a for a in result.actions if a.reason == InstallReason.RECOMMENDED]
@@ -684,7 +696,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             resolver.add_local_rpms(sibling_rpm_infos)
         result, aborted = _resolve_with_alternatives(
             resolver, final_packages, choices, args.auto, preferences,
-            local_packages=local_pkg_names
+            local_packages=local_pkg_names,
+            atomic=not getattr(args, 'no_atomic', False),
         )
         if aborted:
             return 1
@@ -714,7 +727,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     resolver.add_local_rpms(sibling_rpm_infos)
                 result, aborted = _resolve_with_alternatives(
                     resolver, retry_packages, choices, args.auto, preferences,
-                    local_packages=local_pkg_names
+                    local_packages=local_pkg_names,
+                    atomic=not getattr(args, 'no_atomic', False),
                 )
                 if aborted:
                     return 1
@@ -1175,7 +1189,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 resolver.mark_as_dependency(explicit_bd)
             resolver.mark_as_builddep(all_names, source_name)
 
-        return 0
+        return partial_exit
 
     except Exception as e:
         ops.abort_transaction(transaction_id)

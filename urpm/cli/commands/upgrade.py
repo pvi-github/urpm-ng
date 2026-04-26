@@ -120,14 +120,16 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         for info in local_rpm_infos:
             package_names.append(info['name'])
 
+    atomic = bool(getattr(args, 'atomic', False))
     if upgrade_all:
         print(_("Resolving system upgrade..."))
-        result = resolver.resolve_upgrade()
+        result = resolver.resolve_upgrade(atomic=atomic)
     else:
         print(_("Resolving upgrade for: {packages}").format(packages=', '.join(package_names)))
         # Build set of local package names for special handling
         local_pkg_names = {info['name'] for info in local_rpm_infos}
-        result = resolver.resolve_upgrade(package_names, local_packages=local_pkg_names)
+        result = resolver.resolve_upgrade(package_names, local_packages=local_pkg_names,
+                                          atomic=atomic)
 
     if not result.success:
         print(colors.error(_("Resolution failed:")))
@@ -152,9 +154,21 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                 print("  " + colors.warning(held_pkg) + " " + _("(would be obsoleted by {pkg})").format(pkg=obsoleting_pkg))
         print("\n  " + _("Use '{cmd}' to allow changes.").format(cmd=colors.dim('urpm unhold <package>')))
 
+    # Render skipped-jobs report (best-effort partial transactions).
+    # Exit code 2 is reserved for "transaction completed but at least
+    # one package was dropped" — see ``urpm.1`` ``EXIT CODES``.
+    from .. import display as _display
+    _display.print_skipped_jobs(
+        list(result.skipped or []),
+        verbose=getattr(args, 'verbose', False),
+        command_hint="urpm upgrade",
+    )
+    partial_exit = 2 if result.skipped else 0
+
     if not result.actions:
-        print(colors.success(_("All packages are up to date.")))
-        return 0
+        if not result.skipped:
+            print(colors.success(_("All packages are up to date.")))
+        return partial_exit
 
     # Find orphaned dependencies (unless --noerase-orphans)
     # Pass all actions so orphan detection can simulate the full
@@ -365,7 +379,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     # --download-only: stop here, do not install
     if download_only:
         print(colors.success(_("\nPackages downloaded to cache. Use 'urpm upgrade' to install them later.")))
-        return 0
+        return partial_exit
 
     rpm_paths = [r.path for r in dl_results if r.success and r.path]
     rpm_paths.extend(local_action_paths)
@@ -591,7 +605,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         if removed:
             resolver.unmark_packages(removed)
 
-        return 0
+        return partial_exit
 
     except Exception as e:
         ops.abort_transaction(transaction_id)

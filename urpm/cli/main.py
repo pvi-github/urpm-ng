@@ -507,6 +507,14 @@ Examples:
         default='keep',
         help=_('Config file conflict policy: keep existing (default), replace with package version, or ask')
     )
+    install_parser.add_argument(
+        '--no-atomic',
+        action='store_true',
+        default=False,
+        help=_("Mode best-effort : installer ce qui est possible et lister "
+               "les paquets écartés avec leur raison (sortie 2 si écarts). "
+               "Par défaut, install est atomique : tout ou rien.")
+    )
 
     # =========================================================================
     # download / dl - Download packages without installing
@@ -1244,6 +1252,15 @@ Examples:
     upgrade_parser.add_argument(
         '--sync', action='store_true', default=False,
         help=_('Wait for full completion including post-install triggers')
+    )
+    upgrade_parser.add_argument(
+        '--atomic',
+        action='store_true',
+        default=False,
+        help=_("Mode strict : annuler toute la transaction si un paquet ne "
+               "peut pas être mis à jour. Par défaut, upgrade est best-effort : "
+               "les paquets non mis à jour sont listés avec leur raison "
+               "(sortie 2 si écarts). Recommandé sur serveurs.")
     )
 
     # =========================================================================
