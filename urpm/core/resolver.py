@@ -501,7 +501,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         return f"{sn}-{se}"
 
     def _classify_jobs(
-        self, jobs, *, default_kind: str, obsolete_jobs=None
+        self, jobs, *, default_kind: str, obsolete_jobs=None,
+        head_solvables: list = None,
     ) -> List[JobOrigin]:
         """Build a parallel ``List[JobOrigin]`` for ``jobs``.
 
@@ -544,16 +545,22 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 kind = default_kind
                 group = "upg" if default_kind == "implicit_upgrade" else "req"
 
+            # ``job.solvables()`` materialises every pool solvable that
+            # matches the job (potentially the whole pool for a name
+            # selector).  We only need the first one — ask libsolv for
+            # the head element via __getitem__ when supported, falling
+            # back to a one-shot list materialisation only if needed.
             name = ""
             srpm_id: Optional[str] = None
+            head = None
             try:
-                solvables = list(job.solvables())
+                sols = job.solvables()
+                head = sols[0] if sols else None
             except Exception:
-                solvables = []
-            if solvables:
-                s = solvables[0]
-                name = s.name or ""
-                srpm_id = self._solvable_srpm_id(s)
+                head = None
+            if head is not None:
+                name = head.name or ""
+                srpm_id = self._solvable_srpm_id(head)
 
             request_id = f"{group}:{name}" if name else f"{group}:job{idx}"
             origins.append(JobOrigin(
@@ -562,6 +569,12 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 package_name=name,
                 srpm_id=srpm_id,
             ))
+            # Optionally stash head solvables in a caller-provided list
+            # so ``resolve_upgrade`` does not re-walk ``job.solvables()``
+            # to take its silent-holdback snapshot.  Filled in lock-step
+            # with ``origins`` (same length, same ordering).
+            if head_solvables is not None:
+                head_solvables.append(head)
         return origins
 
     def _format_problems(self, problems) -> List[str]:
@@ -610,6 +623,15 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             New :class:`SkippedJob` entries to append to
             :attr:`Resolution.skipped`.
         """
+        # Fast path: no actions and nothing actively skipped means
+        # libsolv decided the system is fully up-to-date.  There is no
+        # holdback to diagnose — every requested name simply did not
+        # need to move.  Without this short-circuit the method walks
+        # every requested solvable's Requires and pays a DB lookup per
+        # capability, which dominates the resolve time on a clean
+        # system.
+        if not actions and not already_skipped:
+            return []
         from .resolution.diagnose import (
             classify_unsatisfied_dep,
             format_dependency_issue,
@@ -859,8 +881,11 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
                 # Surface dropped jobs, then rebuild jobs / origins in
                 # parallel so the invariant holds before the next solve.
-                problem_strs = self._format_problems(problems)
-                reason_default = problem_strs[0] if problem_strs else ""
+                # Use the raw libsolv string for the per-iteration
+                # reason — pretty-formatting (which calls into the
+                # synthesis DB) is reserved for the final remaining
+                # problems handled by the caller.
+                reason_default = str(problems[0]) if problems else ""
                 for i in sorted(drop_set):
                     origin = job_origins[i]
                     skipped.append(SkippedJob(
@@ -1736,27 +1761,32 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             solver.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)
 
         obsolete_jobs = [j for j in jobs if id(j) in obs_job_ids]
+        head_solvables: list = []
         job_origins = self._classify_jobs(
-            jobs, default_kind="implicit_upgrade", obsolete_jobs=obsolete_jobs
+            jobs, default_kind="implicit_upgrade",
+            obsolete_jobs=obsolete_jobs,
+            head_solvables=head_solvables,
         )
 
         # Snapshot the solvables we asked the solver to install, *before*
         # the partial-skip loop mutates ``jobs``.  Used post-solve by
         # :meth:`_diagnose_silent_holdback` to detect upgrades that
         # libsolv silently turned into no-ops (no problem reported, but
-        # the new version did not land in the transaction).
+        # the new version did not land in the transaction).  We reuse
+        # the head-solvable list filled by ``_classify_jobs`` to avoid
+        # walking ``job.solvables()`` a second time — that call
+        # materialises every pool solvable matching the job and is the
+        # dominant cost on a system upgrade with many name-selector
+        # jobs.
         requested_solvables: Dict[str, object] = {}
-        for j, o in zip(jobs, job_origins):
+        for o, head in zip(job_origins, head_solvables):
+            if head is None:
+                continue
             if o.kind not in ("implicit_upgrade", "user_explicit"):
                 continue
-            try:
-                sols = list(j.solvables())
-            except Exception:
-                sols = []
-            if sols:
-                s = sols[0]
-                if s.name and s.name.lower() not in requested_solvables:
-                    requested_solvables[s.name.lower()] = s
+            key = (head.name or "").lower()
+            if key and key not in requested_solvables:
+                requested_solvables[key] = head
 
         problems, _skipped = self._solve(
             solver, jobs, job_origins, atomic=atomic, debug=debug
