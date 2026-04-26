@@ -920,6 +920,15 @@ class OrphansMixin:
                 ``all_actions`` with SHOW_ACTIVE) and must not be
                 classified as orphans.
 
+        Note:
+            Packages dropped by a partial transaction (listed in
+            :attr:`Resolution.skipped`) require no special handling
+            here.  They are absent from ``all_actions``, fall through
+            to the ``else`` branch of the post-state synthesis, and
+            are preserved in ``S_post`` with their pre-transaction
+            (rpmdb) capabilities — exactly the desired "still
+            installed at old version" semantics.
+
         Returns:
             An :class:`UpgradeOrphanPlan` partitioning the new orphans
             into:
