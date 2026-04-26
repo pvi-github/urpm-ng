@@ -4,6 +4,7 @@ Dependency resolver using libsolv
 Uses the SAT-based libsolv library for fast, correct dependency resolution.
 """
 
+import logging
 import re
 import solv
 from pathlib import Path
@@ -23,6 +24,8 @@ from .config import get_media_local_path, get_base_dir, get_system_version
 from .compression import decompress_stream
 from .resolution import PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin
 from .synthesis import parse_nevra
+
+LOGGER = logging.getLogger(__name__)
 
 # Known RPM architectures for NEVRA detection
 _KNOWN_ARCHES = {"x86_64", "i586", "i686", "noarch", "aarch64", "armv7hl"}
@@ -333,6 +336,77 @@ class Alternative:
 
 
 @dataclass
+class JobOrigin:
+    """Bookkeeping attached to each libsolv job built by the resolver.
+
+    ``jobs`` and ``job_origins`` are maintained as **parallel lists**:
+    same length, same indices.  When the partial-transaction helper
+    (:meth:`Resolver._solve`) drops a job, it consults the origin to
+    know which siblings must fall together (hints with their request,
+    SRPM siblings) and which jobs are user-driven (and therefore
+    candidates for skipping) versus auto-derived.
+
+    Attributes:
+        kind: Why the job was added.
+
+            * ``"user_explicit"`` — the user named it on the command
+              line (``urpm install foo``, ``urpm upgrade foo``).
+            * ``"hint"`` — solver hint (FAVOR / DISFAVOR / WEAK)
+              attached to a user request; never skipped on its own,
+              only as part of its request group.
+            * ``"implicit_upgrade"`` — full-system upgrade derived a
+              job for an installed package.
+            * ``"obsolete"`` — an Obsoletes transition replaces an
+              installed package by another.
+
+        request_id: Stable group identifier.  Jobs sharing the same
+            ``request_id`` fall together: this is how a ``--prefer X``
+            cluster (FAVOR + INSTALL WEAK) drops as one unit when its
+            companion request is unsolvable.
+        package_name: Lowercase package name for display and for
+            cross-referencing with :attr:`Resolution.skipped`.
+        srpm_id: ``"<sourcename>-<sourceevr>"`` used to cascade SRPM
+            siblings (``kwin`` skipped → ``kwin-common`` and
+            ``lib64kwin5`` skipped too).  ``None`` when unknown (hint
+            jobs, local RPMs).
+    """
+
+    kind: str
+    request_id: str
+    package_name: str
+    srpm_id: Optional[str] = None
+
+
+@dataclass
+class SkippedJob:
+    """A job dropped from a partial transaction with its reason.
+
+    Surfaced through :attr:`Resolution.skipped` so the CLI can list
+    every package that did not make it into the transaction, with a
+    human explanation.
+
+    Attributes:
+        name: Package name.
+        evr: EVR string (may be empty when the job did not point at a
+            specific solvable).
+        reason: Free-form i18n explanation (typically the same string
+            that :func:`format_dependency_issue` would produce).
+        kind: One of the :class:`JobOrigin` kinds, ``"srpm_sibling"``
+            (cascaded with another skipped package), or
+            ``"held_silently_by_libsolv"`` (surfaced by the
+            post-solve diff in :meth:`Resolver.resolve_upgrade`).
+        request_id: Group identifier copied from the originating
+            :class:`JobOrigin`; empty for post-solve diff entries.
+    """
+
+    name: str
+    evr: str = ""
+    reason: str = ""
+    kind: str = ""
+    request_id: str = ""
+
+
+@dataclass
 class Resolution:
     """Result of dependency resolution."""
     success: bool
@@ -342,12 +416,15 @@ class Resolution:
     remove_size: int = 0
     alternatives: List[Alternative] = None  # Choices that need user input
     obsoleted_names: set = None  # Package names replaced via Obsoletes
+    skipped: List[SkippedJob] = None  # Jobs dropped by a partial transaction
 
     def __post_init__(self):
         if self.alternatives is None:
             self.alternatives = []
         if self.obsoleted_names is None:
             self.obsoleted_names = set()
+        if self.skipped is None:
+            self.skipped = []
 
 
 class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
@@ -406,6 +483,87 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         self._held_obsolete_warnings = []  # List of (held_pkg, obsoleting_pkg) tuples
         self._held_upgrade_warnings = []  # List of held package names skipped from upgrade
 
+    def _solvable_srpm_id(self, solvable) -> Optional[str]:
+        """Return ``"<sourcename>-<sourceevr>"`` for a solvable or ``None``.
+
+        Used to cascade SRPM siblings during a partial transaction.
+        Falls back to the binary ``name-evr`` when the SOURCENAME /
+        SOURCEEVR tags are missing — the cascade then degenerates to
+        same-binary-name only, which matches the historical behaviour.
+        """
+        try:
+            sn = solvable.lookup_str(solv.SOLVABLE_SOURCENAME) or solvable.name
+            se = solvable.lookup_str(solv.SOLVABLE_SOURCEEVR) or solvable.evr
+        except Exception:
+            return None
+        if not sn or not se:
+            return None
+        return f"{sn}-{se}"
+
+    def _classify_jobs(
+        self, jobs, *, default_kind: str, obsolete_jobs=None
+    ) -> List[JobOrigin]:
+        """Build a parallel ``List[JobOrigin]`` for ``jobs``.
+
+        Each origin is derived from the job's solvable (name + SRPM
+        id) and its libsolv flags: ``SOLVER_FAVOR`` / ``DISFAVOR`` /
+        ``SOLVER_WEAK`` flag a hint; everything else takes
+        ``default_kind``. Jobs whose ``id()`` is in ``obsolete_jobs``
+        are tagged as ``"obsolete"`` regardless.
+
+        Args:
+            jobs: List of ``solv.Job`` objects, in construction order.
+            default_kind: ``JobOrigin.kind`` for non-hint, non-obsolete
+                jobs (``"user_explicit"`` for ``resolve_install``,
+                ``"implicit_upgrade"`` for ``resolve_upgrade``).
+            obsolete_jobs: Iterable of jobs that originate from an
+                Obsoletes scan (used to retag from
+                ``"implicit_upgrade"`` to ``"obsolete"``).
+
+        Returns:
+            A list of :class:`JobOrigin`, exactly as long as ``jobs``.
+        """
+        obsolete_ids = {id(j) for j in (obsolete_jobs or [])}
+        # FAVOR / DISFAVOR are *action* codes within ``SOLVER_JOBMASK``
+        # (e.g. INSTALL=0x100, FAVOR=0xc00), not bitflags — they must
+        # be matched on equality after masking.  WEAK is a true bitflag
+        # (0x10000) and can be tested directly.
+        hint_actions = {solv.Job.SOLVER_FAVOR, solv.Job.SOLVER_DISFAVOR}
+        origins: List[JobOrigin] = []
+        for idx, job in enumerate(jobs):
+            flags = getattr(job, "how", 0) or 0
+            action = flags & solv.Job.SOLVER_JOBMASK
+            is_hint = action in hint_actions or bool(flags & solv.Job.SOLVER_WEAK)
+            if id(job) in obsolete_ids:
+                kind = "obsolete"
+                group = "obs"
+            elif is_hint:
+                kind = "hint"
+                group = "req"
+            else:
+                kind = default_kind
+                group = "upg" if default_kind == "implicit_upgrade" else "req"
+
+            name = ""
+            srpm_id: Optional[str] = None
+            try:
+                solvables = list(job.solvables())
+            except Exception:
+                solvables = []
+            if solvables:
+                s = solvables[0]
+                name = s.name or ""
+                srpm_id = self._solvable_srpm_id(s)
+
+            request_id = f"{group}:{name}" if name else f"{group}:job{idx}"
+            origins.append(JobOrigin(
+                kind=kind,
+                request_id=request_id,
+                package_name=name,
+                srpm_id=srpm_id,
+            ))
+        return origins
+
     def _format_problems(self, problems) -> List[str]:
         """Render libsolv ``Problem`` objects as human-readable strings.
 
@@ -423,47 +581,324 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 rendered.append(str(p))
         return rendered
 
-    def _solve_with_auto_resolution(self, solver, jobs, debug=None, max_retries=5):
-        """Solve with automatic conflict resolution.
+    def _diagnose_silent_holdback(
+        self,
+        requested_solvables: Dict[str, object],
+        actions: List["PackageAction"],
+        already_skipped: List["SkippedJob"],
+    ) -> List["SkippedJob"]:
+        """Detect upgrades silently held back by libsolv.
 
-        When the first solve fails, iterates over each problem's first
-        solution, applies its elements (job modifications or supplementary
-        jobs), and re-solves.  Repeats up to *max_retries* times.
+        ``solver.solve()`` may decide to keep an installed package at its
+        old version without raising any :class:`Problem` — typically when
+        the new version's :samp:`Requires` cannot be satisfied because a
+        sibling package was skipped earlier in a partial transaction.
+        These holdbacks are invisible to the user otherwise: the package
+        is neither in ``Resolution.problems`` nor in
+        ``Resolution.actions``.
 
-        This handles cases like mutual conflicts (install a + b where
-        a conflicts b) or upgrade promotions where a dep chain cannot
-        be satisfied: the solver drops the problematic job and finds
-        the best achievable subset.
+        For each requested upgrade that did not land in the transaction
+        and is not already in ``already_skipped``, walk the new
+        solvable's :samp:`Requires` and classify each unsatisfied
+        capability through :func:`classify_unsatisfied_dep`.  Providers
+        already in ``already_skipped`` produce a ``"rdep de X"`` reason.
+        If no broken require can be found at all, log a loud BUG entry
+        and surface the package with a generic ``"anomalie résolveur"``
+        reason — silent holdbacks must always be explained.
 
         Returns:
-            Remaining unsolved problems (empty list on success).
+            New :class:`SkippedJob` entries to append to
+            :attr:`Resolution.skipped`.
         """
-        problems = solver.solve(jobs)
-        retries = 0
-        while problems and retries < max_retries:
-            retries += 1
-            if debug:
-                debug.log(f"Solver has {len(problems)} problem(s), applying solutions (retry {retries}/{max_retries})")
-            for problem in problems:
-                solutions = problem.solutions()
-                if not solutions:
+        from .resolution.diagnose import (
+            classify_unsatisfied_dep,
+            format_dependency_issue,
+        )
+        from ..i18n import _
+
+        # Names actually in the transaction (lowercased).
+        transacted = set()
+        for a in actions:
+            if a.action in (
+                TransactionType.UPGRADE,
+                TransactionType.INSTALL,
+                TransactionType.DOWNGRADE,
+                TransactionType.REINSTALL,
+            ):
+                if a.name:
+                    transacted.add(a.name.lower())
+
+        skipped_names = {s.name.lower() for s in already_skipped if s.name}
+        result: List[SkippedJob] = []
+
+        for name, solvable in requested_solvables.items():
+            if name in transacted or name in skipped_names:
+                continue
+
+            reasons: List[str] = []
+            try:
+                requires = solvable.lookup_deparray(solv.SOLVABLE_REQUIRES)
+            except Exception:
+                requires = []
+
+            for dep in requires or []:
+                dep_str = str(dep)
+                # Skip rpmlib() and file requires — neither maps to a
+                # synthesis provider, neither is informative here.
+                if dep_str.startswith("rpmlib(") or dep_str.startswith("/"):
                     continue
-                for element in solutions[0].elements():
-                    newjob = element.Job()
-                    if element.type == solv.Solver.SOLVER_SOLUTION_JOB:
-                        jobs[element.jobidx] = newjob
-                    else:
-                        if newjob and newjob not in jobs:
-                            jobs.append(newjob)
+
+                dep_name, dep_op, dep_version = dep_str, "", ""
+                for op in (">=", "<=", "==", "=", ">", "<"):
+                    if f" {op} " in dep_str:
+                        head, ver = dep_str.split(f" {op} ", 1)
+                        dep_name = head.strip()
+                        dep_op = "=" if op == "==" else op
+                        dep_version = ver.strip()
+                        break
+
+                # First check whether a skipped sibling provides this
+                # capability — that's the high-signal case ("rdep de X").
+                provider_in_skipped = None
+                try:
+                    providers = self.pool.whatprovides(self.pool.Dep(dep_str))
+                except Exception:
+                    providers = []
+                for prov in providers or []:
+                    pname = (prov.name or "").lower()
+                    if pname and pname in skipped_names:
+                        provider_in_skipped = prov.name
+                        break
+
+                if provider_in_skipped:
+                    reasons.append(
+                        _("rdep de {pkg} (silencieusement maintenu)").format(
+                            pkg=provider_in_skipped
+                        )
+                    )
+                    continue
+
+                # Otherwise classify against active synthesis: missing,
+                # version_mismatch or excluded.  ``unknown`` is dropped
+                # so we don't pollute the report with non-actionable
+                # noise.
+                issue = classify_unsatisfied_dep(
+                    self.db, dep_name, dep_op, dep_version, pool=self.pool
+                )
+                if issue.kind == "unknown":
+                    continue
+                reasons.append(format_dependency_issue(issue))
+
+            evr = ""
+            try:
+                evr = solvable.evr or ""
+            except Exception:
+                pass
+
+            if not reasons:
+                LOGGER.error(
+                    "BUG: package %s silently held by libsolv with no "
+                    "diagnosable broken require (evr=%s). Please report.",
+                    name, evr,
+                )
+                reason_text = _("anomalie résolveur ; voir log pour le détail")
+            else:
+                reason_text = "\n".join(reasons)
+
+            result.append(SkippedJob(
+                name=solvable.name or name,
+                evr=evr,
+                reason=reason_text,
+                kind="held_silently_by_libsolv",
+                request_id="",
+            ))
+
+        return result
+
+    def _solve(
+        self,
+        solver,
+        jobs: list,
+        job_origins: Optional[List[JobOrigin]] = None,
+        *,
+        atomic: bool = True,
+        debug=None,
+    ):
+        """Solve, optionally dropping unsolvable user requests.
+
+        Two modes share this entry point:
+
+        * ``atomic=True`` (default) — historical behaviour.  When the
+          first solve reports problems, iterates over each problem's
+          first solution and applies its elements (job replacements or
+          supplementary jobs), then re-solves.  A *seen-state guard*
+          terminates the loop if the same problem fingerprint reappears
+          (would otherwise flap forever); replaces the previous
+          ``max_retries=5`` magic.  The skipped-jobs list returned in
+          this mode is always empty: nothing is dropped, problems
+          either go away or are surfaced to the caller.
+
+        * ``atomic=False`` — best-effort partial transaction.  Per
+          problem, walks **all** solutions and **all** their elements
+          to collect every job index libsolv would skip; cascades by
+          ``request_id`` (hints fall with their request, never alone)
+          and by ``srpm_id`` (sibling subpackages); drops the dropped
+          jobs (sets to ``None``, filters with origins kept in sync);
+          re-solves.  Loops to a fixed point (skip set empty this
+          turn); the seen-state guard breaks any flap.  Returns the
+          remaining problems plus the structured list of dropped
+          requests so the caller can surface them.
+
+        Args:
+            solver: An already-configured ``solv.Solver``.
+            jobs: Mutable list of ``solv.Job``.  ``atomic=True`` may
+                replace entries in place; ``atomic=False`` may set
+                entries to ``None`` and filter them out.
+            job_origins: Parallel list of :class:`JobOrigin`.
+                Required for ``atomic=False`` (used for cascade);
+                optional for ``atomic=True``.  Caller is responsible
+                for handing in lists of equal length.
+            atomic: Mode selector.
+            debug: Optional solver-debug helper.
+
+        Returns:
+            ``(remaining_problems, skipped)`` where ``remaining_problems``
+            is the list of libsolv ``Problem`` objects still present
+            after the loop, and ``skipped`` is a ``List[SkippedJob]``
+            (always empty in atomic mode).
+        """
+        if job_origins is None:
+            job_origins = []
+        if job_origins and len(job_origins) != len(jobs):
+            raise AssertionError(
+                f"jobs / job_origins desync at entry: "
+                f"len(jobs)={len(jobs)} len(origins)={len(job_origins)}"
+            )
+
+        skipped: List[SkippedJob] = []
+        problems = solver.solve(jobs)
+        seen_fingerprints: set = set()
+
+        while problems:
+            fingerprint = tuple(sorted(str(p) for p in problems))
+            if fingerprint in seen_fingerprints:
+                if debug:
+                    debug.log(
+                        f"_solve: seen-state guard tripped after "
+                        f"{len(seen_fingerprints)} iterations; "
+                        f"breaking on {len(problems)} problem(s)"
+                    )
+                break
+            seen_fingerprints.add(fingerprint)
+
+            if atomic:
+                applied = False
+                for problem in problems:
+                    solutions = problem.solutions()
+                    if not solutions:
+                        continue
+                    for element in solutions[0].elements():
+                        newjob = element.Job()
+                        if element.type == solv.Solver.SOLVER_SOLUTION_JOB:
+                            jobs[element.jobidx] = newjob
+                            applied = True
+                        else:
+                            if newjob and newjob not in jobs:
+                                jobs.append(newjob)
+                                if job_origins:
+                                    job_origins.append(JobOrigin(
+                                        kind="implicit_upgrade",
+                                        request_id=f"sol:{len(jobs)}",
+                                        package_name="",
+                                        srpm_id=None,
+                                    ))
+                                applied = True
+                if not applied:
+                    break
+            else:
+                if not job_origins:
+                    raise AssertionError(
+                        "_solve(atomic=False) requires job_origins"
+                    )
+                drop_set: set = set()
+                for problem in problems:
+                    candidate_indices: set = set()
+                    for solution in problem.solutions():
+                        for element in solution.elements():
+                            if element.type == solv.Solver.SOLVER_SOLUTION_JOB:
+                                candidate_indices.add(element.jobidx)
+                    skippable = {
+                        idx for idx in candidate_indices
+                        if 0 <= idx < len(job_origins)
+                        and job_origins[idx].kind in (
+                            "user_explicit", "implicit_upgrade", "obsolete"
+                        )
+                    }
+                    if not skippable:
+                        continue
+                    drop_set |= skippable
+
+                if not drop_set:
+                    break
+
+                # Cascade by request_id
+                request_ids = {
+                    job_origins[i].request_id
+                    for i in drop_set if job_origins[i].request_id
+                }
+                # Cascade by srpm_id
+                srpm_ids = {
+                    job_origins[i].srpm_id
+                    for i in drop_set if job_origins[i].srpm_id
+                }
+                for i, origin in enumerate(job_origins):
+                    if origin.request_id in request_ids:
+                        drop_set.add(i)
+                    elif origin.srpm_id and origin.srpm_id in srpm_ids:
+                        drop_set.add(i)
+
+                # Surface dropped jobs, then rebuild jobs / origins in
+                # parallel so the invariant holds before the next solve.
+                problem_strs = self._format_problems(problems)
+                reason_default = problem_strs[0] if problem_strs else ""
+                for i in sorted(drop_set):
+                    origin = job_origins[i]
+                    skipped.append(SkippedJob(
+                        name=origin.package_name,
+                        evr="",
+                        reason=reason_default,
+                        kind=origin.kind,
+                        request_id=origin.request_id,
+                    ))
+                    if debug:
+                        debug.log(
+                            f"_solve(partial): drop {origin.package_name} "
+                            f"({origin.kind}, {origin.request_id})"
+                        )
+                kept = [
+                    (j, o) for i, (j, o) in enumerate(zip(jobs, job_origins))
+                    if i not in drop_set
+                ]
+                jobs[:] = [j for j, _ in kept]
+                job_origins[:] = [o for _, o in kept]
+
+                if len(jobs) != len(job_origins):
+                    raise AssertionError(
+                        f"jobs / job_origins desync after drop: "
+                        f"len(jobs)={len(jobs)} len(origins)={len(job_origins)}"
+                    )
+
             problems = solver.solve(jobs)
-        return problems
+
+        return problems, skipped
 
     def resolve_install(self, package_names: List[str],
                         choices: Dict[str, str] = None,
                         favored_packages: set = None,
                         explicit_disfavor: set = None,
                         preference_patterns: list = None,
-                        local_packages: set = None) -> Resolution:
+                        local_packages: set = None,
+                        atomic: bool = True) -> Resolution:
         """Resolve packages to install.
 
         Args:
@@ -732,7 +1167,10 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         if not self.install_recommends:
             solver.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)
 
-        problems = self._solve_with_auto_resolution(solver, jobs)
+        job_origins = self._classify_jobs(jobs, default_kind="user_explicit")
+        problems, _skipped = self._solve(
+            solver, jobs, job_origins, atomic=atomic
+        )
 
         if problems:
             return Resolution(
@@ -867,7 +1305,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             actions=actions,
             problems=[],
             install_size=install_size,
-            remove_size=remove_size
+            remove_size=remove_size,
+            skipped=list(_skipped or []),
         )
 
     def build_dependency_graph(self, resolution: Resolution,
@@ -1066,7 +1505,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         return jobs, will_be_obsoleted, held_warnings
 
     def resolve_upgrade(self, package_names: List[str] = None,
-                        local_packages: set = None) -> Resolution:
+                        local_packages: set = None,
+                        atomic: bool = False) -> Resolution:
         """Resolve packages to upgrade.
 
         Args:
@@ -1094,6 +1534,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             debug.log_pool_stats(self.pool)
 
         jobs = []
+        obs_job_ids: set = set()  # ids of jobs that came from _scan_obsoletes
         will_be_obsoleted = set()
 
         if package_names:
@@ -1204,6 +1645,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     held_packages, only_names=requested_names,
                 )
                 jobs += obs_jobs
+                obs_job_ids.update(id(j) for j in obs_jobs)
                 self._held_obsolete_warnings = held_obs
 
         else:
@@ -1265,6 +1707,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
             # Add the obsoletes jobs computed earlier (before the upgrade loop)
             jobs += obs_jobs
+            obs_job_ids.update(id(j) for j in obs_jobs)
             self._held_obsolete_warnings = held_obs
             self._held_upgrade_warnings = held_upgrade_warnings
 
@@ -1292,7 +1735,32 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         if not self.install_recommends:
             solver.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)
 
-        problems = self._solve_with_auto_resolution(solver, jobs, debug)
+        obsolete_jobs = [j for j in jobs if id(j) in obs_job_ids]
+        job_origins = self._classify_jobs(
+            jobs, default_kind="implicit_upgrade", obsolete_jobs=obsolete_jobs
+        )
+
+        # Snapshot the solvables we asked the solver to install, *before*
+        # the partial-skip loop mutates ``jobs``.  Used post-solve by
+        # :meth:`_diagnose_silent_holdback` to detect upgrades that
+        # libsolv silently turned into no-ops (no problem reported, but
+        # the new version did not land in the transaction).
+        requested_solvables: Dict[str, object] = {}
+        for j, o in zip(jobs, job_origins):
+            if o.kind not in ("implicit_upgrade", "user_explicit"):
+                continue
+            try:
+                sols = list(j.solvables())
+            except Exception:
+                sols = []
+            if sols:
+                s = sols[0]
+                if s.name and s.name.lower() not in requested_solvables:
+                    requested_solvables[s.name.lower()] = s
+
+        problems, _skipped = self._solve(
+            solver, jobs, job_origins, atomic=atomic, debug=debug
+        )
 
         if problems:
             debug.log_problems(problems)
@@ -1383,6 +1851,11 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 from_evr=from_evr,
             ))
 
+        skipped = list(_skipped or [])
+        skipped.extend(self._diagnose_silent_holdback(
+            requested_solvables, actions, skipped,
+        ))
+
         return Resolution(
             success=True,
             actions=actions,
@@ -1390,6 +1863,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             install_size=install_size,
             remove_size=remove_size,
             obsoleted_names=will_be_obsoleted,
+            skipped=skipped,
         )
 
     def resolve_remove(self, package_names: List[str], clean_deps: bool = True) -> Resolution:
