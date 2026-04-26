@@ -406,6 +406,23 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         self._held_obsolete_warnings = []  # List of (held_pkg, obsoleting_pkg) tuples
         self._held_upgrade_warnings = []  # List of held package names skipped from upgrade
 
+    def _format_problems(self, problems) -> List[str]:
+        """Render libsolv ``Problem`` objects as human-readable strings.
+
+        Falls back to ``str(problem)`` when the diagnose adapter cannot
+        extract a structured payload — never raises.
+        """
+        from .resolution.diagnose import format_dependency_issue, from_libsolv_problem
+
+        rendered: List[str] = []
+        for p in problems:
+            try:
+                issue = from_libsolv_problem(p, self.pool, db=self.db)
+                rendered.append(format_dependency_issue(issue))
+            except Exception:
+                rendered.append(str(p))
+        return rendered
+
     def _solve_with_auto_resolution(self, solver, jobs, debug=None, max_retries=5):
         """Solve with automatic conflict resolution.
 
@@ -721,7 +738,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             return Resolution(
                 success=False,
                 actions=[],
-                problems=[str(p) for p in problems]
+                problems=self._format_problems(problems)
             )
 
         # Get transaction and order it for correct install sequence
@@ -1282,7 +1299,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             return Resolution(
                 success=False,
                 actions=[],
-                problems=[str(p) for p in problems]
+                problems=self._format_problems(problems)
             )
 
         # Get transaction
@@ -1443,7 +1460,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             return Resolution(
                 success=False,
                 actions=[],
-                problems=[str(p) for p in problems]
+                problems=self._format_problems(problems)
             )
 
         trans = solver.transaction()

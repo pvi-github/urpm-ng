@@ -10,6 +10,59 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def decode_rpmsense_flags(flags: int) -> str:
+    """Decode RPMSENSE_* version-compare flags into an operator string.
+
+    Args:
+        flags: Bitmask of ``rpm.RPMSENSE_LESS`` / ``RPMSENSE_GREATER`` /
+            ``RPMSENSE_EQUAL``.
+
+    Returns:
+        Operator string (``'<'``, ``'>'``, ``'='``, ``'<='``, ``'>='``,
+        ``'<>'``) or empty string when no version compare is encoded.
+    """
+    import rpm
+
+    op = ''
+    if flags & rpm.RPMSENSE_LESS:
+        op += '<'
+    if flags & rpm.RPMSENSE_GREATER:
+        op += '>'
+    if flags & rpm.RPMSENSE_EQUAL:
+        op += '='
+    return op
+
+
+def decode_rpmdep_sense(value: int) -> str:
+    """Decode the ``sense`` field of an ``rpm.ts.check()`` problem tuple.
+
+    The ``sense`` value distinguishes the kind of unsatisfied dependency
+    reported by rpmlib (a missing requirement vs. a conflict). Some bindings
+    do not expose the full set of ``RPMDEP_SENSE_*`` constants; unknown
+    values fall back to ``"unknown"`` so callers always get a stable label.
+
+    Args:
+        value: Integer ``sense`` from a ``ts.check()`` tuple.
+
+    Returns:
+        One of ``"requires"``, ``"conflicts"``, ``"obsoletes"``,
+        ``"provides"``, or ``"unknown"``.
+    """
+    import rpm
+
+    mapping = {}
+    for label, attr in (
+        ("requires", "RPMDEP_SENSE_REQUIRES"),
+        ("conflicts", "RPMDEP_SENSE_CONFLICTS"),
+        ("obsoletes", "RPMDEP_SENSE_OBSOLETES"),
+        ("provides", "RPMDEP_SENSE_PROVIDES"),
+    ):
+        const = getattr(rpm, attr, None)
+        if const is not None:
+            mapping[const] = label
+    return mapping.get(value, "unknown")
+
+
 def is_local_rpm(pkg_spec: str) -> bool:
     """Check if a package spec is a local RPM file path.
 

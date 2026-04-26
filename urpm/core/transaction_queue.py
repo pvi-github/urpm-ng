@@ -1365,9 +1365,16 @@ queue._child_process_standalone()
                           file=sys.stderr)
                     sys.stderr.flush()
                 if fatal:
+                    from urpm.core.resolution.diagnose import (
+                        format_dependency_issue,
+                        from_rpmlib_tuple,
+                    )
                     print(f"[_execute_install] unresolved deps: {fatal}", file=sys.stderr)
                     sys.stderr.flush()
-                    errors = [f"Dependency: {prob}" for prob in fatal]
+                    errors = [
+                        format_dependency_issue(from_rpmlib_tuple(prob))
+                        for prob in fatal
+                    ]
                     return False, 0, errors, []
             if DEBUG_EXECINSTALL:
                 _debug_write("[install] dependencies OK")
