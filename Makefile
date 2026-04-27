@@ -17,7 +17,7 @@ version:
 	echo $(VERSION) > rpmdrake/VERSION
 	$(MAKE) -C rpmdrake version RELEASE=$(RELEASE)
 
-tarball: version
+tarball: version tarball-rpmdrake
 	$(SED) -i 's/^%define version.*/%define version $(VERSION)/' rpmbuild/SPECS/$(NAME).spec
 	$(SED) -i 's/^%define release.*/%define release $(RELEASE)/' rpmbuild/SPECS/$(NAME).spec
 	$(MKDIR) -p rpmbuild/SOURCES
@@ -26,8 +26,10 @@ tarball: version
 		--transform "s,^,$(NAME)-$(VERSION)/," \
 		--exclude='urpm/tests' \
 		urpm pyproject.toml README.md QUICKSTART.md CHANGELOG.md LICENSE doc completion man data VERSION po
-	# PackageKit backend tarball
-	$(TAR) czf rpmbuild/SOURCES/pk-backend-urpm.tar.gz \
+	# PackageKit backend tarball — versioned alongside the main tarball
+	# so SOURCES/ keeps a per-release archive trail rather than
+	# overwriting the previous one in place.
+	$(TAR) czf rpmbuild/SOURCES/pk-backend-urpm-$(VERSION).tar.gz \
 		--transform "s,^pk-backend-urpm/,pk-backend-urpm/," \
 		pk-backend-urpm/pk-backend-urpm.c \
 		pk-backend-urpm/pk-backend.h \
@@ -35,6 +37,13 @@ tarball: version
 		pk-backend-urpm/pk-shared.h \
 		pk-backend-urpm/meson.build \
 		pk-backend-urpm/meson_options.txt
+
+# Rpmdrake-NG sibling tarball — produced by descending into rpmdrake/.
+# Symmetric with rpm-rpmdrake; chained from the top-level tarball so
+# a single ``make tarball`` builds everything (the previous behaviour
+# silently skipped rpmdrake's tarball).
+tarball-rpmdrake:
+	$(MAKE) -C rpmdrake tarball RELEASE=$(RELEASE)
 
 install-completion:
 	install -D -m 644 completion/urpm.bash /etc/bash_completion.d/urpm
@@ -49,7 +58,7 @@ rpm-all: rpm rpm-rpmdrake
 
 clean:
 	$(RM) -f rpmbuild/SOURCES/$(NAME)-*.tar.gz
-	$(RM) -f rpmbuild/SOURCES/pk-backend-urpm.tar.gz
+	$(RM) -f rpmbuild/SOURCES/pk-backend-urpm-*.tar.gz
 	$(MAKE) -C rpmdrake clean
 
 # ============================================================================

@@ -10,7 +10,7 @@ License:        GPLv3+
 Group:          System/Configuration/Packaging
 URL:            https://github.com/pvi-github/urpm-ng
 Source0:        %{name}-%{version}.tar.gz
-Source1:        pk-backend-urpm.tar.gz
+Source1:        pk-backend-urpm-%{version}.tar.gz
 
 # Note: No BuildArch:noarch because we also build the C backend
 
