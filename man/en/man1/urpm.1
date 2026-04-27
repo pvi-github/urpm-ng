@@ -639,12 +639,13 @@ dropped) are surfaced explicitly with their unsatisfied requirement,
 not hidden.
 .PP
 Use
-.B -v
+.B --show-all
+(or
+.BR -a )
 to print the full per-package reason (every classified broken
 .B Requires
-and every cascade hop). Without
-.BR -v ,
-each entry is capped at the first 3 lines.
+and every cascade hop). Without it, each entry is capped at the
+first 3 lines.
 .PP
 To retry the dropped operations later, run
 .B urpm upgrade <package>

@@ -642,12 +642,13 @@ paquet dont la nouvelle version requiert un sibling qui vient d'être
 jamais masqués.
 .PP
 Utiliser
-.B -v
+.B --show-all
+(ou
+.BR -a )
 pour afficher la raison complète par paquet (chaque
 .B Requires
-classifié et chaque saut de cascade). Sans
-.BR -v ,
-chaque entrée est tronquée aux 3 premières lignes.
+classifié et chaque saut de cascade). Sans cela, chaque entrée est
+tronquée aux 3 premières lignes.
 .PP
 Pour relancer les opérations écartées plus tard, exécuter
 .B urpm upgrade <paquet>

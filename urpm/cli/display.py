@@ -499,13 +499,13 @@ class DownloadProgressDisplay:
         self.last_lines_count = 0
 
 
-def print_skipped_jobs(skipped: list, *, verbose: bool = False,
+def print_skipped_jobs(skipped: list, *, show_all: bool = False,
                        command_hint: str = "urpm upgrade") -> None:
     """Print the ``Non mis à jour`` block from a partial transaction.
 
     Each :class:`urpm.core.resolver.SkippedJob` is rendered with its
     name, EVR, and the resolver's reason text.  Reasons are truncated
-    to the first 3 lines unless ``verbose`` is ``True`` — in which
+    to the first 3 lines unless ``show_all`` is ``True`` — in which
     case the full reason (every classified broken Require, every
     cascade hop) is shown.  This matches the contract: nothing is
     hidden, the user can always demand the full picture.
@@ -513,9 +513,12 @@ def print_skipped_jobs(skipped: list, *, verbose: bool = False,
     Args:
         skipped: ``Resolution.skipped`` (list of :class:`SkippedJob`).
             Empty list = no output.
-        verbose: When ``True``, print every line of every reason.
+        show_all: When ``True``, print every line of every reason.
             When ``False``, cap each entry at 3 lines and add a
-            ``... (-v pour le détail)`` hint.
+            ``... (--show-all pour le détail)`` hint.  Wired to the
+            existing ``--show-all`` / ``-a`` flag inherited from the
+            display-parent parser, for consistency with the rest of
+            the CLI.
         command_hint: Verb to mention in the rerun-tip footer.
             Defaults to ``"urpm upgrade"``; pass ``"urpm install"``
             for the install path.
@@ -549,9 +552,9 @@ def print_skipped_jobs(skipped: list, *, verbose: bool = False,
         print(f"  - {colors.warning(head)}{colors.dim(kind_tag)}")
 
         reason_lines = (sj.reason or "").splitlines() or [""]
-        if not verbose and len(reason_lines) > 3:
+        if not show_all and len(reason_lines) > 3:
             shown = reason_lines[:3]
-            shown.append(_("... (-v pour le détail complet)"))
+            shown.append(_("... (--show-all pour le détail complet)"))
         else:
             shown = reason_lines
         for line in shown:

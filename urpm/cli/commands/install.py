@@ -414,7 +414,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     from .. import display as _display
     _display.print_skipped_jobs(
         list(result.skipped or []),
-        verbose=getattr(args, 'verbose', False),
+        show_all=getattr(args, 'show_all', False),
         command_hint="urpm install",
     )
     partial_exit = 2 if result.skipped else 0
