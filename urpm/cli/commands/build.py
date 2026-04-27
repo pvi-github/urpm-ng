@@ -309,7 +309,7 @@ def _phase2_container_promote(
         # `urpm upgrade` below will naturally replay scriptlets for any
         # bootstrap package that has a newer version available.
         print(_("  Upgrading packages (picks up any newer versions)..."))
-        ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto', '--atomic'])
+        ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto'])
         if ret != 0:
             print(colors.warning(_("  Warning: upgrade returned {code}").format(code=ret)))
 
@@ -1008,7 +1008,7 @@ def _build_single_package(
             if ret != 0:
                 print(colors.warning(_("  Warning: media update failed, continuing...")))
             print(_("  Updating packages..."))
-            ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto', '--atomic'])
+            ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto'])
             if ret != 0:
                 print(colors.warning(_("  Warning: package update failed, continuing...")))
 
@@ -1296,7 +1296,7 @@ def cmd_image_update(args, db: 'PackageDatabase') -> int:
 
         # Upgrade packages
         print(_("  Upgrading packages..."))
-        ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto', '--atomic'])
+        ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto'])
         if ret != 0:
             print(colors.warning(
                 _("  Warning: package update returned {code}").format(
