@@ -316,7 +316,7 @@ def _phase2_container_promote(
         if extra_packages:
             print(_("  Installing {n} extra packages...").format(n=len(extra_packages)))
             ret = container.exec_stream(
-                cid, ['urpm', 'install', '--auto', *extra_packages])
+                cid, ['urpm', 'install', '--auto', '--without-recommends', *extra_packages])
             if ret != 0:
                 print(colors.error(_("Failed to install extra packages")))
                 return 1
@@ -337,7 +337,7 @@ def _phase2_container_promote(
                 return 1
             print(_("  Installing BuildRequires..."))
             ret = container.exec_stream(
-                cid, ['urpm', 'install', '--auto', '--buildrequires', dst_in_container])
+                cid, ['urpm', 'install', '--auto', '--without-recommends', '--buildrequires', dst_in_container])
             if ret != 0:
                 print(colors.error(_("Failed to install BuildRequires")))
                 return 1
@@ -1015,7 +1015,7 @@ def _build_single_package(
         # 4. Install rpm-build (provides rpmbuild)
         print(_("  Installing rpm-build..."))
         ret = container.exec_stream(cid, [
-            'urpm', 'install', '--auto', '--sync', 'rpm-build'
+            'urpm', 'install', '--auto', '--without-recommends', '--sync', 'rpm-build'
         ])
         if ret != 0:
             return (source_path, False, "Failed to install rpm-build")
@@ -1036,7 +1036,7 @@ def _build_single_package(
                 rpm_paths_in_container.append(f"/tmp/local-rpms/{rpm_path.name}")
             # Install all local RPMs at once
             ret = container.exec_stream(cid, [
-                'urpm', 'install', '--auto', '--sync', '--nosignature'
+                'urpm', 'install', '--auto', '--without-recommends', '--sync', '--nosignature'
             ] + rpm_paths_in_container)
             if ret != 0:
                 return (source_path, False, "Failed to install local RPMs")
@@ -1044,7 +1044,7 @@ def _build_single_package(
         # 5. Install build dependencies
         print(_("  Installing BuildRequires..."))
         ret = container.exec_stream(cid, [
-            'urpm', 'install', '--auto', '--sync', '--buildrequires', spec_path
+            'urpm', 'install', '--auto', '--without-recommends', '--sync', '--buildrequires', spec_path
         ])
         if ret != 0:
             return (source_path, False, f"BuildRequires install failed")
