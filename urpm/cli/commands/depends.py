@@ -926,6 +926,18 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
         print(f"{colors.bold(pkg_name)}: {colors.success(_('explicitly installed'))}")
         return 0
 
+    # Single source of truth for orphan classification: delegate to
+    # ``Resolver.is_orphan`` so this verb cannot diverge from
+    # ``urpm autoremove`` / ``urpme --auto-orphans`` on the same
+    # system state.  The BFS below is preserved purely for the
+    # explanatory listing of which paths lead to which explicit
+    # ancestors when the package is NOT an orphan.
+    if resolver.is_orphan(pkg_name):
+        print(f"{colors.bold(pkg_name)}: {colors.warning(_('orphan'))} "
+              + _("(no explicit package requires it)"))
+        print("\n" + _("This package can be removed with: urpm autoremove --orphans"))
+        return 0
+
     DEP_PRIORITY = {'R': 3, 'r': 2, 's': 1}
     rdeps_cache = {}  # Cache for _get_rdeps calls
 
@@ -943,8 +955,13 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
                               cache=rdeps_cache, installed_pkgs=installed_pkgs)
 
     if not direct_rdeps:
-        print(f"{colors.bold(pkg_name)}: {colors.warning(_('orphan'))} " + _("(nothing requires it)"))
-        print("\n" + _("This package can be removed with: urpm autoremove --orphans"))
+        # ``is_orphan`` returned False (we passed the early exit above)
+        # yet no Requires/Recommends/Suggests chain matches.  The
+        # protective edge can only come from Supplements.  Surface
+        # this explicitly rather than mislabel the package as orphan.
+        print(f"{colors.bold(pkg_name)}: {colors.success(_('kept by Supplements'))}")
+        print("\n" + _("This package is triggered by a Supplements "
+                       "relationship from another installed package."))
         return 0
 
     # For each direct rdep, find ALL paths to explicit packages using ONLY requires
@@ -982,8 +999,15 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
     orphan_branches = [k for k, v in results.items() if v is None]
 
     if not explicit_branches:
-        print(f"{colors.bold(pkg_name)}: {colors.warning(_('orphan'))} " + _("(no explicit package requires it)"))
-        print("\n" + _("This package can be removed with: urpm autoremove --orphans"))
+        # ``is_orphan`` returned False (we passed the early exit above)
+        # yet no Requires-only chain reaches an explicit ancestor.  The
+        # package is kept alive by a weak-dep-only chain (Recommends or
+        # Suggests transitive) or by a Supplements trigger.  Surface
+        # the rdeps we did find without claiming the package is orphan.
+        print(f"{colors.bold(pkg_name)}: "
+              + _("kept by weak dependency chain"))
+        for direct in sorted(orphan_branches):
+            print(f"  ← {direct}")
         return 0
 
     # Group by explicit package

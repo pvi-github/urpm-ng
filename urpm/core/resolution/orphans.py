@@ -12,6 +12,28 @@ except ImportError:
     HAS_RPM = False
 
 
+# Per-process debug flag for orphan-graph diagnostics.  Activated by
+# ``urpm upgrade --debug orphans`` (or ``--debug all``); see
+# :func:`set_orphan_debug`.  When True, ``find_upgrade_orphans`` dumps
+# the post-state edges of every newly-flagged orphan candidate so the
+# missing-edge class can be identified on real-world false positives.
+DEBUG_ORPHANS = False
+
+
+def set_orphan_debug(enabled: bool = False) -> None:
+    """Enable/disable orphan-detection diagnostic logging.
+
+    Activated via ``--debug orphans`` or ``--debug all``.  Logs, for
+    every package the upgrade orphan detector flags as a new orphan,
+    its post-transaction in-edges, declared provides, and require
+    count, so the missing-edge class (sonames, ``pkgconfig(...)``,
+    ``devel(...)``, plain names …) can be diagnosed without rebuilding
+    the resolver state.
+    """
+    global DEBUG_ORPHANS
+    DEBUG_ORPHANS = enabled
+
+
 # --- Module-level constants for versioned capability handling ---------------
 #
 # A "sense" is an RPMSENSE_* bitmask describing a dependency comparison
@@ -533,6 +555,38 @@ class OrphansMixin:
             unrequested.discard(name.lower())
         return self._save_unrequested_packages(unrequested)
 
+    def is_orphan(self, name: str) -> bool:
+        """Single-package orphan classification.
+
+        Single source of truth for "is package P orphan?", used by
+        every CLI verb that surfaces orphan status (``urpm why``,
+        ``urpm autoremove``, etc.).  Built on top of
+        :meth:`find_all_orphans` so that any divergence between
+        verbs is impossible by construction.
+
+        A package is considered orphan iff it is installed, marked as
+        a dependency in the ``installed-through-deps.list`` tracking
+        file, and no chain of Requires / Recommends / Suggests
+        relationships (or reverse Supplements triggers) connects it
+        to an explicitly-installed or builddep-tracked package.
+
+        Args:
+            name: Package name (case-insensitive matching against the
+                rpmdb).
+
+        Returns:
+            True iff ``name`` would be returned by
+            :meth:`find_all_orphans` on the current system state.
+            ``False`` for a non-installed package, an explicitly
+            installed one, or a builddep-tracked one.
+        """
+        if not name:
+            return False
+        target = name.lower()
+        return any(
+            o.name.lower() == target for o in self.find_all_orphans()
+        )
+
     def find_all_orphans(self) -> list:
         """Find ALL orphan packages in the system.
 
@@ -559,9 +613,11 @@ class OrphansMixin:
         # Single-pass: build provides map, reverse deps, and collect headers
         installed_pkgs = {}   # name -> hdr
         provides_map = {}     # capability -> set of package names
-        reverse_deps = {}     # name -> set of names that require/recommend/supplement it
+        reverse_deps = {}     # name -> set of names that require/recommend/
+                              #         suggest it, plus its supplement triggers
         pkg_requires = {}     # name -> list of capability names
         pkg_recommends = {}   # name -> list of capability names
+        pkg_suggests = {}     # name -> list of capability names (weak forward dep)
         pkg_supplements = {}  # name -> list of capability names (reverse weak dep)
 
         for hdr in ts.dbMatch():
@@ -580,6 +636,7 @@ class OrphansMixin:
                 if not r.startswith('rpmlib(') and not r.startswith('/')
             ]
             pkg_recommends[name] = list(hdr[rpm.RPMTAG_RECOMMENDNAME] or [])
+            pkg_suggests[name] = list(hdr[rpm.RPMTAG_SUGGESTNAME] or [])
             pkg_supplements[name] = list(hdr[rpm.RPMTAG_SUPPLEMENTNAME] or [])
 
         # Build the reverse-dep graph used for orphan DFS.  ``reverse_deps[X]``
@@ -602,6 +659,12 @@ class OrphansMixin:
         #   as independent capability names, which we treat as OR
         #   (conservative: may keep a package that strict AND would drop,
         #   but never drops one that strict AND would keep).
+        # Per project policy (configured by the user, not negotiated by the
+        # detector): every weak-dep relationship — Recommends and Suggests —
+        # protects from orphan classification by default.  Cleanup of
+        # weak-only-kept packages is opt-in via dedicated commands
+        # (``urpm autoremove --erase-recommends`` etc.), never the default
+        # behaviour of any orphan-classification verb.
         for name in installed_pkgs:
             for req in pkg_requires[name]:
                 for provider in provides_map.get(req, set()):
@@ -609,6 +672,10 @@ class OrphansMixin:
                         reverse_deps[provider].add(name)
             for rec in pkg_recommends[name]:
                 for provider in provides_map.get(rec, set()):
+                    if provider != name:
+                        reverse_deps[provider].add(name)
+            for sug in pkg_suggests[name]:
+                for provider in provides_map.get(sug, set()):
                     if provider != name:
                         reverse_deps[provider].add(name)
             for supp in pkg_supplements[name]:
@@ -1021,6 +1088,17 @@ class OrphansMixin:
                 flag_raw = rec_flags[i] if i < len(rec_flags) else 0
                 reqs.append((rec_name, flag_raw & _SENSE_MASK, ver or ''))
 
+            # Suggests count as protective edges by default (project policy:
+            # anything you installed via --suggests or accepted at install
+            # time should not be auto-removed unless explicitly requested).
+            sug_names = hdr[rpm.RPMTAG_SUGGESTNAME] or []
+            sug_vers = hdr[rpm.RPMTAG_SUGGESTVERSION] or []
+            sug_flags = hdr[rpm.RPMTAG_SUGGESTFLAGS] or []
+            for i, sug_name in enumerate(sug_names):
+                ver = sug_vers[i] if i < len(sug_vers) else ''
+                flag_raw = sug_flags[i] if i < len(sug_flags) else 0
+                reqs.append((sug_name, flag_raw & _SENSE_MASK, ver or ''))
+
             provs: List[Tuple[str, str]] = []
             prov_names = hdr[rpm.RPMTAG_PROVIDENAME] or []
             prov_vers = hdr[rpm.RPMTAG_PROVIDEVERSION] or []
@@ -1059,6 +1137,19 @@ class OrphansMixin:
                     continue
                 reqs.append((name, sense, evr))
             for r in pkg.get('recommends', []):
+                name, sense, evr = _parse_synthesis_cap(r)
+                reqs.append((name, sense, evr))
+            # ``@suggests@`` always counts as a protective edge in the
+            # orphan-detection graph, regardless of the resolver's
+            # ``suggests_as_recommends`` setting.  Two reasons:
+            # (1) Project policy: anything installed via --suggests or
+            #     accepted at install must not be auto-removed unless
+            #     the user explicitly asks for cleanup of weak-deps;
+            # (2) On Mageia synthesis, ``@suggests@`` is the legacy
+            #     storage of RPM Recommends (genhdlist2 mapping); on
+            #     genmedia-built media it carries real Suggests.  Both
+            #     readings count as protection per (1).
+            for r in pkg.get('suggests', []):
                 name, sense, evr = _parse_synthesis_cap(r)
                 reqs.append((name, sense, evr))
             for p in pkg.get('provides', []):
@@ -1242,6 +1333,24 @@ class OrphansMixin:
             if name in pre_state and _is_orphan(name, pre_reverse):
                 continue
             orphan_candidates.add(name)
+            if DEBUG_ORPHANS:
+                post_reqs = post_state.get(name, {}).get('requires', ())
+                in_edges = post_reverse.get(name, set())
+                provs = [
+                    p for p, _ in
+                    post_state.get(name, {}).get('provides', ())
+                ]
+                logger.warning(
+                    "orphans: flag %s in_edges=%d provides=%d requires=%d "
+                    "provs_sample=%s in_edges_sample=%s reqs_sample=%s",
+                    name,
+                    len(in_edges),
+                    len(provs),
+                    len(post_reqs),
+                    provs[:8],
+                    list(in_edges)[:8],
+                    [r[0] for r in post_reqs[:8]],
+                )
 
         # Build the plan: rpmdb-side removes and cancelled new versions.
         plan = UpgradeOrphanPlan()

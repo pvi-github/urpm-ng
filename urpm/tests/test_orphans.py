@@ -62,6 +62,14 @@ class FakeResolver:
         from urpm.core.resolution.orphans import OrphansMixin
         return OrphansMixin.find_upgrade_orphans(self, all_actions, obsoleted_names=obsoleted_names)
 
+    def find_all_orphans(self):
+        from urpm.core.resolution.orphans import OrphansMixin
+        return OrphansMixin.find_all_orphans(self)
+
+    def is_orphan(self, name):
+        from urpm.core.resolution.orphans import OrphansMixin
+        return OrphansMixin.is_orphan(self, name)
+
 
 @pytest.fixture
 def resolver(tmp_path):
@@ -217,10 +225,11 @@ class TestCaseInsensitive:
 rpm = pytest.importorskip('rpm')
 
 
-def _fake_hdr(name, requires=(), recommends=(), provides=(),
+def _fake_hdr(name, requires=(), recommends=(), suggests=(), provides=(),
               supplements=(),
               require_vers=(), require_flags=(),
               recommend_vers=(), recommend_flags=(),
+              suggest_vers=(), suggest_flags=(),
               supplement_vers=(), supplement_flags=(),
               provide_vers=(),
               epoch=0, version='1', release='1', arch='noarch', size=0):
@@ -240,6 +249,9 @@ def _fake_hdr(name, requires=(), recommends=(), provides=(),
         rpm.RPMTAG_RECOMMENDNAME: list(recommends),
         rpm.RPMTAG_RECOMMENDVERSION: list(recommend_vers),
         rpm.RPMTAG_RECOMMENDFLAGS: list(recommend_flags),
+        rpm.RPMTAG_SUGGESTNAME: list(suggests),
+        rpm.RPMTAG_SUGGESTVERSION: list(suggest_vers),
+        rpm.RPMTAG_SUGGESTFLAGS: list(suggest_flags),
         rpm.RPMTAG_SUPPLEMENTNAME: list(supplements),
         rpm.RPMTAG_SUPPLEMENTVERSION: list(supplement_vers),
         rpm.RPMTAG_SUPPLEMENTFLAGS: list(supplement_flags),
@@ -659,3 +671,93 @@ class TestFindUpgradeOrphansSpec:
             "plugin is kept alive by Supplements: app — must not be "
             "flagged when app is merely upgraded"
         )
+
+
+class TestOrphanCrossPathConsistency:
+    """Ensure ``is_orphan`` and ``find_all_orphans`` agree, and that
+    every weak-dep relationship (Recommends, Suggests, Supplements)
+    counts as a protective edge per the unified spec.
+
+    These tests pin the single-source-of-truth contract: any verb
+    surfacing orphan status must call ``is_orphan`` (which is
+    backed by ``find_all_orphans``) so a future refactor cannot
+    re-introduce the divergence between ``urpm why`` /
+    ``urpm autoremove`` / ``urpme --auto-orphans``.
+    """
+
+    def _run(self, resolver, headers):
+        with patch('urpm.core.resolution.orphans.rpm.TransactionSet') as ts_cls:
+            ts_cls.return_value.dbMatch.return_value = headers
+            return resolver.find_all_orphans(), [
+                resolver.is_orphan(h[rpm.RPMTAG_NAME]) for h in headers
+            ]
+
+    def test_suggests_protects_from_orphan(self, resolver):
+        """A package pulled only by Suggests must NOT be orphan.
+
+        Project policy: ``Suggests`` counts as a protective edge.  A
+        runtime helper (``helper``) installed because some explicit
+        package suggests it must not be auto-removed unless the user
+        explicitly asks for weak-dep cleanup.
+        """
+        resolver._save_unrequested_packages({'helper'})
+        headers = [
+            _fake_hdr('app', suggests=['helper'], provides=['app']),
+            _fake_hdr('helper', provides=['helper']),
+        ]
+        all_orphans, _per_name = self._run(resolver, headers)
+        assert {o.name for o in all_orphans} == set(), (
+            "helper is suggested by an explicit app — must not be flagged"
+        )
+
+    def test_recommends_protects_from_orphan(self, resolver):
+        """A package pulled only by Recommends must NOT be orphan."""
+        resolver._save_unrequested_packages({'helper'})
+        headers = [
+            _fake_hdr('app', recommends=['helper'], provides=['app']),
+            _fake_hdr('helper', provides=['helper']),
+        ]
+        all_orphans, _per_name = self._run(resolver, headers)
+        assert {o.name for o in all_orphans} == set()
+
+    def test_truly_orphan_is_flagged(self, resolver):
+        """Closed-cluster of unrequested with no explicit ancestor."""
+        resolver._save_unrequested_packages({'a', 'b'})
+        headers = [
+            _fake_hdr('a', requires=['b'], provides=['a']),
+            _fake_hdr('b', provides=['b']),
+        ]
+        all_orphans, _per_name = self._run(resolver, headers)
+        assert {o.name for o in all_orphans} == {'a', 'b'}
+
+    def test_is_orphan_agrees_with_find_all_orphans(self, resolver):
+        """``is_orphan(X)`` ⇔ X ∈ find_all_orphans() for every X.
+
+        The contract is bidirectional: a package returned by
+        ``find_all_orphans`` must be ``is_orphan``-True, and a package
+        not returned must be ``is_orphan``-False.  Any divergence is a
+        regression of the single-source-of-truth invariant.
+        """
+        resolver._save_unrequested_packages({'a', 'b', 'helper'})
+        headers = [
+            _fake_hdr('explicit_root', requires=['a'], provides=['explicit_root']),
+            _fake_hdr('a', requires=['b'], suggests=['helper'], provides=['a']),
+            _fake_hdr('b', provides=['b']),
+            _fake_hdr('helper', provides=['helper']),
+            _fake_hdr('cluster_x', requires=['cluster_y'], provides=['cluster_x']),
+            _fake_hdr('cluster_y', requires=['cluster_x'], provides=['cluster_y']),
+        ]
+        # cluster_x and cluster_y form a closed unrequested cycle → orphan
+        # a/b/helper protected via explicit_root
+        resolver._save_unrequested_packages(
+            {'a', 'b', 'helper', 'cluster_x', 'cluster_y'}
+        )
+        all_orphans, per_name_results = self._run(resolver, headers)
+        all_orphan_names = {o.name for o in all_orphans}
+        for hdr, is_orph in zip(headers, per_name_results):
+            name = hdr[rpm.RPMTAG_NAME]
+            in_set = name in all_orphan_names
+            assert is_orph == in_set, (
+                f"is_orphan({name})={is_orph} but "
+                f"find_all_orphans includes={in_set}"
+            )

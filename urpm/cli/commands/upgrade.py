@@ -45,7 +45,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     _debug = getattr(args, 'debug', None) or ''
     _debug_parts = {d.strip() for d in _debug.split(',')} if _debug else set()
     if 'all' in _debug_parts:
-        _debug_parts.update(('solver', 'tsrun', 'timing'))
+        _debug_parts.update(('solver', 'tsrun', 'timing', 'orphans'))
     debug_solver = 'solver' in _debug_parts
     debug_timing = 'timing' in _debug_parts
     watched_pkgs = getattr(args, 'watched', None)
@@ -57,6 +57,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     if 'tsrun' in _debug_parts:
         from ...core.transaction_queue import set_tsrun_debug
         set_tsrun_debug(enabled=True)
+    if 'orphans' in _debug_parts:
+        from ...core.resolution.orphans import set_orphan_debug
+        set_orphan_debug(enabled=True)
 
     # Determine what to upgrade
     packages = getattr(args, 'packages', []) or []
