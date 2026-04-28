@@ -526,7 +526,7 @@ def print_skipped_jobs(skipped: list, *, show_all: bool = False,
     if not skipped:
         return
 
-    from .colors import colors
+    from . import colors
     from ..i18n import _, ngettext
 
     n = len(skipped)
