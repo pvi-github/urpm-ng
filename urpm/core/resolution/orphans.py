@@ -1324,14 +1324,72 @@ class OrphansMixin:
         #   P ∈ S_post ∧ unrequested(P)
         #   ∧ orphan(P, S_post)
         #   ∧ ¬(P ∈ S_pre ∧ orphan(P, S_pre))
+        # Probe set used by the reject-trace below — narrowed so the
+        # debug log stays signal-rich on the typical 38k-solvable run.
+        # Includes packages an external observer (urpm autoremove)
+        # confirms as post-tx orphans, but that the upgrade-orphan
+        # detector is suspected of missing.  Add names freely here
+        # while diagnosing; nothing else depends on its contents.
+        _orphan_reject_probe = {
+            'kwin', 'kwin-common', 'kwin-wayland',
+            'lib64kwin6', 'lib64klipper6', 'lib64notificationmanager1',
+            'lib64taskmanager6', 'lib64batterycontrol6',
+            'lib64kfontinst6', 'lib64kfontinstui6',
+            'lib64kf6pulseaudioqt_5', 'lib64kcmkwincommon6',
+            'lib64bind9.20.18', 'lib64bind9.20.20',
+            'lib64xcb-devel', 'x11-proto-devel', 'lib64x11-devel',
+            'lib64xt-devel', 'lib64sm-devel', 'lib64ice-devel',
+            'lib64xau-devel', 'lib64xdmcp-devel', 'lib64uuid-devel',
+            'lib64pixman-devel', 'libpthread-stubs',
+            'lib64xcb-dbe0', 'lib64xcb-screensaver0',
+            'lib64xcb-xf86dri0', 'lib64xcb-xtest0', 'lib64xcb-xvmc0',
+            'lib64gpac12',
+        }
+
         orphan_candidates = set()
         for name in post_state:
+            probe = DEBUG_ORPHANS and name in _orphan_reject_probe
+
             if name.lower() not in effective_unrequested:
+                if probe:
+                    logger.warning(
+                        "orphans: REJECT %s — not in effective_unrequested "
+                        "(in unrequested=%s, in installed_names=%s)",
+                        name,
+                        name.lower() in unrequested,
+                        name in installed_names,
+                    )
                 continue
+
             if not _is_orphan(name, post_reverse):
+                if probe:
+                    in_edges = post_reverse.get(name, set())
+                    explicit_parents = sorted(
+                        p for p in in_edges
+                        if p.lower() not in effective_unrequested
+                    )
+                    logger.warning(
+                        "orphans: REJECT %s — has explicit ancestor in "
+                        "post_state (in_edges=%d, explicit_in_edges=%s)",
+                        name, len(in_edges), explicit_parents[:8],
+                    )
                 continue
+
             if name in pre_state and _is_orphan(name, pre_reverse):
+                if probe:
+                    in_edges_pre = pre_reverse.get(name, set())
+                    in_edges_post = post_reverse.get(name, set())
+                    logger.warning(
+                        "orphans: REJECT %s — pre-orphan filter "
+                        "(pre_in_edges=%d, post_in_edges=%d, "
+                        "pre_sample=%s, post_sample=%s)",
+                        name,
+                        len(in_edges_pre), len(in_edges_post),
+                        sorted(in_edges_pre)[:6],
+                        sorted(in_edges_post)[:6],
+                    )
                 continue
+
             orphan_candidates.add(name)
             if DEBUG_ORPHANS:
                 post_reqs = post_state.get(name, {}).get('requires', ())
