@@ -1392,17 +1392,82 @@ class OrphansMixin:
         # return the names separately so the caller can drop the action
         # and skip the downloaded RPM without asking rpm to install+remove
         # the same NVRA in one shot.
+        #
+        # Refinement: a NEW INSTALL pulled by libsolv to satisfy a
+        # versioned require of an UPGRADED package (e.g. ``lib64gimp-gir3.0``
+        # for ``gimp-3.2.4``'s ``Requires: typelib(Gimp) = 3.0``) appears
+        # in ``orphan_candidates`` whenever its only requirers are part of
+        # a closed unrequested cluster (gimp/gimp-python both classified
+        # DEPENDENCY).  Cancelling such an install would silently drop a
+        # provider that ``rpm ts.check()`` then refuses, blocking the
+        # whole transaction.  Cancellation is therefore performed in two
+        # passes plus an iteration to fix-point:
+        #
+        # 1. UPGRADE / DOWNGRADE / REINSTALL actions in ``orphan_candidates``
+        #    cancel unconditionally (a now-orphan upgrade has no useful
+        #    target post-tx).
+        # 2. INSTALL actions in ``orphan_candidates`` cancel only when
+        #    *no surviving requirer* remains in the plan — i.e. every
+        #    package whose post_state requires this name is itself
+        #    cancelled or absent from the plan.  When at least one
+        #    surviving UPGRADE/INSTALL still requires it, the install is
+        #    pulled for a legitimate reason and must be kept.
+        # 3. Iteration: a freshly-cancelled action may invalidate the
+        #    "surviving requirer" status of dependencies pulled by it,
+        #    cascading further INSTALL cancellations.  Repeat the
+        #    INSTALL pass until ``cancelled_new_versions`` stabilises.
         new_version_actions = {
             TransactionType.INSTALL,
             TransactionType.UPGRADE,
             TransactionType.DOWNGRADE,
             TransactionType.REINSTALL,
         }
+        upgrade_like_actions = {
+            TransactionType.UPGRADE,
+            TransactionType.DOWNGRADE,
+            TransactionType.REINSTALL,
+        }
+
+        # Pass 1 — cancel orphan-candidate upgrades unconditionally.
         for action in all_actions:
-            if action.action not in new_version_actions:
-                continue
-            if action.name in orphan_candidates:
+            if action.action in upgrade_like_actions and action.name in orphan_candidates:
                 plan.cancelled_new_versions.add(action.name.lower())
+
+        # Pass 2 (iterative) — cancel orphan-candidate installs whose
+        # requirers are all cancelled or absent from the plan.
+        action_by_lower_name = {
+            a.name.lower(): a for a in all_actions
+            if a.action in new_version_actions
+        }
+        install_orphans = [
+            a for a in all_actions
+            if a.action == TransactionType.INSTALL
+            and a.name in orphan_candidates
+        ]
+
+        while True:
+            newly_cancelled = False
+            for action in install_orphans:
+                key = action.name.lower()
+                if key in plan.cancelled_new_versions:
+                    continue
+                requirers = post_reverse.get(action.name, set())
+                # A requirer "survives" iff it is a planned action that
+                # has not been cancelled.  Requirers that are not in the
+                # plan at all (i.e. only present via @System or pre_state)
+                # are NOT counted as surviving — their post_state edges
+                # come from packages we don't actively install/upgrade.
+                has_survivor = any(
+                    r.lower() in action_by_lower_name
+                    and r.lower() not in plan.cancelled_new_versions
+                    for r in requirers
+                )
+                if has_survivor:
+                    continue
+                plan.cancelled_new_versions.add(key)
+                newly_cancelled = True
+            if not newly_cancelled:
+                break
 
         return plan
 

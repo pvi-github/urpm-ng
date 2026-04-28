@@ -585,6 +585,87 @@ class TestFindUpgradeOrphansSpec:
         # was the silent-no-op bug the refactor exists to fix.
         assert 'ff2' not in {o.name for o in plan.removes}
 
+    def test_new_install_pulled_by_surviving_upgrade_kept(self, resolver):
+        """Pulled-by-upgrade dep of a closed unrequested cluster: keep.
+
+        Scenario (mirrors the gimp 3.0.8 → 3.2.4 transition observed on
+        a real Mageia 10 system):
+
+        * ``gimp`` and ``gimp_python`` are installed and classified
+          DEPENDENCY (in ``installed-through-deps.list``) — common when
+          they came in through a task meta-package.
+        * Both are upgraded by the transaction.  Their new versions
+          add a versioned ``Requires: typelib(Gimp) = 3.0`` provided
+          by ``lib64gimp_gir`` — a brand-new package libsolv pulls
+          to satisfy the require.
+        * Without the fix, ``find_upgrade_orphans`` flagged
+          ``lib64gimp_gir`` as orphan-on-arrival (because all its
+          requirers in post_state — gimp, gimp_python — sat in the
+          unrequested cluster) and the caller cancelled its install.
+          rpm ``ts.check()`` then refused the whole transaction
+          because ``typelib(Gimp) = 3.0`` had no provider.
+        * With the fix, ``cancelled_new_versions`` keeps the install
+          when at least one surviving plan action requires it — even
+          if those requirers are themselves in unrequested.
+
+        Distinguishes the gimp case from ``test_auto_select_f``: there,
+        ``f``'s upgrade was itself cancelled (it had no requirer
+        post-tx), so ``ff2``'s only requirer was a cancelled action.
+        Here, ``gimp``'s upgrade survives (it is filtered out of
+        orphan_candidates by the pre-state-orphan clause), so its
+        new dep must survive too.
+        """
+        from urpm.core.resolver import TransactionType
+
+        resolver._save_unrequested_packages({'gimp', 'gimp_python'})
+        resolver.db.get_package.side_effect = lambda name: {
+            'gimp': {
+                'name': 'gimp', 'epoch': 5, 'version': '3.2.4',
+                'release': '1',
+                'requires': ['typelib(Gimp) == 3.0'], 'recommends': [],
+                'provides': ['gimp[= 5:3.2.4-1]'],
+            },
+            'gimp_python': {
+                'name': 'gimp_python', 'epoch': 5, 'version': '3.2.4',
+                'release': '1',
+                'requires': ['typelib(Gimp) == 3.0'], 'recommends': [],
+                'provides': ['gimp_python[= 5:3.2.4-1]'],
+            },
+            'lib64gimp_gir': {
+                'name': 'lib64gimp_gir', 'epoch': 5, 'version': '3.2.4',
+                'release': '1',
+                'requires': [], 'recommends': [],
+                'provides': [
+                    'lib64gimp_gir[= 5:3.2.4-1]',
+                    'typelib(Gimp) == 3.0',
+                ],
+            },
+        }.get(name)
+
+        # Pre-state: gimp + gimp_python installed, no lib64gimp_gir.
+        # Their old versions don't carry the versioned typelib require.
+        headers = [
+            _fake_hdr('gimp', provides=['gimp']),
+            _fake_hdr('gimp_python', provides=['gimp_python']),
+        ]
+        actions = [
+            _make_action('gimp', TransactionType.UPGRADE),
+            _make_action('gimp_python', TransactionType.UPGRADE),
+            _make_action('lib64gimp_gir', TransactionType.INSTALL),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+
+        # The new gir provider must NOT be cancelled — gimp's upgrade
+        # survives (it has no pre-state requirer so the pre-orphan
+        # clause filters it out of orphan_candidates) and still
+        # requires lib64gimp_gir's typelib(Gimp) = 3.0 in post-state.
+        assert 'lib64gimp_gir' not in plan.cancelled_new_versions, (
+            "lib64gimp_gir is pulled by surviving gimp/gimp_python "
+            "upgrades and must be kept — cancelling it leaves "
+            "typelib(Gimp) = 3.0 unprovided and rpmlib refuses the tx"
+        )
+
     # -- Supplements regression tests --------------------------------------
     #
     # The two scenarios below pin the fix for the
