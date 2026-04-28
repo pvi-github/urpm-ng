@@ -891,7 +891,6 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
     from collections import deque
 
     package = args.package
-    pkg_name = _extract_pkg_name(package)
 
     # Get set of installed packages
     installed_pkgs = set()
@@ -904,9 +903,23 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
         print(_("rpm module not available"))
         return 1
 
-    if pkg_name not in installed_pkgs:
-        print(_("Package '{package}' is not installed").format(package=pkg_name))
-        return 1
+    # Resolve the user-typed string to an installed Name.  The literal
+    # input wins whenever it matches the rpmdb directly: Mageia ABI-
+    # versioned packages (``lib64polkit1-devel-127``,
+    # ``lua-rpm-macros-1``, ``xmltex-20020625``,
+    # ``kernel-desktop-devel-6.18.22-1.mga10``) embed numbers / dates /
+    # kernel versions in their Name and must not be split as if those
+    # suffixes were a NEVRA's Version-Release.  Only fall back to
+    # ``extract_pkg_name`` if the literal does not match the rpmdb —
+    # that handles the case where the user pastes a full NEVRA copied
+    # from another command's output.
+    if package in installed_pkgs:
+        pkg_name = package
+    else:
+        pkg_name = _extract_pkg_name(package)
+        if pkg_name not in installed_pkgs:
+            print(_("Package '{package}' is not installed").format(package=package))
+            return 1
 
     # Get the list of auto-installed packages
     resolver = Resolver(db)

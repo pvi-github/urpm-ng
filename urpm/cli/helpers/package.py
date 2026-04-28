@@ -10,25 +10,58 @@ if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
 
+_KNOWN_ARCHES = {"x86_64", "i586", "i686", "noarch", "aarch64", "armv7hl"}
+
+
 def extract_pkg_name(package: str) -> str:
     """Extract package name from a NEVRA string.
 
+    A genuine NEVRA always ends with an explicit ``.arch`` suffix
+    (``.x86_64``, ``.noarch``, ``.i586``, ``.aarch64``, ``.armv7hl``,
+    ``.i686``).  Without that suffix, the input is treated as a literal
+    package name — even if it contains hyphens followed by digits.
+
+    This is critical for Mageia conventions where the package Name
+    itself can embed numeric suffixes:
+
+    * SONAME-versioned libraries: ``lib64polkit1-devel-127``
+      (Name=``lib64polkit1-devel-127``, not ``lib64polkit1-devel``).
+    * Date-versioned packages: ``xmltex-20020625``.
+    * Singleton-versioned packages: ``lua-rpm-macros-1``.
+    * Kernel packages: ``kernel-desktop-devel-6.18.22-1.mga10``
+      (when passed without ``.arch``, it is the kernel Name itself).
+
+    Mirrors :func:`urpm.core.resolver._is_nevra` semantics so the CLI
+    helper and the resolver agree on what constitutes a NEVRA.
+
     Args:
-        package: Either a simple name like 'firefox' or NEVRA like 'firefox-120.0-1.mga10.x86_64'
+        package: Either a simple name like ``firefox`` or a NEVRA like
+            ``firefox-120.0-1.mga10.x86_64``.
 
     Returns:
-        The package name
+        The package name.  For a literal name (no ``.arch`` suffix),
+        the input is returned unchanged.
     """
     # Don't try to extract NEVRA from virtual packages (pkgconfig, etc.)
     # These have parentheses and the version inside is part of the name
     if '(' in package:
         return package
-    # If it looks like a NEVRA (has version pattern), extract name
-    # Pattern: name-version-release.arch where version starts with digit
-    match = re.match(r'^(.+?)-\d+[.:]', package)
-    if match:
-        return match.group(1)
-    return package
+    # Globs and version constraints are never NEVRAs
+    if any(c in package for c in ('*', '?', '[', ' ')):
+        return package
+    # A real NEVRA must end with ".arch".  Without an explicit known
+    # arch suffix the input is a literal package name and must be
+    # returned as-is, even if it contains hyphen-digit patterns.
+    dot_pos = package.rfind('.')
+    if dot_pos < 0 or package[dot_pos + 1:] not in _KNOWN_ARCHES:
+        return package
+    # Strip ".arch", then split off "release" (last "-...") and
+    # "version" (next-to-last "-...") to get the name.
+    head = package[:dot_pos]
+    if head.count('-') < 2:
+        return package
+    name, _ver, _rel = head.rsplit('-', 2)
+    return name
 
 
 def extract_family(pkg_name: str) -> str:
