@@ -8,6 +8,13 @@ if TYPE_CHECKING:
 
 from ..helpers.package import extract_pkg_name as _extract_pkg_name
 from ..helpers.resolver import create_resolver as _create_resolver
+# Imported at module load time so the function survives a self-removal
+# of urpm-ng: ``urpm e urpm-ng-core`` removes urpm-ng's own Python files
+# during the rpm transaction; deferring this import to the post-tx
+# code path raises ModuleNotFoundError because progress.py is gone
+# from disk before we try to read it.  Python keeps the function
+# reference in memory regardless of the source file's fate.
+from ..helpers.progress import display_scriptlet_output as _display_scriptlet_output
 
 
 def cmd_erase(args, db: 'PackageDatabase') -> int:
@@ -341,11 +348,15 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
             "{count} packages erased",
             erased_count).format(count=erased_count)))
 
-        # Persist and display captured scriptlet output
+        # Persist and display captured scriptlet output.  The function
+        # reference was captured at module load (see top-of-file) so a
+        # self-removal of urpm-ng-core does not break this post-tx step.
         ops.record_scriptlet_output(transaction_id, queue_result)
-        from ..helpers.progress import display_scriptlet_output
-        display_scriptlet_output(queue_result, verbose=getattr(args, 'verbose', False),
-                                 transaction_id=transaction_id)
+        _display_scriptlet_output(
+            queue_result,
+            verbose=getattr(args, 'verbose', False),
+            transaction_id=transaction_id,
+        )
 
         ops.complete_transaction(transaction_id)
 
