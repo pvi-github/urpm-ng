@@ -1917,30 +1917,57 @@ class PackageDatabase(
 
         return results, seen_ids
 
-    def get_package(self, name: str) -> Optional[Dict]:
+    def get_package(self, name: str, arch: Optional[str] = None) -> Optional[Dict]:
         """Get a package by exact name (latest version).
 
         Filters by system version to avoid returning packages from other
         Mageia versions (e.g., mga9 packages on a mga10 system).
+
+        Args:
+            name: Package name (case-insensitive lookup).
+            arch: Optional architecture hint. When provided, the query is
+                restricted to packages whose ``arch`` matches ``arch`` or
+                is ``noarch``. This avoids returning a row of a foreign
+                arch (e.g. ``i686`` on an ``x86_64`` system with 32-bit
+                media enabled), whose sonames in ``Requires`` would not
+                match the capabilities provided by the system arch.
+                When ``arch`` is ``None`` (default), no arch filter is
+                applied — historical behaviour preserved for backward
+                compatibility with all other callers.
+
+        Returns:
+            A dict describing the package (with deps populated) or
+            ``None`` when no row matches.
         """
         # Build version filter (respects version-mode config)
         version_join, version_filter, version_params = self._build_version_filter()
+
+        # Optional arch filter: keep the requested arch and noarch (which
+        # is universally compatible). The filter is appended to the WHERE
+        # clause so it composes with the version filter.
+        arch_filter = ''
+        arch_params: tuple = ()
+        if arch is not None:
+            arch_filter = "AND p.arch IN (?, 'noarch')"
+            arch_params = (arch,)
 
         if version_join:
             cursor = self.conn.execute(f"""
                 SELECT p.* FROM packages p
                 {version_join}
-                WHERE p.name_lower = ? {version_filter}
+                WHERE p.name_lower = ? {version_filter} {arch_filter}
                 ORDER BY p.epoch DESC, p.version DESC, p.release DESC
                 LIMIT 1
-            """, (name.lower(),) + version_params)
+            """, (name.lower(),) + version_params + arch_params)
         else:
-            cursor = self.conn.execute("""
-                SELECT * FROM packages
-                WHERE name_lower = ?
-                ORDER BY epoch DESC, version DESC, release DESC
+            # Without the version join we still need to alias as ``p`` so
+            # the optional arch filter (referencing ``p.arch``) parses.
+            cursor = self.conn.execute(f"""
+                SELECT p.* FROM packages p
+                WHERE p.name_lower = ? {arch_filter}
+                ORDER BY p.epoch DESC, p.version DESC, p.release DESC
                 LIMIT 1
-            """, (name.lower(),))
+            """, (name.lower(),) + arch_params)
 
         row = cursor.fetchone()
         if not row:

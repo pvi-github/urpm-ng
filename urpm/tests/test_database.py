@@ -383,3 +383,108 @@ class TestPackageVersioning:
         assert pkg is not None
         assert pkg['name'] == 'vim'
         assert pkg['version'] == '9.0'
+
+
+class TestGetPackageArchFilter:
+    """Regression tests for the optional ``arch`` filter on ``get_package``.
+
+    On a multi-arch system (typically x86_64 with 32-bit media enabled),
+    the package table can hold three rows for the same N-V-R: ``i686``,
+    ``x86_64`` and ``noarch``. Without an arch hint, SQLite is free to
+    return any of them, and a foreign-arch row carries the wrong sonames
+    in ``Requires`` (``libfoo.so.2()`` without the ``(64bit)`` qualifier),
+    which then fails to match the capabilities provided by 64-bit
+    packages — the orphan detector mistakenly flags surviving providers.
+    These tests pin the fix so a future refactor cannot silently drop
+    the arch filter again.
+    """
+
+    def _import_multiarch_foo(self, db):
+        """Insert three rows of ``foo`` (i686 + x86_64 + noarch) at the
+        same NVR, plus a control row of an unrelated package."""
+        media_id = db.add_media(
+            name="Core Release",
+            short_name="core_release",
+            mageia_version="9",
+            architecture="x86_64",
+            relative_path="core/release"
+        )
+        packages = [
+            {
+                'name': 'foo', 'version': '1.0', 'release': '1.mga9',
+                'epoch': 0, 'arch': 'i686',
+                'nevra': 'foo-1.0-1.mga9.i686',
+                'provides': ['foo'], 'requires': ['libfoo.so.2()'],
+                'filesize': 1000,
+            },
+            {
+                'name': 'foo', 'version': '1.0', 'release': '1.mga9',
+                'epoch': 0, 'arch': 'x86_64',
+                'nevra': 'foo-1.0-1.mga9.x86_64',
+                'provides': ['foo'], 'requires': ['libfoo.so.2()(64bit)'],
+                'filesize': 1000,
+            },
+            {
+                'name': 'foo', 'version': '1.0', 'release': '1.mga9',
+                'epoch': 0, 'arch': 'noarch',
+                'nevra': 'foo-1.0-1.mga9.noarch',
+                'provides': ['foo'], 'requires': [],
+                'filesize': 1000,
+            },
+        ]
+        db.import_packages(iter(packages), media_id=media_id)
+        return media_id
+
+    def test_no_arch_hint_returns_one_row(self, db):
+        """Backward compat: ``arch=None`` keeps the historical behaviour
+        (no arch filter, one arbitrary row returned)."""
+        self._import_multiarch_foo(db)
+
+        pkg = db.get_package('foo')
+        assert pkg is not None
+        assert pkg['name'] == 'foo'
+        assert pkg['arch'] in {'i686', 'x86_64', 'noarch'}
+
+    def test_arch_hint_x86_64_returns_x86_64_row(self, db):
+        """``arch='x86_64'`` selects the x86_64 row even when i686 and
+        noarch rows exist for the same NVR."""
+        self._import_multiarch_foo(db)
+
+        pkg = db.get_package('foo', arch='x86_64')
+        assert pkg is not None
+        assert pkg['arch'] == 'x86_64'
+        assert pkg['nevra'] == 'foo-1.0-1.mga9.x86_64'
+
+    def test_arch_hint_i686_returns_i686_row(self, db):
+        """``arch='i686'`` selects the i686 row.
+
+        Confirms the filter is symmetric and not hard-coded to the host
+        arch — useful for inspection paths that may want a foreign-arch
+        row deliberately.
+        """
+        self._import_multiarch_foo(db)
+
+        pkg = db.get_package('foo', arch='i686')
+        assert pkg is not None
+        assert pkg['arch'] == 'i686'
+
+    def test_arch_hint_falls_back_to_noarch(self, db):
+        """``arch='aarch64'`` matches no native row but falls back to the
+        ``noarch`` row, which is universally compatible.
+
+        The filter is expressed as ``arch IN (?, 'noarch')`` precisely so
+        a noarch package is reachable from any requested arch hint.
+        """
+        self._import_multiarch_foo(db)
+
+        pkg = db.get_package('foo', arch='aarch64')
+        assert pkg is not None
+        assert pkg['arch'] == 'noarch'
+
+    def test_arch_hint_unknown_package_returns_none(self, db):
+        """``arch`` on a missing name still returns ``None`` (no crash,
+        no spurious match)."""
+        self._import_multiarch_foo(db)
+
+        pkg = db.get_package('bar', arch='x86_64')
+        assert pkg is None

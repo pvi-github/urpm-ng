@@ -1027,15 +1027,26 @@ class OrphansMixin:
 
         ts = rpm.TransactionSet(self.root or '/')
 
-        upgraded_names = set()
-        installed_names = set()
+        # ``upgraded_names`` and ``installed_names`` are name → arch maps:
+        # the post-state synthesis below queries
+        # :meth:`PackageDatabase.get_package` for each one and we must
+        # pin the arch hint, otherwise on a multi-arch system (e.g.
+        # x86_64 host + 32-bit media) SQLite may return the ``i686``
+        # row of a multi-arch package.  The sonames in its ``Requires``
+        # (``libfoo.so.2()`` without ``(64bit)``) then fail to match the
+        # capabilities provided by 64-bit packages, leaving providers
+        # erroneously flagged as orphans (see ntfs-3g / lib64fuse2 bug).
+        # ``in`` and iteration semantics on a dict mirror those on a
+        # set of names, so other usages downstream are unaffected.
+        upgraded_names: dict = {}
+        installed_names: dict = {}
         removed_names = set()
 
         for action in all_actions:
             if action.action == TransactionType.UPGRADE:
-                upgraded_names.add(action.name)
+                upgraded_names[action.name] = action.arch
             elif action.action == TransactionType.INSTALL:
-                installed_names.add(action.name)
+                installed_names[action.name] = action.arch
             elif action.action == TransactionType.REMOVE:
                 removed_names.add(action.name)
 
@@ -1213,7 +1224,7 @@ class OrphansMixin:
                 continue
 
             if name in upgraded_names:
-                new_pkg = self.db.get_package(name)
+                new_pkg = self.db.get_package(name, arch=upgraded_names[name])
                 new_reqs, new_provs, new_supps = _collect_from_synthesis(new_pkg)
                 new_provs.append((name, _pkg_self_evr(new_pkg)))
                 post_state[name] = {
@@ -1231,7 +1242,7 @@ class OrphansMixin:
         for name in installed_names:
             if name in post_state:
                 continue
-            new_pkg = self.db.get_package(name)
+            new_pkg = self.db.get_package(name, arch=installed_names[name])
             reqs, provs, supps = _collect_from_synthesis(new_pkg)
             provs.append((name, _pkg_self_evr(new_pkg)))
             post_state[name] = {

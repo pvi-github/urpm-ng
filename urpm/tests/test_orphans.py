@@ -311,7 +311,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages({'a'})
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             'req_a': {'requires': [], 'recommends': [], 'provides': ['req_a']},
             'a':     {'requires': [], 'recommends': [], 'provides': ['a']},
         }.get(name)
@@ -346,7 +346,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages(set())
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             'user_app': {
                 'requires': ['new_dep'], 'recommends': [],
                 'provides': ['user_app'],
@@ -387,7 +387,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages({'hh'})
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             'h':  {'requires': [], 'recommends': [], 'provides': ['h']},
             'hh': {'requires': [], 'recommends': [], 'provides': ['hh']},
         }.get(name)
@@ -418,7 +418,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages({'stale'})
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             'user_app': {
                 'requires': [], 'recommends': [], 'provides': ['user_app'],
             },
@@ -467,7 +467,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages({'tt1', 'tt2'})
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             't': {
                 'name': 't', 'epoch': 0, 'version': '2', 'release': '1',
                 'requires': ['tt[>= 2]'], 'recommends': [],
@@ -537,7 +537,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages({'f', 'ff1', 'ff2'})
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             'req_f': {
                 'name': 'req_f', 'epoch': 0, 'version': '2', 'release': '1',
                 'requires': [], 'recommends': [],
@@ -618,7 +618,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages({'gimp', 'gimp_python'})
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             'gimp': {
                 'name': 'gimp', 'epoch': 5, 'version': '3.2.4',
                 'release': '1',
@@ -666,6 +666,158 @@ class TestFindUpgradeOrphansSpec:
             "typelib(Gimp) = 3.0 unprovided and rpmlib refuses the tx"
         )
 
+    # -- ntfs-3g / lib64fuse2 regression -----------------------------------
+    #
+    # Reproduces the production bug observed on Mageia cauldron during
+    # ``urpm u``: ``ntfs-3g-2026.2.25-1.mga10`` (UPGRADE) requires
+    # ``libfuse.so.2()(64bit)``, provided by the already-installed
+    # ``lib64fuse2-2.9.9-8.mga10`` (not in the transaction).  The bug
+    # flagged ``lib64fuse2`` as a new orphan post-tx, leading to a
+    # transaction that ``rpmlib ts.check()`` refused.
+
+    def test_ntfs3g_keeps_lib64fuse2_via_versioned_soname(self, resolver):
+        """Surviving upgrade picks up new soname require ⇒ provider kept.
+
+        Pre-state: old ``ntfs-3g`` does NOT require ``libfuse.so.2()``;
+        ``lib64fuse2`` is unrequested but provides the soname.
+        Post-state: new ``ntfs-3g`` requires ``libfuse.so.2()(64bit)``
+        (via synthesis ``self.db.get_package``).  The reverse-dep graph
+        must credit ``lib64fuse2`` with an in-edge from ``ntfs-3g``.
+
+        This fixture also models the **multi-arch SQLite row hazard**
+        that drove the root-cause fix: three rows exist in the database
+        for ``ntfs-3g`` (``i686``, ``x86_64`` and a noarch fallback),
+        with the ``i686`` row carrying the **wrong** soname
+        (``libfuse.so.2()`` without the ``(64bit)`` qualifier).  The fix
+        passes ``arch=action.arch`` (``x86_64`` here) to
+        ``get_package`` so the right row is returned and lib64fuse2's
+        capability matches.  Without the fix, the i686 row's bare
+        soname would not be satisfied by lib64fuse2's ``(64bit)``
+        capability — lib64fuse2 would lose its in-edge and be flagged
+        orphan, exactly the regression we are pinning.
+        """
+        from urpm.core.resolver import TransactionType
+
+        resolver._save_unrequested_packages({'lib64fuse2'})
+
+        # Multi-arch model: three rows for ntfs-3g, only the x86_64 one
+        # carries the correct (64bit) soname.  ``get_package`` must
+        # honour the arch hint passed by ``find_upgrade_orphans``.
+        ntfs3g_rows = {
+            'i686': {
+                'name': 'ntfs-3g', 'epoch': 0,
+                'version': '2026.2.25', 'release': '1.mga10',
+                'arch': 'i686',
+                'requires': ['libfuse.so.2()'],
+                'recommends': [],
+                'provides': ['ntfs-3g[= 2026.2.25-1.mga10]'],
+            },
+            'x86_64': {
+                'name': 'ntfs-3g', 'epoch': 0,
+                'version': '2026.2.25', 'release': '1.mga10',
+                'arch': 'x86_64',
+                'requires': ['libfuse.so.2()(64bit)'],
+                'recommends': [],
+                'provides': ['ntfs-3g[= 2026.2.25-1.mga10]'],
+            },
+            'noarch': {
+                'name': 'ntfs-3g', 'epoch': 0,
+                'version': '2026.2.25', 'release': '1.mga10',
+                'arch': 'noarch',
+                'requires': [],
+                'recommends': [],
+                'provides': ['ntfs-3g[= 2026.2.25-1.mga10]'],
+            },
+        }
+
+        def fake_get_package(name, arch=None):
+            if name != 'ntfs-3g':
+                return None
+            # Mimic the real DB filter: when arch is given, pick the
+            # matching row or fall back to noarch; without a hint,
+            # SQLite would return an arbitrary row — pick the
+            # **wrong** one (i686) on purpose to make sure the fix
+            # really passes a hint.
+            if arch is None:
+                return ntfs3g_rows['i686']
+            return ntfs3g_rows.get(arch) or ntfs3g_rows['noarch']
+
+        resolver.db.get_package.side_effect = fake_get_package
+
+        # Pre-state rpmdb: old ntfs-3g (no soname require), lib64fuse2.
+        headers = [
+            _fake_hdr('ntfs-3g', provides=['ntfs-3g']),
+            _fake_hdr(
+                'lib64fuse2',
+                provides=['lib64fuse2', 'libfuse.so.2()(64bit)'],
+                provide_vers=['2.9.9-8.mga10', ''],
+            ),
+        ]
+        # Action carries arch='x86_64' — the fix forwards it to
+        # get_package, selecting the row whose require matches the
+        # (64bit) soname provided by lib64fuse2.
+        actions = [
+            _make_action('ntfs-3g', TransactionType.UPGRADE, arch='x86_64'),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+
+        assert 'lib64fuse2' not in {o.name for o in plan.removes}, (
+            "lib64fuse2 provides libfuse.so.2()(64bit) which the "
+            "upgraded ntfs-3g (x86_64 row) requires — must NOT be "
+            "flagged orphan. If this assert fails, find_upgrade_orphans "
+            "is no longer passing arch=action.arch to db.get_package "
+            "and is picking up the i686 row whose soname lacks (64bit)."
+        )
+        assert 'lib64fuse2' not in plan.cancelled_new_versions
+
+    def test_ntfs3g_H1_get_package_returns_None_drops_provider(self, resolver):
+        """H1: db.get_package returns None ⇒ post_state requires empty.
+
+        Reproduces the failure mode if some upstream filter
+        (mageia_version, TEXT-sort, etc.) makes
+        ``self.db.get_package('ntfs-3g')`` return ``None`` even though
+        the action is UPGRADE.  ``_collect_from_synthesis(None)``
+        returns empty lists silently, so the post-tx requires of
+        ntfs-3g are empty, lib64fuse2 has zero in-edges and is
+        flagged as a new orphan.
+        """
+        from urpm.core.resolver import TransactionType
+
+        resolver._save_unrequested_packages({'lib64fuse2'})
+        # Simulate H1: get_package returns None for the upgraded pkg.
+        # Accept the optional ``arch`` kwarg so this stub stays
+        # compatible with the arch-aware caller.
+        resolver.db.get_package.side_effect = lambda name, arch=None: None
+
+        # Pre-state: old ntfs-3g ALREADY requires libfuse.so.2()(64bit)
+        # — without this, lib64fuse2 is already orphan pre-tx and the
+        # ``¬(P ∈ S_pre ∧ orphan(P, S_pre))`` clause filters it out.
+        headers = [
+            _fake_hdr(
+                'ntfs-3g',
+                requires=['libfuse.so.2()(64bit)'],
+                provides=['ntfs-3g'],
+            ),
+            _fake_hdr(
+                'lib64fuse2',
+                provides=['lib64fuse2', 'libfuse.so.2()(64bit)'],
+                provide_vers=['2.9.9-8.mga10', ''],
+            ),
+        ]
+        actions = [
+            _make_action('ntfs-3g', TransactionType.UPGRADE),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+
+        # Pinning the bug: with H1, lib64fuse2 IS in plan.removes.
+        assert 'lib64fuse2' in {o.name for o in plan.removes}, (
+            "Bug repro: H1 (get_package=None) should produce empty "
+            "post-state requires for ntfs-3g, leaving lib64fuse2 "
+            "with no in-edge → flagged orphan"
+        )
+
     # -- Supplements regression tests --------------------------------------
     #
     # The two scenarios below pin the fix for the
@@ -692,7 +844,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages({'plugin'})
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             'app':    {'requires': [], 'recommends': [], 'provides': ['app']},
             'plugin': {
                 'requires': [], 'recommends': [],
@@ -727,7 +879,7 @@ class TestFindUpgradeOrphansSpec:
         from urpm.core.resolver import TransactionType
 
         resolver._save_unrequested_packages({'plugin'})
-        resolver.db.get_package.side_effect = lambda name: {
+        resolver.db.get_package.side_effect = lambda name, arch=None: {
             'app': {
                 'name': 'app', 'epoch': 0, 'version': '2', 'release': '1',
                 'requires': [], 'recommends': [],
