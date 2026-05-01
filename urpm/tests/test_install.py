@@ -86,6 +86,20 @@ class BaseUrpmiTest:
         else:
             self.prefix_rpm = ["unshare", "--mount", "--user", "--map-root-user","rpm"]
 
+    def teardown_method(self, method):
+        """Close the chroot PackageDatabase between tests.
+
+        pytest keeps test instances alive for the whole session (for
+        reporting), so the SQLite connection opened in ``prepare()``
+        otherwise leaks one fd per test. Around 70 leaked fds plus the
+        rpm subprocess fds is enough to hit the default 1024 ulimit and
+        cascade-fail every remaining test that touches the chroot.
+        """
+        chroot_db = getattr(self, 'chroot_db', None)
+        if chroot_db is not None:
+            chroot_db.close()
+            self.chroot_db = None
+
     # ------------------------------------------------------------------
     # Media management
     # ------------------------------------------------------------------
