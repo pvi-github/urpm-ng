@@ -22,6 +22,7 @@ _COLORS = {
     # Additional
     'dim': '\033[2m',
     'cyan': '\033[96m',
+    'light_purple': '\033[95m',  # Bright magenta — used for dependency names
 }
 
 # Global state
@@ -106,6 +107,11 @@ def bold(text: str) -> str:
 def cyan(text: str) -> str:
     """Format text as cyan."""
     return _wrap(text, 'cyan')
+
+
+def light_purple(text: str) -> str:
+    """Format text as light purple (bright magenta)."""
+    return _wrap(text, 'light_purple')
 
 
 # Convenience functions for common patterns

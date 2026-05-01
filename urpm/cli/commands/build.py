@@ -1041,7 +1041,7 @@ def _build_single_package(
             if ret != 0:
                 return (source_path, False, "Failed to install local RPMs")
 
-        # 5. Install build dependencies
+        # 5. Install static build dependencies (those declared verbatim in the spec)
         print(_("  Installing BuildRequires..."))
         ret = container.exec_stream(cid, [
             'urpm', 'install', '--auto', '--without-recommends', '--sync', '--buildrequires', spec_path
@@ -1049,14 +1049,113 @@ def _build_single_package(
         if ret != 0:
             return (source_path, False, f"BuildRequires install failed")
 
-        # 6. Build the package
-        print(_("  Building..."))
         # Get package name from spec for log naming (log.<Name>)
         result = container.exec(cid, ['rpmspec', '-q', '--srpm', '--qf', '%{name}', spec_path])
         pkg_name = result.stdout.strip() if result.returncode == 0 else source_path.stem
         container_log = f'/tmp/log.{pkg_name}'
+
+        # 5b. Resolve dynamic BuildRequires (rpm 4.15+ %generate_buildrequires).
+        #
+        # ANTI-PATTERN — adopted reluctantly to align with the ecosystem.
+        # ---------------------------------------------------------------
+        # What we'd *like*: parse all BuildRequires from the spec once, install
+        # them, then run rpmbuild. Done.
+        #
+        # What rpm forces us to do: modern PEP 517 / Cargo / Meson backends
+        # declare their dependencies programmatically (e.g. poetry-core reads
+        # pyproject.toml at runtime to enumerate them). To learn what a project
+        # needs you must execute its build backend; to execute the backend the
+        # backend must already be installed. So rpm 4.15 introduced
+        # %generate_buildrequires: rpmbuild runs the backend, writes newly
+        # discovered BuildRequires into a *.buildreqs.nosrc.rpm sidecar, and
+        # exits with code 11. The build tool installs those, retries, repeats
+        # until convergence (typically 1-2 passes for Python).
+        #
+        # This is a retry-on-failure loop using an exit code as control flow.
+        # It is the exact pattern documented by rpm upstream and implemented by
+        # mock(1), dnf builddep, and koji. We do not have a cleaner option if
+        # we want to build mainstream Python/Rust packages without forcing
+        # every packager to duplicate pyproject.toml/Cargo.toml deps by hand
+        # in their .spec — which would drift and rot.
+        #
+        # Refs:
+        #   https://rpm-software-management.github.io/rpm/manual/dynamic_build_dependencies.html
+        #   rpm source: RPMRC_MISSINGBUILDREQUIRES = 11
+        import re
+        RPMBUILD_MISSING_BR = 11        # rpm's documented "more BRs needed" exit code
+        MAX_DYNBR_PASSES = 16           # safety cap; real builds converge in 1-3
+        _ver_re = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
+
+        # Output discipline: the per-iteration `rpmbuild -br` runs are an
+        # implementation detail of dynamic BR resolution, not output we want
+        # to surface. They are captured (not streamed) and appended to the
+        # build log for post-mortem. The actual `urpm install` of the
+        # discovered deps stays visible — that's a real install with progress
+        # the user expects to see.
+
+        for dynbr_pass in range(MAX_DYNBR_PASSES):
+            # `rpmbuild -br` runs only %prep + %generate_buildrequires (cheap:
+            # no %build, no %install). `set -o pipefail` so we observe
+            # rpmbuild's exit code, not tee's. Output captured + logged.
+            result = container.exec(cid, [
+                'bash', '-c',
+                f'set -o pipefail; rpmbuild -br {spec_path} 2>&1 | tee -a {container_log}'
+            ])
+            rc = result.returncode
+            if rc == 0:
+                break  # all BRs satisfied (or %generate_buildrequires absent)
+            if rc != RPMBUILD_MISSING_BR:
+                # Real failure — surface the captured output so the user
+                # sees what broke without having to open the log.
+                if result.stdout:
+                    print(result.stdout, end='')
+                return (source_path, False,
+                        _("rpmbuild -br failed before %build (rc={rc}, see log)").format(rc=rc))
+
+            # Read newly-required deps from the .buildreqs.nosrc.rpm sidecar.
+            result = container.exec(cid, ['bash', '-c',
+                'rpm -qp --requires /root/rpmbuild/SRPMS/*.buildreqs.nosrc.rpm 2>/dev/null'])
+            if result.returncode != 0:
+                return (source_path, False,
+                        _("rpmbuild reported missing BRs but .buildreqs.nosrc.rpm could not be read"))
+
+            new_deps = []
+            for line in result.stdout.splitlines():
+                dep = _ver_re.sub('', line.strip()).strip()
+                if dep and not dep.startswith('rpmlib('):
+                    new_deps.append(dep)
+            # Sort + dedupe for readable display.
+            new_deps = sorted(set(new_deps))
+            if not new_deps:
+                return (source_path, False,
+                        _("rpmbuild requested more BRs but emitted no installable requirements"))
+
+            # Header in warning/orange; each dep on its own indented line.
+            # Light purple for the dep names. Real packages stay at normal
+            # intensity, virtual provides (anything containing '(' — i.e.
+            # pkgconfig(), python3dist(), typelib(), …) are dimmed so the
+            # eye latches onto the actual installable packages first.
+            print(colors.warning(
+                _("Getting dynamic buildrequires (round {n}), found :").format(
+                    n=dynbr_pass + 1)))
+            for dep in new_deps:
+                if '(' in dep:
+                    print("  " + colors.dim(colors.light_purple(dep)))
+                else:
+                    print("  " + colors.light_purple(dep))
+            ret = container.exec_stream(cid, [
+                'urpm', 'install', '--auto', '--without-recommends', '--sync'
+            ] + new_deps)
+            if ret != 0:
+                return (source_path, False, _("Dynamic BuildRequires install failed"))
+        else:
+            return (source_path, False,
+                    _("Dynamic BuildRequires did not converge in {n} passes").format(n=MAX_DYNBR_PASSES))
+
+        # 6. Build the package
+        print(_("  Building..."))
         result = container.exec_stream(cid, [
-            'bash', '-c', f'rpmbuild -ba {spec_path} 2>&1 | tee {container_log}'
+            'bash', '-c', f'rpmbuild -ba {spec_path} 2>&1 | tee -a {container_log}'
         ])
         build_failed = result != 0
 
