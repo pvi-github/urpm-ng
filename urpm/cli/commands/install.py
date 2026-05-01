@@ -1009,11 +1009,14 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
 
     from ..helpers.progress import make_progress_callback
 
+    # Kept as a fallback header for the cleanup print below; the live
+    # progress region (progress.py) owns the on-screen header during the
+    # install. Printing it here too would leave a duplicate stuck in the
+    # scrollback once the live region freezes.
     _header_text = ngettext(
         "Installing {count} package...",
         "Installing {count} packages...",
         len(rpm_paths)).format(count=len(rpm_paths))
-    print(colors.info("\n" + _header_text))
 
     # Check if another install is in progress
     # Use root path for lock file when installing to chroot
