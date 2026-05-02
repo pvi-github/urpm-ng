@@ -17,6 +17,7 @@ from typing import Optional
 from . import GenerateResult, RpmMetadata
 from .compress import parse_filter
 from .scanner import RpmScanner
+from traceback import format_exc
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ class MediaGenerator:
         xml_info_filter: str = '.lzma:xz -7',
         versioned: bool = False,
         allow_empty: bool = False,
+        force = False,
     ) -> GenerateResult:
         """Generate media metadata files.
 
@@ -102,6 +104,7 @@ class MediaGenerator:
             xml_info_filter: Compression filter for XML info files.
             versioned: Prefix output filenames with a timestamp.
             allow_empty: Allow generation with zero RPMs.
+            force: don't use cached metainfo for appstream
 
         Returns:
             A :class:`~urpm.genmedia.GenerateResult` with outcome details.
@@ -162,7 +165,8 @@ class MediaGenerator:
                 old_hdlist = self.media_info_dir / hdlist_filename
                 write_hdlist(
                     hdlist_path, packages,
-                    compression_filter=f'{hd_comp} -{hd_level}',
+                    compression_filter=hd_comp,
+                    compression_level=hd_level,
                     incremental=incremental,
                     old_hdlist_path=old_hdlist if incremental and old_hdlist.exists() else None,
                 )
@@ -206,12 +210,33 @@ class MediaGenerator:
                 cache_dir = self.rpms_dir / '.genhdlist'
                 cache_dir.mkdir(exist_ok=True)
                 from urpm.core.appstream import AppStreamManager
+                if force:
+                    print("⚡ Force mode: all packages will be re-extracted.\n")
+
+                results   = {}   # packages processed in this execution
+                skipped   = []   # packages skipped (already up to date)
+                generated = []   # packages for which XML was generated (no embedded)
+                errors    = []   # packages with errors
+
                 # AppStreamManager needs a db instance, but for generation
                 # from RPM dir we use extract_from_rpm + build_catalog
                 # which don't need the database.
                 appstream_mgr = AppStreamManager.__new__(AppStreamManager)
+                # Loading persistent state
+                state = appstream_mgr._load_state()
                 for pkg in packages:
-                    appstream_mgr.extract_from_rpm(pkg, cache_dir)
+                    pkg_result = appstream_mgr.extract_from_rpm(pkg, cache_dir, force=force)
+                    # ── Mise à jour de l'état ────────────────────────────────
+                    rpm_name = os.path.basename(pkg.filename)
+                    entry = state.get(rpm_name, {})
+                    entry.update({
+                        "sha256":       pkg_result["sha256"],
+                        "extracted":    pkg_result["extracted"],
+                        "generated":    pkg_result["generated"],
+                        "processed_at": appstream_mgr._now_iso(),
+                    })
+                    state[rpm_name] = entry
+                    appstream_mgr._save_state(state)
                 as_filename = f'appstream.xml{xml_ext}'
                 as_path = tmp_dir / as_filename
                 appstream_mgr.build_catalog(
@@ -260,6 +285,7 @@ class MediaGenerator:
             raise
         except Exception as e:
             logger.error(f"Generation failed: {e}")
+            print(format_exc())
             result.errors.append(str(e))
         finally:
             if lock_ctx is not None:
