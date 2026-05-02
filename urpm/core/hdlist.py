@@ -6,10 +6,14 @@ Format validated with real Mageia files.
 """
 
 import struct
+import os
+import gzip
+import lzma
+import json
 from pathlib import Path
-from typing import BinaryIO, Dict, Iterator, List, Optional, Any
-
+from typing import BinaryIO, Dict, Iterator, List, Optional, Any, IO
 from .compression import decompress_stream
+from struct import pack
 
 # RPM Header magic (3 bytes)
 RPM_HEADER_MAGIC = b'\x8e\xad\xe8'
@@ -295,7 +299,8 @@ def write_hdlist(
     output_path: Path,
     packages,
     *,
-    compression_filter: str = 'gzip -9',
+    compression_filter: str = 'gzip',
+    compression_level: int = 9,
     block_size: int = 400 * 1024,
     incremental: bool = False,
     old_hdlist_path: Optional[Path] = None,
@@ -314,8 +319,8 @@ def write_hdlist(
     Args:
         output_path: Destination file (e.g. ``media_info/tmp/hdlist.cz``).
         packages: Iterable of :class:`~urpm.genmedia.RpmMetadata`.
-        compression_filter: Compressor and level, e.g. ``"gzip -9"`` or
-            ``"xz -7"``.
+        compression_filter: Compressor, e.g. 'gzip'.
+        compression_level: level, e.g. 9.
         block_size: Maximum uncompressed bytes per block.
         incremental: If True, reuse unchanged blocks from *old_hdlist_path*.
         old_hdlist_path: Path to the previous hdlist (required when
@@ -332,6 +337,360 @@ def write_hdlist(
       big-endian ``>4i``, then a footer ``cz[0...0]cz``.
     - Use :func:`parse_hdlist` to read *old_hdlist_path* for incremental.
     """
-    raise NotImplementedError(
-        "write_hdlist() is a stub — implementation needed."
-    )
+    writer = HdlistWriter(
+            output_path,
+            packages,
+            compression_filter=compression_filter,
+            compression_level=compression_level,
+            block_size=block_size,
+            incremental=incremental,
+            old_hdlist_path=old_hdlist_path,
+            )
+    writer.run()
+
+
+class HdlistWriter():
+    def __init__(
+            self,
+            output_path: Path,
+            packages,
+            compression_filter: str = 'gzip',
+            compression_level: int = 9,
+            block_size: int = 400 * 1024,
+            incremental: bool = False,
+            old_hdlist_path: Optional[Path] = None,
+            ):
+        self.output_path = output_path
+        self.packages = packages
+        self.filter = compression_filter
+        self.level = compression_level
+        self.block_size = block_size
+        self.incremental = incremental
+        self.old_hdlist_path = old_hdlist_path
+        self.files: dict = {}
+        self.dir: dict = {}
+        self.symlink: dict = {}
+        self.coff: int = 0
+        self.current_block_data: bytes = b""
+        self.current_block_files: List = []
+        self.current_block_csize: int = 0
+        self.current_block_coff: int = 0
+        self.current_block_off: int = 0
+        # self.ustream_data: Any = None
+        self.toc_f_count: int = 0
+        self.handle: IO = open(self.output_path, 'wb')
+        if self.filter == "gzip":
+            self.uncompress = b"gzip -d"
+        elif self.filter in ("xz", "lzma"):
+            self.uncompress = b"xz -d"
+        else:
+            raise ValueError("Compression filter should be one of gzip, xz, lzma")
+
+    def run(self):
+        """Write hdlist, either fully or incrementally."""
+        self.current_block_off = 0
+        self.current_block_coff = 0
+
+        if self.incremental and self.old_hdlist_path is not None:
+            _, _, hdlist_table = self._read_toc(self.old_hdlist_path)
+            if hdlist_table:
+                self._write_incremental(hdlist_table)
+            else:
+                # No prior hdlist — fall back to full write
+                self._write_full()
+        else:
+            self._write_full()
+
+        self._build_toc()
+        self.handle.close()
+        self.destroyed = True
+        print("File wrotten: ", self.output_path)
+
+    def _append_header(self, rpm_name: str, header_bytes: bytes) -> None:
+        """Append a single RPM header to the current block, flushing if needed."""
+        length = len(header_bytes)
+        # coff and off are captured before appending
+        block_coff = self.current_block_coff
+        block_off  = self.current_block_off
+        self.current_block_files.append(rpm_name)
+        self.current_block_off += length
+        self.current_block_data += header_bytes
+        self.files[rpm_name] = {
+            'size':  length,
+            'off':   block_off,
+            'csize': -1,
+            'coff':  block_coff,
+        }
+        if len(self.current_block_data) >= self.block_size:
+            self._end_block()
+
+    def _copy_block(self, coff: int, csize: int,
+                    rpms_in_block: list[str], state: dict) -> None:
+        """Copy a compressed block verbatim from the old hdlist,
+        and update self.files with the new coff for each RPM in the block."""
+        new_coff = self.coff
+        with open(self.old_hdlist_path, 'rb') as f:
+            f.seek(coff)
+            block_data = f.read(csize)
+        self.handle.seek(new_coff)
+        self.handle.write(block_data)
+        self.coff += csize
+        self.current_block_coff = self.coff
+        for rpm_name in rpms_in_block:
+            old_entry = state[rpm_name]
+            self.files[rpm_name] = {
+                'size':  len(self.packages[self.indexes[rpm_name]].header_bytes),
+                'off':   old_entry['off'],
+                'csize': csize,
+                'coff':  new_coff,
+            }
+
+    def _write_incremental(self, state: dict) -> None:
+        """Write hdlist incrementally, reusing unchanged compressed blocks."""
+        self.indexes = {os.path.basename(pkg.filename):index for index, pkg in enumerate(self.packages)}
+        present = set(os.path.basename(a.filename) for a in self.packages)
+        # Only RPMs that have a block_id were part of the last written hdlist.
+        # Entries without block_id come from extract_appstream only and must be
+        # treated as new regardless of presence.
+        in_hdlist = {name for name, entry in state.items() if 'coff' in entry}
+        removed = in_hdlist - present
+
+        # Classify each present RPM
+        unchanged: set[str] = set()
+        new_rpms:  set[str] = set()
+        for rpm_name in present:
+            print(rpm_name)
+            if rpm_name not in in_hdlist:
+                new_rpms.add(rpm_name)
+            else:
+                unchanged.add(rpm_name)
+
+        print(f"Incremental: {len(removed)} removed, "
+              f"{len(new_rpms)} new, {len(unchanged)} unchanged.")
+
+        # Group in_hdlist RPMs by coff
+        blocks: dict[int, list[str]] = {}
+        for rpm_name in in_hdlist:
+            bid = state[rpm_name]['coff']
+            blocks.setdefault(bid, []).append(rpm_name)
+
+        # Process existing blocks in order
+        for bid in sorted(blocks.keys()):
+            rpms_in_block = blocks[bid]
+            # Survivors: RPMs still present in this block
+            survivors = [r for r in rpms_in_block if r not in removed]
+            if not survivors:
+                # Entire block was removed, skip it
+                continue
+            # Check whether the block can be copied verbatim
+            block_intact = all(r in unchanged for r in survivors) and len(survivors) == len(rpms_in_block)
+            if block_intact:
+                coff  = state[rpms_in_block[0]]['coff']
+                csize = state[rpms_in_block[0]]['csize']
+                self._copy_block(coff, csize, survivors, state)
+            else:
+                # Rebuild the block from headers in memory
+                for rpm_name in survivors:
+                    self._append_header(rpm_name, self.packages[rpm_name]['header'])
+                self._end_block()
+
+    def _write_full(self):
+        for rpm in self.packages:
+            name = os.path.basename(rpm.filename)
+            self.current_block_files.append(name)
+            data = rpm.header_bytes
+            length = len(data)
+            self.current_block_off += length
+            self.current_block_data += data
+            self.files[name] = {
+                'size': length,
+                'off': self.current_block_off,
+                'csize': -1,
+                'coff': self.current_block_coff,
+            }
+            if len(self.current_block_data) >= self.block_size:
+                self._end_block()
+        self._end_block()
+
+    def _build_toc(self) -> bool:
+        self._end_block()
+        self._end_seek()
+        toc_length = 0
+
+        coff = self.coff
+        toc_sizes_offsets = b""
+
+        toc_str = b""
+        for entry in self.dir:
+            toc_str += entry + b"\n"
+            toc_length += len(entry + "\n")
+        for entry, link in self.symlink.items():
+            toc_str += entry + b"\n" + link + b"\n"
+            toc_length += len(entry + "\n" + link + "\n")
+        for entry in sorted(self.files.keys()):
+            toc_length += len(entry + "\n")
+        for entry in sorted(self.files.keys()):
+            coff, csize, off, size = self.files[entry].values()
+            print(entry, coff, csize, off, size)
+            toc_str += entry.encode("utf-8") + b"\n"
+            toc_sizes_offsets += pack(">4i", coff, csize, off, size)
+            toc_length += len(pack(">4i", coff, csize, off, size))
+
+        toc_str += toc_sizes_offsets
+        self.coff += toc_length
+        toc_header = b"cz[0"
+        toc_footer = b"0]cz"
+        toc_str += pack(b">4s4i40s4s", toc_header, len(self.dir), len(self.symlink), len(self.files), toc_length, self.uncompress, toc_footer)
+        self.handle.seek(self.coff, os.SEEK_SET)
+        self.handle.write(toc_str)
+        self.toc_f_count = len(self.files)
+        return True
+
+    def _read_toc(self, filename: Path) -> (list[str], dict[str: str], dict[dict[str: int]]):
+        with open(filename, "rb") as hdlist:
+            hdlist.seek(-64, os.SEEK_END)  # 64 bytes before end
+            header, toc_d_count, toc_l_count, toc_f_count, toc_str_size, uncompress, trailer = struct.unpack(">4s4i40s4s", hdlist.read(64))
+            """ cz[0
+                number of directory, 4 bytes
+                number of symlinks, 4 bytes
+                number of files, 4 bytes
+                the toc size, 4 bytes
+                uncompress command
+                0]cz
+            """
+            print(header, toc_d_count, toc_l_count, toc_f_count, toc_str_size, uncompress, trailer)
+            if header != b"cz[0" and trailer != b"0]cz":
+                raise ValueError("Error reading toc: wrong header/trailer")
+            hdlist.seek(-64 - (toc_str_size + 16 * toc_f_count), os.SEEK_END)
+            fileslist = hdlist.read(toc_str_size)
+            filenames = [x.decode('utf-8') for x in fileslist.split(b"\n")]
+            if filenames[-1] == "":
+                del filenames[-1]
+            index = 0
+            dir_list = []
+            links_list = {}
+            files = {}
+            link_flag = False
+            iter_toc = struct.iter_unpack(">4i", hdlist.read(16 * toc_f_count))
+            """ Interpret bytes as packed binary data
+            > : big-endian
+            4: number of values
+            i: integer
+            iter_toc is an iterator
+            """
+            uncompressed_size = 0
+            for f in filenames:
+                index += 1
+                if index <= toc_d_count:  # directories listed first
+                    dir_list.append(f)
+                    continue
+                if index <= toc_d_count + toc_l_count:  # symlinks listed then
+                    if not link_flag:
+                        symlink = f
+                        link_flag = True
+                    else:
+                        links_list[symlink] = f
+                        link_flag = False
+                else:
+                    coff, csize, off, size = next(iter_toc)
+                    files[f] = {
+                        "coff": coff,
+                        "csize": csize,
+                        "off": off,
+                        "size": size
+                        }
+                    uncompressed_size += size
+            return dir_list, links_list, files
+
+    def _end_seek(self):
+        seekvalue = self.coff
+        r = self.handle.seek(seekvalue, os.SEEK_SET)
+        return r == seekvalue
+
+    def _end_block(self):
+        # self.log(f"writing block with {len(self.current_block_data)} bytes")
+        if not self.current_block_data:
+            return
+        if not self._end_seek():
+            return
+        # TODO Use compress_open from compression module?
+        if self.filter == "gzip":
+            import io
+            self.uncompress = b"gzip -d"
+            buf = io.BytesIO()
+            with gzip.GzipFile(fileobj=buf, mode='w', compresslevel=self.level) as gzip_file:
+                gzip_file.write(self.current_block_data)
+            cdata = buf.getvalue()
+        elif self.filter in ("xz", "lzma"):
+            cdata = lzma.compress(self.current_block_data, preset=self.level)
+            self.uncompress = b"xz -d"
+        outsize = len(cdata)
+        self.handle.write(cdata)
+        for pkg in self.current_block_files:
+            self.files[pkg]["csize"] = outsize
+        self.coff += outsize
+        self.current_block_coff = self.coff
+        self.current_block_csize = 0
+        self.current_block_files = []
+        self.current_block_off = 0
+        self.current_block_data = b""
+    # ─────────────────────────────────────────────
+    # Hdlist state — delegates to unified _load/_save_state
+    # ─────────────────────────────────────────────
+
+    def _load_hdlist_state(self) -> dict:
+        """Return hdlist-relevant entries from the unified state."""
+        return self._load_state()
+
+    def _save_hdlist_state(self, new_entries: dict) -> None:
+        """Merge hdlist entries into the unified state and persist."""
+        state = self._load_state()
+        for rpm_name, hdlist_data in new_entries.items():
+            entry = state.get(rpm_name, {})
+            entry.update(hdlist_data)
+            state[rpm_name] = entry
+        self._save_state(state)
+
+    # ─────────────────────────────────────────────
+    # State persistence
+    # ─────────────────────────────────────────────
+
+    def _load_state(self) -> dict:
+        """Load unified state from .genhdlist/state.json.
+
+        Each entry is keyed by RPM filename and holds all persistence data:
+        hdlist block layout, appstream extraction results, and header SHA-256.
+
+        {
+            "firefox-120.0-1.mga9.x86_64.rpm": {
+                "sha256":       "abc123...",   # SHA-256 of hdr.unload()
+                "block_id":     0,             # coff of the block (hdlist)
+                "coff":         0,
+                "csize":        12800,
+                "off":          0,
+                "extracted":    [...],         # appstream: extracted metainfo paths
+                "generated":    null,          # appstream: generated metainfo path
+                "processed_at": "2024-..."
+            }, ...
+        }
+        """
+        if self.cache_path is None:
+            return {}
+        state_file = self.cache_path / self.STATE_FILENAME
+        if state_file.exists():
+            try:
+                return json.loads(state_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                print("Warning: corrupted state file, falling back to full rebuild.")
+        return {}
+
+    def _save_state(self, state: dict) -> None:
+        """Save unified state to .genhdlist/state.json."""
+        if self.cache_path is None:
+            return
+        self.cache_path.mkdir(parents=True, exist_ok=True)
+        state_file = self.cache_path / self.STATE_FILENAME
+        state_file.write_text(
+            json.dumps(state, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )

@@ -19,6 +19,7 @@ Format example:
 import logging
 import lzma
 import re
+import os
 from pathlib import Path
 from typing import Iterator, Tuple, List, Optional, Callable, Set
 from xml.etree.ElementTree import iterparse
@@ -231,12 +232,16 @@ def extract_nevras_from_files_xml(path: Path) -> Set[str]:
 
 def _xml_escape(text: str) -> str:
     """Escape XML special characters in text content and attributes."""
-    return (text
-            .replace('&', '&amp;')
-            .replace('<', '&lt;')
-            .replace('>', '&gt;')
-            .replace("'", '&apos;')
-            .replace('"', '&quot;'))
+    if text is not None:
+        return (text
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;')
+                .replace("'", '&apos;')
+                .replace('"', '&quot;')
+                )
+    else:
+        return ""
 
 
 def write_files_xml(
@@ -274,9 +279,9 @@ def write_files_xml(
     with compress_open(output_path, compressor, level) as f:
         f.write('<media_info>\n')
         for pkg in packages:
-            f.write(f'<files fn="{_xml_escape(pkg.filename)}">')
+            f.write(f'<files fn="{_xml_escape(os.path.basename(pkg.filename))}">\n')
             for filepath in pkg.files:
-                f.write(_xml_escape(filepath) + '\n')
+                f.write(_xml_escape(filepath.name) + '\n')
             f.write('</files>\n')
             count += 1
         f.write('</media_info>\n')
@@ -317,13 +322,13 @@ def write_info_xml(
         f.write('<media_info>\n')
         for pkg in packages:
             f.write(
-                f"<info fn='{_xml_escape(pkg.filename)}'"
+                f"  <info fn='{_xml_escape(os.path.basename(pkg.filename))}'"
                 f" sourcerpm='{_xml_escape(pkg.sourcerpm)}'"
                 f" url='{_xml_escape(pkg.url)}'"
                 f" license='{_xml_escape(pkg.license)}'>"
             )
             f.write(_xml_escape(pkg.description))
-            f.write('</info>\n')
+            f.write('  </info>\n')
             count += 1
         f.write('</media_info>\n')
     return count
@@ -365,13 +370,13 @@ def write_changelog_xml(
     with compress_open(output_path, compressor, level) as f:
         f.write('<media_info>\n')
         for pkg in packages:
-            f.write(f"<changelogs fn='{_xml_escape(pkg.filename)}'>\n")
+            f.write(f"  <changelogs fn='{_xml_escape(os.path.basename(pkg.filename))}'>\n")
             for ts, author, text in pkg.changelog:
-                f.write(f"<log time='{ts}'>\n")
-                f.write(f'<log_name>{_xml_escape(author)}</log_name>\n')
-                f.write(f'<log_text>{_xml_escape(text)}</log_text>\n')
-                f.write('</log>\n')
-            f.write('</changelogs>\n')
+                f.write(f"    <log time='{ts}'>\n")
+                f.write(f'      <log_name>{_xml_escape(author)}</log_name>\n')
+                f.write(f'      <log_text>{_xml_escape(text)}</log_text>\n')
+                f.write('    </log>\n')
+            f.write('  </changelogs>\n')
             count += 1
         f.write('</media_info>\n')
     return count
