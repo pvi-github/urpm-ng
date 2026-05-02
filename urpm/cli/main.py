@@ -405,7 +405,7 @@ Examples:
     install_parser = subparsers.add_parser(
         'install', aliases=['i'],
         help=_('Install packages'),
-        parents=[display_parent, debug_parent]
+        parents=[display_parent, debug_parent, arch_parent]
     )
     install_parser.add_argument(
         'packages', nargs='*',
@@ -826,7 +826,7 @@ Examples:
     erase_parser = subparsers.add_parser(
         'erase', aliases=['e'],
         help=_('Erase (remove) packages'),
-        parents=[display_parent]
+        parents=[display_parent, arch_parent]
     )
     erase_parser.add_argument(
         'packages', nargs='*',
@@ -1175,7 +1175,7 @@ Examples:
     upgrade_parser = subparsers.add_parser(
         'upgrade', aliases=['u'],
         help=_('Upgrade packages (all if none specified)'),
-        parents=[display_parent, debug_parent]
+        parents=[display_parent, debug_parent, arch_parent]
     )
     upgrade_parser.add_argument(
         'packages', nargs='*',

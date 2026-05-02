@@ -75,3 +75,54 @@ def test_media_autoconfig_arch_default_none():
 def test_media_autoconfig_alias_ac_arch():
     args = _parse(['media', 'ac', '-r', '10', '--arch', 'aarch64'])
     assert args.arch == 'aarch64'
+
+
+# --- install / i -------------------------------------------------------
+
+def test_install_arch_set():
+    args = _parse(['install', '--arch', 'x86_64', 'foo'])
+    assert args.arch == 'x86_64'
+
+
+def test_install_arch_default_none():
+    args = _parse(['install', 'foo'])
+    assert args.arch is None
+
+
+def test_install_alias_i_arch():
+    args = _parse(['i', '--arch', 'i686', 'foo'])
+    assert args.arch == 'i686'
+
+
+# --- upgrade / u -------------------------------------------------------
+
+def test_upgrade_arch_set():
+    args = _parse(['upgrade', '--arch', 'x86_64'])
+    assert args.arch == 'x86_64'
+
+
+def test_upgrade_arch_default_none():
+    args = _parse(['upgrade'])
+    assert args.arch is None
+
+
+def test_upgrade_alias_u_arch():
+    args = _parse(['u', '--arch', 'aarch64'])
+    assert args.arch == 'aarch64'
+
+
+# --- erase / e ---------------------------------------------------------
+
+def test_erase_arch_set():
+    args = _parse(['erase', '--arch', 'x86_64', 'foo'])
+    assert args.arch == 'x86_64'
+
+
+def test_erase_arch_default_none():
+    args = _parse(['erase', 'foo'])
+    assert args.arch is None
+
+
+def test_erase_alias_e_arch():
+    args = _parse(['e', '--arch', 'i686', 'foo'])
+    assert args.arch == 'i686'

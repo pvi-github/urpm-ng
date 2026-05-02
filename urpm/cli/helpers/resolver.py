@@ -1,8 +1,9 @@
 """Resolver helper functions for CLI commands."""
 
-import platform
 import re
 from typing import TYPE_CHECKING
+
+from .package import resolve_target_arch, system_arch
 
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
@@ -46,9 +47,10 @@ def create_resolver(db: 'PackageDatabase', args, **kwargs) -> 'Resolver':
     root = getattr(args, 'root', None)
     urpm_root = getattr(args, 'urpm_root', None)
 
-    # Default arch if not provided
+    # Honour args.arch when no explicit kwarg was provided.
+    # Priority: explicit kwarg > args.arch > system_arch().
     if 'arch' not in kwargs:
-        kwargs['arch'] = platform.machine()
+        kwargs['arch'] = resolve_target_arch(args)
 
     # Handle --allow-arch: build allowed_arches list
     # Default: [system_arch, 'noarch']
@@ -57,7 +59,7 @@ def create_resolver(db: 'PackageDatabase', args, **kwargs) -> 'Resolver':
         allow_arch = getattr(args, 'allow_arch', None)
         if allow_arch:
             # User specified additional architectures
-            arch = kwargs.get('arch', platform.machine())
+            arch = kwargs.get('arch', system_arch())
             allowed_arches = [arch, 'noarch'] + list(allow_arch)
             # Remove duplicates while preserving order
             seen = set()
