@@ -40,6 +40,7 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
         return 0
 
     # Filter to enabled only unless --all
+    disabled_count = sum(1 for m in media_list if not m['enabled'])
     if not show_all:
         media_list = [m for m in media_list if m['enabled']]
         if not media_list:
@@ -54,8 +55,11 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
         # Get servers for this media
         servers = db.get_servers_for_media(m['id'], enabled_only=False)
 
-        # Status: [x] or [ ]
-        status = colors.success(_("[x]")) if m['enabled'] else colors.dim(_("[ ]"))
+        # Status: [x] enabled, [D] disabled — ``[D]`` is far more readable
+        # than the previous ``[ ]`` placeholder when scanning the column
+        # (Bug 3).  The label still uses dim styling to keep the disabled
+        # rows visually de-emphasised.
+        status = colors.success(_("[x]")) if m['enabled'] else colors.dim(_("[D]"))
 
         # Update flag: U or space
         update_flag = colors.info(_("U")) if m['update_media'] else " "
@@ -91,6 +95,10 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
             servers_display = colors.warning(_("(no server)"))
 
         print(f"  {status} {update_flag}{files_flag} {name}  {rel_path}  {servers_display}")
+
+    # Hint when there are disabled media we did not show
+    if not show_all and disabled_count:
+        print(colors.dim(_("({n} disabled media hidden — use --all to see them)").format(n=disabled_count)))
 
     return 0
 
@@ -690,6 +698,7 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     media = db.get_media_by_version_arch_shortname(version, arch, short_name)
     media_created = False
 
+    media_reactivated = False
     if not media:
         # Create new media
         media_id = db.add_media(
@@ -711,6 +720,15 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     else:
         print(_("  Using existing media '{name}' (id={id})").format(name=media['name'], id=media['id']))
         media_id = media['id']
+        # Re-enable a previously-disabled media: ``urpm media add`` is the
+        # natural way for a user to re-introduce a media after disabling
+        # it, and silently leaving ``enabled=0`` makes the media invisible
+        # to ``urpm media update`` (Bug 1).  Honour ``--disabled`` if the
+        # user explicitly asked to keep it off.
+        if not media.get('enabled') and not getattr(args, 'disabled', False):
+            db.enable_media(media['name'], enabled=True)
+            media_reactivated = True
+            print(colors.success(_("  Media '{name}' re-enabled (was disabled)").format(name=media['name'])))
 
     # --- Link server to media ---
     if not db.server_media_link_exists(server['id'], media['id']):
@@ -719,16 +737,21 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     else:
         print(_("  Link already exists: server '{server}' -> media '{media}'").format(server=server['name'], media=media['name']))
 
-    # Summary
+    # Summary — always reference the media actually processed (``media['name']``).
+    # Using the URL-derived ``name`` here misreports cases where the existing
+    # media's display name differs from what we just parsed (Bug 2).
+    final_name = media['name']
     print()
     if server_created and media_created:
-        print(colors.success(_("Added media '{name}' with new server").format(name=name)))
+        print(colors.success(_("Added media '{name}' with new server").format(name=final_name)))
     elif media_created:
-        print(colors.success(_("Added media '{name}' to existing server").format(name=name)))
+        print(colors.success(_("Added media '{name}' to existing server").format(name=final_name)))
     elif server_created:
-        print(colors.success(_("Added new server for existing media '{name}'").format(name=name)))
+        print(colors.success(_("Added new server for existing media '{name}'").format(name=final_name)))
+    elif media_reactivated:
+        print(colors.success(_("Re-enabled existing media '{name}'").format(name=final_name)))
     else:
-        print(colors.success(_("Linked existing server to existing media '{name}'").format(name=name)))
+        print(colors.success(_("Linked existing server to existing media '{name}'").format(name=final_name)))
 
     return 0
 
