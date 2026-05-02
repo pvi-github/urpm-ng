@@ -89,9 +89,13 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         pkg_name = _extract_pkg_name(pkg).lower()
         explicit_names.add(pkg_name)
 
-    # Also include packages that provide what the user requested
+    # Also include packages that provide what the user requested.
+    # Pin the lookup to the action's own arch — the resolver already
+    # picked the row that matches what is installed, so we must read the
+    # provides of the same row to avoid e.g. asking the i686 row's
+    # provides when the x86_64 row is being erased.
     for action in result.actions:
-        pkg_info = db.get_package(action.name)
+        pkg_info = db.get_package(action.name, arch=action.arch)
         if pkg_info and pkg_info.get('provides'):
             for prov in pkg_info['provides']:
                 prov_name = prov.split('[')[0].split('=')[0].split('<')[0].split('>')[0].strip().lower()

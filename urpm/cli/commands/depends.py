@@ -11,6 +11,7 @@ from ..helpers.package import (
     extract_pkg_name as _extract_pkg_name,
     pick_arch_for_lookup,
     resolve_target_arch,
+    system_arch,
 )
 from ..helpers.alternatives import (
     PreferencesMatcher,
@@ -321,11 +322,21 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
     # Get what this package provides - from both RPM and database
     provides = [pkg_name]
 
+    # Architecture honoured by the urpmi DB lookup below. When the package
+    # is installed, the rpmdb header tells us the truth; otherwise we fall
+    # back to the host arch so SQLite does not return a foreign-arch row
+    # (e.g. ``i686`` for ``lib64fuse2`` on an ``x86_64`` host with 32-bit
+    # media enabled), which would carry suffix-less sonames and break the
+    # downstream ``whatrequires`` / ``whatrecommends`` / ``whatsuggests``
+    # queries.
+    inst_arch = None
+
     # From RPM database (installed)
     try:
         ts = rpm.TransactionSet()
         mi = ts.dbMatch('name', pkg_name)
         for hdr in mi:
+            inst_arch = hdr[rpm.RPMTAG_ARCH]
             rpm_provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
             for prov in rpm_provides:
                 if prov not in provides and not _is_virtual_provide(prov):
@@ -335,7 +346,7 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
         pass
 
     # Also from urpmi database
-    pkg = db.get_package(pkg_name)
+    pkg = db.get_package(pkg_name, arch=inst_arch or system_arch())
     if pkg and pkg.get('provides'):
         for prov in pkg['provides']:
             cap = prov.split('[')[0].strip()
@@ -646,9 +657,11 @@ def _build_installed_reachable_set(rdeps: list, rdeps_graph: dict, installed_pkg
         # Check extended cache
         if pkg_name in extended_cache:
             return extended_cache[pkg_name]
-        # Not in RPM graph - query urpmi database
+        # Not in RPM graph - query urpmi database. Pin to the host arch so
+        # SQLite does not pick a foreign-arch row whose suffix-less sonames
+        # would silently miss every consumer using the ``(64bit)`` form.
         result = set()
-        pkg = db.get_package(pkg_name)
+        pkg = db.get_package(pkg_name, arch=system_arch())
         provides = [pkg_name]
         if pkg and pkg.get('provides'):
             for prov in pkg['provides']:

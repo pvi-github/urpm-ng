@@ -32,7 +32,12 @@ from pathlib import Path
 
 import pytest
 
-from urpm.cli.commands.depends import cmd_whatrecommends, cmd_whatsuggests
+from urpm.cli.commands.depends import (
+    _build_installed_reachable_set,
+    _get_rdeps,
+    cmd_whatrecommends,
+    cmd_whatsuggests,
+)
 from urpm.core.database import PackageDatabase
 
 
@@ -279,3 +284,192 @@ class TestWhatSuggestsArch:
         listed = _capture_listed_pkgs(capsys)
         assert rc == 0
         assert listed == {'app-i'}
+
+
+# ---------------------------------------------------------------------------
+# _get_rdeps (used by ``urpm rdepends``)
+# ---------------------------------------------------------------------------
+
+
+def _import_multiarch_lib64fuse2_with_requirers(db):
+    """Insert ``lib64fuse2`` two arches plus consumers via Requires.
+
+    Each arch publishes a *distinct* arch-specific capability
+    (``fuse2cap-64`` vs ``fuse2cap-32``) that consumer packages
+    Require. This is the same shape, semantically, as ``libfuse.so.2()
+    (64bit)`` vs ``libfuse.so.2()`` — different cap, same name. We
+    avoid the literal ``()`` soname here because
+    :func:`urpm.cli.commands.depends._is_virtual_provide` strips any
+    ``foo()`` cap as virtual, which would defeat the test. The arch
+    bug we're guarding against is independent of soname syntax: it's
+    "wrong row → wrong provides → wrong consumers".
+    """
+    media_id = db.add_media(
+        name="Core Release",
+        short_name="core_release",
+        mageia_version="9",
+        architecture="x86_64",
+        relative_path="core/release",
+    )
+
+    packages = [
+        {
+            'name': 'lib64fuse2', 'version': '2.9.9', 'release': '30.mga9',
+            'epoch': 0, 'arch': 'x86_64',
+            'nevra': 'lib64fuse2-2.9.9-30.mga9.x86_64',
+            'provides': [
+                'lib64fuse2',
+                'lib64fuse2(x86-64)',
+                'fuse2cap-64',
+            ],
+            'requires': [], 'filesize': 1000,
+        },
+        {
+            'name': 'lib64fuse2', 'version': '2.9.9', 'release': '30.mga9',
+            'epoch': 0, 'arch': 'i686',
+            'nevra': 'lib64fuse2-2.9.9-30.mga9.i686',
+            'provides': [
+                'lib64fuse2',
+                'lib64fuse2(i686)',
+                'fuse2cap-32',
+            ],
+            'requires': [], 'filesize': 1000,
+        },
+    ]
+
+    for n in range(1, 4):
+        packages.append({
+            'name': f'app-x{n}', 'version': '1.0', 'release': '1.mga9',
+            'epoch': 0, 'arch': 'x86_64',
+            'nevra': f'app-x{n}-1.0-1.mga9.x86_64',
+            'provides': [f'app-x{n}'],
+            'requires': ['fuse2cap-64'],
+            'filesize': 1000,
+        })
+
+    packages.append({
+        'name': 'app-i', 'version': '1.0', 'release': '1.mga9',
+        'epoch': 0, 'arch': 'i686',
+        'nevra': 'app-i-1.0-1.mga9.i686',
+        'provides': ['app-i'],
+        'requires': ['fuse2cap-32'],
+        'filesize': 1000,
+    })
+
+    db.import_packages(iter(packages), media_id=media_id)
+    return media_id
+
+
+class TestGetRdepsArch:
+    """``_get_rdeps`` must pin its urpmi DB lookup to the host arch.
+
+    The function reads sonames from ``db.get_package(pkg_name)`` and
+    feeds them back into ``db.whatrequires``. Without an arch hint, the
+    multi-arch row of ``lib64fuse2`` returned by SQLite is unstable and
+    the resulting consumer set is wrong for the host arch.
+    """
+
+    def test_host_x86_64_returns_64bit_consumers(self, db, monkeypatch):
+        """Host ``x86_64`` and no installed header → urpmi DB row is the
+        x86_64 one (its ``Provides`` carry ``libfuse.so.2()(64bit)``),
+        and ``whatrequires`` thus surfaces only the three x86_64 apps.
+        """
+        _import_multiarch_lib64fuse2_with_requirers(db)
+        monkeypatch.setattr(
+            'urpm.cli.commands.depends.system_arch', lambda: 'x86_64'
+        )
+
+        rdeps = _get_rdeps(
+            'lib64fuse2', db, dep_types='R',
+            installed_only=False, cache={}, installed_pkgs=None,
+        )
+
+        assert set(rdeps.keys()) == {'app-x1', 'app-x2', 'app-x3'}
+        assert all(t == 'R' for t in rdeps.values())
+
+    def test_host_i686_returns_32bit_consumer(self, db, monkeypatch):
+        """Host ``i686`` flips the consumer set.
+
+        Symmetric proof that the arch hint is honoured rather than
+        defaulting to whatever happens to be the test runner's host.
+        """
+        _import_multiarch_lib64fuse2_with_requirers(db)
+        monkeypatch.setattr(
+            'urpm.cli.commands.depends.system_arch', lambda: 'i686'
+        )
+
+        rdeps = _get_rdeps(
+            'lib64fuse2', db, dep_types='R',
+            installed_only=False, cache={}, installed_pkgs=None,
+        )
+
+        assert set(rdeps.keys()) == {'app-i'}
+
+
+# ---------------------------------------------------------------------------
+# _build_installed_reachable_set (used by ``urpm rdepends --tree``)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildInstalledReachableSetArch:
+    """The fallback DB path in ``_build_installed_reachable_set`` must
+    pin its lookup to the host arch.
+
+    The branch under test triggers when a package is *not* in the
+    pre-built ``rdeps_graph`` (i.e. not installed): the function then
+    queries ``db.get_package(pkg_name)`` for the package's provides and
+    feeds them into ``db.whatrequires``. With a multi-arch DB and no
+    arch hint, SQLite may return the foreign-arch row whose suffix-less
+    sonames cause every host-arch consumer to be missed.
+    """
+
+    def test_x86_64_host_finds_64bit_consumers_for_uninstalled(
+        self, db, monkeypatch
+    ):
+        """``rdeps_graph`` empty for ``lib64fuse2`` → fallback DB path.
+
+        The fallback must pick the x86_64 row so its ``(64bit)`` sonames
+        flow into ``whatrequires`` and the three x86_64 consumers land in
+        the reachable set.
+        """
+        _import_multiarch_lib64fuse2_with_requirers(db)
+        monkeypatch.setattr(
+            'urpm.cli.commands.depends.system_arch', lambda: 'x86_64'
+        )
+
+        installed_pkgs = {'app-x1', 'app-x2', 'app-x3', 'app-i'}
+        reachable = _build_installed_reachable_set(
+            rdeps=['lib64fuse2'],
+            rdeps_graph={},
+            installed_pkgs=installed_pkgs,
+            max_depth=4,
+            db=db,
+        )
+
+        # The three x86_64 consumers must be reachable via lib64fuse2.
+        assert {'app-x1', 'app-x2', 'app-x3'} <= reachable
+        # The 32-bit consumer must NOT be picked up: its requirement
+        # ``libfuse.so.2()`` does not appear in the x86_64 row's provides.
+        assert 'app-i' not in reachable
+
+    def test_i686_host_finds_32bit_consumer_for_uninstalled(
+        self, db, monkeypatch
+    ):
+        """Symmetric counterpart on a 32-bit host."""
+        _import_multiarch_lib64fuse2_with_requirers(db)
+        monkeypatch.setattr(
+            'urpm.cli.commands.depends.system_arch', lambda: 'i686'
+        )
+
+        installed_pkgs = {'app-x1', 'app-x2', 'app-x3', 'app-i'}
+        reachable = _build_installed_reachable_set(
+            rdeps=['lib64fuse2'],
+            rdeps_graph={},
+            installed_pkgs=installed_pkgs,
+            max_depth=4,
+            db=db,
+        )
+
+        assert 'app-i' in reachable
+        # 64-bit apps should not be reachable when we pinned i686.
+        assert reachable.isdisjoint({'app-x1', 'app-x2', 'app-x3'})
