@@ -7,7 +7,11 @@ from ...i18n import _, ngettext
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
-from ..helpers.package import extract_pkg_name as _extract_pkg_name
+from ..helpers.package import (
+    extract_pkg_name as _extract_pkg_name,
+    pick_arch_for_lookup,
+    resolve_target_arch,
+)
 from ..helpers.alternatives import (
     PreferencesMatcher,
     _resolve_with_alternatives,
@@ -764,9 +768,16 @@ def cmd_whatrecommends(args, db: 'PackageDatabase') -> int:
     """Handle whatrecommends command - show packages that recommend a package."""
     package = args.package
     pkg_name = _extract_pkg_name(package)
+    # Pin the lookup to the target arch so multi-arch systems don't pick
+    # up the foreign-arch row whose sonames lack the ``(64bit)`` suffix.
+    # Without this, ``whatrecommends lib64fuse2`` on x86_64 may return
+    # the i686 row whose ``Provides`` list is missing the 64-bit
+    # capabilities, producing a false-negative empty result for the
+    # 5 x86_64 packages that recommend ``libfuse.so.2()(64bit)``.
+    arch = pick_arch_for_lookup(package, resolve_target_arch(args))
 
     # Get what this package provides
-    pkg = db.get_package(pkg_name)
+    pkg = db.get_package(pkg_name, arch=arch)
     provides = [pkg_name]
     if pkg and pkg.get('provides'):
         for prov in pkg['provides']:
@@ -839,9 +850,14 @@ def cmd_whatsuggests(args, db: 'PackageDatabase') -> int:
     """Handle whatsuggests command - show packages that suggest a package."""
     package = args.package
     pkg_name = _extract_pkg_name(package)
+    # See ``cmd_whatrecommends`` — same multi-arch pitfall: the foreign
+    # i686 row of a Mageia ``lib64*`` package carries plain sonames
+    # without the ``(64bit)`` suffix, so a naive ``db.get_package`` on a
+    # multi-arch host drops the 64-bit suggesters.
+    arch = pick_arch_for_lookup(package, resolve_target_arch(args))
 
     # Get what this package provides
-    pkg = db.get_package(pkg_name)
+    pkg = db.get_package(pkg_name, arch=arch)
     provides = [pkg_name]
     if pkg and pkg.get('provides'):
         for prov in pkg['provides']:
