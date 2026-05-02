@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 from ..helpers.package import (
     extract_pkg_name as _extract_pkg_name,
+    pick_arch_for_lookup,
     resolve_target_arch,
 )
 from ..helpers.debug import (
@@ -305,10 +306,18 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Add local RPM names to the list
     for info in local_rpm_infos:
         resolved_packages.append(info['name'])
+    # Default arch for plain names: --arch flag if set, else system arch.
+    # An explicit NEVRA on the command line keeps its own arch suffix
+    # (handled by pick_arch_for_lookup).
+    target_arch_for_lookup = resolve_target_arch(args)
     # Resolve virtual packages from command line
     for pkg in package_names:
         pkg_name = _extract_pkg_name(pkg)
-        concrete = _resolve_virtual_package(db, pkg_name, auto_mode, install_all)
+        # Pick the arch hint for db.get_package() inside _resolve_virtual_package:
+        # blocks multi-arch leaks where get_package() would return an i686 row
+        # for a x86_64 request just because both arches share the same name.
+        pkg_arch = pick_arch_for_lookup(pkg, target_arch_for_lookup)
+        concrete = _resolve_virtual_package(db, pkg_name, auto_mode, install_all, arch=pkg_arch)
         # If virtual resolution changed the name, use that;
         # otherwise preserve the original string (may contain version info
         # like "firefox-release-147.0.3" that libsolv SELECTION_CANON can parse)

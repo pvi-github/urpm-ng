@@ -5,6 +5,7 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
+from ...core.synthesis import parse_nevra
 from ...i18n import _, confirm_yes
 
 if TYPE_CHECKING:
@@ -75,6 +76,40 @@ def extract_pkg_name(package: str) -> str:
     return name
 
 
+def pick_arch_for_lookup(pkg: str, target_arch: str) -> str:
+    """Pick the architecture hint for a DB lookup of ``pkg``.
+
+    On a multi-arch system (e.g. ``x86_64`` host with 32-bit media
+    enabled), looking up a plain name like ``lib64fuse2`` without an
+    arch filter risks returning a foreign-arch row from SQLite (the
+    SQL ``ORDER BY`` does not pin the arch). This helper centralises
+    the rule used by ``cmd_install``:
+
+    * If ``pkg`` is an explicit NEVRA whose name strips down to
+      something different (i.e. it really has a ``.arch`` suffix),
+      its own arch wins — the user typed it explicitly.
+    * Otherwise the caller-supplied ``target_arch`` (typically
+      :func:`resolve_target_arch` of ``args``) is used.
+
+    Args:
+        pkg: Raw user input — either a plain name like ``firefox`` or
+            a NEVRA like ``firefox-120.0-1.mga10.x86_64``.
+        target_arch: Default arch to use for plain names. Should never
+            be empty; callers compute it via :func:`resolve_target_arch`.
+
+    Returns:
+        The architecture string to pass as ``arch=`` to
+        :meth:`PackageDatabase.get_package` (and downstream helpers).
+    """
+    pkg_name = extract_pkg_name(pkg)
+    if pkg_name == pkg:
+        # Plain name, no NEVRA suffix detected.
+        return target_arch
+    # `pkg` is a NEVRA — trust the arch baked into it.
+    nevra_arch = parse_nevra(pkg)[3]
+    return nevra_arch or target_arch
+
+
 def extract_family(pkg_name: str) -> str:
     """Extract the family prefix from a versioned package name.
 
@@ -124,7 +159,7 @@ def get_installed_families(prefix: str) -> set:
     return families
 
 
-def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, install_all: bool) -> list:
+def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, install_all: bool, arch: 'str | None' = None) -> list:
     """Resolve a virtual package to concrete package(s).
 
     When multiple providers exist from different families (php8.4-opcache, php8.5-opcache),
@@ -137,12 +172,22 @@ def resolve_virtual_package(db: 'PackageDatabase', pkg_name: str, auto: bool, in
         pkg_name: Virtual package name (e.g., 'php-opcache')
         auto: If True, don't ask user
         install_all: If True, install for all installed families
+        arch: Optional architecture hint. When provided, the SQLite lookup
+            for the (possibly real) ``pkg_name`` row is restricted to this
+            arch (and ``noarch``). On multi-arch systems (e.g. host
+            ``x86_64`` with 32-bit media enabled), this prevents
+            ``get_package(pkg_name)`` from returning the ``i686`` row when
+            the user asked for ``x86_64`` — which would otherwise leak
+            ``arch='i686'`` into the providers list and let the resolver
+            install a 32-bit package in place of the expected 64-bit one
+            under ``--allow-arch i686``. ``None`` keeps legacy behaviour.
 
     Returns:
         List of concrete package names to install, or empty list to abort
     """
-    # Check if pkg_name is a real package (not just a capability)
-    real_pkg = db.get_package(pkg_name)
+    # Check if pkg_name is a real package (not just a capability).
+    # The arch hint guards against multi-arch row leakage (see docstring).
+    real_pkg = db.get_package(pkg_name, arch=arch)
 
     # Find all providers of this capability
     providers = db.whatprovides(pkg_name)
