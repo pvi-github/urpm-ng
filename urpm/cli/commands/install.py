@@ -453,6 +453,41 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 result.actions.append(reinstall_action)
 
     if not result.actions:
+        # Distinguish "no-op" (already installed at latest) from "package
+        # not available for the requested arch" (Bug 4).  When the user
+        # passed ``--arch i686 lib64fuse2`` and the package only ships
+        # for x86_64, the resolver returns an empty action list because
+        # the SELECTION_NAME job matched nothing — but ``Nothing to do``
+        # is misleading: the package is not installed, the request just
+        # cannot be satisfied for that arch.  We surface this case
+        # explicitly with the available archs so the user knows.
+        unavailable = []  # list of (pkg_name, [archs_actually_available])
+        for pkg in package_names:
+            pkg_name = _extract_pkg_name(pkg)
+            # If the user typed an explicit ``.arch`` NEVRA, trust their
+            # arch; otherwise the install-wide target_arch_for_lookup.
+            wanted_arch = pick_arch_for_lookup(pkg, target_arch_for_lookup)
+            if db.get_package(pkg_name, arch=wanted_arch):
+                continue
+            # Not found at the requested arch: see if it exists at any arch.
+            other = db.get_package(pkg_name)
+            if other and other.get('arch') and other['arch'] != wanted_arch:
+                # Collect ALL archs we know for this package name (not just
+                # the latest) so the message is informative on multi-arch.
+                cursor = db.conn.execute(
+                    "SELECT DISTINCT arch FROM packages WHERE name_lower = ?",
+                    (pkg_name.lower(),),
+                )
+                archs = sorted({r[0] for r in cursor if r[0]})
+                unavailable.append((pkg, wanted_arch, archs))
+        if unavailable:
+            for pkg, wanted_arch, archs in unavailable:
+                print(colors.error(
+                    _("Error: package '{pkg}' is not available for arch '{arch}' "
+                      "(available for: {archs})").format(
+                        pkg=pkg, arch=wanted_arch, archs=', '.join(archs))
+                ))
+            return 1
         # Promote user-requested packages to explicit even when already
         # installed (the resolver skips unchanged packages from its
         # action list, so mark_dependencies alone would miss them).
