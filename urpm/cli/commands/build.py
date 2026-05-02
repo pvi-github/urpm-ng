@@ -2,7 +2,6 @@
 
 import argparse
 import os
-import platform
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +14,7 @@ if TYPE_CHECKING:
     from ...core.database import PackageDatabase
     from ...core.container import Container
 
+from ..helpers.package import resolve_target_arch
 from .media import cmd_init
 from .install import cmd_install
 
@@ -169,7 +169,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     os.environ['SYSTEMD_OFFLINE'] = '1'
 
     release = args.release
-    arch = getattr(args, 'arch', None) or platform.machine()
+    arch = resolve_target_arch(args)
     tag = args.tag
     runtime_name = getattr(args, 'runtime', None)
     profile_name = getattr(args, 'profile', None) or 'build'

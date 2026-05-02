@@ -1,5 +1,6 @@
 """Package name extraction and virtual package resolution helpers."""
 
+import platform
 import re
 import subprocess
 from typing import TYPE_CHECKING
@@ -11,6 +12,16 @@ if TYPE_CHECKING:
 
 
 _KNOWN_ARCHES = {"x86_64", "i586", "i686", "noarch", "aarch64", "armv7hl"}
+
+
+def system_arch() -> str:
+    """Return the host architecture (e.g. 'x86_64')."""
+    return platform.machine()
+
+
+def resolve_target_arch(args) -> str:
+    """Return args.arch if set, else the host arch."""
+    return getattr(args, 'arch', None) or system_arch()
 
 
 def extract_pkg_name(package: str) -> str:

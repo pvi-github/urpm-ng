@@ -323,6 +323,13 @@ def create_parser() -> argparse.ArgumentParser:
         help=_('Watch specific packages during resolution (comma-separated)')
     )
 
+    # Parent parser for --arch (inherited by init/download/image/media/...)
+    arch_parent = argparse.ArgumentParser(add_help=False)
+    arch_parent.add_argument(
+        '--arch', metavar='ARCH',
+        help=_('Target architecture (default: current system)'),
+    )
+
     # Register custom action for aliases
     parser.register('action', 'parsers', AliasedSubParsersAction)
 
@@ -343,6 +350,7 @@ def create_parser() -> argparse.ArgumentParser:
         'init',
         help=_('Initialize urpm setup (for bootstrap/chroot)'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[arch_parent],
         description=_('''Initialize a new urpm setup with standard Mageia media.
 
 Used for creating chroot environments or bootstrapping new systems.
@@ -360,11 +368,6 @@ Examples:
         '--mirrorlist',
         metavar='URL',
         help=_('URL to fetch mirror list (auto-generated from --release if not provided)')
-    )
-    init_parser.add_argument(
-        '--arch',
-        metavar='ARCH',
-        help=_('Target architecture (default: current system)')
     )
     init_parser.add_argument(
         '--release',
@@ -522,7 +525,7 @@ Examples:
     download_parser = subparsers.add_parser(
         'download', aliases=['dl'],
         help=_('Download packages to cache without installing'),
-        parents=[display_parent, debug_parent]
+        parents=[display_parent, debug_parent, arch_parent]
     )
     download_parser.add_argument(
         'packages', nargs='*',
@@ -532,11 +535,6 @@ Examples:
         '--release', '-r',
         type=str,
         help=_('Target release (e.g., 10, cauldron). Downloads for this release.')
-    )
-    download_parser.add_argument(
-        '--arch',
-        type=str,
-        help=_('Target architecture (default: host arch)')
     )
     download_parser.add_argument(
         '--buildrequires', '--builddeps', '--br', '-b',
@@ -595,6 +593,7 @@ Examples:
         'make', aliases=['m'],
         help=_('Create a minimal Docker/Podman image for RPM builds'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[arch_parent],
         description=_('''Create a minimal Mageia Docker/Podman image for RPM builds.
 
 The image contains a minimal system with urpm configured to use
@@ -624,10 +623,6 @@ Examples:
         '--profile',
         default='build',
         help=_('Package profile (default: build). See /usr/share/urpm/profiles/')
-    )
-    image_make.add_argument(
-        '--arch',
-        help=_('Target architecture (default: host arch)')
     )
     image_make.add_argument(
         '--packages', '-p',
@@ -726,6 +721,7 @@ Examples:
         'mkimage',
         help=_('Alias for "image make" (deprecated)'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[arch_parent],
         description=_('Deprecated: use "urpm image make" instead.\n\nSee: urpm image make --help')
     )
     mkimage_parser.add_argument('--release', '-r', required=True,
@@ -734,7 +730,6 @@ Examples:
                                 help=_('Image tag'))
     mkimage_parser.add_argument('--profile', default='build',
                                 help=_('Package profile'))
-    mkimage_parser.add_argument('--arch', help=_('Target architecture'))
     mkimage_parser.add_argument('--packages', '-p',
                                 help=_('Additional packages (comma-separated)'))
     mkimage_parser.add_argument('--buildrequires', '--br', metavar='SPEC_OR_SRPM',
@@ -1610,6 +1605,7 @@ Examples:
         'autoconfig', aliases=['auto', 'ac'],
         help=_('Auto-add official Mageia media for a release'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[arch_parent],
         description=_('''Auto-configure all official Mageia media for a release.
 
 Uses the Mageia mirror API to discover mirrors and adds all standard media:
@@ -1630,10 +1626,6 @@ Examples:
         '--release', '-r',
         required=True,
         help=_('Mageia release (e.g., 10, cauldron)')
-    )
-    media_autoconfig.add_argument(
-        '--arch',
-        help=_('Architecture (default: host architecture)')
     )
     media_autoconfig.add_argument(
         '--dry-run', '-n',

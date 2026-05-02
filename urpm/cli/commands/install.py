@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 from ..helpers.package import (
     extract_pkg_name as _extract_pkg_name,
+    resolve_target_arch,
 )
 from ..helpers.debug import (
     notify_urpmd_cache_invalidate as _notify_urpmd_cache_invalidate,
@@ -1208,7 +1209,6 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     Uses ignore_installed=True to resolve all dependencies, even if already installed.
     """
     import time
-    import platform
     from pathlib import Path
 
     from ...core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction
@@ -1294,7 +1294,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
 
     # Get target release/arch
     target_release = getattr(args, 'release', None)
-    target_arch = getattr(args, 'arch', None) or platform.machine()
+    target_arch = resolve_target_arch(args)
 
     # Get CLI options
     without_recommends = getattr(args, 'without_recommends', False)

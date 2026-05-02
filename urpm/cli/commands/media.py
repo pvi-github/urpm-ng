@@ -25,6 +25,7 @@ from ..helpers.media import (
     is_key_in_rpm_keyring as _is_key_in_rpm_keyring,
     import_gpg_key as _import_gpg_key,
 )
+from ..helpers.package import resolve_target_arch, system_arch
 
 
 def cmd_media_list(args, db: 'PackageDatabase') -> int:
@@ -114,11 +115,10 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     from .. import colors
     from .server import autoconfig_servers
     import re
-    import platform
 
     mirrorlist_url = args.mirrorlist
     version = getattr(args, 'release', None)
-    arch = getattr(args, 'arch', None) or platform.machine()
+    arch = resolve_target_arch(args)
 
     # If no mirrorlist but --release provided, auto-construct URL
     if not mirrorlist_url:
@@ -1788,13 +1788,12 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     from urllib.parse import urlparse
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from ...core.mirrorlist import fetch_mirrors
-    import platform
     import time
     import re
 
     # Get release and arch
     release = args.release
-    arch = getattr(args, 'arch', None) or platform.machine()
+    arch = resolve_target_arch(args)
     dry_run = getattr(args, 'dry_run', False)
     no_nonfree = getattr(args, 'no_nonfree', False)
     no_tainted = getattr(args, 'no_tainted', False)
@@ -1921,7 +1920,7 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     # Add each media type
     for media_type, repo, name_suffix in media_types:
         # Media name: e.g., "mga10-core-release" or "mga10-x86_64-core-release" for non-host arch
-        if arch == platform.machine():
+        if arch == system_arch():
             media_name = f"mga{release}-{media_type}-{repo}"
         else:
             media_name = f"mga{release}-{arch}-{media_type}-{repo}"
