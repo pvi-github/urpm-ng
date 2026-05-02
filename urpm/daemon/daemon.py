@@ -3,6 +3,7 @@
 import logging
 import logging.handlers
 import os
+import platform
 import signal
 import sys
 import threading
@@ -210,6 +211,22 @@ class UrpmDaemon:
     def check_available(self, packages: List[str]) -> Dict[str, Any]:
         """Check availability of packages.
 
+        Looks up each name in the local SQLite catalogue and returns the
+        version/release/arch/media/summary tuple as exposed over the HTTP
+        API at ``/api/available`` (consumed by LAN peers, Discover and the
+        rpmdrake-ng GUI).
+
+        On a multi-arch host (typically ``x86_64`` with 32-bit media
+        enabled), the ``packages`` table holds two rows for the same
+        Mageia ``lib*`` name. Without an arch hint, ``db.get_package``
+        is free to return either row; an HTTP client probing for, say,
+        ``lib64fuse2`` could legitimately receive ``arch='i686'`` and
+        wrongly conclude that the 64-bit package is unavailable. We pin
+        the lookup to the host's native arch (``platform.machine()``)
+        so the response always reflects what the daemon's host can
+        actually install. The HTTP API does not yet accept a per-request
+        arch override; if/when it does, this is the single line to plumb.
+
         Args:
             packages: List of package names to check
 
@@ -219,9 +236,10 @@ class UrpmDaemon:
         if not self.db:
             return {'error': 'Database not initialized', 'packages': {}}
 
+        arch = platform.machine()
         result = {}
         for pkg_name in packages:
-            pkg_info = self.db.get_package(pkg_name)
+            pkg_info = self.db.get_package(pkg_name, arch=arch)
             if pkg_info:
                 result[pkg_name] = {
                     'available': True,
@@ -247,7 +265,6 @@ class UrpmDaemon:
             return {'error': 'Database not initialized', 'updates': []}
 
         # Use resolver to find updates
-        import platform
         from ..core.resolver import Resolver
 
         try:
