@@ -10,6 +10,7 @@ from shutil import rmtree
 from subprocess import run
 
 import pytest
+import tempfile
 
 from urpm.cli.commands.media import cmd_media_add
 from urpm.cli.commands.install import cmd_install
@@ -50,7 +51,7 @@ class BaseUrpmiTest:
 
     MEDIUM: str = ""  # override in subclasses that have a fixed medium
 
-    media_dir =  Path(__file__).parent / "media"
+    media_dir = Path(__file__).parent / "media"
     base_dir = media_dir.parent
 
     # ------------------------------------------------------------------
@@ -60,8 +61,8 @@ class BaseUrpmiTest:
     def prepare(self):
         """Reset the chroot and create a fresh PackageDatabase.
         Check that media/ exists or create it """
-        self.tmpdir =  Path(__file__).parent / "root"
-        self.chroot_tmp_path = self.tmpdir
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.chroot_tmp_path = Path(self.tmpdir.name)
         shutil.rmtree(self.chroot_tmp_path, ignore_errors=True)
         (self.chroot_tmp_path / "var" / "lib" / "rpm").mkdir(
             parents=True, exist_ok=True
@@ -369,6 +370,7 @@ class TestInstall(BaseUrpmiTest):
         ret = self._install("a-1-1.x86_64", "d")
         assert ret == 0
         self.check_installed_names(["a-1-1", "d-1-1"], full=True)
+        self.tmpdir.cleanup()
         # not working with urpm
         # ret = self._install('c', allow_arch="i686")
         # assert ret == 0
@@ -395,6 +397,7 @@ class TestInstall(BaseUrpmiTest):
             assert ret == 0
             # urpm installs b1 instead of b3 — pass for now
             # self.check_installed_names([pkg, expected_b], remove=True)
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_dropped_provides(self):
@@ -411,6 +414,7 @@ class TestInstall(BaseUrpmiTest):
         self.check_installed_names(["a-1-1"], full=True)
         ret = self._install("b")
         self.check_installed_names(["a", "aa", "b"], remove=True)
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_epochless_conflict_with_promotion(self):
@@ -428,6 +432,7 @@ class TestInstall(BaseUrpmiTest):
         self.check_installed_names(["a-1-1"], full=True)
         ret = self._install("b")
         self.check_installed_names(["a", "b"], remove=True)
+        self.tmpdir.cleanup()
 
     # TODO or not superuser-exclude, needs the option excludedocs and excludepath
     @pytest.mark.todo
@@ -478,6 +483,7 @@ class TestInstall(BaseUrpmiTest):
         # disabled until fixed
         self._upgrade()
         self.check_installed_names(["a-2-1"], full=True, remove=True)
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_failing_scriptlets(self):
@@ -554,6 +560,7 @@ class TestInstall(BaseUrpmiTest):
         test_install_upgrade_rpm("triggerin")
         test_install_upgrade_rpm("triggerun")
         test_install_upgrade_rpm("triggerpostun")
+        self.tmpdir.cleanup()
 
 
 class TestFileConflicts(BaseUrpmiTest):
@@ -615,6 +622,7 @@ class TestFileConflicts(BaseUrpmiTest):
         else:
             self._rpm_i_fails("h", "i")
             self.check_nothing_installed()
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_rpm_different_transactions(self):
@@ -714,6 +722,8 @@ class TestFileConflicts(BaseUrpmiTest):
             assert self._install("h", "i") == 0
             self.check_installed_names(["h", "i"], remove=True)
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_urpmi_different_transactions(self):
         """urpmi file-conflict checks across separate transactions."""
@@ -774,6 +784,8 @@ class TestFileConflicts(BaseUrpmiTest):
             assert self._install("i") == 0
             self.check_installed_names(["h", "i"], remove=True)
 
+        self.tmpdir.cleanup()
+
 
 class TestHandleConflictDeps(BaseUrpmiTest):
     """Tests for conflict resolution with dependencies.
@@ -811,24 +823,28 @@ class TestHandleConflictDeps(BaseUrpmiTest):
         """c installed first, then d (conflicts with c) replaces it."""
         self.prepare()
         self._test_simple("c", "d")
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_simple_d_then_c(self):
         """d installed first, then c (conflicts with d) replaces it."""
         self.prepare()
         self._test_simple("d", "c")
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_simple_e_then_f(self):
         """e conflicts with ff; f provides ff — f should replace e (mdvbz #17106)."""
         self.prepare()
         self._test_simple("e", "f")
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_simple_f_then_e(self):
         """f provides ff; e conflicts with ff — e should replace f."""
         self.prepare()
         self._test_simple("f", "e")
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_conflict_on_install(self):
@@ -855,6 +871,8 @@ class TestHandleConflictDeps(BaseUrpmiTest):
         else:
             self.check_installed_names(["g"], remove=True)
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_conflict_on_upgrade(self):
         """Conflict resolution during upgrade (bugs #12696, #11885).
@@ -872,6 +890,8 @@ class TestHandleConflictDeps(BaseUrpmiTest):
         # b conflicts with a => urpmi removes a (and a-sup) then installs b + b-sub
         assert self._install("b") == 0
         self.check_installed_names(["b", "b-sub"], remove=True)
+
+        self.tmpdir.cleanup()
 
 
 class TestHandleConflictDeps2(BaseUrpmiTest):
@@ -964,6 +984,7 @@ class TestHandleConflictDeps2(BaseUrpmiTest):
             result1=["c-1", "d1-2"],
             result2=["c-2", "d2-2"],
         )
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_conflict_upgrade_a_b(self):
@@ -980,6 +1001,7 @@ class TestHandleConflictDeps2(BaseUrpmiTest):
             result1=["a2-2", "b-2"],
             result2=["a1-2", "b-1"],
         )
+        self.tmpdir.cleanup()
 
 
 class TestI586ToI686(BaseUrpmiTest):
@@ -1025,6 +1047,7 @@ class TestI586ToI686(BaseUrpmiTest):
             self._rpm_query_nvra("libfoobar") == "libfoobar-1-1.i686"
         ), "i686 package should be installed (i.e. upgraded from i586)"
         self.check_installed_names(["libfoobar"], remove=True)
+        self.tmpdir.cleanup()
 
 
 class TestMediaInfoDir(BaseUrpmiTest):
@@ -1082,6 +1105,7 @@ class TestMediaInfoDir(BaseUrpmiTest):
             assert self._install(pkg) == 0, f"install failed for medium '{medium_name}'"
             self.check_installed_names([f"{pkg}-1-1"], full=True, remove=True)
             self.check_nothing_installed()
+            self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_query_and_list(self):
@@ -1106,6 +1130,8 @@ class TestMediaInfoDir(BaseUrpmiTest):
         assert (
             list_out == expected
         ), f"search_packages list all: expected {expected!r}, got {list_out!r}"
+
+        self.tmpdir.cleanup()
 
     @pytest.mark.deferred
     @pytest.mark.skip(reason="--force not yet implemented")
@@ -1132,6 +1158,8 @@ class TestMediaInfoDir(BaseUrpmiTest):
         # With --force the known package must be installed, unknown skipped
         assert self._install(pkg, "unknown-pkg", force=True) == 0
         self.check_installed_names([pkg], full=True, remove=True)
+
+        self.tmpdir.cleanup()
 
 
 # TODO Add all media and test that a standard package is installable
@@ -1176,6 +1204,8 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         assert self._install("b", "c") == 0
         self.check_installed_names(["b", "c"], remove=True)
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_with_ad_plain(self):
         """With a+d installed, upgrading to b+c must keep d (via b provides a)."""
@@ -1186,6 +1216,8 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
 
         assert self._install("b", "c") == 0
         self.check_installed_names(["b", "c", "d"], remove=True)
+
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_with_ad_split_level(self):
@@ -1204,6 +1236,8 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         assert self._install("c") == 0
         self.check_installed_names(["b", "c", "d"], remove=True)
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_with_ad_auto_c(self):
         """Installing only c with --auto must promote b (which obsoletes a)."""
@@ -1216,6 +1250,8 @@ class TestObsoleteAndConflict(BaseUrpmiTest):
         # because c conflicts with a and b obsoletes/provides a.
         assert self._install("c") == 0
         self.check_installed_names(["b", "c", "d"], remove=True)
+
+        self.tmpdir.cleanup()
 
 
 class TestOrderingScriptletsUrpm(BaseUrpmiTest):
@@ -1259,10 +1295,14 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
         self._rpm_install_direct(a1, pkg1)
         self._check_and_remove("a", name)
 
+        self.tmpdir.cleanup()
+
         # Ordering 2: requires_X before a
         self.prepare()
         self._rpm_install_direct(pkg1, a1)
         self._check_and_remove(name, "a")
+
+        self.tmpdir.cleanup()
 
     def _test_install_upgrade_rpm(self, name):
         """install v1, upgrade to v2."""
@@ -1277,11 +1317,15 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
         self._rpm_upgrade_direct(pkg2, a2)
         self._check_and_remove("a", name)
 
+        self.tmpdir.cleanup()
+
         # Ordering 2: requires_X first at install and upgrade
         self.prepare()
         self._rpm_install_direct(pkg1, a1)
         self._rpm_upgrade_direct(a2, pkg2)
         self._check_and_remove(name, "a")
+
+        self.tmpdir.cleanup()
 
     def _test_install_remove_urpm(self, name):
         """Install a + requires_X via urpm in both orderings.
@@ -1293,6 +1337,8 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
             assert ret
             assert self._install(*names) == 0
             self._check_and_remove(*names)
+
+            self.tmpdir.cleanup()
 
     def _test_install_upgrade_urpm(self, name):
         """Pre-install v1 of both packages via rpm, then upgrade via urpm
@@ -1309,6 +1355,8 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
             assert self._install(*names) == 0
             self._check_and_remove(*names)
 
+            self.tmpdir.cleanup()
+
     def _test_install_remove_urpm_one_by_one(self, name):
         """Installs each package in a separate _install() call to emulate
         the one-package-per-transaction behaviour of --split-length 1.
@@ -1320,6 +1368,8 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
             for pkg in names:
                 assert self._install(pkg) == 0
             self._check_and_remove(*names)
+
+            self.tmpdir.cleanup()
 
     def _test_install_upgrade_one_by_one(self, name):
         """Upgrade each package in a separate call to emulate
@@ -1335,6 +1385,8 @@ class TestOrderingScriptletsUrpm(BaseUrpmiTest):
             for pkg in names:
                 assert self._install(pkg) == 0
             self._check_and_remove(*names)
+
+            self.tmpdir.cleanup()
 
     # ------------------------------------------------------------------
     # Test methods
@@ -1426,10 +1478,14 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
         self._rpm_install_direct(a1, pkg1)
         self._check_and_remove("a", name)
 
+        self.tmpdir.cleanup()
+
         # Ordering 2: requires_X before a
         self.prepare()
         self._rpm_install_direct(pkg1, a1)
         self._check_and_remove(name, "a")
+
+        self.tmpdir.cleanup()
 
     def _test_install_upgrade_rpm(self, name):
         """Mirror sub test_install_upgrade_rpm(): install v1, upgrade to v2."""
@@ -1444,11 +1500,15 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
         self._rpm_upgrade_direct(pkg2, a2)
         self._check_and_remove("a", name)
 
+        self.tmpdir.cleanup()
+
         # Ordering 2: requires_X first at install and upgrade
         self.prepare()
         self._rpm_install_direct(pkg1, a1)
         self._rpm_upgrade_direct(a2, pkg2)
         self._check_and_remove(name, "a")
+
+        self.tmpdir.cleanup()
 
     def _test_install_remove_urpmi(self, name):
         """Mirror sub test_install_remove_urpmi() without split options.
@@ -1463,6 +1523,8 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
             assert ret
             assert self._install(*names) == 0
             self._check_and_remove(*names)
+
+            self.tmpdir.cleanup()
 
     def _test_install_upgrade_urpmi(self, name):
         """Mirror sub test_install_upgrade_urpmi() without split options.
@@ -1481,6 +1543,8 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
             assert self._install(*names) == 0
             self._check_and_remove(*names)
 
+            self.tmpdir.cleanup()
+
     def _test_install_remove_urpmi_one_by_one(self, name):
         """Mirror sub test_install_remove_urpmi() with --split-length 1.
 
@@ -1495,6 +1559,8 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
                 assert self._install(pkg) == 0
             self._check_and_remove(*names)
 
+            self.tmpdir.cleanup()
+
     def _test_install_upgrade_urpmi_one_by_one(self, name):
         """Mirror sub test_install_upgrade_urpmi() with --split-length 1."""
         a1 = self._rpm_glob_single("a", 1)
@@ -1508,6 +1574,8 @@ class TestOrderingScriptletsUrpmi(BaseUrpmiTest):
             for pkg in names:
                 assert self._install(pkg) == 0
             self._check_and_remove(*names)
+
+            self.tmpdir.cleanup()
 
     # ------------------------------------------------------------------
     # Test methods
@@ -1678,6 +1746,8 @@ class TestOrphans(BaseUrpmiTest):
         self.check_installed_names(expected, remove=bool(expected))
         self._reset_unrequested_list()
 
+        self.tmpdir.cleanup()
+
     def _test_urpme(self, req_v1_list, wanted_v2, remove_v2, remaining_v2):
         """Mirror sub test_urpme(): install v1, upgrade some to v2, remove with orphans."""
         self.prepare()
@@ -1688,6 +1758,8 @@ class TestOrphans(BaseUrpmiTest):
         remaining = self._add_release(*filter(None, remaining_v2.split()))
         self.check_installed_names(remaining, full=True, remove=bool(remaining))
         self._reset_unrequested_list()
+
+        self.tmpdir.cleanup()
 
     def _test_auto_select(self, req_v1_list, wanted_v1_nvr, wanted_v2, orphans_v2,
                           without_recommends=True):
@@ -1723,6 +1795,8 @@ class TestOrphans(BaseUrpmiTest):
         self.check_installed_names(remaining, full=True, remove=True)
         self._reset_unrequested_list()
 
+        self.tmpdir.cleanup()
+
     def _test_auto_select_auto_orphans(self, req_v1_list, wanted_v1_nvr, wanted_v2,
                                        without_recommends=True):
         """Mirror sub test_auto_select_raw_auto_orphans()."""
@@ -1737,6 +1811,8 @@ class TestOrphans(BaseUrpmiTest):
         self.check_installed_names(remaining, full=True, remove=True)
         self._reset_unrequested_list()
 
+        self.tmpdir.cleanup()
+
     def _test_auto_select_both(self, pkg, wanted_v1, wanted_v2, orphans_v2="",
                                without_recommends=True):
         """Mirror sub test_auto_select_both()."""
@@ -1746,6 +1822,8 @@ class TestOrphans(BaseUrpmiTest):
         self._urpme_auto_orphans(pkg)
         self.check_nothing_installed()
         self._reset_unrequested_list()
+
+        self.tmpdir.cleanup()
 
         # test_urpme2: only for packages whose v1 deps don't require the pkg itself
         skip_urpme2 = bool(set(pkg) & set("mlno"))
@@ -1759,6 +1837,8 @@ class TestOrphans(BaseUrpmiTest):
             self._urpme_auto_orphans()
             self.check_nothing_installed()
             self._reset_unrequested_list()
+
+            self.tmpdir.cleanup()
 
         # test_auto_select for pkg itself
         wanted_v1_nvr = " ".join(
@@ -1793,6 +1873,8 @@ class TestOrphans(BaseUrpmiTest):
         self._urpme_auto_orphans(pkg1)
         self.check_installed_names([pkg2], remove=True)
 
+        self.tmpdir.cleanup()
+
     def _test_unorphan_v2(self, pkg1, pkg2):
         """Install pkg1, remove it, install pkg2 — pkg2 is now unrequested, removed by auto-orphans."""
         self.prepare()
@@ -1802,6 +1884,8 @@ class TestOrphans(BaseUrpmiTest):
         self._urpme_auto_orphans()
         self.check_installed_names([pkg2], remove=True)
 
+        self.tmpdir.cleanup()
+
     def _test_unorphan_v3(self, pkg1, pkg2):
         """Install pkg1 (pulls pkg2), remove both, reinstall pkg2 — auto-orphans cleans up."""
         self.prepare()
@@ -1810,6 +1894,8 @@ class TestOrphans(BaseUrpmiTest):
         assert self._install_v1(pkg2) == 0
         self._urpme_auto_orphans()
         self.check_installed_names([pkg2], remove=True)
+
+        self.tmpdir.cleanup()
 
     # ------------------------------------------------------------------
     # Test methods
@@ -1997,6 +2083,8 @@ class TestOrphansKernels(BaseUrpmiTest):
         self.prepare()
         self._test_unorphan_kernels(self.MEDIUM_V1, "kernel-desktop-latest")
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_unorphan_kernels_new_naming(self):
         """New kernel naming: package name is kernel-desktop, version in V field.
@@ -2008,6 +2096,8 @@ class TestOrphansKernels(BaseUrpmiTest):
         self._test_unorphan_kernels(
             self.MEDIUM_V2, "kernel-desktop-latest", "kernel-desktop"
         )
+
+        self.tmpdir.cleanup()
 
 
 class TestPrefer2(BaseUrpmiTest):
@@ -2039,11 +2129,15 @@ class TestPrefer2(BaseUrpmiTest):
         self.prepare()
         self._test("a", ["a", "b2"])
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_prefer_c2_over_c1(self):
         """d requires cc+c1; c1 and c2 both provide cc => c2 must be picked."""
         self.prepare()
         self._test("d", ["d", "c1"])
+
+        self.tmpdir.cleanup()
 
 
 # TODO priority-upgrade
@@ -2083,6 +2177,8 @@ class TestProvideAndNoObsolete(BaseUrpmiTest):
         self._urpme("a")
         self.check_nothing_installed()
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_install_b_keeps_a(self):
         """urpmi b: b-3 is installed alongside a-1 (b does not obsolete a)."""
@@ -2093,6 +2189,8 @@ class TestProvideAndNoObsolete(BaseUrpmiTest):
         self._urpme("a", "b")
         self.check_nothing_installed()
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_auto_select_upgrades_a(self):
         """urpmi --auto-select --auto must upgrade a-1 to a-2, same as 'urpmi a' (bug #31130)."""
@@ -2102,6 +2200,8 @@ class TestProvideAndNoObsolete(BaseUrpmiTest):
         self.check_installed_names(["a-2-1"], full=True)
         self._urpme("a")
         self.check_nothing_installed()
+
+        self.tmpdir.cleanup()
 
 
 class TestReadmeUrpmi(BaseUrpmiTest):
@@ -2163,6 +2263,8 @@ class TestReadmeUrpmi(BaseUrpmiTest):
         self._check_readme(["a"], ["installing/upgrading a"])
         self.check_installed_names(["a"], remove=True)
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_b(self):
         """Upgrading b-1 to b-2 shows the upgrade messages; then upgrading via name."""
@@ -2179,12 +2281,16 @@ class TestReadmeUrpmi(BaseUrpmiTest):
         self._check_readme(["b"], ["upgrading b"])
         self.check_installed_names(["b"], remove=True)
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_c(self):
         """Installing c shows 'installing c'."""
         self.prepare()
         self._check_readme(["c"], ["installing c"])
         self.check_installed_names(["c"], remove=True)
+
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_d(self):
@@ -2194,6 +2300,8 @@ class TestReadmeUrpmi(BaseUrpmiTest):
         # d_ may show any valid message; we just verify install succeeds
         self._check_readme(["d_"], ["installing d_"])
         self.check_installed_names(["d_"], remove=True)
+
+        self.tmpdir.cleanup()
 
 
 # TODO or not ? rpm-query-in-scriptlet
@@ -2455,6 +2563,8 @@ class TestSpecifyMedia(BaseUrpmiTest):
         self.prepare()
         self._install_and_check_source(self.MEDIA[0], self.MEDIA[1])
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_urpmi_media_0(self):
         """urpmi --media various: installs from various."""
@@ -2462,6 +2572,8 @@ class TestSpecifyMedia(BaseUrpmiTest):
         self._install_and_check_source(
             self.MEDIA[0], self.MEDIA[1], media=self.MEDIA[0]
         )
+
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_urpmi_media_1(self):
@@ -2471,6 +2583,8 @@ class TestSpecifyMedia(BaseUrpmiTest):
             self.MEDIA[1], self.MEDIA[0], media=self.MEDIA[1]
         )
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_urpmi_excludemedia_1(self):
         """urpmi --excludemedia various_bis: installs from various."""
@@ -2479,6 +2593,8 @@ class TestSpecifyMedia(BaseUrpmiTest):
             self.MEDIA[0], self.MEDIA[1], excludemedia=self.MEDIA[1]
         )
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_urpmi_excludemedia_0(self):
         """urpmi --excludemedia various: installs from various_bis."""
@@ -2486,6 +2602,8 @@ class TestSpecifyMedia(BaseUrpmiTest):
         self._install_and_check_source(
             self.MEDIA[1], self.MEDIA[0], excludemedia=self.MEDIA[0]
         )
+
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_urpmi_sortmedia_0_1(self):
@@ -2497,6 +2615,8 @@ class TestSpecifyMedia(BaseUrpmiTest):
             sortmedia=f"{self.MEDIA[0]},{self.MEDIA[1]}",
         )
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_urpmi_sortmedia_1_0(self):
         """urpmi --sortmedia various_bis,various: installs from various_bis first."""
@@ -2506,6 +2626,8 @@ class TestSpecifyMedia(BaseUrpmiTest):
             self.MEDIA[0],
             sortmedia=f"{self.MEDIA[1]},{self.MEDIA[0]}",
         )
+
+        self.tmpdir.cleanup()
 
 
 class TestSrpmBootstrapping(BaseUrpmiTest):
@@ -2582,6 +2704,8 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         assert srpm_glob, f"no src.rpm found in {srpm_dir}"
         self._run_test(str(srpm_glob[0]))
 
+        self.tmpdir.cleanup()
+
     @pytest.mark.stable
     def test_buildrequires_from_src_medium(self):
         """Add the SRPM medium then pass the package name to --buildrequires."""
@@ -2589,6 +2713,8 @@ class TestSrpmBootstrapping(BaseUrpmiTest):
         ret, _ = self._addmedia(f"media/SRPMS-{self.MEDIUM}")
         assert ret, f"addmedia failed for SRPMS medium"
         self._run_test(self.MEDIUM)
+
+        self.tmpdir.cleanup()
 
 
 class TestSuggests(BaseUrpmiTest):
@@ -2631,6 +2757,8 @@ class TestSuggests(BaseUrpmiTest):
         self._install("with-invalid")
         self.check_installed_names(['with-invalid'], remove=True)
 
+        self.tmpdir.cleanup()
+
     def _test(self, name: str, required: list[str], suggested: list[str]):
         self.prepare()
         self._install(name)
@@ -2639,6 +2767,8 @@ class TestSuggests(BaseUrpmiTest):
         self.check_installed_names([name] + required + suggested)
         self._rpm_remove(name, *required)
         self.check_installed_names(suggested, remove=True)
+
+        self.tmpdir.cleanup()
 
 
     def _test_2(self, name1: str, required1: list[str], name2: str, required2: list[str], suggested2: list[str]):
@@ -2652,6 +2782,8 @@ class TestSuggests(BaseUrpmiTest):
         self.check_installed_names([name1] + required1)
         self._install(name2, without_recommends=False, with_suggests=True)
         self.check_installed_names([name1] + required1 + [name2] + required2 + suggested2, remove=True)
+
+        self.tmpdir.cleanup()
 
     @pytest.mark.stable
     def test_suggests_upgrade(self):
@@ -2669,6 +2801,8 @@ class TestSuggests(BaseUrpmiTest):
         self.check_installed_names(['a', 'suggested_b', 'suggested_c'])
         self._install("a-3", without_recommends=False, with_suggests=True)
         self.check_installed_names(['a', 'suggested_b', 'suggested_c'], remove=True)
+
+        self.tmpdir.cleanup()
 
 
     @pytest.mark.stable
@@ -2688,3 +2822,5 @@ class TestSuggests(BaseUrpmiTest):
             ret = self._rpm_remove("cc")
             assert ret == False
             self.check_installed_names(pkgs + ['cc'] + common, remove=True)
+
+        self.tmpdir.cleanup()
