@@ -281,7 +281,7 @@ def write_files_xml(
         for pkg in packages:
             f.write(f'<files fn="{_xml_escape(os.path.basename(pkg.filename))}">\n')
             for filepath in pkg.files:
-                f.write(_xml_escape(filepath.name) + '\n')
+                f.write(_xml_escape(filepath) + '\n')
             f.write('</files>\n')
             count += 1
         f.write('</media_info>\n')
