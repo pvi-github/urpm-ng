@@ -346,7 +346,8 @@ def write_hdlist(
             incremental=incremental,
             old_hdlist_path=old_hdlist_path,
             )
-    writer.run()
+    wrotten = writer.run()
+    return wrotten
 
 
 class HdlistWriter():
@@ -394,17 +395,18 @@ class HdlistWriter():
         if self.incremental and self.old_hdlist_path is not None:
             _, _, hdlist_table = self._read_toc(self.old_hdlist_path)
             if hdlist_table:
-                self._write_incremental(hdlist_table)
+                wrotten = self._write_incremental(hdlist_table)
             else:
                 # No prior hdlist — fall back to full write
-                self._write_full()
+                wrotten = self._write_full()
         else:
-            self._write_full()
+            wrotten = self._write_full()
 
         self._build_toc()
         self.handle.close()
         self.destroyed = True
         print("File wrotten: ", self.output_path)
+        return wrotten
 
     def _append_header(self, rpm_name: str, header_bytes: bytes) -> None:
         """Append a single RPM header to the current block, flushing if needed."""
@@ -444,6 +446,7 @@ class HdlistWriter():
                 'csize': csize,
                 'coff':  new_coff,
             }
+        return len(rpms_in_block)
 
     def _write_incremental(self, state: dict) -> None:
         """Write hdlist incrementally, reusing unchanged compressed blocks."""
@@ -511,6 +514,7 @@ class HdlistWriter():
             if len(self.current_block_data) >= self.block_size:
                 self._end_block()
         self._end_block()
+        return len(self.packages)
 
     def _build_toc(self) -> bool:
         self._end_block()
