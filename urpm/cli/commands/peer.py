@@ -33,6 +33,18 @@ def _query_daemon_peers() -> list:
 def cmd_peer(args, db: 'PackageDatabase') -> int:
     """Handle peer command - manage P2P peers and provenance."""
     from .. import colors, display
+    from ...auth.privileges import require_privileges
+
+    # The ``list``/``downloads`` subcommands are read-only and stay
+    # usable unprivileged; only the mutating subcommands
+    # (blacklist/unblacklist/clean) require root.
+    _MUTATING_PEER_CMDS = (
+        'blacklist', 'bl', 'block',
+        'unblacklist', 'unbl', 'unblock',
+        'clean',
+    )
+    if args.peer_command in _MUTATING_PEER_CMDS:
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     # peer list - show peer stats (default when no subcommand)
     if args.peer_command in ('list', 'ls', None):

@@ -69,6 +69,9 @@ def cmd_mirror_status(args, db: 'PackageDatabase') -> int:
 def cmd_mirror_enable(args, db: 'PackageDatabase') -> int:
     """Handle mirror enable command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     db.set_mirror_config('enabled', '1')
     print(colors.success(_("Mirror mode enabled")))
@@ -79,6 +82,9 @@ def cmd_mirror_enable(args, db: 'PackageDatabase') -> int:
 def cmd_mirror_disable(args, db: 'PackageDatabase') -> int:
     """Handle mirror disable command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     db.set_mirror_config('enabled', '0')
     print(colors.success(_("Mirror mode disabled")))
@@ -89,7 +95,13 @@ def cmd_mirror_disable(args, db: 'PackageDatabase') -> int:
 def cmd_mirror_quota(args, db: 'PackageDatabase') -> int:
     """Handle mirror quota command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from ...core.cache import format_size
+
+    # ``mirror quota`` without an argument is a read-only display; only
+    # the set path requires root.
+    if args.size:
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     if not args.size:
         # Show current quota
@@ -123,6 +135,9 @@ def cmd_mirror_quota(args, db: 'PackageDatabase') -> int:
 def cmd_mirror_disable_version(args, db: 'PackageDatabase') -> int:
     """Handle mirror disable-version command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     current = db.get_disabled_mirror_versions()
     new_versions = [v.strip() for v in args.versions.split(',') if v.strip()]
@@ -141,6 +156,9 @@ def cmd_mirror_disable_version(args, db: 'PackageDatabase') -> int:
 def cmd_mirror_enable_version(args, db: 'PackageDatabase') -> int:
     """Handle mirror enable-version command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     current = db.get_disabled_mirror_versions()
     to_enable = [v.strip() for v in args.versions.split(',') if v.strip()]
@@ -163,10 +181,16 @@ def cmd_mirror_enable_version(args, db: 'PackageDatabase') -> int:
 def cmd_mirror_clean(args, db: 'PackageDatabase') -> int:
     """Handle mirror clean command - enforce quotas and retention."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from ...core.cache import CacheManager, format_size
 
     cache_mgr = CacheManager(db)
     dry_run = getattr(args, 'dry_run', False)
+
+    # Privilege check is gated on actually deleting files; ``--dry-run``
+    # only reports what would be removed.
+    if not dry_run:
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     if dry_run:
         print(colors.info(_("Dry run mode - no files will be deleted\n")))
@@ -198,11 +222,14 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
     Unlike the background daemon which waits for idle, this downloads immediately.
     """
     from .. import colors
+    from ...auth.privileges import require_privileges
     from ..helpers.debug import notify_urpmd_cache_invalidate as _notify_urpmd_cache_invalidate
     from ...core.rpmsrate import RpmsrateParser, DEFAULT_RPMSRATE_PATH
     from ...core.download import Downloader, DownloadItem
     from ...core.config import get_media_local_path, build_media_url
     import json
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     # Default sections (same as DVD content)
     DEFAULT_SEED_SECTIONS = [
@@ -492,6 +519,12 @@ def cmd_mirror_sync(args, db: 'PackageDatabase') -> int:
 def cmd_mirror_ratelimit(args, db: 'PackageDatabase') -> int:
     """Handle mirror rate-limit command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    # ``mirror rate-limit`` without an argument is a read-only display;
+    # only the set path requires root.
+    if args.setting:
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     if not args.setting:
         # Show current setting

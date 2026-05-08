@@ -12,9 +12,16 @@ if TYPE_CHECKING:
 
 def cmd_appstream(args, db: 'PackageDatabase') -> int:
     """Handle appstream command - manage AppStream metadata."""
+    from ...auth.privileges import require_privileges
     from ...core.config import get_system_version, get_base_dir
     from ...core.appstream import AppStreamManager
     from .. import colors
+
+    # ``status`` is read-only; every other subcommand writes to
+    # ``/var/lib/urpm/appstream/`` (or ``/usr/share/metainfo/`` for
+    # ``init-distro``) and so requires root.
+    if args.appstream_command in ('generate', 'gen', None, 'merge', 'init-distro'):
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     appstream_mgr = AppStreamManager(db, get_base_dir())
 

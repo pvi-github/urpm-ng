@@ -756,6 +756,10 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
 
 def cmd_media_remove(args, db: 'PackageDatabase') -> int:
     """Handle media remove command."""
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
+
     rc = 0
     for name in args.name:
         if not db.get_media(name):
@@ -769,6 +773,10 @@ def cmd_media_remove(args, db: 'PackageDatabase') -> int:
 
 def cmd_media_enable(args, db: 'PackageDatabase') -> int:
     """Handle media enable command."""
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
+
     name = args.name
 
     if not db.get_media(name):
@@ -782,6 +790,10 @@ def cmd_media_enable(args, db: 'PackageDatabase') -> int:
 
 def cmd_media_disable(args, db: 'PackageDatabase') -> int:
     """Handle media disable command."""
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
+
     name = args.name
 
     if not db.get_media(name):
@@ -1302,7 +1314,10 @@ def _import_single_media(db: 'PackageDatabase', media: dict, colors) -> bool:
 def cmd_media_import(args, db: 'PackageDatabase') -> int:
     """Handle media import command - import from urpmi.cfg."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     import os
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     filepath = args.file
 
@@ -1442,7 +1457,10 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
 def cmd_media_set(args, db: 'PackageDatabase') -> int:
     """Handle media set command - modify media settings."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from datetime import datetime
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     # Handle --all option for sync_files
     use_all = getattr(args, 'all', False)
@@ -1694,9 +1712,12 @@ def cmd_media_seed_info(args, db: 'PackageDatabase') -> int:
 def cmd_media_link(args, db: 'PackageDatabase') -> int:
     """Handle media link command - link/unlink servers to a media."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from ...core.config import build_server_url
     import urllib.request
     from pathlib import Path
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     # Find media
     media = db.get_media(args.name)
@@ -1801,6 +1822,7 @@ def cmd_media_link(args, db: 'PackageDatabase') -> int:
 def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     """Handle media autoconfig command - auto-add official Mageia media for a release."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from urllib.request import urlopen, Request
     from urllib.error import URLError, HTTPError
     from urllib.parse import urlparse
@@ -1815,6 +1837,12 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
     dry_run = getattr(args, 'dry_run', False)
     no_nonfree = getattr(args, 'no_nonfree', False)
     no_tainted = getattr(args, 'no_tainted', False)
+
+    # Privilege check is gated on actually mutating the DB; ``--dry-run``
+    # only inspects mirrorlists and prints what *would* happen, so it
+    # remains usable unprivileged for previewing autoconfig.
+    if not dry_run:
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     print(_("Auto-configuring media for Mageia {release} ({arch})").format(release=release, arch=arch))
 
@@ -2013,6 +2041,7 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
         - Backports, testing, debug, SRPMS → always disabled
     """
     from .. import colors
+    from ...auth.privileges import require_privileges
     from ...core.media_cfg import (
         fetch_media_cfg, parse_media_cfg, filter_media, decompose_url,
         detect_installed_categories, should_enable,
@@ -2022,6 +2051,12 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
     dry_run = getattr(args, 'dry_run', False)
     include_srpms = getattr(args, 'sources', False)
     include_debug = getattr(args, 'debug', False)
+
+    # Privilege check is gated on actually mutating the DB; ``--dry-run``
+    # only fetches and parses media.cfg to print a preview, so it stays
+    # usable unprivileged.
+    if not dry_run:
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     # Parse --with / --without into per-category overrides
     with_cats = set()

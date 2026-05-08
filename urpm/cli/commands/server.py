@@ -84,10 +84,13 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
 def cmd_server_add(args, db: 'PackageDatabase') -> int:
     """Handle server add command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from urllib.parse import urlparse
     from ...core.config import test_server_ip_connectivity, build_server_url
     import urllib.request
     import socket
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     url = args.url.rstrip('/')
     parsed = urlparse(url)
@@ -230,6 +233,9 @@ def cmd_server_add(args, db: 'PackageDatabase') -> int:
 def cmd_server_remove(args, db: 'PackageDatabase') -> int:
     """Handle server remove command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     ret = 0
     for name in args.name:
@@ -246,6 +252,9 @@ def cmd_server_remove(args, db: 'PackageDatabase') -> int:
 def cmd_server_enable(args, db: 'PackageDatabase') -> int:
     """Handle server enable command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     server = db.get_server(args.name)
     if not server:
@@ -264,6 +273,9 @@ def cmd_server_enable(args, db: 'PackageDatabase') -> int:
 def cmd_server_disable(args, db: 'PackageDatabase') -> int:
     """Handle server disable command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     server = db.get_server(args.name)
     if not server:
@@ -282,6 +294,9 @@ def cmd_server_disable(args, db: 'PackageDatabase') -> int:
 def cmd_server_priority(args, db: 'PackageDatabase') -> int:
     """Handle server priority command."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     server = db.get_server(args.name)
     if not server:
@@ -296,7 +311,13 @@ def cmd_server_priority(args, db: 'PackageDatabase') -> int:
 def cmd_server_test(args, db: 'PackageDatabase') -> int:
     """Handle server test command - test connectivity and detect IP mode."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from ...core.config import test_server_ip_connectivity
+
+    # ``server test`` writes the detected IP mode back to the DB when it
+    # changes, so it requires root even though most of the work is
+    # network probing.
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     if args.name:
         # Test specific server
@@ -342,6 +363,9 @@ def cmd_server_test(args, db: 'PackageDatabase') -> int:
 def cmd_server_ipmode(args, db: 'PackageDatabase') -> int:
     """Handle server ip-mode command - manually set IP mode."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     server = db.get_server(args.name)
     if not server:
@@ -661,8 +685,14 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     newly added servers to enabled media via parallel HEAD probes.
     """
     from .. import colors
+    from ...auth.privileges import require_privileges
     from urllib.request import urlopen, Request
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Privilege check is gated on actually mutating the DB; ``--dry-run``
+    # only inspects mirrorlists and prints candidate servers.
+    if not getattr(args, 'dry_run', False):
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     # ── Resolve version and arch ──────────────────────────────────────
     version = getattr(args, 'release', None)

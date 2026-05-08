@@ -116,7 +116,10 @@ def cmd_cache_clean(args, db: 'PackageDatabase') -> int:
 
 def cmd_cache_rebuild(args, db: 'PackageDatabase') -> int:
     """Handle cache rebuild command - rebuild database from synthesis files."""
+    from ...auth.privileges import require_privileges
     from ...core.sync import sync_media
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     print(_("Rebuilding cache database..."))
 
@@ -260,7 +263,10 @@ def cmd_cache_stats(args, db: 'PackageDatabase') -> int:
 
 def cmd_cache_rebuild_fts(args, db: 'PackageDatabase') -> int:
     """Handle cache rebuild-fts command - rebuild FTS index for file search."""
+    from ...auth.privileges import require_privileges
     from ...core.config import DEV_PORT, PROD_PORT, is_dev_mode
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     # Check current FTS state
     stats = db.get_fts_stats()

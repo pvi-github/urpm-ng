@@ -347,7 +347,14 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 def cmd_mark(args, db: 'PackageDatabase') -> int:
     """Handle mark command - mark packages as manual or auto-installed."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from ...core.resolver import Resolver
+
+    # ``urpm mark show`` is read-only, so the privilege check is gated
+    # on the mutation subcommands.  Any other command falls through to
+    # the usage hint and never touches the DB.
+    if args.mark_command in ('manual', 'm', 'explicit', 'auto', 'a', 'dep'):
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
     resolver = Resolver(db)
 
@@ -479,6 +486,7 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
 def cmd_hold(args, db: 'PackageDatabase') -> int:
     """Handle hold command - hold packages to prevent upgrades and obsoletes."""
     from .. import colors
+    from ...auth.privileges import require_privileges
     from datetime import datetime
 
     # List holds if no packages or --list
@@ -497,6 +505,8 @@ def cmd_hold(args, db: 'PackageDatabase') -> int:
         return 0
 
     # Hold packages
+    require_privileges(action_id="org.mageia.urpm.media-manage")
+
     added = []
     already_held = []
 
@@ -519,6 +529,9 @@ def cmd_hold(args, db: 'PackageDatabase') -> int:
 def cmd_unhold(args, db: 'PackageDatabase') -> int:
     """Handle unhold command - remove hold from packages."""
     from .. import colors
+    from ...auth.privileges import require_privileges
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     removed = []
     not_held = []
