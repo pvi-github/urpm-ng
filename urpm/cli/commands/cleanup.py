@@ -22,7 +22,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
     from .. import colors
     from ...core.resolver import Resolver, format_size
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
     from ...core.background_install import (
         check_background_error, clear_background_error,
         InstallLock
@@ -216,9 +216,8 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
     # Check root (not required for chroot operations)
     allow_no_root = getattr(args, 'allow_no_root', False)
-    if not allow_no_root and not check_root():
-        print(colors.error(_("Error: autoremove requires root privileges")))
-        return 1
+    if not allow_no_root:
+        require_privileges(action_id="org.mageia.urpm.remove")
 
     # Build command line for history
     cmd_parts = ["urpm", "autoremove"]
@@ -544,7 +543,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
     """Handle cleandeps command - remove orphan deps from interrupted transactions."""
     import signal
     import platform
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
     from ...core.resolver import Resolver
     from ...core.transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
     from ...core.background_install import InstallLock
@@ -594,9 +593,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
             return 1
 
     # Check root
-    if not check_root():
-        print(_("Error: cleandeps requires root privileges"))
-        return 1
+    require_privileges(action_id="org.mageia.urpm.remove")
 
     # Record transaction
     cmd_line = 'urpm cleandeps'

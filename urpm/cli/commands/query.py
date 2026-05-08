@@ -669,11 +669,8 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
 
                 if confirm_yes(response):
                     # Enable sync_files on all enabled media
-                    from ...core.install import check_root
-                    if not check_root():
-                        print(colors.error(_("Erreur: droits root requis pour activer sync_files")))
-                        print(_("Essayez: sudo urpm media set --all --sync-files"))
-                        return 1
+                    from ...auth.privileges import require_privileges
+                    require_privileges(action_id="org.mageia.urpm.media-manage")
 
                     db.set_all_media_sync_files(True, enabled_only=True)
                     enabled_count = len(db.get_media_with_sync_files())

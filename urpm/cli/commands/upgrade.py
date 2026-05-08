@@ -36,7 +36,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         clear_background_error()
 
     from ...core.resolver import Resolver, format_size, set_solver_debug
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
     from pathlib import Path
     from ...core.rpm import is_local_rpm, read_rpm_header
     from ...core.download import verify_rpm_signature
@@ -106,9 +106,8 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
 
     # Check root (not required for --download-only or chroot installs)
     allow_no_root = getattr(args, 'allow_no_root', False)
-    if not download_only and not allow_no_root and not check_root():
-        print(colors.error(_("Error: upgrade requires root privileges")))
-        return 1
+    if not download_only and not allow_no_root:
+        require_privileges(action_id="org.mageia.urpm.upgrade")
 
     # Resolve upgrades
     # For upgrades, don't install recommends by default (unlike install)

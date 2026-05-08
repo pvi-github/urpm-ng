@@ -190,7 +190,7 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
 
 def cmd_undo(args, db: 'PackageDatabase') -> int:
     """Handle undo command - undo last or specific transaction."""
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
     from ...core.resolver import Resolver
     from ...core.transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
     from ...core.background_install import InstallLock
@@ -199,9 +199,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
     from .. import colors
 
     # Check root
-    if not check_root():
-        print(colors.error(_("Error: undo requires root privileges")))
-        return 1
+    require_privileges(action_id="org.mageia.urpm.install")
 
     # Determine which transaction to undo
     if args.transaction_id is None:
@@ -582,7 +580,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
     - rollback to N    : rollback to state after transaction #N
     - rollback to DATE : rollback to state at DATE
     """
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
     from ...core.resolver import Resolver
     from ...core.transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
     from ...core.background_install import InstallLock
@@ -590,9 +588,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
     from .. import colors
 
     # Check root
-    if not check_root():
-        print(colors.error(_("Error: rollback requires root privileges")))
-        return 1
+    require_privileges(action_id="org.mageia.urpm.install")
 
     rollback_args = args.args if hasattr(args, 'args') else []
 

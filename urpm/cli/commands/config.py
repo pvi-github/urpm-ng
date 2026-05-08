@@ -218,7 +218,7 @@ def _cmd_auto_upgrade_policy(args, target: str) -> int:
         get_discover_auto_upgrades, set_discover_auto_upgrades,
         get_packagekit_auto_upgrades, set_packagekit_auto_upgrades,
     )
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
 
     getters = {
         'gnome': get_gnome_auto_upgrades,
@@ -251,9 +251,7 @@ def _cmd_auto_upgrade_policy(args, target: str) -> int:
         return 0
 
     # Set value
-    if not check_root():
-        print(_("Error: this operation requires root privileges"))
-        return 1
+    require_privileges(action_id="org.mageia.urpm.media-manage")
 
     enabled = value in ('yes', 'true', 'on', '1')
     ok = setters[target](enabled)
@@ -269,7 +267,7 @@ def _cmd_auto_upgrade_policy(args, target: str) -> int:
 def cmd_key(args) -> int:
     """Handle key command - manage GPG keys for package verification."""
     import rpm
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
 
     if not hasattr(args, 'key_cmd') or not args.key_cmd:
         print(_("Usage: urpm key <list|import|remove> ..."))
@@ -303,9 +301,7 @@ def cmd_key(args) -> int:
 
     # Import key
     elif args.key_cmd in ('import', 'i', 'add'):
-        if not check_root():
-            print(_("Error: importing keys requires root privileges"))
-            return 1
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
         if not hasattr(args, 'keyfile') or not args.keyfile:
             print(_("Usage: urpm key import <keyfile|url>"))
@@ -374,9 +370,7 @@ def cmd_key(args) -> int:
     # Remove key
     elif args.key_cmd in ('remove', 'rm', 'del'):
         import rpm
-        if not check_root():
-            print(_("Error: removing keys requires root privileges"))
-            return 1
+        require_privileges(action_id="org.mageia.urpm.media-manage")
 
         keyid = args.keyid.lower()
 

@@ -146,12 +146,10 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         return 1
 
     # Check root privileges early (unless allowed to skip for mkimage)
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
     allow_no_root = getattr(args, 'allow_no_root', False)
-    if not download_only and not allow_no_root and not check_root():
-        print(colors.error(_("Error: root privileges required for installation")))
-        print(_("Try: sudo urpm install <packages>"))
-        return 1
+    if not download_only and not allow_no_root:
+        require_privileges(action_id="org.mageia.urpm.install")
 
     # Handle --buildrequires option (install build dependencies from spec/SRPM)
     builddeps = getattr(args, 'buildrequires', None)

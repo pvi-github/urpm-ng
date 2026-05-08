@@ -534,7 +534,7 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     Falls back to legacy mode if URL parsing fails.
     """
     from .. import colors
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
 
     url = args.url
     custom_args = getattr(args, 'custom', None)
@@ -648,9 +648,7 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
                     print(_("\nAborted"))
                     return 1
 
-            if not check_root():
-                print(colors.error(_("Error: importing keys requires root privileges")))
-                return 1
+            require_privileges(action_id="org.mageia.urpm.media-manage")
 
             if _import_gpg_key(key_data):
                 print(colors.success(_("  Key {keyid} imported").format(keyid=keyid)))
@@ -799,15 +797,12 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
     """Handle media update command."""
     from .. import colors
     from ...core.sync import sync_media, sync_all_media, sync_files_xml, sync_all_files_xml
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
     from ...core.sync_lock import SyncLock
     import threading
 
     # Check root privileges (media update writes to database)
-    if not check_root():
-        print(colors.error(_("Error: root privileges required for media update")))
-        print(_("Try: sudo urpm media update"))
-        return 1
+    require_privileges(action_id="org.mageia.urpm.refresh")
 
     # Prevent concurrent media syncs (CLI or daemon)
     sync_lock = SyncLock()

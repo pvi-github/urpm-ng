@@ -24,7 +24,7 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
     import signal
 
     from ...core.resolver import Resolver, format_size, set_solver_debug
-    from ...core.install import check_root
+    from ...auth.privileges import require_privileges
     from ...core.operations import PackageOperations, InstallOptions
     from ...core.background_install import (
         check_background_error, clear_background_error,
@@ -54,9 +54,8 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
 
     # Check root (not required for chroot operations)
     allow_no_root = getattr(args, 'allow_no_root', False)
-    if not allow_no_root and not check_root():
-        print(colors.error(_("Error: erase requires root privileges")))
-        return 1
+    if not allow_no_root:
+        require_privileges(action_id="org.mageia.urpm.remove")
 
     # Set up debug if requested
     _debug = getattr(args, 'debug', None) or ''
