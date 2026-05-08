@@ -46,6 +46,13 @@ DEV_PID_FILE = DEV_BASE_DIR / "urpmd.pid"
 DEV_PORT = 9877  # Different port so both daemons can coexist
 DEV_DISCOVERY_PORT = 9879  # UDP port for peer discovery (dev mode)
 
+# Groups conventionally entitled to elevate privileges via sudo on the
+# RHEL/Mageia family ('wheel') and the Debian family ('sudo'). Used by
+# urpm.auth.privileges to suggest the most relevant escalation method.
+# If Mageia or a downstream distribution changes the convention, update
+# this tuple — the helper has no env override and no config knob.
+SUDOER_GROUPS = ('wheel', 'sudo')
+
 # Cache for detected mode (avoid repeated filesystem checks)
 _cached_config: Optional[dict] = None
 
