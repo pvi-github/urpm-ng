@@ -100,6 +100,33 @@ urpm media update
 
 # urpm - Command Line Interface
 
+## Global Options
+
+These options apply to most commands and are placed before the subcommand:
+
+```bash
+-V, --version              # Show urpm version
+-v, --verbose              # Verbose output
+-q, --quiet                # Quiet output
+--nocolor                  # Disable colored output
+--root DIR                 # Use DIR as root for RPM install (chroot, urpm config from host)
+--urpm-root DIR            # Use DIR as root for both urpm config and RPM install
+```
+
+The following parents are inherited by transactional and query commands
+(`install`, `upgrade`, `erase`, `download`, `depends`, ...):
+
+```bash
+--arch ARCH                # Target architecture (default: current system)
+--debug COMPONENT          # Enable debug output: solver, tsrun, orphans, download, timing, all
+--watched PACKAGES         # Comma-separated package names to watch during resolution
+```
+
+Note: `--arch` (parent option, sets the target architecture for the
+operation) is distinct from `--allow-arch` (per-call option on
+install/upgrade/download, allows additional architectures alongside the
+system arch — typically `i686` for wine/steam on x86_64).
+
 ## Display Options
 
 Most commands support these output options:
@@ -119,6 +146,66 @@ urpm search firefox --json          # JSON output
 urpm i task-plasma --show-all       # Show all dependencies
 ```
 
+## Atomic vs best-effort transactions
+
+Since 0.7.9, `urpm upgrade` runs in **best-effort** mode by default:
+packages whose dependencies cannot be satisfied are dropped from the
+transaction and reported at the end with their reason (missing
+dependency, version mismatch, SRPM sibling cascade, ...). The transaction
+is committed for everything else. Pass `--atomic` to switch to strict
+mode (recommended on servers): any unsolvable package aborts the whole
+transaction.
+
+`urpm install`, by contrast, is **atomic by default**: if any requested
+package cannot be installed, the entire transaction is rolled back. Pass
+`--no-atomic` to opt into best-effort mode for the install path.
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0    | Transaction completed successfully, no package skipped |
+| 1    | Hard failure: transaction aborted (atomic mode, network, permission, ...) |
+| 2    | Partial transaction: succeeded but at least one package was dropped (skipped packages listed on stderr with their reason) |
+
+Scriptable check for the partial case:
+
+```bash
+urpm upgrade --auto || [ $? -eq 2 ] && echo "ok or partial"
+```
+
+## Bootstrap and chroot
+
+### Initialize a new urpm setup (`urpm init`)
+
+Bootstrap urpm media in a fresh root or in a chroot for image building.
+Mirrors are picked from the Mageia mirror API and filtered by the
+`[server]` section of `/etc/urpm/conf.d/10-server.cfg`.
+
+```bash
+# Bootstrap a chroot rootfs for Mageia 10
+urpm --urpm-root /tmp/rootfs init --release 10 --arch x86_64
+
+# Use a custom mirror list
+urpm init --mirrorlist 'https://mirrors.mageia.org/api/mageia.10.x86_64.list'
+
+# Options
+--release, -r <version>     # Target Mageia version (10, cauldron, ...)
+--mirrorlist <url>          # Override the auto-generated mirror list URL
+--arch <arch>               # Target architecture (default: host)
+--auto, -y                  # Non-interactive mode
+--no-sync                   # Configure media but skip the initial metadata sync
+```
+
+### Unmount a chroot (`urpm cleanup`)
+
+After working inside an `--urpm-root` chroot, unmount `/dev` and `/proc`
+mounted by `urpm init`:
+
+```bash
+urpm --urpm-root /tmp/rootfs cleanup
+```
+
 ## Package Management
 
 ### Install packages
@@ -128,14 +215,25 @@ urpm install <package>        # Install a package
 urpm i <package>              # Short alias
 
 # Options
---auto                        # Non-interactive mode
+--auto, -y                    # Non-interactive mode
 --test                        # Dry run (simulation)
 --without-recommends          # Skip recommended packages
 --with-suggests               # Also install suggested packages
 --force                       # Force despite dependency problems
+--reinstall                   # Reinstall already installed packages (repair)
 --nosignature                 # Skip GPG verification (not recommended)
+--noscripts                   # Skip pre/post install scripts (chroot/container builds)
+--no-peers                    # Disable P2P download from LAN peers
+--only-peers                  # Only download from LAN peers, no upstream mirrors
+--no-atomic                   # Best-effort mode (default is atomic for install)
+--download-only               # Download to cache, do not install
+--nodeps                      # Skip dependency resolution (with --download-only)
+--all                         # Install for all matching families (e.g., php8.4 + php8.5)
+--install-src                 # Install source RPM (extract spec/sources to ~/rpmbuild/)
+--config-policy {keep,replace,ask}  # Config file conflict policy (default: keep)
 --prefer=<prefs>              # Guide alternative choices (see below)
 --allow-arch <arch>           # Allow additional architectures (e.g., i686 for wine/steam)
+--sync                        # Wait for full completion (post-install triggers)
 ```
 
 #### Preference-guided installation
@@ -178,10 +276,15 @@ urpm erase <package>          # Remove a package
 urpm e <package>              # Short alias
 
 # Options
---auto                        # Non-interactive mode
+--auto, -y                    # Non-interactive mode
+--test                        # Dry run (simulation)
+--auto-orphans                # Also remove orphan dependencies (implied by -y unless --keep-orphans)
+--keep-orphans                # Do not remove orphan dependencies
 --erase-recommends            # Also remove packages only recommended (not required)
 --keep-suggests               # Keep packages that are suggested by remaining packages
 --force                       # Force despite dependency problems
+--debug {solver,tsrun,all}    # Enable debug output for the resolver/transaction
+--sync                        # Wait for full completion (post-uninstall triggers)
 ```
 
 ### Update metadata (apt-style)
@@ -198,6 +301,15 @@ urpm update --files           # Also sync files.xml
 urpm download <package>       # Download a package to cache
 urpm dl <package>             # Short alias
 urpm download --only-peers pkg  # Download only from LAN peers
+
+# Options
+--release, -r <version>       # Target release for cross-release downloads (e.g., cauldron)
+--buildrequires, --br [SPEC]  # Download build dependencies (auto-detect or from .spec/.src.rpm)
+--without-recommends          # Skip recommended packages
+--nodeps                      # Download only the listed packages, no dependencies
+--no-peers / --only-peers     # Same as install (peer policy)
+--allow-arch <arch>           # Allow additional architectures
+--arch <arch>                 # Inherited: target architecture
 ```
 
 ### Upgrade packages
@@ -208,10 +320,20 @@ urpm u                        # Short alias
 urpm upgrade <package>        # Upgrade specific packages
 
 # Options
---auto                        # Non-interactive mode
+--auto, -y                    # Non-interactive mode
+--test                        # Dry run (simulation)
+--atomic                      # Strict mode: abort the whole transaction on any unsolvable package.
+                              # Default is best-effort (see "Atomic vs best-effort transactions" above).
 --with-recommends             # Install recommended packages
 --with-suggests               # Also install suggested packages
+--noerase-orphans             # Keep orphan dependencies (do not remove them)
+--download-only               # Download to cache without applying the upgrade
+--nosignature                 # Skip GPG verification (not recommended)
+--no-peers / --only-peers     # Disable / restrict to LAN peers
+--force                       # Force upgrade despite dependency problems
+--config-policy {keep,replace,ask}  # Config file conflict policy (default: keep)
 --allow-arch <arch>           # Allow additional architectures (e.g., i686)
+--sync                        # Wait for full completion (post-install triggers)
 ```
 
 ### Auto-remove orphans
@@ -369,14 +491,28 @@ urpm unhold dhcp-client
 ## History and Undo
 
 ```bash
-urpm history                  # Show transaction history
-urpm history <id>             # Show details of a transaction
+urpm history                  # Show transaction history (last 20)
+urpm history -i               # Filter: install transactions only
+urpm history -r               # Filter: remove transactions only
+urpm history -d <id>          # Show details of transaction <id>
+urpm history --delete <id>... # Delete transactions from the history log
 
-urpm undo [id]                # Undo a transaction (default: last)
+urpm undo [id]                # Undo a transaction (default: last). Records a clean
+                              # history entry. Use --auto/-y to skip the prompt.
 
 urpm rollback <n>             # Rollback last n transactions
 urpm rollback to <id>         # Rollback to a specific transaction
-urpm rollback to <date>       # Rollback to a date (YYYY-MM-DD)
+urpm rollback to <date>       # Rollback to a date (YYYY-MM-DD or DD/MM/YYYY)
+```
+
+## Background transactions
+
+When a transaction is detached (e.g. via the daemon or PackageKit), follow
+its progress with:
+
+```bash
+urpm progress                 # Show current transaction progress and exit
+urpm progress --watch         # Continuously watch until completion
 ```
 
 ## Media Management
@@ -392,8 +528,19 @@ urpm media update [name]      # Update media metadata
 urpm media import <file>      # Import from urpmi.cfg
 urpm media link <name> +srv -srv  # Link/unlink servers to a media
 urpm media set <name> [opts]  # Modify media settings (sharing, replication, quota...)
+urpm media seed-info <name>   # Show seed set info (sections, package count, size estimate)
 urpm media autoconfig -r 10   # Auto-add official Mageia media for release 10
 urpm media discover <url>     # Discover media from a repo's media.cfg
+```
+
+Useful flags for `urpm media add`:
+
+```bash
+--import-key                  # Import the GPG key advertised by the media
+--allow-unsigned              # Allow unsigned packages (custom media only)
+--version <ver>               # Target Mageia version (custom media only: 9, 10, cauldron...)
+--update                      # Mark as an update media
+--disabled                    # Add but leave disabled
 ```
 
 ### Discover media from a repository
@@ -405,6 +552,11 @@ Discover all available media from any Mageia-compatible repository
 urpm media discover https://repo.example.org/9/x86_64/media/       # Add all media
 urpm media discover --dry-run https://repo.example.org/9/x86_64/media/  # Preview only
 urpm media discover --sources --debug https://...                   # Include SRPMS and debug
+
+# Force-enable / force-disable categories (nonfree, tainted, 32bit, all)
+urpm media discover --with nonfree,tainted https://...
+urpm media discover --without nonfree https://...
+urpm media discover --with all https://...
 ```
 
 The command fetches `media.cfg` from the repository, discovers all media,
@@ -551,10 +703,11 @@ When urpmd is running on multiple machines on the same LAN, they discover each o
 
 ```bash
 urpm peer list                # List discovered peers
-urpm peer downloads           # Show download statistics from peers
+urpm peer downloads [host]    # Show packages downloaded from peers (filter by host)
 urpm peer blacklist <host>    # Block a peer (e.g., if providing bad packages)
 urpm peer unblacklist <host>  # Unblock a peer
-urpm peer clean               # Remove stale/offline peers from list
+urpm peer clean <host>        # Delete RPMs downloaded from a specific peer
+                              # (use after blacklisting; <host> is required)
 ```
 
 ### Local-only mode
@@ -574,8 +727,32 @@ This is useful for air-gapped networks or when you want to ensure all packages c
 ```bash
 urpm cache info               # Show cache information
 urpm cache clean              # Remove orphan RPMs from cache
-urpm cache rebuild            # Rebuild database from synthesis
+urpm cache rebuild            # Rebuild package database from synthesis files
+urpm cache rebuild-fts        # Rebuild the FTS index for fast file search
 urpm cache stats              # Detailed statistics
+```
+
+`urpm cache clean` accepts `--dry-run/-n` (preview), `--auto/-y`
+(no confirmation) and `--verbose/-v` (list every orphan file).
+
+## Local Package Mirroring
+
+Beyond the per-media `--replication` policy described below, the
+top-level `urpm mirror` command exposes the daemon-side mirror state
+(quotas, served versions, rate limit) and lets you trigger maintenance
+explicitly.
+
+```bash
+urpm mirror status            # Show mirror status, quotas and served versions
+urpm mirror enable            # Start serving cached packages to peers
+urpm mirror disable           # Stop serving packages
+urpm mirror quota [SIZE]      # Show or set the global cache quota (e.g., 10G, 500M)
+urpm mirror enable-version 10,cauldron   # Resume serving these versions
+urpm mirror disable-version 8,9          # Stop serving these versions
+urpm mirror clean [-n]        # Enforce quotas and retention policies (--dry-run preview)
+urpm mirror sync [media]      # Force replication sync for `seed`-policy media
+urpm mirror sync --latest-only           # Smaller, DVD-like sync
+urpm mirror rate-limit [on|off|N/min]    # Configure outbound rate limit
 ```
 
 ## Mirror / Replication
@@ -649,6 +826,41 @@ urpm config redlist remove <pkg>
 ```bash
 urpm config kernel-keep       # Show how many kernels to keep
 urpm config kernel-keep <n>   # Set number of kernels to keep
+```
+
+### Version mode (system vs cauldron)
+
+When both system and cauldron media are configured, `version-mode` picks
+which one wins for upgrades:
+
+```bash
+urpm config version-mode              # Show current mode
+urpm config version-mode system       # Stick to the installed system version
+urpm config version-mode cauldron     # Roll with cauldron
+urpm config version-mode auto         # Remove the explicit preference
+```
+
+### Auto-upgrade hooks for software centers
+
+Control whether GNOME Software, KDE Discover or the PackageKit offline
+update path may install upgrades on their own:
+
+```bash
+urpm config gnome-auto-upgrades [yes|no]      # GNOME Software
+urpm config discover-auto-upgrades [yes|no]   # KDE Discover
+urpm config packagekit-auto-upgrades [yes|no] # PackageKit offline updates
+```
+
+Without an argument, each subcommand prints the current setting. These
+hooks toggle the desktop-side dconf/PolicyKit settings; the system policy
+is enforced separately by the `urpm-ng-desktop` package.
+
+### Inspect or edit configuration
+
+```bash
+urpm config show              # Show effective configuration from all *.cfg files
+urpm config edit              # Open urpm.cfg in $EDITOR
+urpm config edit 00-urpmi-compat   # Open a specific drop-in
 ```
 
 ### Server selection
@@ -828,16 +1040,39 @@ urpm image update mga:10-build
 ls ./build-output/
 ```
 
-## Package README Messages
+## AppStream metadata
+
+urpm can produce and refresh the AppStream catalogs consumed by KDE
+Discover and GNOME Software:
 
 ```bash
-urpm readme <package>         # Display README.urpmi messages from installed packages
+urpm appstream generate              # Generate catalog from the package database
+urpm appstream generate -m core/release    # Limit to a specific media
+urpm appstream generate --no-compress       # Plain XML instead of gzip
+urpm appstream status                # Show catalog status per media
+urpm appstream merge                 # Merge per-media files into the unified catalog
+urpm appstream merge --refresh       # Also refresh the system AppStream cache
+urpm appstream init-distro           # Create the OS metainfo file (needed by Discover/GS)
+urpm appstream init-distro --force   # Overwrite an existing metainfo
+```
+
+## Package README messages
+
+`urpm readme` shows package README messages displayed to the user during
+a transaction (Mageia keeps them as `README.urpmi` / `README.upgrade`):
+
+```bash
+urpm readme                          # README from the most recent transaction
+urpm readme --transaction <id>       # README from a specific transaction
+urpm readme --list                   # List transactions that have README messages
 ```
 
 ## Orphan Cleanup
 
 ```bash
-urpm cleandeps                # Find and remove orphaned dependencies
+urpm cleandeps                # Alias for `urpm autoremove --faildeps`:
+                              # remove orphan dependencies left behind by
+                              # interrupted transactions.
 ```
 
 ---

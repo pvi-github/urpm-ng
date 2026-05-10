@@ -31,18 +31,84 @@ Mode silencieux.
 .TP
 .B \-\-nocolor
 Désactive les couleurs.
+.TP
+.B \-\-root \fIDIR\fR
+Utilise \fIDIR\fR comme racine pour l'installation RPM (chroot). La
+configuration urpm reste lue depuis le système hôte.
+.TP
+.B \-\-urpm-root \fIDIR\fR
+Utilise \fIDIR\fR comme racine à la fois pour la configuration urpm et
+pour l'installation RPM. Utilisé par \fBinit\fR/\fBcleanup\fR et le
+bootstrap d'images.
+.SH OPTIONS GLOBALES
+Les options suivantes sont héritées (via parent parsers) par la
+plupart des commandes transactionnelles et de requête (\fBinstall\fR,
+\fBupgrade\fR, \fBerase\fR, \fBdownload\fR, \fBdepends\fR,
+\fBrdepends\fR, \fBshow\fR, \fBlist\fR, \fBsearch\fR, \fBfind\fR,
+\fBhistory\fR, \fBcache\fR, \fBmedia\fR, \fBserver\fR, \fBpeer\fR,
+\fBmirror\fR, \fBconfig\fR ...).
+.TP
+.B \-\-arch \fIARCH\fR
+Architecture cible (défaut : système courant). Reconnue par \fBinit\fR,
+\fBdownload\fR, \fBmedia autoconfig\fR, \fBimage make\fR et la famille
+install/upgrade/erase. Distincte de \fB\-\-allow\-arch\fR (qui autorise
+des architectures \fIsupplémentaires\fR aux côtés de l'architecture
+système — typiquement \fBi686\fR pour wine/steam sur x86_64).
+.TP
+.B \-\-debug \fICOMPONENT\fR
+Active la sortie de debug pour un composant :
+\fBsolver\fR, \fBtsrun\fR, \fBorphans\fR, \fBdownload\fR, \fBtiming\fR
+ou \fBall\fR. Hérité par install/upgrade/download.
+.TP
+.B \-\-watched \fIPACKAGES\fR
+Liste de paquets séparés par des virgules à surveiller pendant la
+résolution des dépendances ; le solveur trace toute décision les
+concernant.
+.TP
+.B \-\-json
+Sortie JSON (pour scripts). Disponible sur la plupart des commandes
+de requête et de listing.
+.TP
+.B \-\-flat
+Un élément par ligne (lisible par script).
+.TP
+.B \-\-show-all ", " \-a
+Affiche tous les éléments sans troncature. Sur install/upgrade,
+développe aussi la raison de rejet par paquet en mode best-effort.
 .SH COMMANDES
 .SS Installation et suppression de paquets
 .TP
 .B i|install \fIpaquet\fR ...
 Installe un ou plusieurs paquets.
+.B install
+est atomique par défaut : tout échec annule la transaction entière.
+Utilisez \fB\-\-no\-atomic\fR pour passer en mode best-effort. Voir la
+section \fBTRANSACTIONS PARTIELLES\fR ci-dessous.
 .RS
 .TP
 .BR \-y ", " \-\-auto
 Pas de confirmation.
 .TP
+.B \-\-test
+Simulation (dry-run).
+.TP
+.B \-\-no\-atomic
+Mode best-effort : installer ce qui est possible et lister les paquets
+écartés avec leur raison (sortie 2 si écarts). Par défaut, install est
+atomique.
+.TP
+.B \-\-reinstall
+Réinstalle des paquets déjà installés (réparation).
+.TP
+.B \-\-force
+Force l'installation malgré les problèmes de dépendances ou conflits.
+.TP
 .B \-\-download\-only
 Télécharge sans installer.
+.TP
+.B \-\-nodeps
+Saute la résolution des dépendances (à utiliser avec
+\fB\-\-download\-only\fR).
 .TP
 .B \-\-without\-recommends
 N'installe pas les paquets recommandés.
@@ -50,8 +116,36 @@ N'installe pas les paquets recommandés.
 .B \-\-with\-suggests
 Installe aussi les paquets suggérés.
 .TP
+.B \-\-all
+Installe pour toutes les familles correspondantes (ex : à la fois
+php8.4 et php8.5 si les deux fournissent la capacité demandée).
+.TP
+.B \-\-no\-peers
+Désactive les téléchargements P2P depuis les pairs LAN.
+.TP
 .B \-\-only\-peers
 Télécharge uniquement depuis les pairs LAN, pas de miroirs upstream.
+.TP
+.B \-\-noscripts
+Saute les scriptlets pre/post install (chroot/conteneur).
+.TP
+.B \-\-nosignature
+Saute la vérification GPG (déconseillé).
+.TP
+.B \-\-config\-policy " " \fBkeep\fR|\fBreplace\fR|\fBask\fR
+Politique de conflit pour les fichiers de config. Défaut : \fBkeep\fR
+préserve les configs existantes (\fI.rpmnew\fR pour la version paquet),
+\fBreplace\fR remplace par la version paquet (\fI.rpmsave\fR pour la
+locale), \fBask\fR demande à chaque conflit.
+.TP
+.B \-\-install\-src
+Installe un RPM source : extrait son \fI.spec\fR et ses sources dans
+\fI~/rpmbuild/\fR.
+.TP
+.B \-\-prefer " " \fIprefs\fR
+Préférences pour le choix d'alternatives (séparées par virgules ;
+ex : \fIphp:8.4,nginx,-apache-mod_php\fR). Voir \fBPREFERENCES\fR
+dans le README.
 .TP
 .BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
 Installe les dépendances de build depuis un fichier spec ou SRPM. Auto-détection si non spécifié.
@@ -64,6 +158,8 @@ Autorise des architectures supplémentaires au-delà de l'architecture système 
 Peut être répété. Par défaut, seuls les paquets correspondant à l'architecture système
 (ex: x86_64) et noarch sont considérés. Utilisez cette option pour installer des paquets
 32 bits sur un système 64 bits (ex: \fB\-\-allow\-arch i686\fR pour wine ou steam).
+Distincte de l'option parente \fB\-\-arch\fR qui définit l'architecture
+cible elle-même.
 .RE
 .TP
 .B e|erase \fIpaquet\fR ...
@@ -73,8 +169,33 @@ Supprime un ou plusieurs paquets. Alias : \fBremove\fR.
 .BR \-y ", " \-\-auto
 Pas de confirmation.
 .TP
+.B \-\-test
+Simulation (dry-run).
+.TP
 .B \-\-auto\-orphans
-Supprime aussi les dépendances orphelines.
+Supprime aussi les dépendances orphelines (impliqué par
+.BR \-y / \-\-auto
+sauf si \fB\-\-keep\-orphans\fR est passé).
+.TP
+.B \-\-keep\-orphans
+Ne supprime pas les dépendances orphelines créées par la suppression.
+.TP
+.B \-\-erase\-recommends
+Supprime aussi les paquets seulement recommandés par les paquets
+restants.
+.TP
+.B \-\-keep\-suggests
+Conserve les paquets suggérés par les paquets restants.
+.TP
+.B \-\-force
+Force la suppression malgré les problèmes de dépendances.
+.TP
+.B \-\-debug " " \fBsolver\fR|\fBtsrun\fR|\fBall\fR
+Active la sortie de debug pour le résolveur et/ou la transaction.
+.TP
+.B \-\-sync
+Attend la fin de tous les triggers de désinstallation avant de
+retourner.
 .RE
 .TP
 .B autoremove
@@ -113,19 +234,57 @@ Synchronise aussi files.xml pour les médias avec sync_files activé.
 .TP
 .B u|upgrade \fR[\fIpaquet\fR ...]
 Met à niveau les paquets (tout le système si aucun n'est spécifié).
+.B upgrade
+fonctionne en mode best-effort par défaut depuis 0.7.9 : voir
+\fBTRANSACTIONS PARTIELLES\fR ci-dessous.
 .RS
 .TP
 .BR \-y ", " \-\-auto
 Pas de confirmation.
 .TP
+.B \-\-test
+Simulation (dry-run).
+.TP
+.B \-\-atomic
+Mode strict : annule toute la transaction si un paquet ne peut pas
+être mis à jour. Recommandé sur serveurs. Sans cette option, upgrade
+est best-effort et sort en code 2 si des paquets ont été écartés.
+.TP
 .B \-\-with\-recommends
-Installe les paquets recommandés.
+Installe les paquets recommandés (non installés par défaut lors d'un
+upgrade).
+.TP
+.B \-\-with\-suggests
+Installe aussi les paquets suggérés.
+.TP
+.B \-\-noerase\-orphans
+Conserve les dépendances orphelines (ne les supprime pas après
+l'upgrade).
+.TP
+.B \-\-download\-only
+Télécharge sans appliquer la mise à jour.
+.TP
+.B \-\-nosignature
+Saute la vérification GPG (déconseillé).
+.TP
+.B \-\-no\-peers
+Désactive les téléchargements P2P depuis les pairs LAN.
 .TP
 .B \-\-only\-peers
 Télécharge uniquement depuis les pairs LAN, pas de miroirs upstream.
 .TP
+.B \-\-force
+Force la mise à jour malgré les problèmes de dépendances ou conflits.
+.TP
+.B \-\-config\-policy " " \fBkeep\fR|\fBreplace\fR|\fBask\fR
+Politique de conflit pour les fichiers de config (défaut : \fBkeep\fR).
+Mêmes sémantiques que sur \fBinstall\fR.
+.TP
 .B \-\-allow\-arch " " \fIarch\fR
 Autorise des architectures supplémentaires (ex: \fB\-\-allow\-arch i686\fR).
+.TP
+.B \-\-sync
+Attend la fin de tous les post-triggers avant de retourner.
 .RE
 .SS Informations sur les paquets
 .TP
@@ -181,6 +340,18 @@ Affiche la légende des symboles après l'arbre.
 .TP
 .B why \fIpaquet\fR
 Explique pourquoi un paquet est installe.
+.TP
+.B recommends \fIpaquet\fR
+Affiche les paquets recommandés par \fIpaquet\fR.
+.TP
+.B whatrecommends \fIpaquet\fR
+Affiche les paquets qui recommandent \fIpaquet\fR.
+.TP
+.B suggests \fIpaquet\fR
+Affiche les paquets suggérés par \fIpaquet\fR.
+.TP
+.B whatsuggests \fIpaquet\fR
+Affiche les paquets qui suggèrent \fIpaquet\fR.
 .SS Gestion des médias et serveurs
 .TP
 .B media \fR[\fIsous-commande\fR]
@@ -190,8 +361,37 @@ Gère les sources de médias. Sans sous-commande, liste les médias.
 .B list
 Liste les médias configurés.
 .TP
-.B add \fInom\fR \fIurl\fR
-Ajoute un nouveau media.
+.B add \fIurl\fR " " \fR[\fIoptions\fR]
+Ajoute un nouveau média. Pour les URL Mageia officielles, le nom et le
+nom court sont auto-détectés. Pour des médias personnalisés ou tiers,
+utilisez \fB\-\-custom \fInom\fR \fInom_court\fR\fR.
+.RS
+.TP
+.B \-\-custom \fInom\fR \fInom_court\fR
+Ajoute en tant que média personnalisé avec un nom d'affichage et un
+identifiant court.
+.TP
+.B \-\-name \fInom\fR
+Mode legacy pour les URL non-Mageia sans \fB\-\-custom\fR.
+.TP
+.B \-\-update
+Marque comme média de mise à jour.
+.TP
+.B \-\-disabled
+Ajoute mais laisse désactivé.
+.TP
+.B \-\-import\-key
+Importe la clé GPG annoncée par le média.
+.TP
+.B \-\-allow\-unsigned
+Autorise les paquets non signés (média personnalisé uniquement).
+.TP
+.B \-\-version \fIver\fR
+Version Mageia cible pour un média personnalisé (9, 10, cauldron ...).
+.TP
+.BR \-y ", " \-\-auto
+Mode non-interactif.
+.RE
 .TP
 .B remove \fInom\fR
 Supprime un média.
@@ -211,8 +411,17 @@ Synchronise aussi les files.xml pour les médias avec sync_files activé. Requis
 que \fBurpm find\fR recherche dans les paquets disponibles.
 .RE
 .TP
-.B import
-Importe la configuration depuis urpmi.
+.B import \fR[\fIfichier\fR]
+Importe la configuration de médias depuis urpmi (fichier par défaut :
+\fI/etc/urpmi/urpmi.cfg\fR). Utilisez \fB\-\-replace\fR pour écraser
+les médias de même nom et \fB\-\-auto\fR pour ne pas demander
+confirmation.
+.TP
+.B seed-info \fInom\fR
+Affiche le seed set calculé pour un média : sections rpmsrate
+correspondantes, nombre de paquets seed, paquets de locales étendus,
+clôture des dépendances et estimation grossière de la taille disque.
+Utile avant de basculer un média en \fB\-\-replication=seed\fR.
 .TP
 .B link \fInom\fR \fI+serveur\fR|\fI-serveur\fR ...
 Associe ou dissocie des serveurs à un média. Utilisez +serveur pour ajouter, -serveur pour retirer.
@@ -282,8 +491,14 @@ Alias : \fBdisc\fR.
 .BR \-n ", " \-\-dry\-run
 Affiche ce qui serait ajoute sans modifier.
 .TP
-.B \-\-enable
-Active tous les médias découverts, y compris ceux marqués \fBnoauto\fR dans media.cfg.
+.B \-\-with \fICATEGORIES\fR
+Force-active les catégories indiquées (séparées par virgules :
+\fBnonfree\fR, \fBtainted\fR, \fB32bit\fR, \fBall\fR). Surcharge le
+comportement par défaut, qui n'auto-active une catégorie que si elle
+est déjà installée (style urpmi).
+.TP
+.B \-\-without \fICATEGORIES\fR
+Force-désactive les catégories indiquées (séparées par virgules).
 .TP
 .B \-\-sources
 Inclut les médias SRPMS (exclus par défaut).
@@ -360,33 +575,110 @@ Gère les pairs P2P. Sans sous-commande, liste les pairs.
 .B list
 Liste les pairs découverts et les statistiques.
 .TP
+.B downloads \fR[\fIhote\fR]
+Liste les paquets téléchargés depuis les pairs, optionnellement
+filtrés par hôte. \fB\-\-limit\fR / \fB\-n\fR limite le nombre
+d'entrées affichées (défaut : 50).
+.TP
 .B blacklist \fIhote\fR
-Bloque un pair.
+Bloque un pair. Accepte \fB\-\-port\fR / \fB\-p\fR pour un port
+spécifique et \fB\-\-reason\fR / \fB\-r\fR pour enregistrer une
+raison.
 .TP
 .B unblacklist \fIhote\fR
-Debloque un pair.
+Débloque un pair (accepte \fB\-\-port\fR).
 .TP
 .B clean \fIhote\fR
-Supprime les RPM téléchargés depuis un pair.
+Supprime les RPM téléchargés depuis un pair (à utiliser après
+blacklist). L'argument \fIhote\fR est requis. Accepte
+\fB\-\-yes\fR / \fB\-y\fR pour ne pas demander confirmation et
+\fB\-\-show\-all\fR / \fB\-a\fR pour afficher la liste complète sans
+troncature.
 .RE
 .TP
 .B cache \fIsous-commande\fR
 Gère le cache de paquets.
 .RS
 .TP
-.B clean
-Supprime les RPM orphelins du cache.
-.TP
 .B info
 Affiche les statistiques du cache.
+.TP
+.B clean \fR[\fB\-n\fR] [\fB\-y\fR] [\fB\-v\fR]
+Supprime les RPM orphelins du cache. \fB\-\-dry\-run\fR prévisualise,
+\fB\-\-auto\fR saute la confirmation, \fB\-\-verbose\fR liste tous
+les fichiers.
+.TP
+.B rebuild
+Reconstruit la base de données paquets depuis les fichiers synthesis.
+.TP
+.B rebuild-fts
+Reconstruit l'index FTS utilisé par \fBurpm find\fR pour la recherche
+rapide de fichiers.
+.TP
+.B stats
+Statistiques détaillées du cache.
+.RE
+.TP
+.B mirror \fR[\fIsous-commande\fR]
+Gère le mirroring local de paquets (la diffusion par le démon des
+paquets en cache aux pairs LAN). Alias : \fBproxy\fR.
+.RS
+.TP
+.B status
+Affiche l'état du mirror, les quotas et les versions servies.
+.TP
+.B enable
+Démarre la diffusion des paquets en cache vers les pairs.
+.TP
+.B disable
+Arrête la diffusion.
+.TP
+.B quota \fR[\fITAILLE\fR]
+Affiche ou définit le quota global du cache (ex. \fB10G\fR,
+\fB500M\fR).
+.TP
+.B enable-version \fIversions\fR
+Reprend la diffusion des versions Mageia indiquées (séparées par des
+virgules, ex. \fB10,cauldron\fR).
+.TP
+.B disable-version \fIversions\fR
+Arrête la diffusion des versions Mageia indiquées.
+.TP
+.B clean \fR[\fB\-n\fR]
+Applique les quotas et politiques de rétention.
+\fB\-\-dry\-run\fR prévisualise sans supprimer.
+.TP
+.B sync \fR[\fImedia\fR] [\fB\-\-latest-only\fR]
+Force la synchronisation pour les médias en politique de réplication
+\fBseed\fR. \fB\-\-latest-only\fR ne garde que la version la plus
+récente de chaque paquet (plus petit, façon DVD).
+.TP
+.B rate-limit \fR[\fIon\fR|\fIoff\fR|\fIN/min\fR]
+Configure la limitation de débit sortant (ou affiche le réglage
+courant).
 .RE
 .SS Historique et retour arriere
 .TP
 .B history \fR[\fIN\fR]
-Affiche l'historique des transactions. Par défaut : 10 dernières.
+Affiche l'historique des transactions. Par défaut : 20 dernières.
+.RS
+.TP
+.BR \-i ", " \-\-install
+Affiche uniquement les transactions d'installation.
+.TP
+.BR \-r ", " \-\-remove
+Affiche uniquement les transactions de suppression.
+.TP
+.BR \-d ", " \-\-detail " " \fIID\fR
+Affiche les détails de la transaction \fIID\fR.
+.TP
+.B \-\-delete \fIID\fR ...
+Supprime des transactions du journal d'historique.
+.RE
 .TP
 .B rollback \fIspec\fR
-Annule des transactions.
+Annule des transactions. \fB\-\-auto\fR / \fB\-y\fR saute la
+confirmation.
 .RS
 .TP
 .B rollback 5
@@ -400,14 +692,69 @@ Revient à une date spécifique.
 .RE
 .TP
 .B undo \fR[\fIN\fR]
-Annule la dernière transaction, ou la transaction #N.
+Annule la dernière transaction, ou la transaction \fIN\fR. Enregistre
+une entrée propre dans l'historique. Utilisez \fB\-\-auto\fR /
+\fB\-y\fR pour sauter la confirmation.
+.TP
+.B progress \fR[\fB\-\-watch\fR]
+Affiche la progression d'une transaction de fond détachée (ex :
+lancée par le démon ou PackageKit). Sans argument, affiche l'état
+courant et quitte. Avec \fB\-\-watch\fR / \fB\-w\fR, surveille en
+continu jusqu'à la fin.
 .SS Configuration
 .TP
 .B config \fIsous-commande\fR
 Gère la configuration d'urpm.
+.RS
+.TP
+.B blacklist \fR[\fIlist\fR|\fIadd\fR \fIpkg\fR|\fIremove\fR \fIpkg\fR]
+Gère la blacklist des paquets critiques à ne jamais supprimer.
+.TP
+.B redlist \fR[\fIlist\fR|\fIadd\fR \fIpkg\fR|\fIremove\fR \fIpkg\fR]
+Gère la redlist des paquets demandant une confirmation explicite.
+.TP
+.B kernel-keep \fR[\fIN\fR]
+Affiche ou définit le nombre d'anciens noyaux à conserver (en plus
+du noyau courant).
+.TP
+.B version-mode \fR[\fIsystem\fR|\fIcauldron\fR|\fIauto\fR]
+Quand les médias système et cauldron sont tous deux activés,
+choisit lequel l'emporte pour les upgrades. \fIauto\fR retire la
+préférence explicite.
+.TP
+.B gnome-auto-upgrades \fR[\fIyes\fR|\fIno\fR]
+Autorise ou non GNOME Software à installer les upgrades de manière
+autonome.
+.TP
+.B discover-auto-upgrades \fR[\fIyes\fR|\fIno\fR]
+Autorise ou non KDE Discover à installer les upgrades de manière
+autonome.
+.TP
+.B packagekit-auto-upgrades \fR[\fIyes\fR|\fIno\fR]
+Autorise ou non le chemin offline-update de PackageKit.
+.TP
+.B show
+Affiche la configuration effective fusionnée depuis tous les
+\fI/etc/urpm/conf.d/*.cfg\fR.
+.TP
+.B edit \fR[\fIfichier\fR]
+Ouvre \fIurpm.cfg\fR (ou le drop-in nommé) dans \fB$EDITOR\fR.
+.RE
 .TP
 .B key \fIsous-commande\fR
 Gère les clés GPG pour la vérification des paquets.
+.RS
+.TP
+.B list
+Liste les clés GPG installées.
+.TP
+.B import \fIkeyfile\fR
+Importe une clé GPG depuis un chemin local ou une URL HTTPS.
+.TP
+.B remove \fIkeyid\fR
+Supprime une clé GPG par son identifiant court (ex.
+.IR 80420f66 ).
+.RE
 .TP
 .B mark \fIpaquet\fR manual|auto
 Marque les paquets comme installés manuellement ou automatiquement.
@@ -428,15 +775,86 @@ Liste les paquets verrouilles.
 Supprime le verrouillage des paquets, permettant leur mise à jour ou remplacement.
 .SS Initialisation et téléchargement
 .TP
-.B init \fR[\fB\-\-release\fR \fIversion\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]
-Initialise urpm avec les médias Mageia standard. Teste les miroirs et configure les meilleurs.
+.B init \fR[\fIoptions\fR]
+Initialise une nouvelle configuration urpm avec les médias Mageia
+standard. Utilisé pour amorcer un système neuf ou un chroot
+(typiquement combiné avec \fB\-\-urpm\-root\fR).
 .RS
 .TP
 .BR \-r ", " \-\-release " " \fIversion\fR
-Version Mageia (ex: 10, cauldron).
+Version Mageia cible (ex : 10, cauldron). Auto-détectée depuis
+\fB\-\-mirrorlist\fR ou le système hôte si omise.
 .TP
-.B \-\-urpm\-root " " \fIchemin\fR
-Initialise dans un répertoire chroot.
+.B \-\-mirrorlist " " \fIurl\fR
+URL de la liste de miroirs (auto-générée depuis \fB\-\-release\fR si
+non fournie).
+.TP
+.B \-\-arch " " \fIarch\fR
+Architecture cible (défaut : hôte).
+.TP
+.BR \-y ", " \-\-auto
+Mode non-interactif.
+.TP
+.B \-\-no\-sync
+Configure les médias mais saute la première synchronisation des
+métadonnées.
+.PP
+L'option de premier niveau \fB\-\-urpm\-root\fR (voir \fBOPTIONS\fR)
+choisit le chroot dans lequel la configuration et les paquets sont
+écrits.
+.RE
+.TP
+.B cleanup
+Démonte les systèmes de fichiers (\fI/dev\fR, \fI/proc\fR ...)
+montés précédemment par \fBurpm init\fR dans un chroot
+\fB\-\-urpm\-root\fR. À utiliser après avoir terminé le travail dans
+le chroot.
+.TP
+.B update \fR[\fImedia\fR]
+Raccourci de premier niveau pour \fBurpm media update\fR : rafraîchit
+uniquement les métadonnées des médias (style apt). Mêmes options que
+\fBmedia update\fR (notamment \fB\-\-files\fR).
+.TP
+.B cleandeps
+Alias de \fBautoremove --faildeps\fR : supprime les dépendances
+orphelines laissées par des transactions interrompues. Accepte
+\fB\-\-auto\fR / \fB\-y\fR.
+.TP
+.B readme \fR[\fIoptions\fR]
+Affiche les messages README enregistrés pour les transactions
+(style \fIREADME.urpmi\fR / \fIREADME.upgrade\fR de Mageia).
+.RS
+.TP
+.B \-\-last
+Affiche le README de la transaction la plus récente (par défaut).
+.TP
+.BR \-t ", " \-\-transaction " " \fIID\fR
+Affiche le README d'une transaction spécifique.
+.TP
+.BR \-l ", " \-\-list
+Liste les transactions ayant des messages README.
+.RE
+.TP
+.B appstream \fIsous-commande\fR
+Gère les métadonnées AppStream pour les centres logiciels (KDE
+Discover, GNOME Software).
+.RS
+.TP
+.B generate \fR[\fB\-\-output\fR \fIfichier\fR] [\fB\-\-no\-compress\fR] [\fB\-\-media\fR \fInom\fR]
+Génère le catalogue AppStream depuis la base de données paquets.
+Sortie par défaut :
+.IR /var/cache/swcatalog/xml/mageia-{version}.xml.gz .
+.TP
+.B status
+Affiche l'état AppStream pour tous les médias.
+.TP
+.B merge \fR[\fB\-\-refresh\fR]
+Fusionne les fichiers AppStream par média dans le catalogue unifié ;
+\fB\-\-refresh\fR rafraîchit aussi le cache AppStream système.
+.TP
+.B init-distro \fR[\fB\-\-force\fR]
+Crée le fichier metainfo OS requis par Discover et GNOME Software.
+\fB\-\-force\fR écrase un fichier existant.
 .RE
 .TP
 .B download \fIpaquet\fR ...
