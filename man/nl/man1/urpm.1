@@ -30,6 +30,51 @@ Stille uitvoer.
 .TP
 .B \-\-nocolor
 Schakel gekleurde uitvoer uit.
+.TP
+.B \-\-root \fIDIR\fR
+Gebruik \fIDIR\fR als hoofdmap voor de RPM-installatie (chroot). De
+urpm-configuratie wordt nog altijd van het hostsysteem gelezen.
+.TP
+.B \-\-urpm-root \fIDIR\fR
+Gebruik \fIDIR\fR als hoofdmap voor zowel de urpm-configuratie als de
+RPM-installatie. Gebruikt door \fBinit\fR/\fBcleanup\fR en bij het
+bootstrappen van images.
+.SH GLOBALE OPTIES
+De volgende opties worden (via parent parsers) overgeërfd door de
+meeste transactionele en query-commando's (\fBinstall\fR,
+\fBupgrade\fR, \fBerase\fR, \fBdownload\fR, \fBdepends\fR,
+\fBrdepends\fR, \fBshow\fR, \fBlist\fR, \fBsearch\fR, \fBfind\fR,
+\fBhistory\fR, \fBcache\fR, \fBmedia\fR, \fBserver\fR, \fBpeer\fR,
+\fBmirror\fR, \fBconfig\fR ...).
+.TP
+.B \-\-arch \fIARCH\fR
+Doelarchitectuur (standaard: het huidige systeem). Herkend door
+\fBinit\fR, \fBdownload\fR, \fBmedia autoconfig\fR, \fBimage make\fR
+en de install/upgrade/erase-familie. Verschilt van
+\fB\-\-allow\-arch\fR (dat \fIextra\fR architecturen naast de
+systeemarchitectuur toelaat — typisch \fBi686\fR voor wine/steam op
+x86_64).
+.TP
+.B \-\-debug \fICOMPONENT\fR
+Schakel debug-uitvoer in voor één component:
+\fBsolver\fR, \fBtsrun\fR, \fBorphans\fR, \fBdownload\fR, \fBtiming\fR
+of \fBall\fR. Overgeërfd door install/upgrade/download.
+.TP
+.B \-\-watched \fIPACKAGES\fR
+Door komma's gescheiden lijst van pakketten om in de gaten te houden
+tijdens de afhankelijkheidsresolutie; de solver logt elke beslissing
+die hen betreft.
+.TP
+.B \-\-json
+JSON-uitvoer (voor scripts). Beschikbaar bij de meeste query- en
+list-commando's.
+.TP
+.B \-\-flat
+Eén item per regel (scriptvriendelijk).
+.TP
+.B \-\-show-all ", " \-a
+Toont alle items zonder afkapping. Bij install/upgrade wordt ook de
+afwijsreden per pakket in best-effort-modus volledig getoond.
 .SH COMMANDO'S
 .SS Pakketinstallatie en -verwijdering
 .TP
@@ -281,8 +326,14 @@ Aliassen: \fBdisc\fR.
 .BR \-n ", " \-\-dry\-run
 Toon wat zou worden toegevoegd zonder wijzigingen aan te brengen.
 .TP
-.B \-\-enable
-Schakel alle ontdekte media in, inclusief die gemarkeerd als \fBnoauto\fR in media.cfg.
+.B \-\-with \fICATEGORIEEN\fR
+Forceer-activeert de aangegeven categorieën (kommagescheiden:
+\fBnonfree\fR, \fBtainted\fR, \fB32bit\fR, \fBall\fR). Overschrijft
+het standaardgedrag, dat een categorie alleen automatisch activeert
+als deze al geïnstalleerd is (urpmi-stijl).
+.TP
+.B \-\-without \fICATEGORIEEN\fR
+Forceer-deactiveert de aangegeven categorieën (kommagescheiden).
 .TP
 .B \-\-sources
 Neem SRPMS-media op (standaard uitgesloten).
@@ -602,6 +653,73 @@ Uitleggen waarom een pakket is geïnstalleerd:
 .TP
 Mediametadata bijwerken:
 .B urpm m u
+.SH GEDEELTELIJKE TRANSACTIES
+.B urpm upgrade
+draait standaard in best-effort-modus: pakketten waarvan de
+afhankelijkheden niet vervuld kunnen worden, worden uit de transactie
+verwijderd en aan het einde van de uitvoering met hun reden
+opgesomd (ontbrekende afhankelijkheid, versieconflict, SRPM-zustercascade,
+enz.). Met
+.B --atomic
+schakelt u over naar de strikte modus (aanbevolen op servers): elk
+onoplosbaar pakket breekt de hele transactie af.
+.PP
+.B urpm install
+is standaard atomair: kan een gevraagd pakket niet geïnstalleerd
+worden, dan wordt de hele transactie teruggedraaid. Met
+.B --no-atomic
+schakelt het install-pad over naar best-effort-modus.
+.PP
+Een
+.B --prefer
+voorkeur wordt als één geheel behandeld: kan het bijbehorende verzoek
+niet vervuld worden, dan wordt de hele hint-groep samen verworpen met
+een expliciete waarschuwing. De voorkeur wordt nooit stilzwijgend
+alleen ingetrokken.
+.PP
+SRPM-zusterpakketten (gebouwd uit dezelfde bron) worden als groep
+verworpen: als
+.I kwin
+overgeslagen wordt, worden ook
+.I kwin-common
+en
+.I lib64kwin5
+verworpen om ABI-incompatibiliteiten tijdens runtime te voorkomen.
+.PP
+Pakketten met omgekeerde afhankelijkheden die de solver stilzwijgend
+vasthoudt (bijvoorbeeld een pakket waarvan de nieuwe versie een net
+verworpen zusterpakket vereist) worden expliciet getoond met hun
+onvervulde vereiste, niet verborgen.
+.PP
+Gebruik
+.B --show-all
+(of
+.BR -a )
+om de volledige reden per pakket weer te geven (elk geclassificeerd
+.B Requires
+en elke cascade-stap). Zonder deze optie wordt elke vermelding
+afgekapt op de eerste 3 regels.
+.PP
+Om de verworpen bewerkingen later opnieuw te proberen, voer
+.B urpm upgrade <pakket>
+of
+.B urpm install <pakket>
+uit op de betrokken namen zodra het onderliggende verpakkingsprobleem
+is opgelost.
+.SH AFSLUITCODES
+.TP
+.B 0
+Transactie succesvol afgerond, geen pakket overgeslagen.
+.TP
+.B 1
+Harde fout: transactie afgebroken (atomic-modus, netwerkfout,
+permissiefout, enz.).
+.TP
+.B 2
+Gedeeltelijke transactie: succesvol afgerond, maar minstens één pakket
+is verworpen. De overgeslagen pakketten worden op stderr opgesomd met
+hun reden. Scripttest:
+.BR "[ $? -eq 2 ]" .
 .SH ZIE OOK
 .BR urpmd (8),
 .BR rpm (8),

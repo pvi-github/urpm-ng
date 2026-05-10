@@ -31,6 +31,49 @@ Modo silencioso.
 .TP
 .B \-\-nocolor
 Desactiva as cores.
+.TP
+.B \-\-root \fIDIR\fR
+Utiliza \fIDIR\fR como raiz para a instalação RPM (chroot). A
+configuração do urpm continua a ser lida do sistema anfitrião.
+.TP
+.B \-\-urpm-root \fIDIR\fR
+Utiliza \fIDIR\fR como raiz tanto para a configuração do urpm como
+para a instalação RPM. Utilizado por \fBinit\fR/\fBcleanup\fR e pelo
+bootstrap de imagens.
+.SH OPÇÕES GLOBAIS
+As opções seguintes são herdadas (via parent parsers) pela maioria dos
+comandos transaccionais e de consulta (\fBinstall\fR, \fBupgrade\fR,
+\fBerase\fR, \fBdownload\fR, \fBdepends\fR, \fBrdepends\fR,
+\fBshow\fR, \fBlist\fR, \fBsearch\fR, \fBfind\fR, \fBhistory\fR,
+\fBcache\fR, \fBmedia\fR, \fBserver\fR, \fBpeer\fR, \fBmirror\fR,
+\fBconfig\fR ...).
+.TP
+.B \-\-arch \fIARCH\fR
+Arquitectura alvo (por omissão: a do sistema actual). Reconhecida por
+\fBinit\fR, \fBdownload\fR, \fBmedia autoconfig\fR, \fBimage make\fR
+e a família install/upgrade/erase. Distinta de \fB\-\-allow\-arch\fR
+(que autoriza arquitecturas \fIadicionais\fR a par da arquitectura do
+sistema — tipicamente \fBi686\fR para wine/steam em x86_64).
+.TP
+.B \-\-debug \fICOMPONENT\fR
+Activa a saída de depuração para um componente:
+\fBsolver\fR, \fBtsrun\fR, \fBorphans\fR, \fBdownload\fR, \fBtiming\fR
+ou \fBall\fR. Herdado por install/upgrade/download.
+.TP
+.B \-\-watched \fIPACKAGES\fR
+Lista de pacotes separados por vírgulas a vigiar durante a resolução
+de dependências; o resolver regista todas as decisões que os envolvam.
+.TP
+.B \-\-json
+Saída JSON (para scripts). Disponível na maioria dos comandos de
+consulta e listagem.
+.TP
+.B \-\-flat
+Um item por linha (legível por scripts).
+.TP
+.B \-\-show-all ", " \-a
+Mostra todos os itens sem truncar. Em install/upgrade, expande também
+a razão de descarte por pacote em modo best-effort.
 .SH COMANDOS
 .SS Instalação e remoção de pacotes
 .TP
@@ -282,8 +325,14 @@ Alias: \fBdisc\fR.
 .BR \-n ", " \-\-dry\-run
 Mostra o que seria adicionado sem efectuar alteracoes.
 .TP
-.B \-\-enable
-Activa todos os media descobertos, incluindo os marcados \fBnoauto\fR no media.cfg.
+.B \-\-with \fICATEGORIAS\fR
+Activa à força as categorias indicadas (separadas por vírgulas:
+\fBnonfree\fR, \fBtainted\fR, \fB32bit\fR, \fBall\fR). Sobrepõe-se ao
+comportamento por omissão, que apenas activa automaticamente uma
+categoria se já estiver instalada (estilo urpmi).
+.TP
+.B \-\-without \fICATEGORIAS\fR
+Desactiva à força as categorias indicadas (separadas por vírgulas).
 .TP
 .B \-\-sources
 Inclui os media SRPMS (excluídos por omissão).
@@ -606,6 +655,72 @@ Explicar porque e que um pacote esta instalado:
 .TP
 Actualizar os metadados:
 .B urpm m u
+.SH TRANSACÇÕES PARCIAIS
+.B urpm upgrade
+funciona em modo best-effort por omissão: os pacotes cujas
+dependências não podem ser satisfeitas são descartados da transacção
+e listados no fim com a sua razão (dependência em falta, versão
+incompatível, cascata SRPM, etc.). A opção
+.B --atomic
+muda para o modo estrito (recomendado em servidores): qualquer pacote
+não resolvido aborta toda a transacção.
+.PP
+.B urpm install
+é atómico por omissão: se um pacote pedido não puder ser instalado,
+toda a transacção é revertida. A opção
+.B --no-atomic
+permite passar o verbo install ao modo best-effort.
+.PP
+Uma preferência
+.B --prefer
+é tratada como um conjunto: se o pedido associado não puder ser
+satisfeito, todo o grupo é descartado com um aviso explícito. A
+preferência nunca é silenciosamente revertida sozinha.
+.PP
+Os pacotes construídos a partir do mesmo SRPM são descartados em
+grupo: se
+.I kwin
+for descartado,
+.I kwin-common
+e
+.I lib64kwin5
+também o serão, para evitar incompatibilidades de ABI em tempo de
+execução.
+.PP
+Os pacotes com dependências inversas que o resolver mantém
+silenciosamente (por exemplo, um pacote cuja nova versão requer um
+irmão que acabou de ser descartado) são listados explicitamente com o
+seu requisito não satisfeito, nunca escondidos.
+.PP
+Utilize
+.B --show-all
+(ou
+.BR -a )
+para imprimir a razão completa por pacote (cada
+.B Requires
+classificado e cada salto de cascata). Sem esta opção, cada entrada
+é truncada às primeiras 3 linhas.
+.PP
+Para retentar as operações descartadas mais tarde, execute
+.B urpm upgrade <pacote>
+ou
+.B urpm install <pacote>
+sobre os nomes afectados assim que o problema de empacotamento
+estiver corrigido.
+.SH CÓDIGOS DE SAÍDA
+.TP
+.B 0
+Transacção concluída com sucesso, nenhum pacote descartado.
+.TP
+.B 1
+Falha grave: transacção abortada (modo atómico, erro de rede, erro de
+permissão, etc.).
+.TP
+.B 2
+Transacção parcial: concluída com sucesso, mas pelo menos um pacote
+foi descartado. Os pacotes descartados são listados no stderr com a
+sua razão. Verificação para scripts:
+.BR "[ $? -eq 2 ]" .
 .SH VER TAMBEM
 .BR urpmd (8),
 .BR rpm (8),

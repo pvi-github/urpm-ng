@@ -30,6 +30,51 @@ Stille Ausgabe.
 .TP
 .B \-\-nocolor
 Deaktiviert farbige Ausgabe.
+.TP
+.B \-\-root \fIDIR\fR
+Verwendet \fIDIR\fR als Wurzel für die RPM-Installation (chroot). Die
+urpm-Konfiguration wird weiterhin vom Hostsystem gelesen.
+.TP
+.B \-\-urpm-root \fIDIR\fR
+Verwendet \fIDIR\fR als Wurzel sowohl für die urpm-Konfiguration als
+auch für die RPM-Installation. Wird von \fBinit\fR/\fBcleanup\fR und
+beim Image-Bootstrapping verwendet.
+.SH GLOBALE OPTIONEN
+Die folgenden Optionen werden (über parent parsers) von den meisten
+transaktionalen und Abfragebefehlen geerbt (\fBinstall\fR,
+\fBupgrade\fR, \fBerase\fR, \fBdownload\fR, \fBdepends\fR,
+\fBrdepends\fR, \fBshow\fR, \fBlist\fR, \fBsearch\fR, \fBfind\fR,
+\fBhistory\fR, \fBcache\fR, \fBmedia\fR, \fBserver\fR, \fBpeer\fR,
+\fBmirror\fR, \fBconfig\fR ...).
+.TP
+.B \-\-arch \fIARCH\fR
+Zielarchitektur (Standard: aktuelles System). Wird von \fBinit\fR,
+\fBdownload\fR, \fBmedia autoconfig\fR, \fBimage make\fR sowie der
+install/upgrade/erase-Familie erkannt. Verschieden von
+\fB\-\-allow\-arch\fR (das \fIzusätzliche\fR Architekturen neben der
+Systemarchitektur erlaubt — typischerweise \fBi686\fR für wine/steam
+auf x86_64).
+.TP
+.B \-\-debug \fICOMPONENT\fR
+Aktiviert die Debug-Ausgabe für eine Komponente:
+\fBsolver\fR, \fBtsrun\fR, \fBorphans\fR, \fBdownload\fR, \fBtiming\fR
+oder \fBall\fR. Wird von install/upgrade/download geerbt.
+.TP
+.B \-\-watched \fIPACKAGES\fR
+Kommagetrennte Liste von Paketen, die während der Abhängigkeitsauflösung
+beobachtet werden sollen; der Solver protokolliert jede Entscheidung,
+die sie betrifft.
+.TP
+.B \-\-json
+JSON-Ausgabe (für Skripte). Verfügbar bei den meisten Abfrage- und
+Listenbefehlen.
+.TP
+.B \-\-flat
+Ein Eintrag pro Zeile (skripttauglich).
+.TP
+.B \-\-show-all ", " \-a
+Zeigt alle Einträge ohne Kürzung. Bei install/upgrade wird zudem die
+Ablehnungsbegründung pro Paket im best-effort-Modus vollständig angezeigt.
 .SH BEFEHLE
 .SS Paketinstallation und -entfernung
 .TP
@@ -281,8 +326,14 @@ Alias: \fBdisc\fR.
 .BR \-n ", " \-\-dry\-run
 Zeigt an, was hinzugefügt würde, ohne Änderungen vorzunehmen.
 .TP
-.B \-\-enable
-Aktiviert alle erkannten Medien, einschließlich der in media.cfg als \fBnoauto\fR markierten.
+.B \-\-with \fIKATEGORIEN\fR
+Aktiviert die angegebenen Kategorien zwangsweise (kommagetrennt:
+\fBnonfree\fR, \fBtainted\fR, \fB32bit\fR, \fBall\fR). Überschreibt
+das Standardverhalten, das eine Kategorie nur auto-aktiviert, wenn sie
+bereits installiert ist (urpmi-Stil).
+.TP
+.B \-\-without \fIKATEGORIEN\fR
+Deaktiviert die angegebenen Kategorien zwangsweise (kommagetrennt).
 .TP
 .B \-\-sources
 Schliesst SRPMS-Medien ein (standardmäßig ausgeschlossen).
@@ -604,6 +655,73 @@ Erklären, warum ein Paket installiert ist:
 .TP
 Medien-Metadaten aktualisieren:
 .B urpm m u
+.SH PARTIELLE TRANSAKTIONEN
+.B urpm upgrade
+läuft standardmäßig im best-effort-Modus: Pakete, deren Abhängigkeiten
+nicht erfüllt werden können, werden aus der Transaktion ausgeschlossen
+und am Ende des Laufs mit ihrer Begründung aufgelistet (fehlende
+Abhängigkeit, Versionskonflikt, SRPM-Geschwister-Kaskade usw.). Mit
+.B --atomic
+wird in den strikten Modus gewechselt (auf Servern empfohlen): jedes
+unauflösbare Paket bricht die gesamte Transaktion ab.
+.PP
+.B urpm install
+ist standardmäßig atomar: kann ein angefordertes Paket nicht
+installiert werden, wird die gesamte Transaktion zurückgerollt. Mit
+.B --no-atomic
+wechselt der install-Pfad in den best-effort-Modus.
+.PP
+Eine
+.B --prefer
+Präferenz wird als Einheit behandelt: kann die zugehörige Anforderung
+nicht erfüllt werden, wird die gesamte Hint-Gruppe zusammen mit einer
+expliziten Warnung verworfen. Die Präferenz wird niemals stillschweigend
+allein zurückgenommen.
+.PP
+SRPM-Geschwister (Pakete, die aus derselben Quelle gebaut wurden)
+werden als Gruppe verworfen: wird
+.I kwin
+übersprungen, werden auch
+.I kwin-common
+und
+.I lib64kwin5
+verworfen, um ABI-Inkompatibilitäten zur Laufzeit zu vermeiden.
+.PP
+Pakete mit umgekehrten Abhängigkeiten, die der Solver stillschweigend
+zurückhält (zum Beispiel ein Paket, dessen neue Version ein gerade
+verworfenes Geschwister-Paket benötigt), werden explizit mit ihrer nicht
+erfüllten Anforderung ausgewiesen, nicht versteckt.
+.PP
+Mit
+.B --show-all
+(bzw.
+.BR -a )
+wird die vollständige Begründung pro Paket ausgegeben (jedes
+klassifizierte
+.B Requires
+und jeder Kaskaden-Schritt). Ohne diese Option wird jeder Eintrag auf
+die ersten 3 Zeilen gekürzt.
+.PP
+Um die verworfenen Operationen später erneut zu versuchen, führen Sie
+.B urpm upgrade <paket>
+oder
+.B urpm install <paket>
+für die betroffenen Namen aus, sobald das zugrundeliegende
+Verpackungsproblem behoben ist.
+.SH EXIT-CODES
+.TP
+.B 0
+Transaktion erfolgreich abgeschlossen, kein Paket übersprungen.
+.TP
+.B 1
+Harter Fehler: Transaktion abgebrochen (atomarer Modus, Netzwerkfehler,
+Berechtigungsfehler usw.).
+.TP
+.B 2
+Partielle Transaktion: erfolgreich abgeschlossen, aber mindestens ein
+Paket wurde verworfen. Die übersprungenen Pakete werden mit ihrer
+Begründung auf stderr aufgelistet. Skriptbarer Test:
+.BR "[ $? -eq 2 ]" .
 .SH SIEHE AUCH
 .BR urpmd (8),
 .BR rpm (8),
