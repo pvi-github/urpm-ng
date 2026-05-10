@@ -980,12 +980,19 @@ Examples:
     find_parser.add_argument(
         '--available', '-a',
         action='store_true',
-        help=_('Search only in available packages (requires files.xml, see: urpm media update --files)')
+        help=_('Search only in available packages (default: search both)')
     )
     find_parser.add_argument(
         '--installed', '-i',
         action='store_true',
         help=_('Search only in installed packages (default: search both)')
+    )
+    find_parser.add_argument(
+        '--all-versions',
+        action='store_true',
+        help=_('Show every version of every match (default: only the '
+               'highest version per package, mimicking what would be '
+               'installed)')
     )
     find_parser.add_argument(
         '--limit', '-l',

@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict, TYPE_CHECKING
+from typing import Optional, Dict, Tuple, TYPE_CHECKING
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
@@ -171,6 +171,23 @@ class Scheduler:
         except Exception as e:
             logger.warning(f"FTS index check failed: {e}", exc_info=True)
 
+        # Detect a fragmented database left over from the schema v28
+        # migration (DROP TABLE on the multi-GB ``package_files`` cache
+        # leaves all of its pages on the freelist).  Defer the actual
+        # VACUUM to the next idle window in ``_check_tasks`` to avoid
+        # blocking the database for several minutes during startup.
+        try:
+            self._vacuum_pending = self._needs_vacuum()
+            if self._vacuum_pending:
+                logger.info(
+                    "Database fragmented (freelist=%d/%d pages); "
+                    "VACUUM scheduled for next idle window",
+                    *self._db_page_stats(),
+                )
+        except Exception as e:
+            self._vacuum_pending = False
+            logger.warning(f"Vacuum probe failed: {e}", exc_info=True)
+
         try:
             while self._running:
                 try:
@@ -240,6 +257,11 @@ class Scheduler:
         if self._should_run_task('files_xml', now):
             self._run_files_xml_sync()
             self._schedule_next('files_xml', now, self.files_xml_interval)
+
+        # One-shot idle VACUUM for databases left fragmented by schema
+        # v28's DROP of the package_files cache.
+        if getattr(self, '_vacuum_pending', False) and self._is_system_idle():
+            self._run_idle_vacuum()
 
         # Note: cache cleanup runs after predownload, not independently
         # (see _run_predownload)
@@ -1180,6 +1202,83 @@ class Scheduler:
         except Exception as e:
             logger.error(f"files.xml sync error: {e}")
         finally:
+            lock.release()
+
+    # ------------------------------------------------------------------
+    # Idle VACUUM (one-shot, scheduled by the v28 schema migration)
+    # ------------------------------------------------------------------
+
+    # Above 25 % of pages on the freelist, ``VACUUM`` saves enough disk
+    # space to be worth the I/O cost.  After the v28 migration drops
+    # the multi-GB ``package_files`` cache the ratio is typically > 95 %.
+    _VACUUM_FREELIST_RATIO = 0.25
+
+    def _db_page_stats(self) -> Tuple[int, int]:
+        """Return ``(freelist_count, page_count)`` from the SQLite DB."""
+        conn = self.db._get_connection()
+        free = conn.execute("PRAGMA freelist_count").fetchone()[0]
+        total = conn.execute("PRAGMA page_count").fetchone()[0]
+        return free, total
+
+    def _needs_vacuum(self) -> bool:
+        """Decide whether VACUUM should run on this database."""
+        if not self.db:
+            return False
+        free, total = self._db_page_stats()
+        if total <= 0:
+            return False
+        return (free / total) >= self._VACUUM_FREELIST_RATIO
+
+    def _run_idle_vacuum(self):
+        """Reclaim freelist pages by running VACUUM in the background.
+
+        VACUUM rewrites the entire database file; on a multi-GB
+        ``packages.db`` it can take several minutes.  We only trigger
+        it from the idle path of ``_check_tasks``, and we clear
+        ``self._vacuum_pending`` on completion or error so it never
+        runs more than once per scheduler lifetime.
+        """
+        if not self.db:
+            return
+
+        from ..core.sync_lock import SyncLock, FILES_LOCK_PATH
+
+        # Reuse the files-sync lock to keep VACUUM mutually exclusive
+        # with the (former) files.xml import path and any future
+        # heavy maintenance task.
+        lock = SyncLock(FILES_LOCK_PATH)
+        acquired, holder_pid = lock.try_acquire()
+        if not acquired:
+            logger.debug(
+                "VACUUM skipped, sync lock held by PID %s", holder_pid,
+            )
+            return
+
+        try:
+            free_before, total_before = self._db_page_stats()
+            page_size = self.db._get_connection().execute(
+                "PRAGMA page_size"
+            ).fetchone()[0]
+            est_reclaim_mb = free_before * page_size / (1024 * 1024)
+            logger.info(
+                "Running idle VACUUM (~%d MB to reclaim, %d/%d pages free)",
+                int(est_reclaim_mb), free_before, total_before,
+            )
+
+            t0 = time.monotonic()
+            conn = self.db._get_connection()
+            conn.execute("VACUUM")
+            elapsed = time.monotonic() - t0
+
+            free_after, total_after = self._db_page_stats()
+            logger.info(
+                "VACUUM done in %.1fs (pages %d -> %d)",
+                elapsed, total_before, total_after,
+            )
+        except Exception as e:
+            logger.warning("VACUUM failed: %s", e, exc_info=True)
+        finally:
+            self._vacuum_pending = False
             lock.release()
 
     def _refresh_media(self, media_name: str):

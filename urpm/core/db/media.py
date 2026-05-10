@@ -120,43 +120,22 @@ class MediaMixin:
         )
         conn.commit()
 
+    # The ``sync_files`` opt-in (and the column it relied on) was
+    # removed in schema v28: ``urpm f`` now streams ``files.xml.lzma``
+    # directly, so there is nothing to "sync" anymore.  The three
+    # methods below remain as compatibility stubs for callers that
+    # have not been migrated yet (``urpm media set --sync-files``,
+    # the daemon's idle ``files.xml`` job, …).  See
+    # ``doc/TODO_SHRINK_FILES_DB.md``.
+
     def set_all_media_sync_files(self, enabled: bool = True, enabled_only: bool = True) -> int:
-        """Enable or disable files.xml sync for all media.
-
-        Args:
-            enabled: True to enable sync, False to disable
-            enabled_only: If True, only affect enabled media
-
-        Returns:
-            Number of media updated
-        """
-        conn = self._get_connection()
-        if enabled_only:
-            cursor = conn.execute(
-                "UPDATE media SET sync_files = ? WHERE enabled = 1",
-                (int(enabled),)
-            )
-        else:
-            cursor = conn.execute(
-                "UPDATE media SET sync_files = ?",
-                (int(enabled),)
-            )
-        conn.commit()
-        return cursor.rowcount
+        return 0
 
     def get_media_with_sync_files(self) -> List[Dict]:
-        """Get all media that have sync_files enabled."""
-        conn = self._get_connection()
-        cursor = conn.execute(
-            "SELECT * FROM media WHERE sync_files = 1 ORDER BY priority, name"
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        return []
 
     def has_any_sync_files_media(self) -> bool:
-        """Check if any media has sync_files enabled."""
-        conn = self._get_connection()
-        cursor = conn.execute("SELECT 1 FROM media WHERE sync_files = 1 LIMIT 1")
-        return cursor.fetchone() is not None
+        return False
 
     def update_media_sync_info(self, media_id: int, synthesis_md5: str,
                               synthesis_last_modified: str = None):

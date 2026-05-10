@@ -18,7 +18,7 @@ from .db import (
 )
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -148,9 +148,6 @@ CREATE TABLE IF NOT EXISTS media (
     replication_seeds TEXT,               -- JSON list of rpmsrate sections, e.g. ["INSTALL","CAT_PLASMA5"]
     quota_mb INTEGER,                     -- Per-media quota in MB (NULL = no limit)
     retention_days INTEGER DEFAULT 30,    -- Days to keep cached packages
-
-    -- Files.xml sync (v18+)
-    sync_files INTEGER DEFAULT 0,         -- 1 = auto-sync files.xml for urpm find
 
     -- Sync state
     last_sync INTEGER,
@@ -337,38 +334,9 @@ CREATE INDEX IF NOT EXISTS idx_conflicts_pkg ON conflicts(pkg_id);
 CREATE INDEX IF NOT EXISTS idx_obsoletes_cap ON obsoletes(capability);
 CREATE INDEX IF NOT EXISTS idx_obsoletes_pkg ON obsoletes(pkg_id);
 
--- Package file lists (from files.xml.lzma)
--- Split into dir_path + filename for efficient indexing:
---   - Search by filename (pg_hba.conf) -> idx_pf_filename
---   - Search by full path -> idx_pf_dir_filename composite
---   - Prefix patterns (mod_*) -> idx_pf_filename with LIKE 'mod_%'
-CREATE TABLE IF NOT EXISTS package_files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    media_id INTEGER NOT NULL,
-    pkg_nevra TEXT NOT NULL,
-    dir_path TEXT NOT NULL,     -- '/usr/lib64/httpd/modules' (without trailing /)
-    filename TEXT NOT NULL,     -- 'mod_ssl.so'
-    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE,
-    UNIQUE(media_id, pkg_nevra, dir_path, filename)
-);
-
--- Index on filename for searches by name only (most common)
-CREATE INDEX IF NOT EXISTS idx_pf_filename ON package_files(filename);
--- Composite index for full path searches
-CREATE INDEX IF NOT EXISTS idx_pf_dir_filename ON package_files(dir_path, filename);
--- Index on media for bulk delete operations
-CREATE INDEX IF NOT EXISTS idx_pf_media ON package_files(media_id);
-
--- Track files.xml sync state per media
-CREATE TABLE IF NOT EXISTS files_xml_state (
-    media_id INTEGER PRIMARY KEY,
-    files_md5 TEXT,              -- MD5 of files.xml.lzma for change detection
-    last_sync INTEGER,           -- Timestamp of last import
-    file_count INTEGER,          -- Number of files imported
-    pkg_count INTEGER,           -- Number of packages imported
-    compressed_size INTEGER,     -- Size of files.xml.lzma in bytes (for progress estimation)
-    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
-);
+-- (package_files / files_xml_state were removed in schema v28: ``urpm
+-- f`` now streams the on-disk ``files.xml.lzma`` of each enabled
+-- medium directly.  See doc/TODO_SHRINK_FILES_DB.md.)
 
 CREATE TABLE IF NOT EXISTS media_update_deltas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -699,6 +667,23 @@ MIGRATIONS = {
             output TEXT NOT NULL,
             FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
         );
+    """),
+    # v27 -> v28: drop the package_files cache and its FTS5 sibling.
+    # ``urpm f`` now streams the on-disk ``files.xml.lzma`` of each
+    # enabled medium directly, so this multi-GB cache is dead weight.
+    # See doc/TODO_SHRINK_FILES_DB.md.
+    27: (28, """
+        -- Drop the virtual FTS table first; SQLite cascades the
+        -- _data/_idx/_docsize/_config shadow tables automatically.
+        DROP TABLE IF EXISTS package_files_fts;
+        DROP INDEX IF EXISTS idx_pf_filename;
+        DROP INDEX IF EXISTS idx_pf_dir_filename;
+        DROP INDEX IF EXISTS idx_pf_media;
+        DROP INDEX IF EXISTS idx_pf_nevra;
+        DROP TABLE IF EXISTS package_files;
+        DROP TABLE IF EXISTS files_xml_state;
+        DROP TABLE IF EXISTS fts_state;
+        ALTER TABLE media DROP COLUMN sync_files;
     """),
 }
 

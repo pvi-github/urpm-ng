@@ -591,135 +591,139 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
     installed_found = []
     available_found = []
 
-    # Search in installed packages via rpm
+    # Search in installed packages via rpm.  Three regimes, each with
+    # the cheapest available path:
+    #
+    #   * pattern is a bare basename (no ``/``, no wildcard) → use
+    #     rpm's basenames index via ``mi.pattern(..., RPMMIRE_STRCMP,
+    #     basename)``: ~50 ms instead of the second-long full-rpmdb
+    #     scan.  Note that ``dbMatch('basenames', X)`` is a different
+    #     API that wants a *full path*, not a basename.
+    #   * pattern starts with ``/`` and has no wildcard → exact path
+    #     lookup via ``dbMatch('basenames', pattern)``.
+    #   * anything with wildcards → no usable index, fall back to
+    #     iterating every installed header.
     if search_installed or search_both:
         try:
             import rpm
+            import os.path
             ts = rpm.TransactionSet()
 
-            if pattern.startswith('/'):
-                # Exact file path
+            has_wildcards = '*' in pattern or '?' in pattern
+
+            def _hdr_to_nevra(hdr):
+                name = hdr[rpm.RPMTAG_NAME]
+                if name == 'gpg-pubkey':
+                    return None
+                version = hdr[rpm.RPMTAG_VERSION]
+                release = hdr[rpm.RPMTAG_RELEASE]
+                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                return name, f"{name}-{version}-{release}.{arch}"
+
+            if not has_wildcards and pattern.startswith('/'):
+                # Exact full-path lookup — rpm's ``basenames`` index is
+                # keyed by full file path despite its misleading name.
                 for hdr in ts.dbMatch('basenames', pattern):
-                    name = hdr[rpm.RPMTAG_NAME]
-                    version = hdr[rpm.RPMTAG_VERSION]
-                    release = hdr[rpm.RPMTAG_RELEASE]
-                    arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                    installed_found.append({
-                        'nevra': f"{name}-{version}-{release}.{arch}",
-                        'file': pattern
-                    })
+                    info = _hdr_to_nevra(hdr)
+                    if info is None:
+                        continue
+                    installed_found.append({'nevra': info[1], 'file': pattern})
+
+            elif not has_wildcards:
+                # Bare basename — query the basenames index by
+                # exact-string compare, then report which path(s) of
+                # each matching package carry that basename.
+                basename_lower = pattern.lower()
+                mi = ts.dbMatch()
+                mi.pattern('basenames', rpm.RPMMIRE_STRCMP, pattern)
+                for hdr in mi:
+                    info = _hdr_to_nevra(hdr)
+                    if info is None:
+                        continue
+                    nevra = info[1]
+                    for f in (hdr[rpm.RPMTAG_FILENAMES] or []):
+                        if os.path.basename(f).lower() == basename_lower:
+                            installed_found.append({'nevra': nevra, 'file': f})
+
             else:
-                # Pattern search - need to iterate all packages
+                # Wildcard pattern — no usable index, iterate
+                # everything.  Mirrors the historical semantics of the
+                # SQLite fallback in ``search_files``.
                 import fnmatch, re as _re
-                # Convert SQL wildcards to fnmatch wildcards
                 fnmatch_pattern = pattern.replace('%', '*').replace('_', '?')
-                has_wildcards = '*' in fnmatch_pattern or '?' in fnmatch_pattern
-
-                if fnmatch_pattern.startswith('/'):
-                    pass
-                elif has_wildcards:
-                    pass
-                else:
-                    fnmatch_pattern = '*/' + fnmatch_pattern
-
-                # Compile pattern once instead of per-file fnmatch call
-                _pat_re = _re.compile(fnmatch.translate(fnmatch_pattern), _re.IGNORECASE)
-
+                _pat_re = _re.compile(
+                    fnmatch.translate(fnmatch_pattern), _re.IGNORECASE
+                )
                 for hdr in ts.dbMatch():
-                    name = hdr[rpm.RPMTAG_NAME]
-                    if name == 'gpg-pubkey':
+                    info = _hdr_to_nevra(hdr)
+                    if info is None:
                         continue
-                    files = hdr[rpm.RPMTAG_FILENAMES] or []
-                    if not files:
-                        continue
-                    version = hdr[rpm.RPMTAG_VERSION]
-                    release = hdr[rpm.RPMTAG_RELEASE]
-                    arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                    nevra = f"{name}-{version}-{release}.{arch}"
-                    for f in files:
+                    nevra = info[1]
+                    for f in (hdr[rpm.RPMTAG_FILENAMES] or []):
                         if _pat_re.match(f):
-                            installed_found.append({
-                                'nevra': nevra,
-                                'file': f
-                            })
+                            installed_found.append({'nevra': nevra, 'file': f})
         except ImportError:
             pass
 
-    # Search in available packages via database (files.xml)
-    files_stats = None  # Cache for get_files_stats (avoid double call)
+    # Search in available packages by streaming each media's
+    # files.xml.lzma — no DB cache, no FTS, no opt-in.  The files are
+    # already on disk after a regular ``urpm media update``.
     if search_available or search_both:
-        # Check if we have files.xml data
-        files_stats = db.get_files_stats()
-        stats = files_stats
-        if stats['total_files'] == 0:
-            # No data - check if sync_files is enabled on any media
-            has_sync_files = db.has_any_sync_files_media()
+        from ...core.config import get_base_dir, get_media_local_path
+        from ...core.files_xml import iter_file_matches
+        from ...core.sync import FILES_XML_PATH
 
-            if not has_sync_files:
-                # Prompt user to enable files.xml sync
-                print(colors.info(_("La recherche dans les paquets disponibles nécessite le téléchargement")))
-                print(colors.info(_("des fichiers files.xml (~500 Mo, ~10-15 minutes la première fois).")))
-                print()
+        base_dir = get_base_dir()
+        media_files = []
+        missing_count = 0
+        for media in db.list_media():
+            if not media.get('enabled', True):
+                continue
+            files_xml = get_media_local_path(media, base_dir) / FILES_XML_PATH
+            # genhdlist2 produces ~65-byte stub files.xml.lzma for empty
+            # media (typically the updates tree of an unreleased distro);
+            # treat them as absent rather than parsing the empty payload
+            # on every query.
+            if files_xml.exists() and files_xml.stat().st_size > 200:
+                media_files.append((files_xml, media['name']))
+            else:
+                missing_count += 1
 
-                try:
-                    response = input(_("Activer cette fonctionnalité ? [o/N] ")).strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return 1
-
-                if confirm_yes(response):
-                    # Enable sync_files on all enabled media
-                    from ...auth.privileges import require_privileges
-                    require_privileges(action_id="org.mageia.urpm.media-manage")
-
-                    db.set_all_media_sync_files(True, enabled_only=True)
-                    enabled_count = len(db.get_media_with_sync_files())
-                    print(colors.success(_("sync_files activé sur {count} media").format(count=enabled_count)))
-                    print()
-                    print(_("Lancez maintenant: sudo urpm media update --files"))
-                    print(_("(~10-15 minutes la première fois, puis quasi-instantané)"))
-                    return 0
-                else:
-                    print(colors.dim(_("Fonctionnalité non activée.")))
-                    print(colors.dim(_("Pour activer plus tard: sudo urpm media set --all --sync-files")))
-                    return 0
-
-            elif search_available:
-                # sync_files is enabled but no data yet
-                print(colors.warning(_("sync_files est activé mais les données ne sont pas encore téléchargées.")))
-                print(_("Lancez: sudo urpm media update --files"))
+        if not media_files:
+            if search_available:
+                print(colors.warning(_(
+                    "No files.xml.lzma available on disk. "
+                    "Run 'sudo urpm media update' first."
+                )))
                 return 1
-            # else: silently skip available search if searching both
+            # else: searching both — silently skip the available side
         else:
-            # Check if FTS index needs rebuild (migration case)
-            if db.is_fts_available() and not db.is_fts_index_current():
-                print(colors.warning(_("L'index de recherche rapide (FTS) doit être reconstruit.")))
-                print(colors.dim(_("Lancez: sudo urpm media update --files")))
-                print(colors.dim(_("(La recherche sera plus lente en attendant)")))
-                print()
-
-            # Search in database (uses FTS if available, falls back to B-tree)
-            results = db.search_files(
+            matches = iter_file_matches(
+                media_files,
                 pattern,
-                limit=0  # Fetch all, display limits handled by FILES_PER_PKG
+                all_versions=getattr(args, 'all_versions', False),
+                limit=args.limit if getattr(args, 'limit', 0) > 0 else 0,
             )
-
-            # Collect all matching files
-            for r in results:
+            for m in matches:
                 available_found.append({
-                    'nevra': r['pkg_nevra'],
-                    'file': r['file_path'],
-                    'media': r['media_name']
+                    'nevra': m.nevra,
+                    'file': m.path,
+                    'media': m.media_name,
                 })
+
+            # If the user explicitly asked for the available side and got
+            # nothing while some media lack their files.xml.lzma, hint
+            # that the missing data may explain the empty result.  We
+            # stay quiet otherwise: empty stubs are normal during RCs.
+            if (search_available and not matches and missing_count):
+                print(colors.dim(_(
+                    "Note: {count} enabled media have no files.xml.lzma "
+                    "on disk (run 'urpm media update' to fetch)."
+                ).format(count=missing_count)))
 
     # Display results
     if not installed_found and not available_found:
         print(_("No package contains '{pattern}'").format(pattern=pattern))
-        if search_both or search_available:
-            if files_stats is None:
-                files_stats = db.get_files_stats()
-            if files_stats['total_files'] == 0:
-                print(colors.info(_("Hint: run 'sudo urpm media update --files' to enable searching available packages")))
         return 1
 
     # Helper to highlight pattern in file path (green)
