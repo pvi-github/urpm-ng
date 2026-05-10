@@ -1,5 +1,5 @@
 %define name rpmdrake-ng
-%define version 0.7.11
+%define version 0.7.12
 %define release 1
 
 Name:           %{name}
