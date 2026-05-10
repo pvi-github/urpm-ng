@@ -1155,7 +1155,7 @@ def _build_single_package(
         # 6. Build the package
         print(_("  Building..."))
         result = container.exec_stream(cid, [
-            'bash', '-c', f'rpmbuild -ba {spec_path} 2>&1 | tee -a {container_log}'
+            'bash', '-c', f'set -o pipefail; rpmbuild -ba {spec_path} 2>&1 | tee -a {container_log}'
         ])
         build_failed = result != 0
 
