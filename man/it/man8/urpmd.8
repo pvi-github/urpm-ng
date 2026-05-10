@@ -1,0 +1,132 @@
+.\" Pagina di manuale per urpmd
+.TH URPMD 8 "Aprile 2026" "urpm-ng" "Amministrazione di sistema"
+.SH NOME
+urpmd \- daemon urpm per la gestione intelligente della cache e la condivisione P2P
+.SH SINOSSI
+.B urpmd
+.RI [ opzioni ]
+.SH DESCRIZIONE
+.B urpmd
+è il daemon in background di urpm-ng. Fornisce:
+.IP \(bu 2
+Cache intelligente dei pacchetti con scaricamenti predittivi
+.IP \(bu 2
+Condivisione P2P dei pacchetti tra macchine in LAN
+.IP \(bu 2
+Server HTTP per servire ai peer i pacchetti in cache
+.IP \(bu 2
+Rilevamento automatico dei peer tramite broadcast UDP
+.IP \(bu 2
+Aggiornamento dei metadati in background
+.PP
+Il daemon è gestito tramite systemd e si avvia automaticamente dopo
+l'installazione.
+.SH OPZIONI
+.TP
+.BR \-h ", " \-\-help
+Mostra il messaggio di aiuto ed esce.
+.TP
+.BR \-f ", " \-\-foreground
+Esegue in primo piano (non si trasforma in daemon). Utile per il debug.
+.TP
+.BR \-p ", " \-\-port " " \fIPORTA\fR
+Porta del server HTTP. Predefinita: 9876 (produzione), 9877 (sviluppo).
+.TP
+.BR \-H ", " \-\-host " " \fIHOST\fR
+Indirizzo di bind del server HTTP. Predefinito: 0.0.0.0 (tutte le
+interfacce).
+.TP
+.BR \-v ", " \-\-verbose
+Abilita la registrazione dettagliata.
+.TP
+.B \-\-dev
+Forza la modalità sviluppo. La modalità sviluppo viene rilevata
+automaticamente quando si esegue dall'albero dei sorgenti o quando esiste
+.urpm.local.
+.TP
+.B \-\-prod
+Forza la modalità produzione, ignorando il rilevamento di .urpm.local.
+.SH PORTE DI RETE
+.TP
+.B TCP 9876
+Server HTTP per gli scaricamenti dei pacchetti e l'API.
+.TP
+.B UDP 9878
+Broadcast/multicast per il rilevamento P2P.
+.PP
+Queste porte devono essere aperte nel firewall per il funzionamento della
+condivisione P2P. Il pacchetto urpm-ng configura automaticamente shorewall,
+se presente.
+.SH CONDIVISIONE P2P
+Quando urpmd è in esecuzione su più macchine nella stessa LAN:
+.IP \(bu 2
+Le macchine si rilevano a vicenda tramite broadcast UDP sulla porta 9878
+.IP \(bu 2
+Quando un pacchetto serve, urpm controlla prima i peer locali
+.IP \(bu 2
+I pacchetti vengono scaricati dai peer quando disponibili (più rapido dei
+mirror)
+.IP \(bu 2
+Si ricade sui server configurati se i peer non hanno il pacchetto
+.PP
+La condivisione P2P rispetta le firme dei pacchetti: vengono utilizzati
+solo i pacchetti firmati provenienti da peer fidati.
+.SH SCARICAMENTI PREDITTIVI
+Il daemon monitora i pattern di accesso ai pacchetti e può pre-scaricare i
+pacchetti che probabilmente saranno necessari a breve, sulla base di:
+.IP \(bu 2
+Dipendenze dei pacchetti installati di recente
+.IP \(bu 2
+Pattern di aggiornamento dei media configurati
+.IP \(bu 2
+Rilevamento dell'inattività di rete per non interferire con le attività
+dell'utente
+.SH FILE
+.TP
+.I /var/lib/urpm/packages.db
+Database SQLite contenente i metadati dei pacchetti, le informazioni sui
+peer e la cronologia degli scaricamenti.
+.TP
+.I /var/lib/urpm/medias/
+Directory contenente i pacchetti in cache, organizzati per media.
+.TP
+.I /run/urpmd.pid
+File PID (modalità produzione).
+.TP
+.I /var/log/urpmd.log
+File di log (quando non si utilizza il journal di systemd).
+.SH SYSTEMD
+Il daemon è controllato tramite systemd:
+.TP
+Avviare il daemon:
+.B systemctl start urpmd
+.TP
+Arrestare il daemon:
+.B systemctl stop urpmd
+.TP
+Abilitare all'avvio:
+.B systemctl enable urpmd
+.TP
+Verificare lo stato:
+.B systemctl status urpmd
+.TP
+Visualizzare i log:
+.B journalctl -u urpmd
+.SH ESEMPI
+.TP
+Eseguire in primo piano per il debug:
+.B urpmd -f -v
+.TP
+Eseguire su una porta alternativa:
+.B urpmd -p 8080
+.SH VEDI ANCHE
+.BR urpm (1),
+.BR systemctl (1),
+.BR journalctl (1)
+.SH BUG
+Segnalare i bug all'indirizzo https://github.com/pvi-github/urpm-ng/issues
+.SH AUTORI
+Pascal Vilarem (Maât) e contributori.
+.SH COPYRIGHT
+Copyright (C) 2024-2025 Pascal Vilarem (Maât).
+Distribuito secondo i termini della licenza GPLv3+.

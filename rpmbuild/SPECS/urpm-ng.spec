@@ -203,7 +203,7 @@ cd pk-backend-urpm
 cd ..
 
 # Compile translations
-for lang in fr de es pt nl; do
+for lang in fr de es pt nl it; do
     mkdir -p po/locale/$lang/LC_MESSAGES
     msgfmt -o po/locale/$lang/LC_MESSAGES/urpm.mo po/$lang.po
 done
@@ -267,13 +267,13 @@ install -m644 doc/*.md %{buildroot}%{_docdir}/%{name}/
 install -Dm644 completion/urpm.bash %{buildroot}%{_sysconfdir}/bash_completion.d/urpm
 
 # Install locale files
-for lang in fr de es pt nl; do
+for lang in fr de es pt nl it; do
     install -Dm644 po/locale/$lang/LC_MESSAGES/urpm.mo \
         %{buildroot}%{_datadir}/locale/$lang/LC_MESSAGES/urpm.mo
 done
 
 # Install man pages (all languages)
-for lang in en de es fr nl pt; do
+for lang in en de es fr nl pt it; do
     install -Dm644 man/$lang/man1/urpm.1 %{buildroot}%{_mandir}/$lang/man1/urpm.1
     install -Dm644 man/$lang/man8/urpmd.8 %{buildroot}%{_mandir}/$lang/man8/urpmd.8
 done

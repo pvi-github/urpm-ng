@@ -70,7 +70,7 @@ MSGMERGE = /usr/bin/msgmerge
 MSGFMT = /usr/bin/msgfmt
 PO_DIR = po
 DOMAIN = urpm
-LINGUAS = fr de es pt nl
+LINGUAS = fr de es pt nl it
 
 pot:
 	$(XGETTEXT) --language=Python --keyword=_ --keyword=N_ \
