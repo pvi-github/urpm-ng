@@ -531,8 +531,8 @@ def print_skipped_jobs(skipped: list, *, show_all: bool = False,
 
     n = len(skipped)
     title = ngettext(
-        "Non mis à jour ({n}) :",
-        "Non mis à jour ({n}) :",
+        "Not upgraded ({n}):",
+        "Not upgraded ({n}):",
         n,
     ).format(n=n)
     print()
@@ -546,20 +546,20 @@ def print_skipped_jobs(skipped: list, *, show_all: bool = False,
         if sj.kind == "srpm_sibling":
             kind_tag = _(" [sibling SRPM]")
         elif sj.kind == "held_silently_by_libsolv":
-            kind_tag = _(" [silencieusement maintenu]")
+            kind_tag = _(" [silently held]")
         elif sj.kind == "hint":
-            kind_tag = _(" [préférence annulée]")
+            kind_tag = _(" [preference overridden]")
         print(f"  - {colors.warning(head)}{colors.dim(kind_tag)}")
 
         reason_lines = (sj.reason or "").splitlines() or [""]
         if not show_all and len(reason_lines) > 3:
             shown = reason_lines[:3]
-            shown.append(_("... (--show-all pour le détail complet)"))
+            shown.append(_("... (--show-all for full detail)"))
         else:
             shown = reason_lines
         for line in shown:
             print(colors.dim(f"      {line}"))
 
     print()
-    print(colors.dim(_("Pour relancer ces opérations plus tard : {cmd} <paquet>")
+    print(colors.dim(_("To rerun these operations later: {cmd} <package>")
                      .format(cmd=command_hint)))

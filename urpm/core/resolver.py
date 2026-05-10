@@ -694,7 +694,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
                 if provider_in_skipped:
                     reasons.append(
-                        _("rdep de {pkg} (silencieusement maintenu)").format(
+                        _("rdep of {pkg} (silently held)").format(
                             pkg=provider_in_skipped
                         )
                     )
@@ -723,7 +723,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     "diagnosable broken require (evr=%s). Please report.",
                     name, evr,
                 )
-                reason_text = _("anomalie résolveur ; voir log pour le détail")
+                reason_text = _("resolver anomaly; see log for details")
             else:
                 reason_text = "\n".join(reasons)
 

@@ -22,7 +22,7 @@ File triggers (after all extractions):
 import os
 import threading
 import time
-from gettext import ngettext, gettext as _
+from ...i18n import _, ngettext
 
 from ...core.transaction_queue import TransactionProgress, TransactionPhase
 from ...core.triggers import describe_trigger

@@ -27,6 +27,7 @@ urpm/cli/helpers/debug.py
 urpm/cli/helpers/kernel.py
 urpm/cli/helpers/media.py
 urpm/cli/helpers/package.py
+urpm/cli/helpers/progress.py
 urpm/cli/helpers/resolver.py
 urpm/core/operations.py
 urpm/core/resolver.py
