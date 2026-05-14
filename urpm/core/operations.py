@@ -802,26 +802,56 @@ class PackageOperations:
     def get_package_files(self, nevra: str) -> List[str]:
         """Get the list of files shipped by ``nevra``.
 
-        Scans each enabled medium's ``files.xml.lzma`` until the
-        package block is found.  Used by the D-Bus ``GetPackageFiles``
-        endpoint; CLI consumers should prefer ``urpm show --files``
-        which already reads the rpmdb for installed packages.
+        Used by the D-Bus ``GetPackageFiles`` endpoint; CLI consumers
+        should prefer ``urpm show --files`` which already reads the
+        rpmdb for installed packages.
+
+        Two-stage scan for performance: an ``xzgrep -q`` containment
+        check probes each medium's ``files.xml.lzma`` (xz decompresses
+        in parallel with grep, ~0.5 s for the 26 MB compressed Core
+        Release), and only the medium that actually carries the
+        package is fully parsed.  Without this, a single D-Bus call
+        could decompress several hundred MB just to discover the
+        package lives in the second or third medium.  Falls back to a
+        straight parse when ``xzgrep`` is missing.
 
         Returns:
             List of file paths shipped by ``nevra``, or empty list
             when the package is not in any on-disk ``files.xml.lzma``.
         """
+        import subprocess
         from .config import get_base_dir, get_media_local_path
         from .files_xml import parse_files_xml
         from .sync import FILES_XML_PATH
 
         base_dir = get_base_dir()
+        # We grep for the literal ``fn="<nevra>"`` attribute, which
+        # synthesis files put once and only once per package.  ``-F``
+        # turns off regex parsing so an unusual NEVRA cannot inject a
+        # metacharacter.
+        needle = f'fn="{nevra}"'
+
         for media in self.db.list_media():
             if not media.get('enabled', True):
                 continue
             files_xml = get_media_local_path(media, base_dir) / FILES_XML_PATH
             if not files_xml.exists() or files_xml.stat().st_size <= 200:
                 continue
+
+            try:
+                hit = subprocess.run(
+                    ['xzgrep', '-aqF', needle, str(files_xml)],
+                    check=False,
+                ).returncode == 0
+            except FileNotFoundError:
+                # ``xzgrep`` unavailable — fall back to the full
+                # parse.  We pay the decompression cost but the
+                # behaviour stays correct.
+                hit = True
+
+            if not hit:
+                continue
+
             try:
                 for parsed_nevra, files in parse_files_xml(files_xml):
                     if parsed_nevra == nevra:
