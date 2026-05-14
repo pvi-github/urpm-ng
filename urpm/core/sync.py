@@ -399,6 +399,19 @@ def _fetch_files_xml_if_changed(db: PackageDatabase, media_id: int,
                 media_id, getattr(result, 'error', 'unknown'),
             )
             return
+        # Verify the body we received hashes to what MD5SUM advertised.
+        # ``download_*`` already streams a hash alongside the bytes, so
+        # this is a cheap comparison.  A mismatch points at a corrupted
+        # or stale mirror — keep the previous on-disk copy (if any),
+        # leave ``media.files_xml_md5`` untouched so the next ``urpm
+        # media update`` retries.
+        if result.md5 != remote_md5:
+            logger.warning(
+                "files.xml.lzma checksum mismatch for media %d "
+                "(got %s, expected %s); keeping previous copy",
+                media_id, result.md5, remote_md5,
+            )
+            return
         shutil.move(str(tmp_path), str(dest))
         db.update_media_files_xml_md5(media_id, remote_md5)
     finally:
