@@ -1011,15 +1011,6 @@ class AppStreamManager:
         clean = clean.strip("_")
         return f"{ORG}.{clean}"
 
-    def _rpm_header_str(self, header, tag) -> str:
-        """Read an RPM tag and return a string (empty if absent)."""
-        value = header[tag]
-        if value is None:
-            return ""
-        if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace")
-        return str(value)
-
     def _generate_appstream_xml(
             self, 
             package_info,
@@ -1235,32 +1226,6 @@ class AppStreamManager:
 
         print(f"  ⚠  No <component> in {xml_file.name}, ignored.")
         return None
-
-    def _compress_gzip(self, source: Path, dest: Path) -> None:
-        """
-        Comprime `source` en gzip (niveau 9) vers `dest`.
-        Original mtime is preserved in gzip header.
-        Write in 64 KB blocks to support large catalogs.
-        """
-        mtime = int(source.stat().st_mtime)
-
-        with open(source, "rb") as f_in:
-            with open(dest, "wb") as f_dest:
-                # Utiliser GzipFile directement pour contrôler mtime (compatible toutes versions)
-                with gzip.GzipFile(
-                    filename="",
-                    mode="wb",
-                    compresslevel=9,
-                    fileobj=f_dest,
-                    mtime=mtime
-                ) as f_out:
-                    for chunk in iter(lambda: f_in.read(65_536), b""):
-                        f_out.write(chunk)
-
-        xml_size = source.stat().st_size
-        gz_size  = dest.stat().st_size
-        ratio    = (1 - gz_size / xml_size) * 100 if xml_size else 0.0
-        # print(f"  ✔  {dest}  ({gz_size:,} bytes, compression {ratio:.1f} %)")
 
     def build_appstream_catalog(self, cache_path: Path) -> tuple[Path | None, Path | None]:
         """
