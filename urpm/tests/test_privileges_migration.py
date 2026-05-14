@@ -289,8 +289,7 @@ class TestSilentCrashSitesNowGuarded:
         ),
         (
             'urpm.cli.commands.media:cmd_media_set',
-            lambda: argparse.Namespace(name='foo', all=False, sync_files=None,
-                                       shared=None),
+            lambda: argparse.Namespace(name='foo', shared=None),
             'org.mageia.urpm.media-manage',
         ),
         (
@@ -321,11 +320,6 @@ class TestSilentCrashSitesNowGuarded:
         (
             'urpm.cli.commands.cache:cmd_cache_rebuild',
             lambda: argparse.Namespace(urpm_root=None),
-            'org.mageia.urpm.media-manage',
-        ),
-        (
-            'urpm.cli.commands.cache:cmd_cache_rebuild_fts',
-            lambda: argparse.Namespace(),
             'org.mageia.urpm.media-manage',
         ),
         # peer.py — dispatcher

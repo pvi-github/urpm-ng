@@ -756,27 +756,79 @@ class PackageOperations:
         return self.db.get_packages_by_names(names)
 
     def search_files(self, pattern: str, limit: int = 100) -> List[Dict]:
-        """Search for files matching a pattern.
+        """Search for files matching a pattern across enabled media.
+
+        Backed by :func:`urpm.core.files_xml.iter_file_matches`, which
+        streams every enabled medium's ``files.xml.lzma`` on demand —
+        no SQLite cache.
 
         Args:
-            pattern: File path pattern (glob-style)
-            limit: Maximum results
+            pattern: see :func:`urpm.core.files_xml._compile_byte_matcher`
+                for the historical urpm-ng matching semantics
+                (basename auto-wrap, anchored glob, …).
+            limit: maximum number of results (0 means unlimited).
 
         Returns:
-            List of dicts with file_path, pkg_nevra, media_name
+            List of dicts with ``file_path``, ``pkg_nevra``,
+            ``media_name``.  Empty when no enabled medium has a
+            ``files.xml.lzma`` on disk yet.
         """
-        return self.db.search_files(pattern, limit=limit)
+        from .config import get_base_dir, get_media_local_path
+        from .files_xml import iter_file_matches
+        from .sync import FILES_XML_PATH
+
+        base_dir = get_base_dir()
+        media_files = []
+        for media in self.db.list_media():
+            if not media.get('enabled', True):
+                continue
+            files_xml = get_media_local_path(media, base_dir) / FILES_XML_PATH
+            if files_xml.exists() and files_xml.stat().st_size > 200:
+                media_files.append((files_xml, media['name']))
+
+        if not media_files:
+            return []
+
+        matches = iter_file_matches(media_files, pattern, limit=limit)
+        return [
+            {
+                'file_path': m.path,
+                'pkg_nevra': m.nevra,
+                'media_name': m.media_name,
+            }
+            for m in matches
+        ]
 
     def get_package_files(self, nevra: str) -> List[str]:
-        """Get list of files for a package.
+        """Get the list of files shipped by ``nevra``.
 
-        Args:
-            nevra: Package NEVRA
+        Scans each enabled medium's ``files.xml.lzma`` until the
+        package block is found.  Used by the D-Bus ``GetPackageFiles``
+        endpoint; CLI consumers should prefer ``urpm show --files``
+        which already reads the rpmdb for installed packages.
 
         Returns:
-            List of file paths
+            List of file paths shipped by ``nevra``, or empty list
+            when the package is not in any on-disk ``files.xml.lzma``.
         """
-        return self.db.get_package_files(nevra)
+        from .config import get_base_dir, get_media_local_path
+        from .files_xml import parse_files_xml
+        from .sync import FILES_XML_PATH
+
+        base_dir = get_base_dir()
+        for media in self.db.list_media():
+            if not media.get('enabled', True):
+                continue
+            files_xml = get_media_local_path(media, base_dir) / FILES_XML_PATH
+            if not files_xml.exists() or files_xml.stat().st_size <= 200:
+                continue
+            try:
+                for parsed_nevra, files in parse_files_xml(files_xml):
+                    if parsed_nevra == nevra:
+                        return list(files)
+            except Exception:
+                continue
+        return []
 
     def get_installed_packages(self) -> List[Dict]:
         """Get list of all installed packages.

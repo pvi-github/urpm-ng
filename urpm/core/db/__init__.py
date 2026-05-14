@@ -7,7 +7,10 @@ Each mixin provides a group of related database operations:
 - HistoryMixin: Transaction history
 - PeerMixin: Peer tracking and mirror configuration
 - CacheMixin: Cache file tracking
-- FilesMixin: Package files and FTS index
+
+The historical ``FilesMixin`` was removed in 0.7.x: package file
+lists are no longer cached in SQLite — see
+``doc/TODO_SHRINK_FILES_DB.md`` for the rationale.
 """
 
 from .media import MediaMixin
@@ -16,7 +19,6 @@ from .constraints import ConstraintsMixin
 from .history import HistoryMixin
 from .peer import PeerMixin
 from .cache import CacheMixin
-from .files import FilesMixin
 
 __all__ = [
     'MediaMixin',
@@ -25,5 +27,4 @@ __all__ = [
     'HistoryMixin',
     'PeerMixin',
     'CacheMixin',
-    'FilesMixin',
 ]

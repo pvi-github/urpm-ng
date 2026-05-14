@@ -14,11 +14,11 @@ from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
 
 from .db import (
     MediaMixin, ServerMixin, ConstraintsMixin,
-    HistoryMixin, PeerMixin, CacheMixin, FilesMixin
+    HistoryMixin, PeerMixin, CacheMixin,
 )
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS media (
     last_sync INTEGER,
     synthesis_md5 TEXT,
     synthesis_last_modified TEXT,
+    files_xml_md5 TEXT,                   -- MD5 of last-fetched files.xml.lzma
     hdlist_md5 TEXT,
 
     added_timestamp INTEGER,
@@ -685,12 +686,18 @@ MIGRATIONS = {
         DROP TABLE IF EXISTS fts_state;
         ALTER TABLE media DROP COLUMN sync_files;
     """),
+    # v28 -> v29: track the per-media MD5 of files.xml.lzma so that
+    # ``urpm media update`` can fetch it conditionally — same pattern
+    # as ``synthesis_md5`` for synthesis.hdlist.cz.
+    28: (29, """
+        ALTER TABLE media ADD COLUMN files_xml_md5 TEXT;
+    """),
 }
 
 
 class PackageDatabase(
     MediaMixin, ServerMixin, ConstraintsMixin,
-    HistoryMixin, PeerMixin, CacheMixin, FilesMixin
+    HistoryMixin, PeerMixin, CacheMixin,
 ):
     """SQLite database for package metadata cache.
 
@@ -707,7 +714,6 @@ class PackageDatabase(
     - HistoryMixin: Transaction history
     - PeerMixin: Peer tracking and mirror configuration
     - CacheMixin: Cache file tracking
-    - FilesMixin: Package files and FTS index
     """
 
     # Timeout for waiting on locked database (30 seconds)

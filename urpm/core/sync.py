@@ -335,6 +335,76 @@ def head_synthesis(synthesis_url: str, server: dict = None,
         return None
 
 
+def _fetch_files_xml_if_changed(db: PackageDatabase, media_id: int,
+                                media: dict, server: Optional[dict],
+                                media_url: str, cache_media_info: Path,
+                                md5sums: dict) -> None:
+    """Refresh ``files.xml.lzma`` in ``cache_media_info`` when it changed.
+
+    Conditional download keyed on the MD5 reported in the just-parsed
+    ``MD5SUM`` file (same source of truth as for ``synthesis.hdlist.cz``).
+    If the remote MD5 matches what we stored last time, nothing is
+    downloaded and we exit silently.  When MD5SUM doesn't list
+    ``files.xml.lzma`` at all, we leave whatever is on disk in place.
+
+    The freshly downloaded file is not parsed nor imported anywhere —
+    ``urpm f`` streams it directly via
+    :func:`urpm.core.files_xml.iter_file_matches`.
+
+    Args:
+        db: Database instance — used to read and update
+            ``media.files_xml_md5``.
+        media_id: Numeric media id.
+        media: Media dict (v8 schema info).
+        server: Server dict the synthesis was just fetched from, or
+            ``None`` for the legacy single-URL flow.
+        media_url: Effective media URL, used by the legacy URL
+            builders when ``server`` is ``None``.
+        cache_media_info: ``<media>/media_info`` destination directory.
+        md5sums: Parsed contents of the ``MD5SUM`` file already
+            downloaded for the synthesis check.
+    """
+    remote_md5 = md5sums.get('files.xml.lzma')
+    if not remote_md5:
+        # No entry in MD5SUM — either the medium does not publish a
+        # files.xml.lzma (some mirrors / dev media) or MD5SUM was
+        # unavailable.  Leave on-disk state untouched.
+        return
+
+    media_info = db.get_media_by_id(media_id)
+    stored_md5 = (media_info or {}).get('files_xml_md5')
+    dest = cache_media_info / FILES_XML_PATH.split('/')[-1]
+
+    if stored_md5 == remote_md5 and dest.exists():
+        return  # Up to date, nothing to fetch.
+
+    files_xml_url = (
+        f"{build_media_url(server, media)}/{FILES_XML_PATH}"
+        if server
+        else f"{media_url}/{FILES_XML_PATH}"
+    )
+
+    with tempfile.NamedTemporaryFile(
+        delete=False, suffix='.files.xml.lzma',
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        if server:
+            result = download_from_server(files_xml_url, tmp_path, server)
+        else:
+            result = download_file(files_xml_url, tmp_path)
+        if not result.success:
+            logger.debug(
+                "files.xml.lzma download failed for media %d: %s",
+                media_id, getattr(result, 'error', 'unknown'),
+            )
+            return
+        shutil.move(str(tmp_path), str(dest))
+        db.update_media_files_xml_md5(media_id, remote_md5)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def check_media_update_needed(db: PackageDatabase, media_id: int,
                               media_url: str,
                               server: dict = None,
@@ -626,8 +696,15 @@ def sync_media(db: PackageDatabase, media_name: str,
         else:
             md5_result = download_file(md5sum_url, md5sum_path)
 
+        # Parse MD5SUM once — both synthesis state-update (above) and
+        # the files.xml.lzma conditional fetch (below) rely on it.
+        md5sums = {}
         if md5_result.success:
             shutil.copy2(md5sum_path, cache_media_info / "MD5SUM")
+            try:
+                md5sums = parse_md5sum_file(md5sum_path.read_text())
+            except OSError:
+                pass
 
         # Retrieve Last-Modified from the server we just synced from
         sync_synthesis_url = (
@@ -638,6 +715,23 @@ def sync_media(db: PackageDatabase, media_name: str,
 
         # Update media sync info (thread-safe)
         db.update_media_sync_info(media_id, result.md5, last_modified)
+
+        # Conditionally fetch files.xml.lzma alongside the synthesis.
+        # The file is consumed on demand by ``urpm f`` (no DB import);
+        # we only refresh it when MD5SUM says it changed.  Errors are
+        # logged but never fail the whole sync — having a slightly
+        # stale (or missing) files.xml.lzma is much better than
+        # blocking a synthesis update on a flaky files.xml mirror.
+        try:
+            _fetch_files_xml_if_changed(
+                db, media_id, media, server, media_url,
+                cache_media_info, md5sums,
+            )
+        except Exception as exc:
+            logger.warning(
+                "files.xml.lzma refresh failed for %s: %s",
+                media_name, exc,
+            )
 
         # Feed adaptive scheduling model with this content change
         try:
@@ -768,264 +862,6 @@ def sync_all_media(db: PackageDatabase,
     return results
 
 
-@dataclass
-class FilesXmlResult:
-    """Result of a files.xml sync operation."""
-    success: bool
-    file_count: int = 0
-    pkg_count: int = 0
-    error: Optional[str] = None
-    skipped: bool = False  # True if already up-to-date
-
-
-def sync_files_xml(
-    db: PackageDatabase,
-    media_name: str,
-    progress_callback: Callable[[str, int, int], None] = None,
-    force: bool = False
-) -> FilesXmlResult:
-    """Download and import files.xml.lzma for a media.
-
-    Args:
-        db: Package database
-        media_name: Name of the media to sync files for
-        progress_callback: Called with (stage, current, total)
-        force: If True, re-download even if files.xml hasn't changed
-
-    Returns:
-        FilesXmlResult with success status and counts
-    """
-    from .files_xml import parse_files_xml
-
-    media = db.get_media(media_name)
-    if not media:
-        return FilesXmlResult(success=False, error=f"Media '{media_name}' not found")
-
-    media_id = media['id']
-
-    # Get cache directory for this media
-    cache_dir = get_media_local_path(media)
-    cache_media_info = cache_dir / "media_info"
-    cache_media_info.mkdir(parents=True, exist_ok=True)
-
-    # get_servers_for_media() returns servers ordered by priority DESC, bandwidth_kbps DESC
-    # — no manual sort needed, and the order improves over time as stats accumulate.
-    servers = db.get_servers_for_media(media_id, enabled_only=True)
-    if not servers:
-        return FilesXmlResult(success=False, error="No servers configured for this media")
-
-    files_xml_downloaded = False
-    files_xml_path = None
-    files_xml_md5 = None
-    all_errors = []
-
-    for server in servers:
-        base_url = build_media_url(server, media)
-        files_xml_url = f"{base_url}/{FILES_XML_PATH}"
-        server_id = server.get('id')
-        ip_mode = server.get('ip_mode', 'auto')
-
-        # Check MD5SUM first so we can skip unchanged files (optional, failure is fine).
-        md5sum_url = f"{base_url}/{MD5SUM_PATH}"
-        current_md5 = None
-        try:
-            md5_tmp = cache_media_info / "MD5SUM.tmp"
-            md5_result = download_from_server(md5sum_url, md5_tmp, server, timeout=30)
-            if md5_result.success:
-                for line in md5_tmp.read_text(errors='ignore').strip().split('\n'):
-                    parts = line.split()
-                    if len(parts) >= 2 and 'files.xml.lzma' in parts[1]:
-                        current_md5 = parts[0]
-                        break
-                md5_tmp.unlink(missing_ok=True)
-        except Exception:
-            pass  # MD5SUM check is optional
-
-        # Skip download if we already have this exact version.
-        if current_md5 and not force:
-            state = db.get_files_xml_state(media_id)
-            if state and state.get('files_md5') == current_md5:
-                return FilesXmlResult(
-                    success=True,
-                    file_count=state.get('file_count', 0),
-                    pkg_count=state.get('pkg_count', 0),
-                    skipped=True
-                )
-
-        if progress_callback:
-            progress_callback("downloading files.xml", 0, 0)
-
-        dest = cache_media_info / "files.xml.lzma"
-        t_start = time.time()
-        result = download_from_server(files_xml_url, dest, server, timeout=120)
-        elapsed = time.time() - t_start
-
-        if result.success:
-            if not current_md5:
-                with open(dest, 'rb') as f:
-                    current_md5 = hashlib.md5(f.read()).hexdigest()
-
-            if server_id:
-                kbps = int(result.size / elapsed / 1024) if elapsed >= 0.5 and result.size else None
-                db.update_server_stats(server_id, success=True,
-                                       **({"bandwidth_kbps": kbps} if kbps else {}))
-
-            files_xml_path = dest
-            files_xml_md5 = current_md5
-            files_xml_downloaded = True
-            break
-        else:
-            if server_id:
-                db.update_server_stats(server_id, success=False)
-            all_errors.append(f"{server['name']}: {result.error}")
-            # logger.warning(f"files.xml download failed on {server['name']}: {result.error}")
-
-            print(f"files.xml download failed on {server['name']}: {result.error}")
-    if not files_xml_downloaded:
-        return FilesXmlResult(
-            success=False,
-            error=f"files.xml.lzma not available (tried {len(servers)} server(s)): "
-                  + "; ".join(all_errors[-3:])
-        )
-
-    # Get file size for progress estimation
-    compressed_size = files_xml_path.stat().st_size
-
-    # Estimate total files based on ratio from previous imports
-    estimated_total = None
-    ratio = db.get_files_xml_ratio()
-    if ratio:
-        estimated_total = int(compressed_size * ratio)
-
-    # Import into database - format estimated total as human-readable approximation
-    def format_estimate(n):
-        """Format number as rounded approximation: ~7M, ~250K, etc."""
-        if n >= 1_000_000:
-            return f"~{round(n / 1_000_000)}M"
-        elif n >= 1_000:
-            return f"~{round(n / 1_000)}K"
-        else:
-            return f"~{n}"
-
-    estimate_str = format_estimate(estimated_total) if estimated_total else None
-
-    if progress_callback:
-        if estimate_str:
-            progress_callback(f"importing: 0/{estimate_str}", 0, 0)
-        else:
-            progress_callback("importing...", 0, 0)
-
-    def import_progress(files_imported, pkgs_imported):
-        if progress_callback:
-            if estimated_total:
-                pct = min(99, int(100 * files_imported / estimated_total))
-                progress_callback(f"importing: {pct}% ({files_imported:,}/{estimate_str})", 0, 0)
-            else:
-                progress_callback(f"importing: {files_imported:,} files", 0, 0)
-
-    try:
-        file_count, pkg_count = db.import_files_xml(
-            media_id,
-            parse_files_xml(files_xml_path),
-            files_md5=files_xml_md5,
-            compressed_size=compressed_size,
-            progress_callback=import_progress
-        )
-
-        return FilesXmlResult(
-            success=True,
-            file_count=file_count,
-            pkg_count=pkg_count
-        )
-
-    except Exception as e:
-        return FilesXmlResult(success=False, error=f"Import error: {e}")
-
-
-def sync_files_xml_incremental(
-    db: PackageDatabase,
-    media_id: int,
-    files_xml_path: Path,
-    progress_callback: Callable[[str, int, int], None] = None
-) -> Tuple[int, int, int]:
-    """Perform incremental sync of files.xml - only add/remove changed packages.
-
-    Much faster than full import since indexes are not recreated.
-
-    Args:
-        db: Package database
-        media_id: Media ID to sync
-        files_xml_path: Path to downloaded files.xml.lzma
-        progress_callback: Called with (stage, current, total)
-
-    Returns:
-        Tuple of (added_count, removed_count, total_files)
-    """
-    from .files_xml import parse_files_xml, extract_nevras_from_files_xml
-
-    if progress_callback:
-        progress_callback("analyzing", 0, 0)
-
-    # 1. Get existing NEVRAs from DB
-    existing_nevras = db.get_package_nevras_for_media(media_id)
-
-    # 2. Extract NEVRAs from new files.xml (fast regex scan)
-    new_nevras = extract_nevras_from_files_xml(files_xml_path)
-
-    # 3. Compute diff
-    to_remove = existing_nevras - new_nevras
-    to_add = new_nevras - existing_nevras
-
-    if progress_callback:
-        progress_callback("diff", len(to_remove), len(to_add))
-
-    # 4. Delete removed packages
-    if to_remove:
-        if progress_callback:
-            progress_callback("removing", 0, len(to_remove))
-        db.delete_package_files_by_nevra(media_id, to_remove)
-
-    # 5. Add new packages (parse XML but only insert for new ones)
-    added_files = 0
-    if to_add:
-        add_count = 0
-        for nevra, files in parse_files_xml(files_xml_path):
-            if nevra in to_add:
-                db.insert_package_files_batch(media_id, nevra, files)
-                added_files += len(files)
-                add_count += 1
-                if progress_callback:
-                    progress_callback("adding", add_count, len(to_add))
-
-    # Get final count
-    state = db.get_files_xml_state(media_id)
-    total_files = state.get('file_count', 0) if state else added_files
-
-    return len(to_add), len(to_remove), total_files
-
-
-@dataclass
-class FilesXmlMediaState:
-    """State of files.xml download/import for a single media."""
-    media_id: int
-    media_name: str
-    media_version: str
-    # Pre-fetched data (avoid DB access in threads)
-    media_dict: Optional[Dict] = None
-    servers: Optional[List[Dict]] = None
-    cache_dir: Optional[Path] = None
-    # Runtime state
-    server_url: Optional[str] = None
-    compressed_size: int = 0
-    current_md5: Optional[str] = None
-    stored_md5: Optional[str] = None
-    download_path: Optional[Path] = None
-    download_complete: bool = False
-    import_complete: bool = False
-    file_count: int = 0
-    pkg_count: int = 0
-    error: Optional[str] = None
-    skipped: bool = False  # True if MD5 unchanged
 
 
 def get_mageia_version_arch() -> Tuple[Optional[str], Optional[str]]:
@@ -1058,459 +894,3 @@ def get_mageia_version_arch() -> Tuple[Optional[str], Optional[str]]:
     return None, arch
 
 
-def sync_all_files_xml(
-    db: PackageDatabase,
-    progress_callback: Callable[[str, str, int, int, int, int], None] = None,
-    force: bool = False,
-    max_workers: int = 4,
-    filter_version: bool = True,
-    sync_files_only: bool = True
-) -> List[Tuple[str, FilesXmlResult]]:
-    """Download and import files.xml.lzma for all media in parallel.
-
-    Uses optimized import strategy:
-    1. Check MD5 for all media first (parallel)
-    2. Skip unchanged media unless force=True
-    3. Download changed files in parallel
-    4. Import into staging table (no indexes)
-    5. Atomic swap at the end
-
-    Args:
-        db: Package database
-        progress_callback: Called with (media_name, stage, dl_current, dl_total, import_current, import_total)
-                          stage is: 'checking'|'downloading'|'downloaded'|'importing'|'done'|'skipped'|'error'
-        force: If True, re-download even if files.xml hasn't changed
-        max_workers: Number of parallel download threads
-        filter_version: If True, only sync media matching current Mageia version
-        sync_files_only: If True, only sync media with sync_files=1 (default: True)
-
-    Returns:
-        List of (media_name, FilesXmlResult) tuples
-    """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from queue import PriorityQueue
-    from .files_xml import parse_files_xml
-    import threading
-
-    # Get all enabled media
-    all_media = [m for m in db.list_media() if m.get('enabled', True)]
-    if not all_media:
-        return []
-
-    # Filter by sync_files flag if requested
-    if sync_files_only:
-        all_media = [m for m in all_media if m.get('sync_files')]
-        if not all_media:
-            return []
-
-    # Filter by version and architecture if requested
-    if filter_version:
-        from .config import get_accepted_versions, get_compatible_arches
-        import platform
-
-        # Get accepted versions (respects version-mode config)
-        accepted_versions, _, _ = get_accepted_versions(db)
-        arch = platform.machine()
-        compatible_arches = get_compatible_arches(arch)
-
-        filtered_media = []
-        for m in all_media:
-            media_version = m.get('mageia_version', '')
-            media_arch = m.get('architecture', '')
-            # Check version match using accepted_versions set
-            if accepted_versions:
-                version_ok = not media_version or media_version in accepted_versions
-            else:
-                version_ok = True  # No filtering if accepted_versions is None
-            # Check arch match (accept if media arch is empty or compatible)
-            arch_ok = not media_arch or media_arch in compatible_arches
-            if version_ok and arch_ok:
-                filtered_media.append(m)
-        all_media = filtered_media
-
-    if not all_media:
-        return []
-
-    # Initialize state for each media - PRE-FETCH all DB data to avoid locks in threads
-    media_states: List[FilesXmlMediaState] = []
-    for m in all_media:
-        media_id = m['id']
-        servers = db.get_servers_for_media(media_id, enabled_only=True)
-        servers.sort(key=lambda s: s.get('priority', 50))
-
-        state = FilesXmlMediaState(
-            media_id=media_id,
-            media_name=m['name'],
-            media_version=m.get('version', ''),
-            media_dict=m,
-            servers=servers,
-            cache_dir=get_media_local_path(m)
-        )
-        # Get stored MD5 for comparison
-        stored_state = db.get_files_xml_state(media_id)
-        if stored_state:
-            state.stored_md5 = stored_state.get('files_md5')
-            state.file_count = stored_state.get('file_count', 0)
-            state.pkg_count = stored_state.get('pkg_count', 0)
-        media_states.append(state)
-
-    # =========================================================================
-    # Phase 1: Check MD5 for all media (parallel)
-    # =========================================================================
-    def check_md5(state: FilesXmlMediaState) -> FilesXmlMediaState:
-        """Fetch MD5SUM and check if files.xml has changed. NO DB ACCESS - uses pre-fetched data."""
-        if progress_callback:
-            progress_callback(state.media_name, 'checking', 0, 0, 0, 0)
-
-        if not state.servers:
-            state.error = "No servers"
-            return state
-
-        for server in state.servers:
-            base_url = build_media_url(server, state.media_dict)
-            md5sum_url = f"{base_url}/{MD5SUM_PATH}"
-
-            try:
-                req = urllib.request.Request(md5sum_url)
-                req.add_header('User-Agent', 'urpm/0.1')
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    md5_content = resp.read().decode('utf-8', errors='ignore')
-                    for line in md5_content.strip().split('\n'):
-                        parts = line.split()
-                        if len(parts) >= 2 and 'files.xml.lzma' in parts[1]:
-                            state.current_md5 = parts[0]
-                            state.server_url = base_url
-                            break
-
-                if state.current_md5:
-                    break
-            except Exception:
-                continue
-
-        # Check if unchanged (file_count/pkg_count already pre-fetched)
-        if state.current_md5 and state.stored_md5 == state.current_md5 and not force:
-            state.skipped = True
-            if progress_callback:
-                progress_callback(state.media_name, 'skipped', 0, 0, state.file_count, state.file_count)
-
-        return state
-
-    # Check MD5 in parallel
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(check_md5, state): state for state in media_states}
-        for future in as_completed(futures):
-            state = future.result()
-            # State is updated in place
-
-    # Early exit if all unchanged
-    changed_states = [s for s in media_states if not s.skipped and not s.error]
-    if not changed_states:
-        results = []
-        for state in media_states:
-            if state.skipped:
-                results.append((state.media_name, FilesXmlResult(
-                    success=True, file_count=state.file_count, pkg_count=state.pkg_count, skipped=True)))
-            else:
-                results.append((state.media_name, FilesXmlResult(
-                    success=False, error=state.error or "No files.xml found")))
-        return results
-
-    # =========================================================================
-    # Phase 2: Download files.xml in parallel
-    # =========================================================================
-    def download_files_xml(state: FilesXmlMediaState) -> FilesXmlMediaState:
-        """Download files.xml.lzma for a media. NO DB ACCESS - uses pre-fetched data."""
-        if state.skipped or state.error:
-            return state
-
-        if progress_callback:
-            progress_callback(state.media_name, 'downloading', 0, 0, 0, 0)
-
-        # Use pre-fetched cache directory
-        cache_media_info = state.cache_dir / "media_info"
-        cache_media_info.mkdir(parents=True, exist_ok=True)
-
-        # Use server URL from MD5 check, or find one from pre-fetched servers
-        if not state.server_url and state.servers:
-            state.server_url = build_media_url(state.servers[0], state.media_dict)
-
-        if not state.server_url:
-            state.error = "No server available"
-            return state
-
-        files_xml_url = f"{state.server_url}/{FILES_XML_PATH}"
-        dest_path = cache_media_info / "files.xml.lzma"
-
-        try:
-            req = urllib.request.Request(files_xml_url)
-            req.add_header('User-Agent', 'urpm/0.1')
-
-            with urllib.request.urlopen(req, timeout=300) as resp:
-                total_size = int(resp.headers.get('Content-Length', 0))
-                downloaded = 0
-                md5_hash = hashlib.md5()
-
-                with open(dest_path, 'wb') as f:
-                    while True:
-                        chunk = resp.read(65536)  # 64KB chunks
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        md5_hash.update(chunk)
-                        downloaded += len(chunk)
-
-                        if progress_callback and total_size > 0:
-                            progress_callback(state.media_name, 'downloading',
-                                            downloaded, total_size, 0, 0)
-
-                state.download_path = dest_path
-                state.compressed_size = dest_path.stat().st_size
-                state.current_md5 = md5_hash.hexdigest()
-                state.download_complete = True
-
-                if progress_callback:
-                    progress_callback(state.media_name, 'downloaded',
-                                    state.compressed_size, state.compressed_size, 0, 0)
-
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                state.error = "files.xml not found (404)"
-            else:
-                state.error = f"HTTP {e.code}"
-        except Exception as e:
-            state.error = str(e)
-
-        return state
-
-    # Download in parallel
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(download_files_xml, state): state for state in changed_states}
-        for future in as_completed(futures):
-            state = future.result()
-
-    # =========================================================================
-    # Phase 3: Import to staging table (sequential, small files first)
-    # =========================================================================
-    # Filter to successfully downloaded
-    downloaded_states = [s for s in changed_states if s.download_complete and s.download_path]
-
-    if not downloaded_states:
-        # No successful downloads
-        results = []
-        for state in media_states:
-            if state.skipped:
-                results.append((state.media_name, FilesXmlResult(
-                    success=True, file_count=state.file_count, pkg_count=state.pkg_count, skipped=True)))
-            else:
-                results.append((state.media_name, FilesXmlResult(
-                    success=False, error=state.error or "Download failed")))
-        return results
-
-    # Sort by compressed size (small first for faster initial feedback)
-    downloaded_states.sort(key=lambda s: s.compressed_size)
-
-    # Check if we have existing data (for incremental vs full import decision)
-    conn = db._get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM package_files")
-    existing_file_count = cursor.fetchone()[0]
-    use_incremental = existing_file_count > 0
-
-    # =========================================================================
-    # Phase 3: Import - INCREMENTAL or FULL depending on existing data
-    # =========================================================================
-    if use_incremental:
-        # INCREMENTAL MODE: faster, no index recreation
-        for state in downloaded_states:
-            if progress_callback:
-                progress_callback(state.media_name, 'syncing', 0, 0, 0, 0)
-
-            try:
-                def incr_progress(stage, current, total):
-                    if progress_callback:
-                        progress_callback(state.media_name, stage, 0, 0, current, total)
-
-                added, removed, total_files = sync_files_xml_incremental(
-                    db, state.media_id, state.download_path, incr_progress
-                )
-                state.file_count = total_files
-                state.pkg_count = added  # Approximate
-                state.import_complete = True
-
-                if progress_callback:
-                    progress_callback(state.media_name, 'done', 0, 0, total_files, total_files)
-
-            except Exception as e:
-                state.error = f"Sync error: {e}"
-                if progress_callback:
-                    progress_callback(state.media_name, 'error', 0, 0, 0, 0)
-
-        # Update state for successful imports
-        for state in downloaded_states:
-            if state.import_complete:
-                # Update files_xml_state
-                cursor.execute("""
-                    INSERT OR REPLACE INTO files_xml_state
-                    (media_id, last_sync, files_md5, file_count, pkg_count, compressed_size)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    state.media_id,
-                    int(time.time()),
-                    state.current_md5,
-                    state.file_count,
-                    state.pkg_count,
-                    state.compressed_size
-                ))
-        conn.commit()
-
-    else:
-        # FULL IMPORT MODE: staging table + atomic swap (first import only)
-        # Estimate total files based on historical ratio
-        ratio = db.get_files_xml_ratio()
-        if ratio:
-            for state in downloaded_states:
-                state.file_count = int(state.compressed_size * ratio)  # Estimate
-
-        original_pragmas = None
-        import_success = False
-
-        try:
-            # Force WAL checkpoint to clear any pending transactions
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            conn.commit()
-
-            db.create_package_files_staging()
-            original_pragmas = db.set_fast_import_pragmas()
-
-            # Import each media
-            for state in downloaded_states:
-                if progress_callback:
-                    progress_callback(state.media_name, 'importing', 0, 0, 0, state.file_count)
-
-                estimated_total = state.file_count
-
-                def import_progress(files_imported, pkgs_imported):
-                    if progress_callback:
-                        progress_callback(state.media_name, 'importing',
-                                        0, 0, files_imported, estimated_total or files_imported)
-
-                try:
-                    file_count, pkg_count = db.import_files_to_staging(
-                        state.media_id,
-                        parse_files_xml(state.download_path),
-                        batch_size=1000,
-                        progress_callback=import_progress
-                    )
-                    state.file_count = file_count
-                    state.pkg_count = pkg_count
-                    state.import_complete = True
-
-                    if progress_callback:
-                        progress_callback(state.media_name, 'done', 0, 0, file_count, file_count)
-
-                except Exception as e:
-                    state.error = f"Import error: {e}"
-                    if progress_callback:
-                        progress_callback(state.media_name, 'error', 0, 0, 0, 0)
-
-            import_success = any(s.import_complete for s in downloaded_states)
-
-        finally:
-            if original_pragmas:
-                db.restore_pragmas(original_pragmas)
-
-        # Atomic swap for full import
-        if import_success:
-            try:
-                conn.commit()
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-
-                # Signal indexing phase (can take ~30s for 7M files)
-                if progress_callback:
-                    for state in downloaded_states:
-                        if state.import_complete:
-                            progress_callback(state.media_name, 'indexing', 0, 0, 0, 0)
-
-                db.finalize_package_files_atomic()
-
-                # Update files_xml_state for all successfully imported media
-                states_to_update = []
-                for state in downloaded_states:
-                    if state.import_complete:
-                        states_to_update.append({
-                            'media_id': state.media_id,
-                            'md5': state.current_md5,
-                            'file_count': state.file_count,
-                            'pkg_count': state.pkg_count,
-                            'compressed_size': state.compressed_size
-                        })
-                if states_to_update:
-                    db.update_files_xml_state_batch(states_to_update)
-
-                # Rebuild FTS index after full import (atomic swap cleared it)
-                if db.is_fts_available():
-                    if progress_callback:
-                        # Use first media for progress reporting
-                        progress_callback("FTS index", 'indexing', 0, 0, 0, 0)
-
-                    def fts_progress(current, total):
-                        if progress_callback:
-                            progress_callback("FTS index", 'indexing', 0, 0, current, total)
-
-                    db.rebuild_fts_index(progress_callback=fts_progress)
-
-                    if progress_callback:
-                        progress_callback("FTS index", 'done', 0, 0, 0, 0)
-
-            except Exception as e:
-                # Atomic swap failed - abort
-                db.abort_package_files_atomic()
-                for state in downloaded_states:
-                    if state.import_complete:
-                        state.error = f"Atomic swap failed: {e}"
-                        state.import_complete = False
-        else:
-            # All imports failed - cleanup staging
-            db.abort_package_files_atomic()
-
-    # =========================================================================
-    # Check if FTS needs rebuild (migration case: data exists but FTS empty)
-    # =========================================================================
-    if use_incremental and db.is_fts_available() and not db.is_fts_index_current():
-        if progress_callback:
-            progress_callback("FTS index", 'indexing', 0, 0, 0, 0)
-
-        def fts_progress(current, total):
-            if progress_callback:
-                progress_callback("FTS index", 'indexing', 0, 0, current, total)
-
-        db.rebuild_fts_index(progress_callback=fts_progress)
-
-        if progress_callback:
-            progress_callback("FTS index", 'done', 0, 0, 0, 0)
-
-    # =========================================================================
-    # Build results
-    # =========================================================================
-    results = []
-    for state in media_states:
-        if state.skipped:
-            results.append((state.media_name, FilesXmlResult(
-                success=True,
-                file_count=state.file_count,
-                pkg_count=state.pkg_count,
-                skipped=True
-            )))
-        elif state.import_complete:
-            results.append((state.media_name, FilesXmlResult(
-                success=True,
-                file_count=state.file_count,
-                pkg_count=state.pkg_count
-            )))
-        else:
-            results.append((state.media_name, FilesXmlResult(
-                success=False,
-                error=state.error or "Unknown error"
-            )))
-
-    return results

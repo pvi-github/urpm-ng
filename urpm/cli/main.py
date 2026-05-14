@@ -75,7 +75,6 @@ from .commands.cache import (
     cmd_cache_clean,
     cmd_cache_rebuild,
     cmd_cache_stats,
-    cmd_cache_rebuild_fts,
 )
 from .commands.peer import cmd_peer
 from .commands.config import cmd_config, cmd_key
@@ -1170,11 +1169,6 @@ Examples:
         'name', nargs='?',
         help=_('Media name to update (default: all)')
     )
-    update_parser.add_argument(
-        '--files',
-        action='store_true',
-        help=_('Also sync files.xml for media with sync_files enabled')
-    )
 
     # =========================================================================
     # upgrade / u
@@ -1488,11 +1482,6 @@ For legacy mode (non-Mageia URL with explicit name):
         help=_('Media name (empty = all)')
     )
     media_update.add_argument(
-        '--files', '-f',
-        action='store_true',
-        help=_('Also download and index files.xml.lzma (enables file search in available packages)')
-    )
-    media_update.add_argument(
         '--no-appstream',
         action='store_true',
         help=_('Skip AppStream metadata sync')
@@ -1524,12 +1513,7 @@ For legacy mode (non-Mageia URL with explicit name):
         'set', aliases=['s'],
         help=_('Modify media settings')
     )
-    media_set.add_argument('name', nargs='?', help=_('Media name (or use --all)'))
-    media_set.add_argument(
-        '--all', '-a',
-        action='store_true',
-        help=_('Apply to all enabled media')
-    )
+    media_set.add_argument('name', help=_('Media name'))
     media_set.add_argument(
         '--shared',
         choices=['yes', 'no'],
@@ -1560,18 +1544,9 @@ For legacy mode (non-Mageia URL with explicit name):
         metavar='N', type=int,
         help=_('Media priority (higher = preferred)')
     )
-    # sync_files: mutually exclusive --sync-files / --no-sync-files
-    sync_files_group = media_set.add_mutually_exclusive_group()
-    sync_files_group.add_argument(
-        '--sync-files',
-        dest='sync_files', action='store_true', default=None,
-        help=_('Enable auto-sync of files.xml for urpm find')
-    )
-    sync_files_group.add_argument(
-        '--no-sync-files',
-        dest='sync_files', action='store_false',
-        help=_('Disable auto-sync of files.xml')
-    )
+    # ``--sync-files`` was removed in 0.7.x: files.xml.lzma now ships
+    # with every ``urpm media update`` (conditional on MD5SUM), so the
+    # opt-in toggle is obsolete.
 
     # media seed-info
     media_seed_info = media_subparsers.add_parser(
@@ -1948,7 +1923,6 @@ Set auto_add = false to disable all automatic server addition.
 
     cache_subparsers.add_parser('rebuild', help=_('Rebuild database from synthesis files'))
     cache_subparsers.add_parser('stats', help=_('Detailed cache statistics'))
-    cache_subparsers.add_parser('rebuild-fts', help=_('Rebuild FTS index for fast file search'))
 
     # =========================================================================
     # history / h
@@ -2539,8 +2513,6 @@ def main(argv=None) -> int:
                 return cmd_cache_clean(args, db)
             elif args.cache_command == 'rebuild':
                 return cmd_cache_rebuild(args, db)
-            elif args.cache_command == 'rebuild-fts':
-                return cmd_cache_rebuild_fts(args, db)
             elif args.cache_command == 'stats':
                 return cmd_cache_stats(args, db)
             else:

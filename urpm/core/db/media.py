@@ -103,40 +103,6 @@ class MediaMixin:
         )
         self.conn.commit()
 
-    def set_media_sync_files(self, name: str, enabled: bool = True):
-        """Enable or disable files.xml sync for a media.
-
-        When enabled, urpmd will auto-sync files.xml for this media,
-        allowing `urpm find` to search in available packages.
-
-        Args:
-            name: Media name
-            enabled: True to enable sync, False to disable
-        """
-        conn = self._get_connection()
-        conn.execute(
-            "UPDATE media SET sync_files = ? WHERE name = ?",
-            (int(enabled), name)
-        )
-        conn.commit()
-
-    # The ``sync_files`` opt-in (and the column it relied on) was
-    # removed in schema v28: ``urpm f`` now streams ``files.xml.lzma``
-    # directly, so there is nothing to "sync" anymore.  The three
-    # methods below remain as compatibility stubs for callers that
-    # have not been migrated yet (``urpm media set --sync-files``,
-    # the daemon's idle ``files.xml`` job, …).  See
-    # ``doc/TODO_SHRINK_FILES_DB.md``.
-
-    def set_all_media_sync_files(self, enabled: bool = True, enabled_only: bool = True) -> int:
-        return 0
-
-    def get_media_with_sync_files(self) -> List[Dict]:
-        return []
-
-    def has_any_sync_files_media(self) -> bool:
-        return False
-
     def update_media_sync_info(self, media_id: int, synthesis_md5: str,
                               synthesis_last_modified: str = None):
         """Update media sync timestamp, MD5, and Last-Modified. Thread-safe."""
@@ -148,6 +114,18 @@ class MediaMixin:
                 WHERE id = ?
             """, (int(time.time()), synthesis_md5, synthesis_last_modified,
                   media_id))
+            conn.commit()
+
+    def update_media_files_xml_md5(self, media_id: int, md5: str):
+        """Record the MD5 of the freshly fetched files.xml.lzma so the
+        next ``urpm media update`` can skip the download when MD5SUM
+        reports the same hash.  Thread-safe."""
+        conn = self._get_connection()
+        with self._lock:
+            conn.execute(
+                "UPDATE media SET files_xml_md5 = ? WHERE id = ?",
+                (md5, media_id),
+            )
             conn.commit()
 
     def get_media_by_id(self, media_id: int) -> Optional[Dict]:

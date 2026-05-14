@@ -24,15 +24,15 @@ DEFAULT_METADATA_CHECK_INTERVAL = 3600  # 1 hour
 DEFAULT_PREDOWNLOAD_CHECK_INTERVAL = 7200  # 2 hours
 DEFAULT_REPLICATION_CHECK_INTERVAL = 1800  # 30 minutes
 DEFAULT_FETCH_DATES_INTERVAL = 300  # 5 minutes
-DEFAULT_FILES_XML_CHECK_INTERVAL = 86400  # 24 hours
 # Note: cache cleanup runs after each predownload, not independently
+# Note: files.xml.lzma is fetched alongside synthesis (conditional on
+# its MD5SUM entry), so no separate scheduler job is needed.
 
 # Dev mode intervals (shorter for testing)
 DEV_METADATA_CHECK_INTERVAL = 60  # 1 minute
 DEV_PREDOWNLOAD_CHECK_INTERVAL = 120  # 2 minutes
 DEV_REPLICATION_CHECK_INTERVAL = 30  # 30 seconds
 DEV_FETCH_DATES_INTERVAL = 20  # 20 seconds
-DEV_FILES_XML_CHECK_INTERVAL = 60  # 1 minute
 
 
 class Scheduler:
@@ -75,7 +75,6 @@ class Scheduler:
             self.predownload_interval = DEV_PREDOWNLOAD_CHECK_INTERVAL  # 120s
             self.replication_interval = DEV_REPLICATION_CHECK_INTERVAL  # 30s
             self.fetch_dates_interval = DEV_FETCH_DATES_INTERVAL  # 20s
-            self.files_xml_interval = DEV_FILES_XML_CHECK_INTERVAL  # 60s
             self.tick_interval = 10  # Check every 10s in dev mode
             logger.info("Dev mode: using short intervals (metadata=%ds, predownload=%ds, replication=%ds, tick=%ds)",
                        DEV_METADATA_CHECK_INTERVAL, DEV_PREDOWNLOAD_CHECK_INTERVAL,
@@ -85,7 +84,6 @@ class Scheduler:
             self.predownload_interval = DEFAULT_PREDOWNLOAD_CHECK_INTERVAL  # 7200s (2h)
             self.replication_interval = DEFAULT_REPLICATION_CHECK_INTERVAL  # 1800s (30m)
             self.fetch_dates_interval = DEFAULT_FETCH_DATES_INTERVAL  # 300s (5m)
-            self.files_xml_interval = DEFAULT_FILES_XML_CHECK_INTERVAL  # 86400s (24h)
             self.tick_interval = 60  # Check every minute in production
 
         # JITTER (thundering herd prevention)
@@ -105,7 +103,6 @@ class Scheduler:
         self._next_predownload: Optional[float] = None
         self._next_replication_check: Optional[float] = None
         self._next_fetch_dates_check: Optional[float] = None
-        self._next_files_xml_check: Optional[float] = None
         self._next_cleanup: Optional[float] = None
 
         # Wake-up detection (created in scheduler thread)
@@ -159,17 +156,6 @@ class Scheduler:
                        f"added {reconcile_result['untracked_files_added']} untracked files")
         except Exception as e:
             logger.warning(f"Startup cache reconcile failed: {e}", exc_info=True)
-
-        # Check if FTS index needs rebuild (after migration/upgrade)
-        try:
-            if self.db.is_fts_supported() and not self.db.is_fts_index_current():
-                fts_stats = self.db.get_fts_stats()
-                main_count = fts_stats.get('main_table_count', 0)
-                fts_count = fts_stats.get('fts_row_count', 0)
-                logger.info(f"FTS index needs rebuild ({fts_count} indexed, {main_count} in table)")
-                self._rebuild_fts_index()
-        except Exception as e:
-            logger.warning(f"FTS index check failed: {e}", exc_info=True)
 
         # Detect a fragmented database left over from the schema v28
         # migration (DROP TABLE on the multi-GB ``package_files`` cache
@@ -252,11 +238,6 @@ class Scheduler:
         if self._should_run_task('fetch_dates', now):
             self._run_fetch_server_dates()
             self._schedule_next('fetch_dates', now, self.fetch_dates_interval)
-
-        # Sync files.xml for urpm find (once per day, when idle)
-        if self._should_run_task('files_xml', now):
-            self._run_files_xml_sync()
-            self._schedule_next('files_xml', now, self.files_xml_interval)
 
         # One-shot idle VACUUM for databases left fragmented by schema
         # v28's DROP of the package_files cache.
@@ -1141,69 +1122,6 @@ class Scheduler:
                 logger.debug(f"Reached max requests per run ({max_requests_per_run})")
                 break
 
-    def _run_files_xml_sync(self):
-        """Sync files.xml for media with sync_files enabled.
-
-        This enables `urpm find` to search in available packages.
-        Only runs if:
-        - At least one media has sync_files=1
-        - System is idle (CPU and network)
-        - Last sync was > 24h ago (enforced by interval)
-        """
-        if not self.db:
-            return
-
-        # Check if any media has sync_files enabled
-        if not self.db.has_any_sync_files_media():
-            logger.debug("No media with sync_files enabled, skipping files.xml sync")
-            return
-
-        # Check if system is idle
-        if not self._is_system_idle():
-            logger.debug("Skipping files.xml sync: system not idle")
-            return
-
-        logger.info("Running scheduled files.xml sync")
-
-        from ..core.sync_lock import SyncLock, FILES_LOCK_PATH
-
-        lock = SyncLock(FILES_LOCK_PATH)
-        acquired, holder_pid = lock.try_acquire()
-        if not acquired:
-            logger.info(
-                "files.xml sync skipped, sync lock held by PID %s",
-                holder_pid,
-            )
-            return
-
-        try:
-            from ..core.sync import sync_all_files_xml
-
-            def progress_callback(media_name, stage, dl_current, dl_total,
-                                  import_current, import_total):
-                # Silent background sync - just log key events
-                if stage == 'done':
-                    logger.debug(f"files.xml {media_name}: sync complete ({import_current} files)")
-                elif stage == 'error':
-                    logger.warning(f"files.xml {media_name}: sync failed")
-
-            results = sync_all_files_xml(self.db, progress_callback, force=False)
-
-            # Log summary
-            synced = sum(1 for _, r in results if r.success and r.file_count > 0)
-            skipped = sum(1 for _, r in results if r.success and r.file_count == 0)
-            errors = sum(1 for _, r in results if not r.success)
-
-            if synced > 0 or errors > 0:
-                logger.info(f"files.xml sync complete: {synced} synced, {skipped} unchanged, {errors} errors")
-            else:
-                logger.debug("files.xml sync: all media up-to-date")
-
-        except Exception as e:
-            logger.error(f"files.xml sync error: {e}")
-        finally:
-            lock.release()
-
     # ------------------------------------------------------------------
     # Idle VACUUM (one-shot, scheduled by the v28 schema migration)
     # ------------------------------------------------------------------
@@ -1439,35 +1357,3 @@ class Scheduler:
 
         return total_rx, total_tx
 
-    def _rebuild_fts_index(self):
-        """Rebuild FTS index for fast file search.
-
-        Called on startup if the FTS index is out of sync (e.g., after
-        database migration from a version without FTS).
-        """
-        if not self.db:
-            return
-
-        logger.info("Rebuilding FTS index for fast file search...")
-
-        try:
-            start_time = time.time()
-            last_log_time = [start_time]
-
-            def progress_callback(current, total):
-                now = time.time()
-                # Log progress every 30 seconds
-                if now - last_log_time[0] >= 30:
-                    pct = current * 100 // total if total > 0 else 0
-                    elapsed = now - start_time
-                    logger.info(f"FTS rebuild: {pct}% ({current:,}/{total:,} files, {elapsed:.0f}s)")
-                    last_log_time[0] = now
-
-            self.db.rebuild_fts_index(progress_callback=progress_callback)
-
-            elapsed = time.time() - start_time
-            stats = self.db.get_fts_stats()
-            logger.info(f"FTS rebuild complete: {stats.get('fts_row_count', 0):,} files indexed in {elapsed:.1f}s")
-
-        except Exception as e:
-            logger.error(f"FTS rebuild failed: {e}", exc_info=True)

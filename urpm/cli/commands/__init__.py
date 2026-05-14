@@ -5,7 +5,6 @@ from .cache import (
     cmd_cache_clean,
     cmd_cache_rebuild,
     cmd_cache_stats,
-    cmd_cache_rebuild_fts,
 )
 from .peer import (
     cmd_peer,
@@ -109,7 +108,6 @@ __all__ = [
     'cmd_cache_clean',
     'cmd_cache_rebuild',
     'cmd_cache_stats',
-    'cmd_cache_rebuild_fts',
     # Peer commands
     'cmd_peer',
     # Config commands

@@ -64,9 +64,6 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
         # Update flag: U or space
         update_flag = colors.info(_("U")) if m['update_media'] else " "
 
-        # Files sync flag: F or space
-        files_flag = colors.info(_("F")) if m.get('sync_files') else " "
-
         # Name - pad first, then apply color
         name_raw = m['name']
         name_padded = f"{name_raw:{max_name}}"
@@ -94,7 +91,7 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
         else:
             servers_display = colors.warning(_("(no server)"))
 
-        print(f"  {status} {update_flag}{files_flag} {name}  {rel_path}  {servers_display}")
+        print(f"  {status} {update_flag} {name}  {rel_path}  {servers_display}")
 
     # Hint when there are disabled media we did not show
     if not show_all and disabled_count:
@@ -808,7 +805,7 @@ def cmd_media_disable(args, db: 'PackageDatabase') -> int:
 def cmd_media_update(args, db: 'PackageDatabase') -> int:
     """Handle media update command."""
     from .. import colors
-    from ...core.sync import sync_media, sync_all_media, sync_files_xml, sync_all_files_xml
+    from ...core.sync import sync_media, sync_all_media
     from ...auth.privileges import require_privileges
     from ...core.sync_lock import SyncLock
     import threading
@@ -848,11 +845,10 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
 def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
     """Execute media update (called with sync lock held)."""
     from .. import colors
-    from ...core.sync import sync_media, sync_all_media, sync_files_xml, sync_all_files_xml
+    from ...core.sync import sync_media, sync_all_media
     from ...i18n import _, ngettext
     import threading
 
-    sync_files = getattr(args, 'files', False)
     skip_appstream = getattr(args, 'no_appstream', False)
 
     def progress(media_name, stage, current, total):
@@ -882,20 +878,6 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
 
         if result.success:
             print(colors.success(ngettext("  {count} package", "  {count} packages", result.packages_count).format(count=result.packages_count)))
-
-            # Sync files.xml if requested
-            if sync_files:
-                print(_("  Downloading files.xml for {name}...").format(name=args.name))
-                files_result = sync_files_xml(db, args.name, single_progress, force=True)
-                print()  # newline after progress
-                if files_result.success:
-                    if files_result.skipped:
-                        print(colors.info(_("  files.xml: up-to-date ({count} files)").format(count=files_result.file_count)))
-                    else:
-                        print(colors.success(_("  files.xml: {count} files from {pkg_count} packages").format(count=files_result.file_count, pkg_count=files_result.pkg_count)))
-                else:
-                    print("  " + colors.warning(_("Warning")) + ": files.xml: " + str(files_result.error))
-
             return 0
         else:
             print("  " + colors.error(_("Error")) + ": " + str(result.error))
@@ -970,140 +952,6 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
         else:
             print("\n" + colors.info(_("Total")) + ": " + colors.success(str(total_packages)) + " " + _("packages from {count} media in {elapsed}").format(count=len(results), elapsed=format_elapsed(sync_elapsed)))
 
-        # Sync files.xml if requested (separate lock from metadata sync)
-        if sync_files:
-            from ...core.sync_lock import SyncLock, FILES_LOCK_PATH
-            files_sync_lock = SyncLock(FILES_LOCK_PATH)
-            f_acquired, f_holder = files_sync_lock.try_acquire()
-            if not f_acquired:
-                if f_holder:
-                    print(colors.warning(
-                        _("files.xml sync already in progress (PID {pid}).").format(pid=f_holder)
-                    ))
-                else:
-                    print(colors.warning(_("files.xml sync already in progress.")))
-                print(colors.dim(_("Waiting for lock... (Ctrl+C to cancel)")))
-                # Block until lock is released, retrying every second
-                import time
-                while not f_acquired:
-                    time.sleep(1)
-                    f_acquired, f_holder = files_sync_lock.try_acquire()
-
-            print(_("\nSyncing files.xml..."))
-
-            try:
-                # Track status for each media (same pattern as synthesis sync)
-                # Filter by version/arch like sync_all_files_xml does
-                from ...core.config import get_accepted_versions, get_compatible_arches
-                import platform
-
-                accepted_versions, _ignored, _ignored2 = get_accepted_versions(db)
-                arch = platform.machine()
-                compatible_arches = get_compatible_arches(arch)
-
-                files_status = {}
-                files_lock = threading.Lock()
-                files_media_list = []
-                for m in db.list_media():
-                    if not m['enabled'] or not m.get('sync_files'):
-                        continue
-                    # Same filter as sync_all_files_xml
-                    media_version = m.get('mageia_version', '')
-                    media_arch = m.get('architecture', '')
-                    if accepted_versions:
-                        version_ok = not media_version or media_version in accepted_versions
-                    else:
-                        version_ok = True
-                    arch_ok = not media_arch or media_arch in compatible_arches
-                    if version_ok and arch_ok:
-                        files_media_list.append(m['name'])
-                files_num_lines = 0
-
-                def files_progress(media_name, stage, dl_current, dl_total, import_current, import_total):
-                    nonlocal files_num_lines
-                    with files_lock:
-                        # Build status string
-                        if stage == 'checking':
-                            status = "checking..."
-                        elif stage == 'skipped':
-                            status = "up-to-date"
-                        elif stage == 'downloading':
-                            if dl_total > 0:
-                                pct = int(100 * dl_current / dl_total)
-                                status = f"downloading {pct}%"
-                            else:
-                                status = "downloading..."
-                        elif stage == 'downloaded':
-                            status = "downloaded"
-                        elif stage in ('syncing', 'analyzing', 'diff'):
-                            status = "analyzing..."
-                        elif stage == 'importing':
-                            if import_total > 0:
-                                pct = min(99, int(100 * import_current / import_total))
-                                status = f"importing {pct}%"
-                            else:
-                                status = "importing..."
-                        elif stage == 'indexing':
-                            status = "creating indexes..."
-                        elif stage == 'done':
-                            status = colors.success(_("done"))
-                        elif stage == 'error':
-                            status = colors.error(_("error"))
-                        else:
-                            status = stage
-
-                        files_status[media_name] = status
-
-                        # Redraw all status lines
-                        if files_num_lines > 0:
-                            print(f"\033[{files_num_lines}F", end='', flush=True)
-
-                        for name in files_media_list:
-                            st = files_status.get(name, "waiting...")
-                            print(f"\033[K  {name}: {st}")
-
-                        files_num_lines = len(files_media_list)
-
-                # Run parallel sync (force=False to respect MD5 checks)
-                files_start = time.time()
-                files_results = sync_all_files_xml(
-                    db,
-                    progress_callback=files_progress,
-                    force=False,
-                    max_workers=4,
-                    filter_version=True
-                )
-                files_elapsed = time.time() - files_start
-
-                # Clear progress lines
-                if files_num_lines > 0:
-                    print(f"\033[{files_num_lines}F", end='', flush=True)
-                    for _i in range(files_num_lines):
-                        print("\033[K", end='')
-                        print("\033[1B", end='')
-                    print(f"\033[{files_num_lines}F", end='', flush=True)
-
-                # Print final results
-                for name, result in files_results:
-                    if result.success:
-                        if result.skipped:
-                            print(f"  {name}: " + _("up-to-date"))
-                        else:
-                            count_str = colors.success(f"{result.file_count:,}") if result.file_count > 0 else "0"
-                            print(f"  {name}: " + count_str + " " + ngettext("file", "files", result.file_count))
-                    else:
-                        print("  " + colors.error(name) + ": " + _("ERROR - {error}").format(error=result.error))
-
-                # Final summary
-                total_files = sum(r.file_count for _name, r in files_results if r.success)
-                files_errors = sum(1 for _name, r in files_results if not r.success)
-
-                if files_errors > 0:
-                    print("\n" + colors.info(_("Total files")) + ": " + colors.success(f'{total_files:,}') + " " + _("in {elapsed} ({errors} errors)").format(elapsed=format_elapsed(files_elapsed), errors=colors.error(str(files_errors))))
-                else:
-                    print("\n" + colors.info(_("Total files")) + ": " + colors.success(f'{total_files:,}') + " " + _("in {elapsed}").format(elapsed=format_elapsed(files_elapsed)))
-            finally:
-                files_sync_lock.release()
 
         return 1 if errors else 0
 
@@ -1462,24 +1310,10 @@ def cmd_media_set(args, db: 'PackageDatabase') -> int:
 
     require_privileges(action_id="org.mageia.urpm.media-manage")
 
-    # Handle --all option for sync_files
-    use_all = getattr(args, 'all', False)
-    sync_files = getattr(args, 'sync_files', None)
-
-    if use_all:
-        # --all only works with --sync-files / --no-sync-files for now
-        if sync_files is None:
-            print(colors.error(_("--all requires --sync-files or --no-sync-files")))
-            return 1
-
-        count = db.set_all_media_sync_files(sync_files, enabled_only=True)
-        status = "enabled" if sync_files else "disabled"
-        print(colors.success(_("sync_files {status} on {count} media").format(status=status, count=count)))
-        return 0
-
-    # Normal mode: require media name
+    # ``name`` is now mandatory (argparse enforces it); kept here for
+    # safety only.
     if not args.name:
-        print(colors.error(_("Media name required (or use --all with --sync-files)")))
+        print(colors.error(_("Media name required")))
         return 1
 
     media = db.get_media(args.name)
@@ -1537,15 +1371,9 @@ def cmd_media_set(args, db: 'PackageDatabase') -> int:
     if priority is not None:
         changes.append(f"priority: {priority}")
 
-    # Handle sync_files option
-    sync_files = None
-    if getattr(args, 'sync_files', None) is not None:
-        sync_files = args.sync_files
-        changes.append(f"sync_files: {'yes' if sync_files else 'no'}")
-
     if not changes:
         print(colors.warning(_("No changes specified")))
-        print(_("Use --shared, --replication, --seeds, --quota, --retention, --priority, --sync-files, or --no-sync-files"))
+        print(_("Use --shared, --replication, --seeds, --quota, --retention or --priority"))
         return 1
 
     # Apply mirror settings
@@ -1567,10 +1395,6 @@ def cmd_media_set(args, db: 'PackageDatabase') -> int:
             (priority, media['id'])
         )
         db.conn.commit()
-
-    # Apply sync_files
-    if sync_files is not None:
-        db.set_media_sync_files(args.name, sync_files)
 
     print(colors.success(_("Updated '{name}':").format(name=args.name)))
     for change in changes:
