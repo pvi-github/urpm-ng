@@ -544,7 +544,7 @@ class HdlistWriter():
         self.coff += toc_length
         toc_header = b"cz[0"
         toc_footer = b"0]cz"
-        toc_str += pack(b">4s4i40s4s", toc_header, len(self.dir), len(self.symlink), len(self.files), toc_length, self.uncompress, toc_footer)
+        toc_str += pack(">4s4i40s4s", toc_header, len(self.dir), len(self.symlink), len(self.files), toc_length, self.uncompress, toc_footer)
         self.handle.seek(self.coff, os.SEEK_SET)
         self.handle.write(toc_str)
         self.toc_f_count = len(self.files)
