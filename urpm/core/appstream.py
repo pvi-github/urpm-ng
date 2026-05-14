@@ -662,15 +662,17 @@ class AppStreamManager:
             # ── Case 2 : no metainfo file → AppStream génération ──
             # print("  → No metainfo file found, generating AppStream XML.")
 
-            generated_path = self._generate_appstream_xml(
-                metadata,
-                pkg_stem=rpm_path.stem,
-                bin_files=bin_files,
-                dest_dir=cache_dir / rpm_path.stem,
-                desktop_info=desktop_info,
-                icon_path=icon_path,
-            )
-            pkg_result["generated"] = generated_path
+            try:
+                pkg_result["generated"] = self._generate_appstream_xml(
+                    metadata,
+                    pkg_stem=rpm_path.stem,
+                    bin_files=bin_files,
+                    dest_dir=cache_dir / rpm_path.stem,
+                    desktop_info=desktop_info,
+                    icon_path=icon_path,
+                )
+            except Exception as e:
+                logging.warning(f"Failed to generate AppStream XML for {metadata.name} : {str(e)}")
         pkg_result["sha256"] = current_sha
         self.results[rpm_name] = pkg_result
         return pkg_result
