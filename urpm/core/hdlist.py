@@ -527,15 +527,14 @@ class HdlistWriter():
         toc_str = b""
         for entry in self.dir:
             toc_str += entry + b"\n"
-            toc_length += len(entry + "\n")
+            toc_length += len(entry) + 1   # count for one \n
         for entry, link in self.symlink.items():
             toc_str += entry + b"\n" + link + b"\n"
-            toc_length += len(entry + "\n" + link + "\n")
+            toc_length += len(entry) + len(link) + 2   # count for 2 \n
         for entry in sorted(self.files.keys()):
-            toc_length += len(entry + "\n")
+            toc_length += len(entry) + 1   # count for one \n
         for entry in sorted(self.files.keys()):
             coff, csize, off, size = self.files[entry].values()
-            print(entry, coff, csize, off, size)
             toc_str += entry.encode("utf-8") + b"\n"
             toc_sizes_offsets += pack(">4i", coff, csize, off, size)
             toc_length += len(pack(">4i", coff, csize, off, size))
