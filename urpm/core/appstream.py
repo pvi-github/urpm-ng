@@ -683,7 +683,7 @@ class AppStreamManager:
         output_path: Path,
         *,
         compression_filter: str = 'xz -7',
-    ) -> int:
+    ) -> int | None:
         """Build an AppStream catalog from cached metainfo files.
 
         Collects all ``*.xml`` files from *cache_dir*, parses each into
@@ -706,7 +706,7 @@ class AppStreamManager:
         xml_files = list(self._iter_xml_files(cache_dir))
         if not xml_files:
             print("\n⚠  No XML file found in cache, catalogue not generated.")
-            return None, None
+            return None
 
         print(f"\n{'─' * 52}")
         print(f"CATALOG — assembling {len(xml_files)} XML file(s)")
@@ -731,7 +731,7 @@ class AppStreamManager:
 
         if ok_count == 0:
             print("⚠  No valid components, catalog not generated.")
-            return None, None
+            return None
 
         tree = ET.ElementTree(components_el)
         ET.indent(tree, space="  ", level=0)
@@ -756,6 +756,7 @@ class AppStreamManager:
         if format == "xz":
             with lzma.open(output_path, 'wt') as f:
                 f.write(final_xml)
+        return ok_count
 
     # ─────────────────────────────────────────────
     # RPM extraction
@@ -1226,29 +1227,6 @@ class AppStreamManager:
 
         print(f"  ⚠  No <component> in {xml_file.name}, ignored.")
         return None
-
-    def build_appstream_catalog(self, cache_path: Path) -> tuple[Path | None, Path | None]:
-        """
-        Concatenate all .appdata.xml / .metainfo.xml files from cache
-        in one file `appstream.xml`, then compress it in `appstream.xml.gz`.
-
-        The produced file follows the structure expected by tools
-        AppStream (appstreamcli, GNOME Software, KDE Discover...):
-
-            <components version="0.15" origin="local">
-            <component type="...">…</component>
-            …
-            </components>
-
-        The catalog is always regenerated from files present in
-        cache, including those from packages not modified in this run.
-
-        Args:
-            cache_path: Cache directory (search root and destination)
-
-        Returns:
-            Tuple (xml_path, gz_path), or (None, None) if nothing to catalog.
-        """
 
     # ─────────────────────────────────────────────
     # Desktop file parsing and icon extraction
