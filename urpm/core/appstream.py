@@ -539,7 +539,7 @@ class AppStreamManager:
 
     # ─── Generation API (used by urpm.genmedia) ──────────────
 
-    def extract_from_rpm(self, metadata, cache_dir: Path, force: bool = False) -> Optional[str]:
+    def extract_from_rpm(self, metadata, cache_dir: Path, state_sha256: str, force: bool = False) -> Optional[str]:
         """Extract AppStream metainfo XML from a single RPM.
 
         Looks for embedded ``/usr/share/metainfo/*.metainfo.xml`` or
@@ -557,6 +557,12 @@ class AppStreamManager:
             Path to the cached metainfo XML file, or None on failure.
         """
 
+        pkg_result = {"extracted": [], "generated": None, "error": None, "skipped": False}
+        # SHA-256 is already computed on hdr.unload() in add_pkg()
+        pkg_result["sha256"] = metadata.header_sha256
+        if state_sha256 == pkg_result["sha256"] and not force:
+            pkg_result["skipped"] = True
+            return pkg_result
         rpm_name = os.path.basename(metadata.filename)
         # package_info = self.synthesis[rpm_name]
         rpm_path = cache_dir / rpm_name
@@ -639,9 +645,6 @@ class AppStreamManager:
         if force and pkg_cache.exists():
             shutil.rmtree(pkg_cache)
 
-        pkg_result = {"extracted": [], "generated": None, "error": None}
-        # SHA-256 is already computed on hdr.unload() in add_pkg()
-        pkg_result["sha256"] = metadata.header_sha256
         if metainfo_targets:
             # ── Case 1 : embedded metainfo files → extraction ───────
             print(f"  → {len(metainfo_targets)} metainfo file(s)"
@@ -672,7 +675,7 @@ class AppStreamManager:
                     icon_path=icon_path,
                 )
             except Exception as e:
-                logging.warning(f"Failed to generate AppStream XML for {metadata.name} : {str(e)}")
+                logging.warning(f"Failed to generate AppStream XML for {metadata.name}: {str(e)}")
         self.results[rpm_name] = pkg_result
         return pkg_result
 
