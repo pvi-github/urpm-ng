@@ -83,7 +83,7 @@ class MediaGenerator:
         xml_info_filter: str = '.lzma:xz -7',
         versioned: bool = False,
         allow_empty: bool = False,
-        force = False,
+        force: bool = False,
     ) -> GenerateResult:
         """Generate media metadata files.
 
@@ -213,11 +213,6 @@ class MediaGenerator:
                 if force:
                     print("⚡ Force mode: all packages will be re-extracted.\n")
 
-                results   = {}   # packages processed in this execution
-                skipped   = []   # packages skipped (already up to date)
-                generated = []   # packages for which XML was generated (no embedded)
-                errors    = []   # packages with errors
-
                 # AppStreamManager needs a db instance, but for generation
                 # from RPM dir we use extract_from_rpm + build_catalog
                 # which don't need the database.
@@ -225,18 +220,23 @@ class MediaGenerator:
                 # Loading persistent state
                 state = appstream_mgr._load_state()
                 for pkg in packages:
-                    pkg_result = appstream_mgr.extract_from_rpm(pkg, cache_dir, force=force)
-                    # ── Mise à jour de l'état ────────────────────────────────
                     rpm_name = os.path.basename(pkg.filename)
-                    entry = state.get(rpm_name, {})
-                    entry.update({
-                        "sha256":       pkg_result["sha256"],
-                        "extracted":    pkg_result["extracted"],
-                        "generated":    pkg_result["generated"],
-                        "processed_at": appstream_mgr._now_iso(),
-                    })
-                    state[rpm_name] = entry
-                    appstream_mgr._save_state(state)
+                    pkg_result = appstream_mgr.extract_from_rpm(
+                                    pkg, cache_dir,
+                                    state.get(rpm_name, {}).get("sha256"),
+                                    force=force,
+                                    )
+                    # ── Mise à jour de l'état ────────────────────────────────
+                    if not pkg_result["skipped"]:
+                        entry = state.get(rpm_name, {})
+                        entry.update({
+                            "sha256":       pkg_result["sha256"],
+                            "extracted":    pkg_result["extracted"],
+                            "generated":    pkg_result["generated"],
+                            "processed_at": appstream_mgr._now_iso(),
+                        })
+                        state[rpm_name] = entry
+                        appstream_mgr._save_state(state)
                 as_filename = f'appstream.xml{xml_ext}'
                 as_path = tmp_dir / as_filename
                 appstream_mgr.build_catalog(
