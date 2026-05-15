@@ -157,7 +157,7 @@ class RpmScanner:
             conflicts,
             obsoletes,
             suggests,
-            rpm.files(hdr),  # Full paths of files owned by this RPM.  Get files in the RPM package
+            [pkg.name for pkg in rpm.files(hdr)],  # Full paths of files owned by this RPM.  Get files in the RPM package
             changelog,
             header_bytes,
             hashlib.sha256(header_bytes).hexdigest(),  # SHA-256 hex digest of header_bytes, for incremental mode

@@ -560,21 +560,19 @@ class AppStreamManager:
         rpm_name = os.path.basename(metadata.filename)
         # package_info = self.synthesis[rpm_name]
         rpm_path = cache_dir / rpm_name
-        # SHA-256 is already computed on hdr.unload() in add_pkg()
-        current_sha = metadata.header_sha256
         file_list = metadata.files
         # ── Filtrage metainfo ──────────────────────────────────────────
         metainfo_targets = [
             f for f in file_list
-            if f.dirname.startswith(self.METAINFO_PREFIX)
-            and f.dirname.endswith(self.METAINFO_SUFFIXES)
+            if f.startswith(self.METAINFO_PREFIX)
+            and f.endswith(self.METAINFO_SUFFIXES)
         ]
 
         # ── Filtrage /usr/bin ──────────────────────────────────────────
         bin_files = [
             f for f in file_list
-            if f.dirname.startswith(self.BIN_PREFIX)
-            and not f.dirname.endswith("/")   # exclude directory itself
+            if f.startswith(self.BIN_PREFIX)
+            and not f.endswith("/")   # exclude directory itself
         ]
         if bin_files:
             print(f"  → {len(bin_files)} /usr/bin binary(ies): "
@@ -589,9 +587,9 @@ class AppStreamManager:
         ]
 
         desktop_files = [
-            f.dirname for f in file_list
-            if any(f.dirname.startswith(path) for path in DESKTOP_PATHS)
-            and f.dirname.endswith(".desktop")
+            f for f in file_list
+            if any(f.startswith(path) for path in DESKTOP_PATHS)
+            and f.endswith(".desktop")
         ]
 
         desktop_info = None
@@ -600,7 +598,7 @@ class AppStreamManager:
             # Parse first found .desktop file
             with tempfile.TemporaryDirectory() as tmp_dir:
                 try:
-                    self._extract_rpm_to_dir(rpm_path, tmp_dir)
+                    self._extract_rpm_to_dir(Path(metadata.filename), tmp_dir)
                     first_desktop = desktop_files[0].lstrip("/")
                     desktop_path = Path(tmp_dir) / first_desktop
                     if desktop_path.exists():
@@ -633,7 +631,7 @@ class AppStreamManager:
                 # Calculate app_id to name the icon
                 app_id = self._sanitize_id(rpm_path.stem)
                 icon_path = self._extract_icon(
-                    rpm_path, icon_in_rpm, app_id, cache_dir
+                    Path(metadata.filename), icon_in_rpm, app_id, cache_dir
                 )
 
         # ── Cleaning previous directory in mode forced ───────
@@ -642,6 +640,8 @@ class AppStreamManager:
             shutil.rmtree(pkg_cache)
 
         pkg_result = {"extracted": [], "generated": None, "error": None}
+        # SHA-256 is already computed on hdr.unload() in add_pkg()
+        pkg_result["sha256"] = metadata.header_sha256
         if metainfo_targets:
             # ── Case 1 : embedded metainfo files → extraction ───────
             print(f"  → {len(metainfo_targets)} metainfo file(s)"
@@ -673,7 +673,6 @@ class AppStreamManager:
                 )
             except Exception as e:
                 logging.warning(f"Failed to generate AppStream XML for {metadata.name} : {str(e)}")
-        pkg_result["sha256"] = current_sha
         self.results[rpm_name] = pkg_result
         return pkg_result
 
