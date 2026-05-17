@@ -117,9 +117,17 @@ class MediaMixin:
             conn.commit()
 
     def update_media_files_xml_md5(self, media_id: int, md5: str):
-        """Record the MD5 of the freshly fetched files.xml.lzma so the
-        next ``urpm media update`` can skip the download when MD5SUM
-        reports the same hash.  Thread-safe."""
+        """Record the MD5 of the freshly fetched ``files.xml.lzma``.
+
+        The next ``urpm media update`` compares ``MD5SUM`` against
+        this value to decide whether to refresh the file or skip.
+        Thread-safe.
+
+        Args:
+            media_id: Numeric media id.
+            md5: Hex-encoded MD5 of the downloaded file, as published
+                in the media's ``MD5SUM`` index.
+        """
         conn = self._get_connection()
         with self._lock:
             conn.execute(
