@@ -2075,6 +2075,88 @@ class PackageDatabase(
 
         return pkg
 
+    def get_package_exact(
+        self,
+        name: str,
+        version: str,
+        release: str,
+        arch: str,
+        epoch: Optional[int] = None,
+    ) -> Optional[Dict]:
+        """Look up the exact package row matching all NEVRA components.
+
+        Unlike :meth:`get_package` (which returns the semantically latest
+        version of ``name`` for ``arch``) and :meth:`get_package_by_nevra`
+        (which matches a single textual NEVRA string), this method takes
+        the components separately, so it is immune to NEVRA-format
+        inconsistencies. In particular, the ``packages.nevra`` column
+        produced by Mageia synthesis is stored **without** the epoch
+        prefix (e.g. ``libreoffice-core-26.2.3.2-1.mga10.x86_64``) while
+        the resolver's :attr:`PackageAction.nevra` includes ``"<E>:"``
+        when ``E > 0`` — a textual match would miss every package with
+        a non-zero epoch.
+
+        When ``epoch`` is None, the epoch column is not constrained:
+        the caller does not know or does not care about it. When
+        ``epoch`` is provided, it is matched exactly against the
+        stored column (``epoch INTEGER DEFAULT 0`` in the schema, so
+        absent / ``0`` rows match ``epoch=0``).
+
+        Args:
+            name: Package name (case-insensitive lookup via ``name_lower``).
+            version: Exact version string (e.g. ``"26.2.3.2"``).
+            release: Exact release string (e.g. ``"1.mga10"``).
+            arch: Exact arch (``"x86_64"``, ``"i686"``, ``"noarch"`` ...).
+            epoch: Optional epoch (integer). When None, not constrained.
+
+        Returns:
+            A dict describing the package (with deps populated) or
+            ``None`` when no row matches. Result shape matches
+            :meth:`get_package` / :meth:`get_package_by_nevra`
+            (``requires``, ``provides``, ``conflicts``, ``obsoletes``,
+            ``recommends``, ``suggests``, ``installed`` keys populated).
+        """
+        # Component-based lookup: deliberately not joined against the
+        # ``media`` version filter. The caller already knows the EVR they
+        # want — typically because it came from a libsolv decision — and
+        # version-mode filtering would only mask a legitimate match when
+        # the row sits in a medium that is filtered out by the current
+        # ``--accept-versions`` config.
+        if epoch is None:
+            cursor = self.conn.execute("""
+                SELECT * FROM packages
+                WHERE name_lower = ?
+                  AND version = ?
+                  AND release = ?
+                  AND arch = ?
+                LIMIT 1
+            """, (name.lower(), version, release, arch))
+        else:
+            cursor = self.conn.execute("""
+                SELECT * FROM packages
+                WHERE name_lower = ?
+                  AND version = ?
+                  AND release = ?
+                  AND arch = ?
+                  AND epoch = ?
+                LIMIT 1
+            """, (name.lower(), version, release, arch, int(epoch)))
+
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        pkg = dict(row)
+        pkg['requires'] = self._get_deps(pkg['id'], 'requires')
+        pkg['provides'] = self._get_deps(pkg['id'], 'provides')
+        pkg['conflicts'] = self._get_deps(pkg['id'], 'conflicts')
+        pkg['obsoletes'] = self._get_deps(pkg['id'], 'obsoletes')
+        pkg['recommends'] = self._get_deps(pkg['id'], 'recommends')
+        pkg['suggests'] = self._get_deps(pkg['id'], 'suggests')
+        pkg['installed'] = self._is_installed(pkg['name'])
+
+        return pkg
+
     _installed_cache: Optional[set] = None
 
     def _get_installed_names(self) -> set:

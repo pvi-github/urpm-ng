@@ -1027,15 +1027,31 @@ class OrphansMixin:
 
         ts = rpm.TransactionSet(self.root or '/')
 
-        # ``upgraded_names`` and ``installed_names`` are name → arch maps:
-        # the post-state synthesis below queries
-        # :meth:`PackageDatabase.get_package` for each one and we must
-        # pin the arch hint, otherwise on a multi-arch system (e.g.
-        # x86_64 host + 32-bit media) SQLite may return the ``i686``
-        # row of a multi-arch package.  The sonames in its ``Requires``
-        # (``libfoo.so.2()`` without ``(64bit)``) then fail to match the
-        # capabilities provided by 64-bit packages, leaving providers
-        # erroneously flagged as orphans (see ntfs-3g / lib64fuse2 bug).
+        # ``upgraded_names`` and ``installed_names`` are name → action maps:
+        # the post-state synthesis below needs the **exact NEVRA** that
+        # libsolv selected, not just an arch hint.  Two reasons:
+        #
+        # 1. On a multi-arch system, ``arch`` alone is not enough to
+        #    distinguish the i686 vs x86_64 vs noarch row, but
+        #    :meth:`PackageDatabase.get_package` already accepts the
+        #    arch filter.  The remaining hazard is **version**.
+        # 2. When the DB holds several versions of the same N for the
+        #    same arch (e.g. a mga9 Updates medium that carries both
+        #    ``libreoffice-core-7.6.7.2`` and ``libreoffice-core-24.2.7.2``)
+        #    and libsolv decides on a non-latest one (Hold, Conflict,
+        #    user pin), ``get_package`` returns the *semantically
+        #    latest* row, which is **not** what libsolv is installing.
+        #    Reading the requires of the wrong row produces a stale
+        #    reverse-dep graph and flags surviving providers as orphans.
+        #
+        # The fix is to pin the post-state lookup to the action's exact
+        # ``(name, version, release, arch, epoch)`` via
+        # :meth:`PackageDatabase.get_package_exact` (with a defensive
+        # fallback on :meth:`get_package` for the rare case where the
+        # DB no longer holds the row libsolv saw — e.g. a media refresh
+        # mid-transaction).  Keeping the full action object also lets
+        # the helper log which fallback fired under ``--debug orphans``.
+        #
         # ``in`` and iteration semantics on a dict mirror those on a
         # set of names, so other usages downstream are unaffected.
         upgraded_names: dict = {}
@@ -1044,9 +1060,9 @@ class OrphansMixin:
 
         for action in all_actions:
             if action.action == TransactionType.UPGRADE:
-                upgraded_names[action.name] = action.arch
+                upgraded_names[action.name] = action
             elif action.action == TransactionType.INSTALL:
-                installed_names[action.name] = action.arch
+                installed_names[action.name] = action
             elif action.action == TransactionType.REMOVE:
                 removed_names.add(action.name)
 
@@ -1187,6 +1203,39 @@ class OrphansMixin:
                 return f"{epoch_int}:{version}-{release}"
             return f"{version}-{release}"
 
+        def _lookup_post_pkg(action):
+            """Return the synthesis row for the exact NEVRA libsolv chose.
+
+            Parses :attr:`PackageAction.evr` into ``(epoch, version,
+            release)`` and queries
+            :meth:`PackageDatabase.get_package_exact`. Falls back to
+            :meth:`PackageDatabase.get_package` (semantically-latest row
+            for the same name+arch) when the exact row is not found —
+            which should be rare and indicates a DB/decision desync
+            (e.g. a medium was just refreshed and the old row dropped).
+            The fallback is logged at WARNING level so ``--debug
+            orphans`` users see it without recompiling.
+            """
+            from urpm.core.synthesis import parse_evr
+            epoch, version, release = parse_evr(action.evr)
+            pkg = self.db.get_package_exact(
+                action.name, version, release, action.arch, epoch=epoch,
+            )
+            if pkg is not None:
+                return pkg
+            # Defensive fallback. The semantically-latest row may carry
+            # a slightly different Requires set than the one libsolv
+            # picked, so we log loudly: this is the diagnostic signal
+            # that the orphan detector is reading a *different* version
+            # than the one being installed.
+            logger.warning(
+                "find_upgrade_orphans: exact row not found for %s "
+                "(evr=%r arch=%s); falling back to latest semantic row "
+                "via get_package — orphan graph may be slightly stale",
+                action.name, action.evr, action.arch,
+            )
+            return self.db.get_package(action.name, arch=action.arch)
+
         # Build S_pre (current rpmdb) and S_post (rpmdb + upgrades applied,
         # removals excluded, new installs added) in a single rpmdb pass.
         #
@@ -1224,7 +1273,7 @@ class OrphansMixin:
                 continue
 
             if name in upgraded_names:
-                new_pkg = self.db.get_package(name, arch=upgraded_names[name])
+                new_pkg = _lookup_post_pkg(upgraded_names[name])
                 new_reqs, new_provs, new_supps = _collect_from_synthesis(new_pkg)
                 new_provs.append((name, _pkg_self_evr(new_pkg)))
                 post_state[name] = {
@@ -1242,7 +1291,7 @@ class OrphansMixin:
         for name in installed_names:
             if name in post_state:
                 continue
-            new_pkg = self.db.get_package(name, arch=installed_names[name])
+            new_pkg = _lookup_post_pkg(installed_names[name])
             reqs, provs, supps = _collect_from_synthesis(new_pkg)
             provs.append((name, _pkg_self_evr(new_pkg)))
             post_state[name] = {

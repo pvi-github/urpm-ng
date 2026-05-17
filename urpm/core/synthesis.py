@@ -49,6 +49,49 @@ def parse_nevra(nevra: str) -> Tuple[str, str, str, str]:
     return name, version, release, arch
 
 
+def parse_evr(evr: str) -> Tuple[Optional[int], str, str]:
+    """Parse an EVR string of the form ``[epoch:]version-release``.
+
+    Used to extract individual components from
+    :attr:`PackageAction.evr` so callers can match a row in the
+    ``packages`` table by separate columns rather than by a textual
+    NEVRA whose epoch-prefix convention can drift (the database stores
+    NEVRA without the epoch prefix while libsolv-derived actions
+    include it whenever ``epoch > 0``).
+
+    Args:
+        evr: EVR string. ``"1.0-1.mga9"``, ``"1:24.2.7.2-1.4.mga9"``,
+            an empty string or a version-only string are all accepted.
+
+    Returns:
+        A triple ``(epoch, version, release)`` where ``epoch`` is
+        ``None`` when no ``epoch:`` prefix is present (i.e. the
+        package has no explicit epoch, equivalent to 0 in RPM
+        semantics), an ``int`` otherwise. ``version`` and ``release``
+        are strings; ``release`` is empty when the input lacks a
+        ``-release`` suffix.
+    """
+    if ':' in evr:
+        epoch_str, vr = evr.split(':', 1)
+        try:
+            epoch: Optional[int] = int(epoch_str)
+        except ValueError:
+            # Malformed epoch — treat as unspecified rather than 0,
+            # so the caller's lookup is not silently restricted.
+            epoch = None
+    else:
+        epoch = None
+        vr = evr
+    if '-' in vr:
+        version, release = vr.rsplit('-', 1)
+    else:
+        # Malformed EVR — version-only (or empty). Use as-is, empty
+        # release. The caller's exact-match query will simply miss.
+        version = vr
+        release = ''
+    return (epoch, version, release)
+
+
 def parse_dependency(dep: str) -> Tuple[str, str, str]:
     """Parse a dependency string with optional version constraint.
 

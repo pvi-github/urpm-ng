@@ -740,3 +740,214 @@ class TestRpmVersionCollation:
         assert pkg is not None
         assert pkg['epoch'] == 1
         assert pkg['version'] == '1.0'
+
+
+# ---------------------------------------------------------------------------
+# Component-based exact NEVRA lookup
+# ---------------------------------------------------------------------------
+
+class TestGetPackageExact:
+    """Tests for :meth:`PackageDatabase.get_package_exact`.
+
+    The orphan detector uses this method to recover the **exact** row
+    libsolv chose to install (e.g. a Held older version, or a pinned
+    EVR), instead of the semantically-latest row that
+    :meth:`get_package` would return. Because the ``packages.nevra``
+    column is stored without the ``epoch:`` prefix while
+    :attr:`PackageAction.nevra` carries it for ``epoch > 0``, the
+    lookup must go through separate columns — that is the contract
+    these tests pin.
+    """
+
+    def _import_libreoffice_mga9_pair(self, db):
+        """Insert two libreoffice-core versions at the same arch."""
+        media_id = db.add_media(
+            name="Updates",
+            short_name="updates",
+            mageia_version="9",
+            architecture="x86_64",
+            relative_path="core/updates",
+        )
+        packages = [
+            {
+                'name': 'libreoffice-core',
+                'version': '7.6.7.2',
+                'release': '1.mga9',
+                'epoch': 0,
+                'arch': 'x86_64',
+                'nevra': 'libreoffice-core-7.6.7.2-1.mga9.x86_64',
+                'provides': ['libreoffice-core'],
+                'requires': [],
+                'filesize': 30000000,
+            },
+            {
+                'name': 'libreoffice-core',
+                'version': '24.2.7.2',
+                'release': '1.4.mga9',
+                'epoch': 0,
+                'arch': 'x86_64',
+                'nevra': 'libreoffice-core-24.2.7.2-1.4.mga9.x86_64',
+                'provides': ['libreoffice-core', 'libzxcvbn.so.0()(64bit)'],
+                'requires': ['libzxcvbn.so.0()(64bit)'],
+                'filesize': 30000000,
+            },
+        ]
+        db.import_packages(iter(packages), media_id=media_id)
+        return media_id
+
+    def test_get_package_exact_matches_all_components(self, db):
+        """Two versions of the same N+arch — exact lookup picks the one
+        whose ``(version, release)`` matches, ignoring which is newer.
+
+        Pins the contract that ``get_package_exact`` is **not**
+        version-sorting: it is a deterministic key→row lookup, the
+        opposite of ``get_package``. The orphan detector relies on
+        this when libsolv chooses a non-latest version.
+        """
+        self._import_libreoffice_mga9_pair(db)
+
+        # New row — exact lookup returns the new branch.
+        pkg = db.get_package_exact(
+            'libreoffice-core', '24.2.7.2', '1.4.mga9', 'x86_64',
+        )
+        assert pkg is not None
+        assert pkg['version'] == '24.2.7.2'
+        assert pkg['release'] == '1.4.mga9'
+        assert pkg['nevra'] == 'libreoffice-core-24.2.7.2-1.4.mga9.x86_64'
+
+        # Old row — exact lookup returns the legacy branch, even though
+        # it is semantically older than the other row.
+        pkg = db.get_package_exact(
+            'libreoffice-core', '7.6.7.2', '1.mga9', 'x86_64',
+        )
+        assert pkg is not None
+        assert pkg['version'] == '7.6.7.2'
+        assert pkg['release'] == '1.mga9'
+
+    def test_get_package_exact_returns_None_on_no_match(self, db):
+        """No row with the requested ``(N,V,R,A)`` ⇒ ``None``."""
+        self._import_libreoffice_mga9_pair(db)
+
+        # Version exists but release does not.
+        assert db.get_package_exact(
+            'libreoffice-core', '24.2.7.2', '999.mga9', 'x86_64',
+        ) is None
+
+        # Package name does not exist at all.
+        assert db.get_package_exact(
+            'no-such-pkg', '1.0', '1.mga9', 'x86_64',
+        ) is None
+
+        # Right NVR but wrong arch.
+        assert db.get_package_exact(
+            'libreoffice-core', '24.2.7.2', '1.4.mga9', 'i686',
+        ) is None
+
+    def test_get_package_exact_with_epoch_matches_exactly(self, db):
+        """Epoch filter: when provided, must match exactly; when None,
+        any epoch passes.
+
+        This is the contract that fixes the rolled-back B-attempt: a
+        textual NEVRA comparison breaks for ``epoch > 0`` packages
+        because the DB stores the NEVRA without the ``E:`` prefix.
+        Component-based lookup with an explicit epoch sidesteps the
+        string-format question entirely.
+        """
+        media_id = db.add_media(
+            name="Updates",
+            short_name="updates",
+            mageia_version="9",
+            architecture="x86_64",
+            relative_path="core/updates",
+        )
+        packages = [
+            {
+                'name': 'epochpkg',
+                'version': '1.0',
+                'release': '1.mga9',
+                'epoch': 1,
+                'arch': 'x86_64',
+                # Mageia synthesis stores NEVRA without epoch prefix —
+                # the very inconsistency we are guarding against.
+                'nevra': 'epochpkg-1.0-1.mga9.x86_64',
+                'provides': ['epochpkg'],
+                'requires': [],
+                'filesize': 1000,
+            },
+        ]
+        db.import_packages(iter(packages), media_id=media_id)
+
+        # Exact epoch match.
+        pkg = db.get_package_exact(
+            'epochpkg', '1.0', '1.mga9', 'x86_64', epoch=1,
+        )
+        assert pkg is not None
+        assert pkg['epoch'] == 1
+
+        # Wrong epoch ⇒ no match (the row has epoch=1, not 0).
+        assert db.get_package_exact(
+            'epochpkg', '1.0', '1.mga9', 'x86_64', epoch=0,
+        ) is None
+
+        # Unspecified epoch ⇒ matches regardless of the stored value.
+        pkg = db.get_package_exact(
+            'epochpkg', '1.0', '1.mga9', 'x86_64', epoch=None,
+        )
+        assert pkg is not None
+        assert pkg['epoch'] == 1
+
+    def test_get_package_exact_arch_constraint(self, db):
+        """``arch`` is matched exactly (no ``noarch`` fallback).
+
+        Unlike :meth:`get_package` (which accepts ``arch IN (?,
+        'noarch')`` as a compatibility filter for multi-arch systems),
+        :meth:`get_package_exact` is a strict key lookup: the action
+        already knows which arch libsolv selected, and a ``noarch`` row
+        with the same NVR is a **different** package, not a fallback.
+        """
+        media_id = db.add_media(
+            name="Updates",
+            short_name="updates",
+            mageia_version="9",
+            architecture="x86_64",
+            relative_path="core/updates",
+        )
+        packages = [
+            {
+                'name': 'multiarch',
+                'version': '1.0',
+                'release': '1.mga9',
+                'epoch': 0,
+                'arch': 'x86_64',
+                'nevra': 'multiarch-1.0-1.mga9.x86_64',
+                'provides': ['multiarch'],
+                'requires': [],
+                'filesize': 1000,
+            },
+            {
+                'name': 'multiarch',
+                'version': '1.0',
+                'release': '1.mga9',
+                'epoch': 0,
+                'arch': 'noarch',
+                'nevra': 'multiarch-1.0-1.mga9.noarch',
+                'provides': ['multiarch'],
+                'requires': [],
+                'filesize': 1000,
+            },
+        ]
+        db.import_packages(iter(packages), media_id=media_id)
+
+        pkg = db.get_package_exact('multiarch', '1.0', '1.mga9', 'x86_64')
+        assert pkg is not None
+        assert pkg['arch'] == 'x86_64'
+
+        pkg = db.get_package_exact('multiarch', '1.0', '1.mga9', 'noarch')
+        assert pkg is not None
+        assert pkg['arch'] == 'noarch'
+
+        # i686 was not imported, so the strict lookup misses — even
+        # though a noarch row exists.
+        assert db.get_package_exact(
+            'multiarch', '1.0', '1.mga9', 'i686',
+        ) is None

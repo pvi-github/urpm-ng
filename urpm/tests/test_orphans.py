@@ -15,6 +15,17 @@ class FakeResolver:
         # OrphansMixin uses self.root
         self.root = str(tmpdir)
         self.db = MagicMock()
+        # ``find_upgrade_orphans`` looks up post-state synthesis rows
+        # via ``db.get_package_exact(name, version, release, arch,
+        # epoch=...)``. For tests that only stub ``db.get_package``
+        # (the historical API), default ``get_package_exact`` to
+        # delegate to ``get_package(name, arch=arch)``. Tests that need
+        # to exercise the exact-vs-latest distinction explicitly can
+        # still override ``db.get_package_exact.side_effect``.
+        self.db.get_package_exact.side_effect = (
+            lambda name, version, release, arch, epoch=None:
+            self.db.get_package(name, arch=arch)
+        )
 
     # --- file helpers (from OrphansMixin) ---
 
@@ -994,3 +1005,365 @@ class TestOrphanCrossPathConsistency:
                 f"is_orphan({name})={is_orph} but "
                 f"find_all_orphans includes={in_set}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Exact-NEVRA post-state lookup (commit-A follow-up)
+#
+# These tests pin the contract that find_upgrade_orphans reads the
+# post-state requires of the **exact** version libsolv chose, not the
+# semantically-latest row that get_package would return.  The bug they
+# guard against is a class of false-positive orphans triggered when the
+# DB carries several versions of the same N+arch and the resolver picks
+# a non-latest one (Hold, Conflict, explicit pin) — reading the wrong
+# row's Requires set produces a stale reverse-dep graph, and surviving
+# providers are flagged orphan.
+# ---------------------------------------------------------------------------
+
+class TestFindUpgradeOrphansExactNevra:
+    """Pins for the ``get_package_exact`` integration in find_upgrade_orphans."""
+
+    def _run(self, resolver, headers, actions):
+        from urpm.core.resolver import TransactionType
+        with patch('urpm.core.resolution.orphans.rpm.TransactionSet') as ts_cls:
+            ts_cls.return_value.dbMatch.return_value = headers
+            return resolver.find_upgrade_orphans(actions), TransactionType
+
+    def test_libsolv_picks_non_latest_version_reads_requires_of_that_version(
+        self, resolver,
+    ):
+        """3 versions of libfoo in DB, libsolv selects 1.2 ⇒ orphan graph
+        must read **libfoo-1.2**'s requires, not libfoo-1.4's.
+
+        This is the headline regression: when the DB has multiple
+        versions of N+arch and libsolv selects a non-latest one (Hold,
+        Conflict, user pin via ``--prefer``), the orphan detector must
+        not fall back to "give me the latest" semantics. Without the
+        fix, libfoo-1.4's requires set is read against libfoo-1.2's
+        decision — its in-edges then credit the wrong providers, and
+        the provider satisfying libfoo-1.2's requires loses its edge
+        and is flagged orphan.
+
+        Scenario:
+          * pre-state: ``libfoo-1.0`` (no soname require), ``host``
+            (requires libfoo), and three potential helper providers
+            ``lib_for_v12`` / ``lib_for_v13`` / ``lib_for_v14``.
+          * post-state: libsolv chooses ``libfoo-1.2`` whose Requires
+            includes ``soname12``. Only ``lib_for_v12`` provides
+            ``soname12``; the other two providers must lose their
+            in-edge and be flagged orphan.
+
+        If the bug came back (``get_package_exact`` unused, or used
+        with wrong args), libfoo-1.4's requires (``soname14``) would
+        be read instead, ``lib_for_v14`` would keep its in-edge, and
+        ``lib_for_v12`` would lose its — asserts below catch both.
+        """
+        from urpm.core.resolver import TransactionType
+
+        # All three lib providers are unrequested; whichever one ends
+        # up edge-less is an orphan.
+        resolver._save_unrequested_packages(
+            {'lib_for_v12', 'lib_for_v13', 'lib_for_v14'}
+        )
+
+        # Per-version requires set: exactly one soname each.
+        libfoo_rows = {
+            ('1.2', '1.mga10'): {
+                'name': 'libfoo', 'epoch': 0,
+                'version': '1.2', 'release': '1.mga10',
+                'arch': 'x86_64',
+                'requires': ['soname12'],
+                'provides': ['libfoo[= 1.2-1.mga10]'],
+            },
+            ('1.3', '1.mga10'): {
+                'name': 'libfoo', 'epoch': 0,
+                'version': '1.3', 'release': '1.mga10',
+                'arch': 'x86_64',
+                'requires': ['soname13'],
+                'provides': ['libfoo[= 1.3-1.mga10]'],
+            },
+            ('1.4', '1.mga10'): {
+                'name': 'libfoo', 'epoch': 0,
+                'version': '1.4', 'release': '1.mga10',
+                'arch': 'x86_64',
+                'requires': ['soname14'],
+                'provides': ['libfoo[= 1.4-1.mga10]'],
+            },
+        }
+
+        # get_package_exact returns the exact row keyed by (V, R).
+        # epoch may be None (no ``E:`` prefix) — we don't constrain on it.
+        def fake_exact(name, version, release, arch, epoch=None):
+            if name != 'libfoo':
+                return None
+            return libfoo_rows.get((version, release))
+
+        # If the bug came back (the code falls through to get_package
+        # without an arch-aware exact lookup), it would read the
+        # **latest** row — return 1.4 deliberately so failure is loud.
+        def fake_latest(name, arch=None):
+            if name == 'libfoo':
+                return libfoo_rows[('1.4', '1.mga10')]
+            return None
+
+        resolver.db.get_package_exact.side_effect = fake_exact
+        resolver.db.get_package.side_effect = fake_latest
+
+        # Pre-state design: old libfoo requires ``soname14`` so
+        # ``lib_for_v14`` has an in-edge in S_pre and is NOT a
+        # pre-state orphan (the new-orphan spec excludes packages
+        # already orphan before the transaction). ``lib_for_v12`` and
+        # ``lib_for_v13`` are pre-state orphans and therefore excluded
+        # by clause 3 of the spec regardless of post-state — only
+        # ``lib_for_v14`` is a moving target.
+        headers = [
+            _fake_hdr('host', requires=['libfoo'], provides=['host']),
+            _fake_hdr(
+                'libfoo',
+                requires=['soname14'],
+                provides=['libfoo'],
+            ),
+            _fake_hdr(
+                'lib_for_v12',
+                provides=['lib_for_v12', 'soname12'],
+                provide_vers=['1-1', ''],
+            ),
+            _fake_hdr(
+                'lib_for_v13',
+                provides=['lib_for_v13', 'soname13'],
+                provide_vers=['1-1', ''],
+            ),
+            _fake_hdr(
+                'lib_for_v14',
+                provides=['lib_for_v14', 'soname14'],
+                provide_vers=['1-1', ''],
+            ),
+        ]
+        # Action says: upgrade libfoo TO version 1.2 — the non-latest.
+        actions = [
+            _make_action('libfoo', TransactionType.UPGRADE,
+                         evr='1.2-1.mga10', arch='x86_64'),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+
+        # Post-state requires read from libfoo-1.2 are ``[soname12]``.
+        # ``lib_for_v14`` had its sole in-edge through the old libfoo's
+        # ``soname14`` requirement; the new libfoo-1.2 does not need
+        # soname14, so lib_for_v14 becomes a new orphan.
+        #
+        # If the bug came back (orphan detector uses get_package and
+        # gets libfoo-1.4's row instead), libfoo-1.4 still requires
+        # soname14 in post-state, lib_for_v14 keeps its in-edge and
+        # is NOT flagged orphan — that is exactly the assert that
+        # fails when the regression is present.
+        orphan_names = {o.name for o in plan.removes}
+        assert 'lib_for_v14' in orphan_names, (
+            "lib_for_v14 must be flagged orphan: post-state libfoo-1.2 "
+            "no longer requires soname14, so its only in-edge is gone. "
+            "If this fails, find_upgrade_orphans is reading libfoo-1.4's "
+            "Requires (the get_package fallback) instead of libfoo-1.2's "
+            "— precisely the version-mismatch bug we are pinning."
+        )
+
+    def test_libreoffice_core_mga9_nevra_pin_keeps_lib64zxcvbn0(
+        self, resolver,
+    ):
+        """mga9 libreoffice-core: lib64zxcvbn0 must NOT be orphaned.
+
+        End-to-end regression for the original bug. The DB has two
+        ``libreoffice-core`` versions (``7.6.7.2-1.mga9`` legacy and
+        ``26.2.3.2-1.4.mga9`` new with ``epoch=1``). Libsolv decides on
+        the new one. The orphan detector must read the new version's
+        requires (which include the ``libzxcvbn.so.0()(64bit)``
+        soname), credit lib64zxcvbn0 with an in-edge, and keep it.
+
+        The action's ``evr`` includes the ``1:`` prefix, exercising
+        parse_evr + get_package_exact with a non-zero epoch — the case
+        that broke the B-attempt (textual NEVRA match missed because
+        the DB stores NEVRA without the epoch prefix).
+        """
+        from urpm.core.resolver import TransactionType
+
+        resolver._save_unrequested_packages({'lib64zxcvbn0'})
+
+        # Two libreoffice-core rows. The new one carries the soname
+        # require; the legacy one does not.
+        loc_rows = {
+            ('7.6.7.2', '1.mga9', None): {
+                'name': 'libreoffice-core', 'epoch': 0,
+                'version': '7.6.7.2', 'release': '1.mga9',
+                'arch': 'x86_64',
+                'requires': [],
+                'provides': ['libreoffice-core[= 7.6.7.2-1.mga9]'],
+            },
+            ('26.2.3.2', '1.4.mga9', 1): {
+                'name': 'libreoffice-core', 'epoch': 1,
+                'version': '26.2.3.2', 'release': '1.4.mga9',
+                'arch': 'x86_64',
+                'requires': ['libzxcvbn.so.0()(64bit)'],
+                'provides': [
+                    'libreoffice-core[= 1:26.2.3.2-1.4.mga9]',
+                ],
+            },
+        }
+
+        def fake_exact(name, version, release, arch, epoch=None):
+            if name != 'libreoffice-core':
+                return None
+            return loc_rows.get((version, release, epoch))
+
+        resolver.db.get_package_exact.side_effect = fake_exact
+        # Fallback never used in this scenario; configure it to raise
+        # to make sure the exact path is taken.
+        resolver.db.get_package.side_effect = AssertionError(
+            "find_upgrade_orphans should not fall back to get_package "
+            "when get_package_exact already returned a row"
+        )
+
+        headers = [
+            _fake_hdr(
+                'libreoffice-core',
+                provides=['libreoffice-core'],
+            ),
+            _fake_hdr(
+                'lib64zxcvbn0',
+                provides=['lib64zxcvbn0', 'libzxcvbn.so.0()(64bit)'],
+                provide_vers=['2.5.0-1.mga9', ''],
+            ),
+        ]
+        # Action carries the epoch-prefixed EVR — the very format that
+        # broke the B-attempt's textual NEVRA matcher.
+        actions = [
+            _make_action(
+                'libreoffice-core', TransactionType.UPGRADE,
+                evr='1:26.2.3.2-1.4.mga9', arch='x86_64',
+            ),
+        ]
+
+        plan, _ = self._run(resolver, headers, actions)
+
+        assert 'lib64zxcvbn0' not in {o.name for o in plan.removes}, (
+            "libreoffice-core-1:26.2.3.2 requires libzxcvbn.so.0()(64bit) "
+            "— lib64zxcvbn0 must be kept. If this fails, parse_evr or "
+            "get_package_exact is mishandling the epoch and the orphan "
+            "detector is reading a stale row."
+        )
+
+    def test_evr_with_epoch_correctly_parsed_and_matched(self, resolver):
+        """End-to-end: ``evr='1:24.2.7.2-1.4.mga9'`` parses to
+        ``(1, '24.2.7.2', '1.4.mga9')`` and reaches get_package_exact.
+
+        This is the unit pin for the parse_evr + get_package_exact
+        contract: the orphan detector must call get_package_exact with
+        exactly these components (no leftover ``1:`` in the version
+        field, no missing epoch), otherwise the DB lookup misses.
+        """
+        from urpm.core.resolver import TransactionType
+
+        # find_upgrade_orphans bails early when ``unrequested`` is empty
+        # (nothing could possibly be an orphan), so we seed a dummy
+        # unrequested package to reach the post-state lookup.
+        resolver._save_unrequested_packages({'dummy_unreq'})
+
+        captured = {}
+
+        def capturing_exact(name, version, release, arch, epoch=None):
+            captured['name'] = name
+            captured['version'] = version
+            captured['release'] = release
+            captured['arch'] = arch
+            captured['epoch'] = epoch
+            # Return a minimal valid row so the rest of the orphan
+            # logic does not blow up.
+            return {
+                'name': name, 'epoch': epoch or 0,
+                'version': version, 'release': release,
+                'arch': arch,
+                'requires': [], 'recommends': [],
+                'provides': [f'{name}[= {version}-{release}]'],
+            }
+
+        resolver.db.get_package_exact.side_effect = capturing_exact
+
+        headers = [
+            _fake_hdr('libreoffice-core', provides=['libreoffice-core']),
+        ]
+        actions = [
+            _make_action(
+                'libreoffice-core', TransactionType.UPGRADE,
+                evr='1:24.2.7.2-1.4.mga9', arch='x86_64',
+            ),
+        ]
+
+        self._run(resolver, headers, actions)
+
+        assert captured == {
+            'name': 'libreoffice-core',
+            'version': '24.2.7.2',
+            'release': '1.4.mga9',
+            'arch': 'x86_64',
+            'epoch': 1,
+        }, (
+            f"parse_evr/get_package_exact contract violation: {captured!r}"
+        )
+
+    def test_exact_miss_falls_back_to_name_lookup_and_warns(
+        self, resolver, caplog,
+    ):
+        """``get_package_exact`` returns None ⇒ fall back to
+        ``get_package`` and emit a WARNING-level log.
+
+        The fallback is the safety net for DB/decision desync (e.g. a
+        media refresh between solve and orphan-detect). It must not be
+        silent: a warning is the only diagnostic surface that
+        ``--debug orphans`` users see when the orphan graph is reading
+        a different version than the one libsolv selected.
+        """
+        import logging
+        from urpm.core.resolver import TransactionType
+
+        # Seed a dummy unrequested package so find_upgrade_orphans does
+        # not bail early before reaching the post-state lookup.
+        resolver._save_unrequested_packages({'dummy_unreq'})
+
+        # exact lookup misses on purpose.
+        resolver.db.get_package_exact.side_effect = (
+            lambda name, version, release, arch, epoch=None: None
+        )
+        fallback_pkg = {
+            'name': 'libfoo', 'epoch': 0,
+            'version': '99', 'release': '1.mga10', 'arch': 'x86_64',
+            'requires': [], 'recommends': [],
+            'provides': ['libfoo[= 99-1.mga10]'],
+        }
+        resolver.db.get_package.side_effect = (
+            lambda name, arch=None: fallback_pkg if name == 'libfoo' else None
+        )
+
+        headers = [
+            _fake_hdr('libfoo', provides=['libfoo']),
+        ]
+        actions = [
+            _make_action(
+                'libfoo', TransactionType.UPGRADE,
+                evr='1.2-1.mga10', arch='x86_64',
+            ),
+        ]
+
+        with caplog.at_level(logging.WARNING,
+                             logger='urpm.core.resolution.orphans'):
+            self._run(resolver, headers, actions)
+
+        warnings = [
+            rec.message for rec in caplog.records
+            if rec.levelno >= logging.WARNING
+            and 'exact row not found' in rec.message
+        ]
+        assert warnings, (
+            "Expected a WARNING containing 'exact row not found' when "
+            "get_package_exact returns None; got none. The fallback "
+            "must remain visible to --debug orphans users."
+        )
+        assert 'libfoo' in warnings[0]
+        assert "1.2-1.mga10" in warnings[0]
