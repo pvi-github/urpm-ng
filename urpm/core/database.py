@@ -17,6 +17,75 @@ from .db import (
     HistoryMixin, PeerMixin, CacheMixin,
 )
 
+
+# ---------------------------------------------------------------------------
+# RPM-semantic version collation
+# ---------------------------------------------------------------------------
+#
+# SQLite's default TEXT collation orders strings lexicographically by code
+# point. That is wrong for RPM ``version``/``release`` columns: ``"7.6.7.2"``
+# sorts AFTER ``"24.2.7.2"`` lexicographically (because ``'7' > '2'``), yet
+# RPM semantics put ``7.6.7.2`` strictly BEFORE ``24.2.7.2`` (numeric
+# segment compare). When this discrepancy hits ``get_package()``'s
+# ``ORDER BY version DESC LIMIT 1`` it silently returns the older NEVRA,
+# which then breaks the orphan detector and the libsolv transaction.
+#
+# We fix the ordering at the storage layer by installing a custom SQLite
+# collation that defers to ``rpm.labelCompare``, the same routine librpm
+# itself uses to compare EVRs.
+
+def _rpm_version_collation(a: str, b: str) -> int:
+    """SQLite collation that compares EVR component strings semantically.
+
+    Registered as ``rpm_version_compare`` on every SQLite connection
+    opened by :class:`PackageDatabase`. Used to ``ORDER BY`` the
+    ``epoch``, ``version`` and ``release`` columns of the ``packages``
+    table using RPM's own ordering rather than ASCII lexicographic
+    order. Concretely, ensures ``"24.2.7.2"`` sorts above ``"7.6.7.2"``
+    (semantic numeric compare) instead of below (lex, because
+    ``'7' > '2'``).
+
+    Each call receives a single component (one of epoch/version/release)
+    and wraps it as ``('', value, '')`` so ``rpm.labelCompare`` compares
+    only that component. ``rpm.labelCompare`` raises
+    ``ValueError("invalid version")`` on an empty version string, so we
+    short-circuit empty/``None`` inputs to a simple total ordering that
+    matches RPM semantics ("missing < present"). This also lets the
+    collation be applied harmlessly to the (numeric) ``epoch`` column:
+    SQLite skips collations on non-TEXT values, but if a NULL ever leaks
+    through as a string we still behave sensibly.
+
+    Args:
+        a: Left component string (may be ``""`` or ``None``).
+        b: Right component string (may be ``""`` or ``None``).
+
+    Returns:
+        Negative if ``a < b``, zero if equal, positive if ``a > b``
+        (the contract SQLite expects from ``create_collation`` callbacks).
+    """
+    # Defensive: SQLite normally passes ``str``, but tolerate ``None``.
+    a = a or ''
+    b = b or ''
+    if not a and not b:
+        return 0
+    if not a:
+        return -1
+    if not b:
+        return 1
+
+    import rpm  # local import: keep database.py importable without librpm
+    return rpm.labelCompare(('', a, ''), ('', b, ''))
+
+
+def _register_rpm_collation(conn: sqlite3.Connection) -> None:
+    """Install the ``rpm_version_compare`` collation on ``conn``.
+
+    Centralised helper so every code path that opens a fresh SQLite
+    connection (main thread, thread-local pool, catastrophic migration
+    fallback) gets the collation registered uniformly.
+    """
+    conn.create_collation('rpm_version_compare', _rpm_version_collation)
+
 # Schema version - increment when schema changes
 SCHEMA_VERSION = 29
 
@@ -781,6 +850,9 @@ class PackageDatabase(
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute(f"PRAGMA busy_timeout={self.BUSY_TIMEOUT_MS}")
+        # Install the RPM-semantic collation so ORDER BY on version/release
+        # columns orders by RPM semantics, not lexicographic ASCII.
+        _register_rpm_collation(conn)
         return conn
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -931,6 +1003,7 @@ class PackageDatabase(
                 self.conn.execute("PRAGMA journal_mode=WAL")
                 self.conn.execute("PRAGMA synchronous=NORMAL")
                 self.conn.execute("PRAGMA foreign_keys=ON")
+                _register_rpm_collation(self.conn)
                 self.conn.executescript(SCHEMA)
                 version = SCHEMA_VERSION
                 break
@@ -1947,7 +2020,9 @@ class PackageDatabase(
                 SELECT p.* FROM packages p
                 {version_join}
                 WHERE p.name_lower = ? {version_filter} {arch_filter}
-                ORDER BY p.epoch DESC, p.version DESC, p.release DESC
+                ORDER BY p.epoch COLLATE rpm_version_compare DESC,
+                         p.version COLLATE rpm_version_compare DESC,
+                         p.release COLLATE rpm_version_compare DESC
                 LIMIT 1
             """, (name.lower(),) + version_params + arch_params)
         else:
@@ -1956,7 +2031,9 @@ class PackageDatabase(
             cursor = self.conn.execute(f"""
                 SELECT p.* FROM packages p
                 WHERE p.name_lower = ? {arch_filter}
-                ORDER BY p.epoch DESC, p.version DESC, p.release DESC
+                ORDER BY p.epoch COLLATE rpm_version_compare DESC,
+                         p.version COLLATE rpm_version_compare DESC,
+                         p.release COLLATE rpm_version_compare DESC
                 LIMIT 1
             """, (name.lower(),) + arch_params)
 
@@ -2423,7 +2500,9 @@ class PackageDatabase(
                 FROM packages p
                 JOIN media m ON p.media_id = m.id
                 WHERE p.name_lower = ? AND m.mageia_version IN ({placeholders})
-                ORDER BY p.epoch DESC, p.version DESC, p.release DESC
+                ORDER BY p.epoch COLLATE rpm_version_compare DESC,
+                         p.version COLLATE rpm_version_compare DESC,
+                         p.release COLLATE rpm_version_compare DESC
             """, (name.lower(),) + tuple(accepted))
         else:
             cursor = self.conn.execute("""
@@ -2431,7 +2510,9 @@ class PackageDatabase(
                 FROM packages p
                 LEFT JOIN media m ON p.media_id = m.id
                 WHERE p.name_lower = ?
-                ORDER BY p.epoch DESC, p.version DESC, p.release DESC
+                ORDER BY p.epoch COLLATE rpm_version_compare DESC,
+                         p.version COLLATE rpm_version_compare DESC,
+                         p.release COLLATE rpm_version_compare DESC
             """, (name.lower(),))
 
         packages = [dict(row) for row in cursor]

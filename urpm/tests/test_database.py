@@ -1,6 +1,7 @@
 """Tests for SQLite database"""
 
 import pytest
+import sqlite3
 import tempfile
 from pathlib import Path
 from urpm.core.database import PackageDatabase
@@ -488,3 +489,254 @@ class TestGetPackageArchFilter:
 
         pkg = db.get_package('bar', arch='x86_64')
         assert pkg is None
+
+
+# ---------------------------------------------------------------------------
+# RPM-semantic version collation
+# ---------------------------------------------------------------------------
+
+class TestRpmVersionCollation:
+    """Regression tests for the ``rpm_version_compare`` SQLite collation.
+
+    The default SQLite TEXT collation orders ``"7.6.7.2"`` AFTER
+    ``"24.2.7.2"`` because ``'7' > '2'`` in ASCII. RPM semantics say the
+    opposite (``24.2.7.2`` > ``7.6.7.2``). Without the custom collation
+    installed by :class:`PackageDatabase`, ``get_package(..., LIMIT 1)``
+    silently returns the older NEVRA, which then breaks the orphan
+    detector and torpedoes the libsolv transaction (rpmlib refuses the
+    upgrade because the older version lacks the modern ``Requires:`` it
+    needs to keep ``lib64zxcvbn0`` in the post-state).
+
+    These tests exercise the collation both directly (raw SQL) and
+    through the public API (``get_package``).
+    """
+
+    # ------------------------------------------------------------------
+    # Direct collation tests on a real SQLite connection
+    # ------------------------------------------------------------------
+
+    def _seed_two_versions(self, conn):
+        """Create a minimal ``packages``-like table and insert the
+        ``libreoffice-core`` row pair that triggers the bug.
+        """
+        conn.execute("""
+            CREATE TABLE packages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                epoch INTEGER DEFAULT 0,
+                version TEXT NOT NULL,
+                release TEXT NOT NULL
+            )
+        """)
+        conn.executemany(
+            "INSERT INTO packages (name, epoch, version, release) VALUES (?, ?, ?, ?)",
+            [
+                ('libreoffice-core', 0, '7.6.7.2',  '1.mga9'),
+                ('libreoffice-core', 0, '24.2.7.2', '1.4.mga9'),
+            ],
+        )
+        conn.commit()
+
+    def test_collation_picks_semantically_latest(self, tmp_path):
+        """Direct SQL: ``ORDER BY version COLLATE rpm_version_compare
+        DESC LIMIT 1`` returns the row with the semantically-latest
+        version (``24.2.7.2``), not the lex-latest (``7.6.7.2``).
+        """
+        from urpm.core.database import _register_rpm_collation
+
+        db_path = tmp_path / 'collation.db'
+        conn = sqlite3.connect(str(db_path))
+        try:
+            _register_rpm_collation(conn)
+            self._seed_two_versions(conn)
+
+            cur = conn.execute("""
+                SELECT version FROM packages
+                WHERE name = 'libreoffice-core'
+                ORDER BY version COLLATE rpm_version_compare DESC
+                LIMIT 1
+            """)
+            assert cur.fetchone()[0] == '24.2.7.2'
+
+            # Sanity check: without the collation, lex sort returns
+            # ``7.6.7.2`` first (the very bug we are fixing).
+            cur = conn.execute("""
+                SELECT version FROM packages
+                WHERE name = 'libreoffice-core'
+                ORDER BY version DESC
+                LIMIT 1
+            """)
+            assert cur.fetchone()[0] == '7.6.7.2'
+        finally:
+            conn.close()
+
+    def test_collation_handles_multi_digit_segments(self, tmp_path):
+        """RPM numeric segment compare: ``1.10`` > ``1.2``.
+
+        Lex sort would put ``1.2`` first (because ``'2' > '1'`` at the
+        second component); RPM sort puts ``1.10`` first.
+        """
+        from urpm.core.database import _register_rpm_collation
+
+        conn = sqlite3.connect(':memory:')
+        try:
+            _register_rpm_collation(conn)
+            conn.execute("CREATE TABLE t (v TEXT)")
+            conn.executemany("INSERT INTO t VALUES (?)", [('1.10',), ('1.2',)])
+
+            cur = conn.execute(
+                "SELECT v FROM t ORDER BY v COLLATE rpm_version_compare DESC"
+            )
+            assert [row[0] for row in cur] == ['1.10', '1.2']
+        finally:
+            conn.close()
+
+    def test_collation_handles_empty_and_none(self, tmp_path):
+        """Collation must not raise on empty/NULL strings: empty < non-empty.
+
+        ``rpm.labelCompare`` raises ``ValueError`` on an empty version,
+        so the collation guards explicitly. The contract we want: an
+        empty/missing component sorts strictly below a populated one
+        (matches RPM semantics where missing release is "less than"
+        present).
+        """
+        from urpm.core.database import _rpm_version_collation
+
+        assert _rpm_version_collation('', '') == 0
+        assert _rpm_version_collation('', '1.0') < 0
+        assert _rpm_version_collation('1.0', '') > 0
+        # ``None`` tolerance (SQLite may pass NULL through as Python None
+        # on some platforms; we coerce to '').
+        assert _rpm_version_collation(None, None) == 0
+        assert _rpm_version_collation(None, '1.0') < 0
+
+    # ------------------------------------------------------------------
+    # End-to-end tests via PackageDatabase.get_package()
+    # ------------------------------------------------------------------
+
+    def _import_libreoffice_mga9_pair(self, db):
+        """Insert the two-row libreoffice-core scenario via the real
+        import code path (not raw DML), so we exercise exactly what
+        ``urpm update_media`` builds in production.
+        """
+        media_id = db.add_media(
+            name="Updates",
+            short_name="updates",
+            mageia_version="9",
+            architecture="x86_64",
+            relative_path="core/updates",
+        )
+
+        packages = [
+            {
+                'name': 'libreoffice-core',
+                'version': '7.6.7.2',
+                'release': '1.mga9',
+                'epoch': 0,
+                'arch': 'x86_64',
+                'nevra': 'libreoffice-core-7.6.7.2-1.mga9.x86_64',
+                'summary': 'LibreOffice core (old branch)',
+                'provides': ['libreoffice-core'],
+                'requires': [],
+                'filesize': 30000000,
+            },
+            {
+                'name': 'libreoffice-core',
+                'version': '24.2.7.2',
+                'release': '1.4.mga9',
+                'epoch': 0,
+                'arch': 'x86_64',
+                'nevra': 'libreoffice-core-24.2.7.2-1.4.mga9.x86_64',
+                'summary': 'LibreOffice core (new branch)',
+                'provides': ['libreoffice-core', 'libzxcvbn.so.0()(64bit)'],
+                'requires': ['libzxcvbn.so.0()(64bit)'],
+                'filesize': 30000000,
+            },
+        ]
+        db.import_packages(iter(packages), media_id=media_id)
+        return media_id
+
+    def test_get_package_returns_semantically_latest_not_lex_latest_libreoffice_core_mga9(self, db):
+        """Production regression: ``get_package('libreoffice-core',
+        arch='x86_64')`` must return the ``24.2.7.2`` row, not the
+        ``7.6.7.2`` row.
+
+        Scenario reproduced from the live mga9 install where the
+        ``Release`` media held ``7.6.7.2`` and ``Updates`` held
+        ``24.2.7.2``. Lex sort returned the old row, the orphan
+        detector read its (smaller) Requires set, built a bogus
+        post_reverse, flagged ``lib64zxcvbn0`` as orphan, and
+        ``ts.check()`` aborted the whole upgrade. We assert the new
+        EVR wins.
+        """
+        self._import_libreoffice_mga9_pair(db)
+
+        pkg = db.get_package('libreoffice-core', arch='x86_64')
+        assert pkg is not None
+        assert pkg['version'] == '24.2.7.2', (
+            f"get_package returned the lex-latest row instead of the "
+            f"semantically-latest one: got version={pkg['version']!r}, "
+            f"release={pkg['release']!r}. Lexicographic sort over RPM "
+            f"versions is the bug."
+        )
+        assert pkg['release'] == '1.4.mga9'
+        assert pkg['nevra'] == 'libreoffice-core-24.2.7.2-1.4.mga9.x86_64'
+
+    def test_get_package_without_arch_hint_also_uses_semantic_sort(self, db):
+        """The collation must apply on BOTH branches of ``get_package``
+        (with and without ``arch``). Caller without an arch hint must
+        also see the semantically-latest row.
+        """
+        self._import_libreoffice_mga9_pair(db)
+
+        pkg = db.get_package('libreoffice-core')
+        assert pkg is not None
+        assert pkg['version'] == '24.2.7.2'
+
+    def test_get_package_picks_higher_epoch(self, db):
+        """Sanity: epoch still dominates version. ``1:1.0`` > ``0:99.0``.
+
+        Epoch is stored as INTEGER so SQLite will sort it numerically
+        and skip the collation; this test simply guards against any
+        regression that might convert epoch to TEXT in the future.
+        """
+        media_id = db.add_media(
+            name="Test Epoch",
+            short_name="test_epoch",
+            mageia_version="9",
+            architecture="x86_64",
+            relative_path="test/epoch",
+        )
+
+        packages = [
+            {
+                'name': 'epochtest',
+                'version': '99.0',
+                'release': '1.mga9',
+                'epoch': 0,
+                'arch': 'x86_64',
+                'nevra': 'epochtest-99.0-1.mga9.x86_64',
+                'summary': 'High version, low epoch',
+                'provides': ['epochtest'],
+                'requires': [],
+                'filesize': 1000,
+            },
+            {
+                'name': 'epochtest',
+                'version': '1.0',
+                'release': '1.mga9',
+                'epoch': 1,
+                'arch': 'x86_64',
+                'nevra': 'epochtest-1:1.0-1.mga9.x86_64',
+                'summary': 'Low version, high epoch',
+                'provides': ['epochtest'],
+                'requires': [],
+                'filesize': 1000,
+            },
+        ]
+        db.import_packages(iter(packages), media_id=media_id)
+
+        pkg = db.get_package('epochtest', arch='x86_64')
+        assert pkg is not None
+        assert pkg['epoch'] == 1
+        assert pkg['version'] == '1.0'
