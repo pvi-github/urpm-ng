@@ -716,8 +716,15 @@ def sync_media(db: PackageDatabase, media_name: str,
             shutil.copy2(md5sum_path, cache_media_info / "MD5SUM")
             try:
                 md5sums = parse_md5sum_file(md5sum_path.read_text())
-            except OSError:
-                pass
+            except Exception as exc:
+                # MD5SUM is best-effort here: ``OSError`` if the temp
+                # file vanished, ``ValueError`` / ``UnicodeDecodeError``
+                # if the body is malformed.  None of those should
+                # abort a synthesis sync that already succeeded.
+                logger.debug(
+                    "Could not parse MD5SUM for %s: %s",
+                    media_name, exc,
+                )
 
         # Retrieve Last-Modified from the server we just synced from
         sync_synthesis_url = (
