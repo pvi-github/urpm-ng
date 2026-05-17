@@ -354,7 +354,7 @@ class HdlistWriter():
     def __init__(
             self,
             output_path: Path,
-            packages,
+            packages,  # Iterable of :class:`~urpm.genmedia.RpmMetadata`.
             compression_filter: str = 'gzip',
             compression_level: int = 9,
             block_size: int = 400 * 1024,
@@ -368,15 +368,16 @@ class HdlistWriter():
         self.block_size = block_size
         self.incremental = incremental
         self.old_hdlist_path = old_hdlist_path
-        self.files: dict = {}
+        # Toc information
+        self.files: dict = {}                # filename : { "off", "size", "coff", "csize" }
         self.dir: dict = {}
         self.symlink: dict = {}
-        self.coff: int = 0
+        self.coff: int = 0                   # end of current compressed data
         self.current_block_data: bytes = b""
-        self.current_block_files: List = []
-        self.current_block_csize: int = 0
-        self.current_block_coff: int = 0
-        self.current_block_off: int = 0
+        self.current_block_files: List = []  # Files in pending compressed block
+        self.current_block_csize: int = 0    # Actual size in pending compressed block
+        self.current_block_coff: int = 0     # The block location (offset)
+        self.current_block_off: int = 0      # Actual uncompressed file offset within the pending block
         # self.ustream_data: Any = None
         self.toc_f_count: int = 0
         self.handle: IO = open(self.output_path, 'wb')
@@ -412,17 +413,15 @@ class HdlistWriter():
         """Append a single RPM header to the current block, flushing if needed."""
         length = len(header_bytes)
         # coff and off are captured before appending
-        block_coff = self.current_block_coff
-        block_off  = self.current_block_off
         self.current_block_files.append(rpm_name)
-        self.current_block_off += length
         self.current_block_data += header_bytes
         self.files[rpm_name] = {
             'size':  length,
-            'off':   block_off,
-            'csize': -1,
-            'coff':  block_coff,
+            'off':   self.current_block_off,
+            'csize': -1,   # Still unknown, will be filled by end_block
+            'coff':  self.current_block_coff,
         }
+        self.current_block_off += length
         if len(self.current_block_data) >= self.block_size:
             self._end_block()
 
@@ -494,27 +493,19 @@ class HdlistWriter():
             else:
                 # Rebuild the block from headers in memory
                 for rpm_name in survivors:
-                    self._append_header(rpm_name, self.packages[rpm_name]['header'])
-                self._end_block()
+                    self._append_header(rpm_name, self.packages[self.indexes[rpm_name]].header_bytes)
+
+        for rpm_name in new_rpms:
+            self._append_header(rpm_name, self.packages[self.indexes[rpm_name]].header_bytes)
+        return len(removed) + len(new_rpms) + len(unchanged)
 
     def _write_full(self):
+        le = 0
         for rpm in self.packages:
             name = os.path.basename(rpm.filename)
-            self.current_block_files.append(name)
-            data = rpm.header_bytes
-            length = len(data)
-            self.current_block_off += length
-            self.current_block_data += data
-            self.files[name] = {
-                'size': length,
-                'off': self.current_block_off,
-                'csize': -1,
-                'coff': self.current_block_coff,
-            }
-            if len(self.current_block_data) >= self.block_size:
-                self._end_block()
-        self._end_block()
-        return len(self.packages)
+            self._append_header(name, rpm.header_bytes)
+            le += 1
+        return le
 
     def _build_toc(self) -> bool:
         self._end_block()
@@ -561,7 +552,6 @@ class HdlistWriter():
                 uncompress command
                 0]cz
             """
-            print(header, toc_d_count, toc_l_count, toc_f_count, toc_str_size, uncompress, trailer)
             if header != b"cz[0" and trailer != b"0]cz":
                 raise ValueError("Error reading toc: wrong header/trailer")
             hdlist.seek(-64 - (toc_str_size + 16 * toc_f_count), os.SEEK_END)
