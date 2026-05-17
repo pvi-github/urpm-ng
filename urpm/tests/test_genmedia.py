@@ -345,14 +345,12 @@ class TestWriteChangelogXml:
 class TestWriteHdlist:
     """Contract tests for write_hdlist()."""
 
-    # @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_package_count(self, sample_packages, tmp_path):
         from urpm.core.hdlist import write_hdlist
         out = tmp_path / 'hdlist.cz'
         count = write_hdlist(out, sample_packages)
         assert count == 3
 
-    # @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_output_is_gzip(self, sample_packages, tmp_path):
         """Default compression is gzip."""
         from urpm.core.hdlist import write_hdlist
@@ -369,11 +367,18 @@ class TestWriteHdlist:
 class TestRpmScanner:
     """Contract tests for RpmScanner using real test RPMs."""
 
-    # @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
+    media_dir = Path(__file__).parent / 'media'
+
+    def prepare(self):
+        if not self.media_dir.exists():
+            from urpm.tests.gen_test_rpms import main as main_gen_tests
+            main_gen_tests()
+
     def test_scan_suggests_dir(self):
         """Scan existing test RPMs from the suggests fixture."""
+        self.prepare()
         from urpm.genmedia.scanner import RpmScanner
-        rpms_dir = Path(__file__).parent / 'media' / 'suggests'
+        rpms_dir = self.media_dir / 'suggests'
         scanner = RpmScanner()
         packages = list(scanner.scan(rpms_dir))
         assert len(packages) >= 10
@@ -382,11 +387,10 @@ class TestRpmScanner:
         assert 'b' in names
         assert 'suggested_b' in names
 
-    # @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_metadata_fields(self):
         """Each RpmMetadata must have all required fields populated."""
         from urpm.genmedia.scanner import RpmScanner
-        rpms_dir = Path(__file__).parent / 'media' / 'suggests'
+        rpms_dir = self.media_dir / 'suggests'
         scanner = RpmScanner()
         for pkg in scanner.scan(rpms_dir):
             assert pkg.name, f"empty name for {pkg.filename}"
@@ -399,11 +403,10 @@ class TestRpmScanner:
             assert isinstance(pkg.requires, list)
             assert isinstance(pkg.provides, list)
 
-    # @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_sorted_order(self):
         """Packages must be yielded in sorted filename order."""
         from urpm.genmedia.scanner import RpmScanner
-        rpms_dir = Path(__file__).parent / 'media' / 'suggests'
+        rpms_dir = self.media_dir / 'suggests'
         scanner = RpmScanner()
         packages = list(scanner.scan(rpms_dir))
         filenames = [p.filename for p in packages]
@@ -416,30 +419,37 @@ class TestRpmScanner:
 class TestMediaGenerator:
     """Contract tests for the orchestrator."""
 
-    # @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
+    media_dir = Path(__file__).parent / 'media'
+
+    def prepare(self):
+        if not self.media_dir.exists():
+            from urpm.tests.gen_test_rpms import main as main_gen_tests
+            main_gen_tests()
+
     def test_generate_returns_result(self, tmp_path):
         """generate() must return a GenerateResult."""
+        self.prepare()
         from urpm.genmedia.generator import MediaGenerator
-        rpms_dir = Path(__file__).parent / 'media' / 'suggests'
+        rpms_dir = self.media_dir / 'suggests'
         gen = MediaGenerator(rpms_dir=rpms_dir, media_info_dir=tmp_path, lock=False)
         result = gen.generate(hdlist=False, xml_info=False, md5sum=False)
         assert isinstance(result, GenerateResult)
 
-    # @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_generate_creates_synthesis(self, tmp_path):
         """Default generate must produce synthesis.hdlist.cz."""
+        self.prepare()
         from urpm.genmedia.generator import MediaGenerator
-        rpms_dir = Path(__file__).parent / 'media' / 'suggests'
+        rpms_dir = self.media_dir / 'suggests'
         gen = MediaGenerator(rpms_dir=rpms_dir, media_info_dir=tmp_path, lock=False)
         result = gen.generate(hdlist=False, xml_info=False)
         assert result.success
         assert (tmp_path / 'synthesis.hdlist.cz').exists()
 
-    # @pytest.mark.xfail(reason='stub not yet implemented', raises=NotImplementedError)
     def test_generate_md5sum(self, tmp_path):
         """MD5SUM must list all generated files."""
+        self.prepare()
         from urpm.genmedia.generator import MediaGenerator
-        rpms_dir = Path(__file__).parent / 'media' / 'suggests'
+        rpms_dir = self.media_dir / 'suggests'
         gen = MediaGenerator(rpms_dir=rpms_dir, media_info_dir=tmp_path, lock=False)
         result = gen.generate(hdlist=True, xml_info=False)
         assert result.md5sum_written
