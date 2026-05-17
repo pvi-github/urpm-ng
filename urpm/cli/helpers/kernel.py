@@ -227,6 +227,36 @@ def get_redlist() -> set:
     return redlist
 
 
+def _compare_version_release(a: tuple, b: tuple) -> int:
+    """Compare two ``(version, release)`` tuples using RPM semantics.
+
+    The kernel cleanup helper groups installed kernels by their
+    ``(version, release)`` and then needs to pick the newest few to keep.
+    A plain ``sorted(..., reverse=True)`` on these tuples falls back to
+    Python's per-component lexicographic ordering, which silently breaks
+    on multi-digit segments: ``'5' > '14'`` as strings, so ``kernel-5.x``
+    would be considered "newer" than ``kernel-14.x``, and the helper
+    would happily list the running major series as removable.
+
+    This helper defers to :func:`rpm.labelCompare` so both ``version``
+    and ``release`` are ordered with RPM's own numeric/alpha-aware
+    semantics (the same routine librpm uses everywhere else in this
+    codebase, see ``urpm.core.database._rpm_version_collation``).
+
+    ``labelCompare`` expects ``(epoch, version, release)`` triples;
+    installed kernels share a uniform epoch so we pin it to ``'0'``.
+
+    Args:
+        a: Left ``(version, release)`` tuple.
+        b: Right ``(version, release)`` tuple.
+
+    Returns:
+        Negative if ``a < b``, zero if equal, positive if ``a > b``.
+    """
+    import rpm
+    return rpm.labelCompare(('0', a[0], a[1]), ('0', b[0], b[1]))
+
+
 def find_old_kernels(keep_count: int = None) -> list:
     """Find old kernels that can be removed.
 
@@ -239,6 +269,7 @@ def find_old_kernels(keep_count: int = None) -> list:
     """
     import rpm
     from collections import defaultdict
+    from functools import cmp_to_key
 
     if keep_count is None:
         keep_count = get_kernel_keep()
@@ -305,8 +336,14 @@ def find_old_kernels(keep_count: int = None) -> list:
         ver_key = (k['version'], k['release'])
         by_version[ver_key].append(k)
 
-    # Sort versions (newest first)
-    sorted_versions = sorted(by_version.keys(), reverse=True)
+    # Sort versions (newest first) using RPM semantics, not Python
+    # lexicographic ordering — see ``_compare_version_release`` docstring
+    # for why a plain ``sorted(..., reverse=True)`` is unsafe here.
+    sorted_versions = sorted(
+        by_version.keys(),
+        key=cmp_to_key(_compare_version_release),
+        reverse=True,
+    )
 
     # Find versions to remove (skip running and keep_count newest)
     versions_to_keep = set()
