@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import BinaryIO, Dict, Iterator, List, Optional, Any, IO
 from .compression import decompress_stream
 from struct import pack
+import logging
+
+logger = logging.getLogger(__name__)
 
 # RPM Header magic (3 bytes)
 RPM_HEADER_MAGIC = b'\x8e\xad\xe8'
@@ -406,7 +409,7 @@ class HdlistWriter():
         self._build_toc()
         self.handle.close()
         self.destroyed = True
-        print("File wrotten: ", self.output_path)
+        logger.debug("File wrotten: ", self.output_path)
         return wrotten
 
     def _append_header(self, rpm_name: str, header_bytes: bytes) -> None:
@@ -461,13 +464,13 @@ class HdlistWriter():
         unchanged: set[str] = set()
         new_rpms:  set[str] = set()
         for rpm_name in present:
-            print(rpm_name)
+            logger.debug(rpm_name)
             if rpm_name not in in_hdlist:
                 new_rpms.add(rpm_name)
             else:
                 unchanged.add(rpm_name)
 
-        print(f"Incremental: {len(removed)} removed, "
+        logger.info(f"Incremental: {len(removed)} removed, "
               f"{len(new_rpms)} new, {len(unchanged)} unchanged.")
 
         # Group in_hdlist RPMs by coff
@@ -674,7 +677,7 @@ class HdlistWriter():
             try:
                 return json.loads(state_file.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
-                print("Warning: corrupted state file, falling back to full rebuild.")
+                logger.warning("Warning: corrupted state file, falling back to full rebuild.")
         return {}
 
     def _save_state(self, state: dict) -> None:

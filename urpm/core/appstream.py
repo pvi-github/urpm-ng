@@ -112,7 +112,7 @@ class AppStreamSyncResult:
     error: Optional[str] = None
 
 
-ICONS_SUBDIR        = "icons"  # Subdirectory to store extracted icons
+ICONS_SUBDIR = "icons"  # Subdirectory to store extracted icons
 
 ORG = "org.mageia"
 
@@ -581,7 +581,7 @@ class AppStreamManager:
             and not f.endswith("/")   # exclude directory itself
         ]
         if bin_files:
-            print(f"  → {len(bin_files)} /usr/bin binary(ies): "
+            logger.debug(f"- {len(bin_files)} /usr/bin binary(ies): "
                   f"{[Path(b).name for b in bin_files]}")
 
         # ── Filtrage fichiers .desktop ─────────────────────────────────
@@ -600,7 +600,7 @@ class AppStreamManager:
 
         desktop_info = None
         if desktop_files:
-            print(f"  → {len(desktop_files)} .desktop file(s) found")
+            logger.debug(f"- {len(desktop_files)} .desktop file(s) found")
             # Parse first found .desktop file
             with tempfile.TemporaryDirectory() as tmp_dir:
                 try:
@@ -609,11 +609,12 @@ class AppStreamManager:
                     desktop_path = Path(tmp_dir) / first_desktop
                     if desktop_path.exists():
                         desktop_info = self._parse_desktop_file(desktop_path)
-                        print(f"     Type: {desktop_info.get('type')}, "
-                              f"Icon: {desktop_info.get('icon')}, "
-                              f"Categories: {desktop_info.get('categories')}")
+                        logger.debug(
+                            f"    Type: {desktop_info.get('type')} + "
+                            f"Icon: {desktop_info.get('icon')} + "
+                            f"Categories: {desktop_info.get('categories')}")
                 except Exception as e:
-                    print(f"  ⚠  .desktop parsing error: {e}")
+                    logger.debug(f"  .desktop parsing error: {e}")
 
         # ── Recherche et extraction icône ──────────────────────────────
         ICON_PATHS = [
@@ -633,7 +634,7 @@ class AppStreamManager:
                 file_list, icon_name, ICON_PATHS, ICON_EXTENSIONS
             )
             if icon_in_rpm:
-                print(f"  → Found icon: {icon_in_rpm}")
+                logger.debug(f"- Found icon: {icon_in_rpm}")
                 # Calculate app_id to name the icon
                 app_id = self._sanitize_id(rpm_path.stem)
                 icon_path = self._extract_icon(
@@ -647,23 +648,25 @@ class AppStreamManager:
 
         if metainfo_targets:
             # ── Case 1 : embedded metainfo files → extraction ───────
-            print(f"  → {len(metainfo_targets)} metainfo file(s)"
-                  f"detected : {metainfo_targets}")
+            logger.debug(
+                  f"- {len(metainfo_targets)} metainfo file(s)" +
+                  f"detected : {metainfo_targets}"
+                  )
             try:
                 copied = self._extract_metainfo_files(
                     rpm_path, metainfo_targets, cache_dir
                 )
                 pkg_result["extracted"] = copied
             except subprocess.CalledProcessError as e:
-                pkg_result["error"] = f"  ✗ Extraction failed (rpm2cpio/cpio): {e}"
+                pkg_result["error"] = f"   Extraction failed (rpm2cpio/cpio): {e}"
                 return pkg_result
             except Exception as e:
-                pkg_result["error"] = f"  ✗ Unexpected error: {e}"
+                pkg_result["error"] = f"   Unexpected error: {e}"
                 return pkg_result
 
         else:
             # ── Case 2 : no metainfo file → AppStream génération ──
-            # print("  → No metainfo file found, generating AppStream XML.")
+            logger.debug("  → No metainfo file found, generating AppStream XML.")
 
             try:
                 pkg_result["generated"] = self._generate_appstream_xml(
@@ -675,7 +678,7 @@ class AppStreamManager:
                     icon_path=icon_path,
                 )
             except Exception as e:
-                logging.warning(f"Failed to generate AppStream XML for {metadata.name}: {str(e)}")
+                logger.warning(f"Failed to generate AppStream XML for {metadata.name}: {str(e)}")
         self.results[rpm_name] = pkg_result
         return pkg_result
 
@@ -707,12 +710,12 @@ class AppStreamManager:
         """
         xml_files = list(self._iter_xml_files(cache_dir))
         if not xml_files:
-            print("\n⚠  No XML file found in cache, catalogue not generated.")
+            logger.warning("\n⚠  No XML file found in cache, catalogue not generated.")
             return None
 
-        print(f"\n{'─' * 52}")
-        print(f"CATALOG — assembling {len(xml_files)} XML file(s)")
-        print(f"{'─' * 52}")
+        logger.info(f"\n{'─' * 52}")
+        logger.info(f"CATALOG — assembling {len(xml_files)} XML file(s)")
+        logger.info(f"{'─' * 52}")
 
         components_el = ET.Element("components", {
             "version": "0.15",
@@ -732,7 +735,7 @@ class AppStreamManager:
             # print(f"  +  {xml_file.relative_to(cache_dir)}")
 
         if ok_count == 0:
-            print("⚠  No valid components, catalog not generated.")
+            logger.info("No valid components, catalog not generated.")
             return None
 
         tree = ET.ElementTree(components_el)
@@ -754,7 +757,6 @@ class AppStreamManager:
 
         # gz_path = cache_dir / CATALOG_GZ_FILENAME
         format, level = compression_filter.split(" ")
-        print(output_path)
         if format == "xz":
             with lzma.open(output_path, 'wt') as f:
                 f.write(final_xml)
@@ -805,13 +807,13 @@ class AppStreamManager:
                 extracted = Path(tmp_dir) / relative
 
                 if not extracted.exists():
-                    print(f"  ⚠  File not found after extraction: {relative}")
+                    logger.warning(f"File not found after extraction: {relative}")
                     continue
 
                 dest_file = dest_dir / extracted.name
                 shutil.copy2(extracted, dest_file)
                 copied.append(str(dest_file))
-                # print(f"  ✔  Copied: {dest_file}")
+                logger.debug(f"  Copied: {dest_file}")
 
         return copied
 
@@ -1081,7 +1083,7 @@ class AppStreamManager:
         elif group:
             categories = self.RPM_GROUP_TO_APPSTREAM_CATEGORIES.get(group, [])
             if not categories:
-                print(f"  ⚠  RPM group '{group}' not mapped, no AppStream category. {version} {license} {summary}")
+                logger.debug(f"  RPM group '{group}' not mapped, no AppStream category. {version} {license} {summary}")
 
         # Default fallback if still empty
         if not categories:
@@ -1171,7 +1173,7 @@ class AppStreamManager:
         dest_dir.mkdir(parents=True, exist_ok=True)
         out_path = dest_dir / f"{app_id}.metainfo.xml"
         out_path.write_text(final_xml, encoding="utf-8")
-        # print(f"  ✎  Generated AppStream XML: {out_path}")
+        logger.debug(f"  Generated AppStream XML: {out_path}")
         return str(out_path)
 
     # ─────────────────────────────────────────────
@@ -1213,7 +1215,7 @@ class AppStreamManager:
             tree = ET.parse(xml_file)
             root = tree.getroot()
         except ET.ParseError as e:
-            print(f"  ⚠  Invalid XML, ignored ({xml_file.name}) : {e}")
+            logger.info(f"  Invalid XML, ignored ({xml_file.name}) : {e}")
             return None
 
         def _local(tag: str) -> str:
@@ -1227,7 +1229,7 @@ class AppStreamManager:
             if _local(child.tag) == "component":
                 return self._strip_ns(child)
 
-        print(f"  ⚠  No <component> in {xml_file.name}, ignored.")
+        logger.info(f"  No <component> in {xml_file.name}, ignored.")
         return None
 
     # ─────────────────────────────────────────────
@@ -1252,7 +1254,7 @@ class AppStreamManager:
         try:
             content = desktop_path.read_text(encoding="utf-8", errors="ignore")
         except Exception as e:
-            print(f"  ⚠  Cannot read {desktop_path.name}: {e}")
+            logger.debug(f"  Cannot read {desktop_path.name}: {e}")
             return result
 
         in_desktop_entry = False
@@ -1384,16 +1386,16 @@ class AppStreamManager:
                 extracted = Path(tmp_dir) / relative
 
                 if not extracted.exists():
-                    print(f"  ⚠  Icon not found after extraction: {relative}")
+                    logger.info(f"Icon not found after extraction: {relative}")
                     return None
 
                 shutil.copy2(extracted, dest_path)
-                print(f"  🖼  Extracted icon: {dest_filename}")
+                logger.debug(f"Extracted icon: {dest_filename}")
                 # Return only the name without extension
                 return app_id
 
             except Exception as e:
-                print(f"  ✗ Icon extraction error: {e}")
+                logger.info(f"Icon extraction error: {e}")
                 return None
 
 
@@ -1441,7 +1443,7 @@ class AppStreamManager:
             try:
                 return json.loads(state_file.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
-                print("Warning: corrupted state file, falling back to full rebuild.")
+                logger.warning("Warning: corrupted state file, falling back to full rebuild.")
         return {}
 
     def _purge_missing_rpms(self, state: dict) -> None:
@@ -1453,12 +1455,12 @@ class AppStreamManager:
         missing = [name for name in list(state) if name not in self.results.keys()]
 
         for name in missing:
-            print(f"\n[PURGE] {name} no longer present, removing from state.")
+            logger.debug(f"\n[PURGE] {name} no longer present, removing from state.")
             if cache_path is not None:
                 pkg_dir = cache_path / Path(name).stem
                 if pkg_dir.exists():
                     shutil.rmtree(pkg_dir)
-                    print(f"  ✔  Cache directory removed: {pkg_dir}")
+                    logger.debug(f"Cache directory removed: {pkg_dir}")
             del state[name]
 
         if missing:
@@ -1473,18 +1475,18 @@ class AppStreamManager:
             ) -> None:
         """Display execution summary."""
         extracted_count = sum(len(v["extracted"]) for v in results.values())
-        print("\n" + "═" * 52)
-        print("SUMMARY")
-        print("═" * 52)
-        print(f"  Processed packages           : {len(results)}")
-        print(f"  Extracted metainfo files     : {extracted_count}")
-        print(f"  Generated AppStream files    : {len(generated)}")
-        print(f"  Skipped packages (unchanged) : {len(skipped)}")
-        print(f"  Errors                       : {len(errors)}")
+        logger.info("\n" + "═" * 52)
+        logger.info("SUMMARY")
+        logger.info("═" * 52)
+        logger.info(f"  Processed packages           : {len(results)}")
+        logger.info(f"  Extracted metainfo files     : {extracted_count}")
+        logger.info(f"  Generated AppStream files    : {len(generated)}")
+        logger.info(f"  Skipped packages (unchanged) : {len(skipped)}")
+        logger.info(f"  Errors                       : {len(errors)}")
         if errors:
-            print(f"  Packages with errors: {', '.join(errors)}")
+            logger.info(f"  Packages with errors: {', '.join(errors)}")
         # if catalog_xml:
-        #     print(f"  XML catalog      : {catalog_xml}")
+        #     logger.info(f"  XML catalog      : {catalog_xml}")
         # if catalog_gz:
-        #     print(f"  Gzip catalog     : {catalog_gz}")
-        print("═" * 52)
+        #     logger.info(f"  Gzip catalog     : {catalog_gz}")
+        logger.info("═" * 52)

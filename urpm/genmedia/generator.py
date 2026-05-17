@@ -9,12 +9,11 @@ import hashlib
 import logging
 import os
 import shutil
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from . import GenerateResult, RpmMetadata
+from . import GenerateResult
 from .compress import parse_filter
 from .scanner import RpmScanner
 from traceback import format_exc
@@ -211,7 +210,7 @@ class MediaGenerator:
                 cache_dir.mkdir(exist_ok=True)
                 from urpm.core.appstream import AppStreamManager
                 if force:
-                    print("⚡ Force mode: all packages will be re-extracted.\n")
+                    logger.info("⚡ Force mode: all packages will be re-extracted.\n")
 
                 # AppStreamManager needs a db instance, but for generation
                 # from RPM dir we use extract_from_rpm + build_catalog
