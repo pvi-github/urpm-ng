@@ -872,12 +872,16 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
             progress(args.name, stage, current, total)
 
         urpm_root = getattr(args, 'urpm_root', None)
-        result = sync_media(db, args.name, single_progress, force=True,
+        force = getattr(args, 'force', False)
+        result = sync_media(db, args.name, single_progress, force=force,
                            urpm_root=urpm_root, skip_appstream=skip_appstream)
         print()  # newline after progress
 
         if result.success:
-            print(colors.success(ngettext("  {count} package", "  {count} packages", result.packages_count).format(count=result.packages_count)))
+            if result.skipped:
+                print("  " + colors.info(_("up-to-date")))
+            else:
+                print(colors.success(ngettext("  {count} package", "  {count} packages", result.packages_count).format(count=result.packages_count)))
             return 0
         else:
             print("  " + colors.error(_("Error")) + ": " + str(result.error))
@@ -922,7 +926,8 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
                 num_lines = len(media_list)
 
         sync_start = time.time()
-        results = sync_all_media(db, parallel_progress, force=True,
+        results = sync_all_media(db, parallel_progress,
+                                 force=getattr(args, 'force', False),
                                  skip_appstream=skip_appstream)
         sync_elapsed = time.time() - sync_start
 
@@ -935,20 +940,33 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
             print(f"\033[{num_lines}F", end='', flush=True)
 
         total_packages = 0
+        skipped_count = 0
         errors = 0
 
         for name, result in results:
-            if result.success:
-                count = result.packages_count
-                count_str = colors.success(str(count)) if count > 0 else str(count)
-                print("  " + colors.info(name) + ": " + count_str + " " + ngettext("package", "packages", count))
-                total_packages += count
-            else:
+            if not result.success:
                 print("  " + colors.error(name) + ": " + _("ERROR - {error}").format(error=result.error))
                 errors += 1
+                continue
+            if result.skipped:
+                # HEAD/MD5 check determined nothing changed — distinguish
+                # this from a genuinely-empty re-parse (which keeps the
+                # explicit "0 packages" label) so users can spot a working
+                # conditional sync at a glance.
+                print("  " + colors.info(name) + ": " + colors.dim(_("up-to-date")))
+                skipped_count += 1
+                continue
+            count = result.packages_count
+            count_str = colors.success(str(count)) if count > 0 else str(count)
+            print("  " + colors.info(name) + ": " + count_str + " " + ngettext("package", "packages", count))
+            total_packages += count
 
+        # Summary: only show the package total when something was
+        # actually re-parsed.  Pure-skip runs get the compact form.
         if errors:
             print("\n" + colors.info(_("Total")) + ": " + colors.success(str(total_packages)) + " " + _("packages from {count} media in {elapsed} ({errors} errors)").format(count=len(results), elapsed=format_elapsed(sync_elapsed), errors=colors.error(str(errors))))
+        elif skipped_count == len(results):
+            print("\n" + colors.info(_("Total")) + ": " + _("all {count} media up-to-date in {elapsed}").format(count=len(results), elapsed=format_elapsed(sync_elapsed)))
         else:
             print("\n" + colors.info(_("Total")) + ": " + colors.success(str(total_packages)) + " " + _("packages from {count} media in {elapsed}").format(count=len(results), elapsed=format_elapsed(sync_elapsed)))
 

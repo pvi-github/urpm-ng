@@ -1169,6 +1169,11 @@ Examples:
         'name', nargs='?',
         help=_('Media name to update (default: all)')
     )
+    update_parser.add_argument(
+        '--force', '-f',
+        action='store_true',
+        help=_('Re-download and re-parse even if metadata is unchanged')
+    )
 
     # =========================================================================
     # upgrade / u
@@ -1480,6 +1485,11 @@ For legacy mode (non-Mageia URL with explicit name):
     media_update.add_argument(
         'name', nargs='?',
         help=_('Media name (empty = all)')
+    )
+    media_update.add_argument(
+        '--force', '-f',
+        action='store_true',
+        help=_('Re-download and re-parse even if metadata is unchanged')
     )
     media_update.add_argument(
         '--no-appstream',

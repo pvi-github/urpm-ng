@@ -69,6 +69,10 @@ class SyncResult:
     synthesis_downloaded: bool = False
     hdlist_downloaded: bool = False
     error: Optional[str] = None
+    # True when the conditional HEAD/MD5 check determined nothing
+    # changed and no synthesis re-parse was needed.  Distinguishes
+    # "up-to-date" from a genuinely-empty medium.
+    skipped: bool = False
 
 
 def download_file(url: str, dest: Path,
@@ -560,7 +564,7 @@ def sync_media(db: PackageDatabase, media_name: str,
         if not needs_update:
             if progress_callback:
                 progress_callback("up-to-date", 0, 0)
-            return SyncResult(success=True, packages_count=0)
+            return SyncResult(success=True, packages_count=0, skipped=True)
 
     # Create temp directory for downloads
     with tempfile.TemporaryDirectory(prefix='urpm_sync_') as tmpdir:
