@@ -1105,20 +1105,35 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     base_name = bracket_match.group(1)
                     version_constraint = (bracket_match.group(2), bracket_match.group(3))
 
-            # Use multiple selection flags for flexibility
+            # Use multiple selection flags for flexibility.  When the
+            # request carries a version constraint (``foo >= 1.0``)
+            # pass the full string so the ``SELECTION_REL`` flag
+            # actually evaluates the relational dep; using
+            # ``base_name`` alone would silently drop the constraint
+            # and let an older installed version be reported as
+            # "already satisfied".
             flags = (solv.Selection.SELECTION_NAME |
                     solv.Selection.SELECTION_CANON |
                     solv.Selection.SELECTION_DOTARCH |
                     solv.Selection.SELECTION_REL)
-            sel = self.pool.select(base_name, flags)
+            sel = self.pool.select(
+                name if version_constraint else base_name, flags,
+            )
 
             if sel.isempty():
-                # Try glob match
+                # Glob fallback — wildcards have no business inside a
+                # version range, so we always drop the constraint here.
                 sel = self.pool.select(base_name, solv.Selection.SELECTION_GLOB |
                                        solv.Selection.SELECTION_CANON)
             if sel.isempty():
-                # Try provides match
-                sel = self.pool.select(base_name, solv.Selection.SELECTION_PROVIDES)
+                # Provides fallback — keep the relational dep so we
+                # don't end up matching an older provider when the
+                # caller explicitly asked for a newer one.
+                sel = self.pool.select(
+                    name if version_constraint else base_name,
+                    solv.Selection.SELECTION_PROVIDES
+                    | solv.Selection.SELECTION_REL,
+                )
 
                 if not sel.isempty() and name not in choices:
                     # Check if multiple different packages provide this capability
