@@ -6,6 +6,6 @@ Built on urpm.core, provides a Qt6 (and future GTK4) interface for:
 - Media configuration
 """
 
-__version__ = "0.7.12"
+__version__ = "0.7.13"
 
 __all__ = ["__version__"]
