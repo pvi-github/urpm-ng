@@ -1119,9 +1119,17 @@ def _build_single_package(
                 return (source_path, False,
                         _("rpmbuild reported missing BRs but .buildreqs.nosrc.rpm could not be read"))
 
+            # Preserve version constraints (``... >= 46``) verbatim:
+            # they are essential for resolution.  Stripping them turned
+            # an unsatisfiable build (a missing version, not a missing
+            # capability) into an infinite "Nothing to do" loop because
+            # ``urpm install`` resolved the bare capability to whatever
+            # older version was on the mirror, while ``rpmbuild -br``
+            # kept rejecting it.  ``urpm install`` accepts the full
+            # ``name op version`` syntax directly.
             new_deps = []
             for line in result.stdout.splitlines():
-                dep = _ver_re.sub('', line.strip()).strip()
+                dep = line.strip()
                 if dep and not dep.startswith('rpmlib('):
                     new_deps.append(dep)
             # Sort + dedupe for readable display.
@@ -1143,11 +1151,18 @@ def _build_single_package(
                     print("  " + colors.dim(colors.light_purple(dep)))
                 else:
                     print("  " + colors.light_purple(dep))
+            # Stream the install so the user sees the live progress
+            # display.  On failure we re-query each requested dep
+            # with ``urpm whatprovides`` to build the want/have report
+            # — much cleaner than trying to parse the streamed output
+            # with its ANSI cursor-control codes.
             ret = container.exec_stream(cid, [
                 'urpm', 'install', '--auto', '--without-recommends', '--sync'
             ] + new_deps)
             if ret != 0:
-                return (source_path, False, _("Dynamic BuildRequires install failed"))
+                _diagnose_unsatisfied_buildrequires(cid, container, new_deps)
+                return (source_path, False,
+                        _("Dynamic BuildRequires install failed"))
         else:
             return (source_path, False,
                     _("Dynamic BuildRequires did not converge in {n} passes").format(n=MAX_DYNBR_PASSES))
@@ -1204,6 +1219,60 @@ def _build_single_package(
         # Always cleanup container unless --keep-container
         if cid and not keep_container:
             container.rm(cid)
+
+
+def _diagnose_unsatisfied_buildrequires(
+    cid: str, container, requested_deps: list[str],
+) -> None:
+    """Print a want/have report after a failed BuildRequires install.
+
+    The resolver's terse ``Package not found: X`` line tells the user
+    which capability could not be resolved, but not what *is*
+    available.  In the most common failure mode — a Mageia mirror
+    that hasn't yet rebuilt the upstream package with the required
+    version — the actionable information is exactly that comparison:
+    "I want ``python3dist(cryptography) >= 46`` but the medium ships
+    45".
+
+    We rerun ``urpm whatprovides`` inside the container for each
+    requested dep that carries a version constraint, plus any bare
+    capability that resolves to nothing, and print the highest
+    priority provider next to the original request.
+
+    Args:
+        cid: Container id to run the diagnostic queries inside.
+        container: ContainerRunner instance.
+        requested_deps: the deps passed to the failing ``urpm install``.
+    """
+    import re as _re
+    _ver_re = _re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
+
+    from .. import colors
+    print()
+    print(colors.error(_("Dynamic BuildRequires cannot be satisfied:")))
+
+    for dep in requested_deps:
+        bare = _ver_re.sub('', dep).strip()
+        has_constraint = (dep != bare)
+        wp = container.exec(cid, ['urpm', 'whatprovides', bare])
+        available = (wp.stdout or '').strip()
+
+        if available:
+            # ``whatprovides`` may list one provider per arch / medium;
+            # the first line is the highest-priority candidate.
+            first = available.splitlines()[0].strip()
+            if has_constraint:
+                # The dep carries a version constraint and the bare
+                # capability resolves to *something* — show both so
+                # the user can spot the version gap.
+                print(f"  {colors.warning(_('want'))}: {dep}")
+                print(f"  {colors.dim(_('have'))}: {first}")
+            # Bare capability that resolves to something is implicitly
+            # satisfied: omit it from the diagnostic to keep the noise
+            # down.
+        else:
+            print(f"  {colors.warning(dep)} → "
+                  + colors.error(_("no provider in any enabled medium")))
 
 
 def _extract_buildrequires(path: str) -> list[str] | None:
