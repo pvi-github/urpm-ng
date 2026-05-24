@@ -2,6 +2,11 @@
 %define version 0.7.13
 %define release 1
 
+# Full Release including the Mageia disttag, used in Obsoletes /
+# Provides on the noarch subpackages so they match what the rpmdb
+# actually records (``3.mga10``, not the bare ``3`` we declare here).
+%global pkgrelfull %mkrel %{release}
+
 Name:           %{name}
 Version:        %{version}
 Release:        %mkrel %{release}
@@ -12,7 +17,14 @@ URL:            https://github.com/pvi-github/urpm-ng
 Source0:        %{name}-%{version}.tar.gz
 Source1:        pk-backend-urpm-%{version}.tar.gz
 
-# Note: No BuildArch:noarch because we also build the C backend
+# Per-subpackage ``BuildArch: noarch`` for everything that is pure
+# Python (core, daemon, appstream, desktop, build, all meta).  Only
+# ``packagekit-backend`` keeps its native arch — it ships the
+# ``libpk_backend_urpm.so`` C plugin.  Each noarch subpackage also
+# carries ``Obsoletes`` / ``Provides`` lines targeting its own
+# %%{?epoch:%%{epoch}:}%%{version}-%%{pkgrelfull} so the transition
+# from older arch-specific RPMs (e.g. urpm-ng-core-0.7.13-3.mga10.
+# x86_64) to the new noarch builds upgrades cleanly.
 
 # Python build requirements
 BuildRequires:  pyproject-rpm-macros
@@ -34,6 +46,13 @@ BuildRequires:  pkgconfig(packagekit-glib2) >= 1.0
 
 # ============================================================================
 # Main package: urpm-ng (meta-package)
+#
+# Stays host-arch by default because RPM only allows ``noarch`` as a
+# per-subpackage ``BuildArch`` override.  Making the main package
+# noarch would cascade to every subpackage including
+# ``packagekit-backend`` (which ships native code), with no way to
+# break out.  Cross-arch users install ``urpm-ng-core`` directly
+# instead of the meta — that's the path mkimage already uses.
 # ============================================================================
 Requires:       %{name}-core = %{version}-%{release}
 Requires:       %{name}-daemon = %{version}-%{release}
@@ -54,6 +73,9 @@ For desktop integration (Discover, GNOME Software), install urpm-ng-desktop.
 %package core
 Summary:        Core CLI and resolver for urpm-ng
 Group:          System/Configuration/Packaging
+BuildArch:      noarch
+Obsoletes:      %{name}-core < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
+Provides:       %{name}-core = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       python3
 Requires:       python3-solv
@@ -79,6 +101,9 @@ desktop integration. Useful for container images and minimal installs.
 %package daemon
 Summary:        Background daemon and P2P sharing for urpm-ng
 Group:          System/Configuration/Packaging
+BuildArch:      noarch
+Obsoletes:      %{name}-daemon < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
+Provides:       %{name}-daemon = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       %{name}-core = %{version}-%{release}
 Requires(post):   systemd
@@ -97,6 +122,9 @@ Background daemon for urpm-ng providing:
 %package appstream
 Summary:        AppStream integration for urpm-ng
 Group:          System/Configuration/Packaging
+BuildArch:      noarch
+Obsoletes:      %{name}-appstream < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
+Provides:       %{name}-appstream = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       %{name}-core = %{version}-%{release}
 
@@ -110,6 +138,13 @@ Enables application metadata for software centers.
 %package packagekit-backend
 Summary:        PackageKit backend for urpm-ng
 Group:          System/Configuration/Packaging
+# No BuildArch override: this is the only subpackage shipping a
+# native artefact (``libpk_backend_urpm.so``) so it inherits the
+# host arch from the spec preamble.  RPM does not let us mix
+# host-arch and ``noarch`` subpackages with a top-level
+# ``BuildArch: noarch`` (only noarch is accepted as a per-subpackage
+# override), so the noarch-becoming subpackages each declare it
+# explicitly.
 
 Requires:       %{name}-core = %{version}-%{release}
 Requires:       %{name}-daemon = %{version}-%{release}
@@ -131,6 +166,9 @@ Includes D-Bus service and PolicyKit integration.
 %package desktop
 Summary:        Desktop integration for urpm-ng
 Group:          System/Configuration/Packaging
+BuildArch:      noarch
+Obsoletes:      %{name}-desktop < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
+Provides:       %{name}-desktop = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       %{name} = %{version}-%{release}
 Requires:       %{name}-packagekit-backend = %{version}-%{release}
@@ -148,6 +186,9 @@ Includes: core CLI, daemon, PackageKit backend, and AppStream support.
 %package build
 Summary:        Container image building tools for urpm-ng
 Group:          System/Configuration/Packaging
+BuildArch:      noarch
+Obsoletes:      %{name}-build < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
+Provides:       %{name}-build = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       %{name}-core = %{version}-%{release}
 
@@ -164,6 +205,9 @@ Requires Docker or Podman to function.
 %package all
 Summary:        Complete urpm-ng installation
 Group:          System/Configuration/Packaging
+BuildArch:      noarch
+Obsoletes:      %{name}-all < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
+Provides:       %{name}-all = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       %{name}-desktop = %{version}-%{release}
 Requires:       %{name}-build = %{version}-%{release}
