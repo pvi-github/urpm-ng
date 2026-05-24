@@ -3375,6 +3375,11 @@ msgstr "pakketten van {count} media in {elapsed} ({errors} fouten)"
 msgid "packages from {count} media in {elapsed}"
 msgstr "pakketten van {count} media in {elapsed}"
 
+#: urpm/cli/commands/media.py:969
+#, python-brace-format
+msgid "all {count} media up-to-date in {elapsed}"
+msgstr "alle {count} media up-to-date in {elapsed}"
+
 #: urpm/cli/commands/media.py:981
 #, python-brace-format
 msgid "files.xml sync already in progress (PID {pid})."
