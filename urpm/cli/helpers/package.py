@@ -1,8 +1,8 @@
 """Package name extraction and virtual package resolution helpers."""
 
+import functools
 import platform
 import re
-import subprocess
 from typing import TYPE_CHECKING
 
 from ...core.synthesis import parse_nevra
@@ -15,8 +15,58 @@ if TYPE_CHECKING:
 _KNOWN_ARCHES = {"x86_64", "i586", "i686", "noarch", "aarch64", "armv7hl"}
 
 
+@functools.lru_cache(maxsize=1)
 def system_arch() -> str:
-    """Return the host architecture (e.g. 'x86_64')."""
+    """Return the user-space architecture as recorded in the rpmdb.
+
+    Reads the ``ARCH`` header of the ``filesystem`` package — and,
+    failing that, ``glibc`` — both of which are always installed on
+    a Mageia system and always built with the target user-space
+    arch.  This avoids two pitfalls that bit earlier attempts:
+
+    * ``platform.machine()`` returns the *kernel* arch — wrong
+      inside a foreign-arch container (an i686 user-space running
+      on an x86_64 kernel via podman reports ``x86_64``).
+    * ``rpm --eval '%{_target_cpu}'`` is also kernel-driven on at
+      least Mageia 10's rpm configuration.
+
+    The rpmdb header, by contrast, is fixed at install time and
+    truthfully reflects the binary's own architecture.
+
+    Implemented through ``python3-rpm`` (an existing hard urpm-ng
+    dependency) so we stay in-process — ~1 ms vs ~50 ms for a
+    ``rpm -q`` subprocess fork, with no ``PATH`` dependency to
+    worry about.
+
+    Cached because rpm's view of the platform does not change for
+    the lifetime of a process and ``system_arch()`` is on the hot
+    path of many resolver / pool operations.
+
+    Falls back to ``platform.machine()`` only when neither probe
+    package is installed (very early bootstrap, where urpm-ng
+    explicitly passes ``--arch`` anyway) or when the ``rpm``
+    Python module is unavailable.
+    """
+    try:
+        import rpm  # noqa: PLC0415 — keep the import lazy
+    except ImportError:
+        return platform.machine()
+
+    try:
+        ts = rpm.TransactionSet()
+        for probe in ('filesystem', 'glibc'):
+            for hdr in ts.dbMatch(rpm.RPMTAG_NAME, probe):
+                arch = hdr[rpm.RPMTAG_ARCH]
+                if isinstance(arch, bytes):
+                    arch = arch.decode('ascii', 'replace')
+                if arch and arch != 'noarch':
+                    return arch
+    except Exception:
+        # rpmdb unreadable, locked, corrupted — fall through.  We
+        # would rather return the kernel arch (probably wrong in a
+        # foreign-arch container, but at least answers *something*)
+        # than crash a CLI invocation on a transient rpm hiccup.
+        pass
     return platform.machine()
 
 
