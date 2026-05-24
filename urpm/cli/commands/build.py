@@ -289,6 +289,13 @@ def _phase2_container_promote(
             detach=True, rm=False, network='host',
         )
         print(_("  Container: {cid}").format(cid=cid[:12]))
+        # Detect the container's user-space arch so subsequent
+        # ``container.exec*`` calls auto-prepend ``linux32`` when
+        # running an i386/i486/i586/i686 user-space on an x86_64
+        # kernel — without that, ``uname -m`` would lie and confuse
+        # rpm-build's CFLAGS, Python's ``sysconfig.get_platform``,
+        # …  See ``Container.probe_arch``.
+        container.probe_arch(cid)
 
         for name, url in addmedia:
             print(_("  Adding media {name}...").format(name=name))
@@ -984,6 +991,11 @@ def _build_single_package(
             network='host'
         )
         print(_("  Container: {cid}").format(cid=cid[:12]))
+        # See ``Container.probe_arch``: pin the personality wrapper
+        # now so that rpmbuild, gcc, meson, Python's
+        # ``sysconfig.get_platform`` and friends all see the right
+        # ``uname -m`` when this image is 32-bit on a 64-bit kernel.
+        container.probe_arch(cid)
 
         # 2. Prepare rpmbuild directories
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/SPECS'])

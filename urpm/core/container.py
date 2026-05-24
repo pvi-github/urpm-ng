@@ -72,9 +72,19 @@ def detect_runtime(preferred: str = None) -> ContainerRuntime:
 class Container:
     """Wrapper for container operations."""
 
+    # Per-cid record of the user-space architecture, set by
+    # ``probe_arch()`` and consulted by ``_personality_wrap()``.
+    # Used to prepend ``linux32`` to every exec into a 32-bit
+    # container running on a 64-bit kernel, so that ``uname -m``
+    # (and everything downstream — rpm-build's CFLAGS, Python's
+    # ``sysconfig.get_platform()``, …) reports the user-space arch
+    # rather than the kernel arch.
+    _ARCH_NEEDS_LINUX32 = frozenset({'i386', 'i486', 'i586', 'i686'})
+
     def __init__(self, runtime: ContainerRuntime):
         self.runtime = runtime
         self.cmd = runtime.path
+        self._arch_by_cid: dict[str, str] = {}
 
     def run(
         self,
@@ -136,6 +146,55 @@ class Container:
 
         return result.stdout.strip()
 
+    def probe_arch(self, container_id: str) -> Optional[str]:
+        """Detect and remember the user-space arch of a running container.
+
+        Queries the ``ARCH`` header of the always-installed
+        ``filesystem`` package — the same approach as the host's
+        :func:`urpm.cli.helpers.package.system_arch`.  Caches the
+        result so subsequent :meth:`exec` / :meth:`exec_stream`
+        calls can prepend ``linux32`` automatically when the
+        container's arch is 32-bit (otherwise ``uname -m`` returns
+        the kernel's ``x86_64`` and confuses rpm-build, gcc, Python
+        ``sysconfig``, …).
+
+        Safe to call multiple times; subsequent calls re-probe and
+        overwrite the cached value.
+
+        Args:
+            container_id: A running container's id.
+
+        Returns:
+            The detected arch (``'i686'``, ``'x86_64'``, …), or
+            ``None`` if probing failed (``filesystem`` absent,
+            container stopped, …).  When ``None``, no personality
+            wrap is applied — same behaviour as before the helper
+            existed.
+        """
+        result = subprocess.run(
+            [self.cmd, 'exec', container_id,
+             'rpm', '-q', '--qf', '%{ARCH}\n', 'filesystem'],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None
+        arch = (result.stdout or '').strip().splitlines()
+        if not arch:
+            return None
+        arch = arch[0].strip()
+        if not arch or arch == 'noarch':
+            return None
+        self._arch_by_cid[container_id] = arch
+        return arch
+
+    def _personality_wrap(self, container_id: str) -> List[str]:
+        """Return the personality wrapper (e.g. ``['linux32']``) to
+        prepend to commands sent into ``container_id``."""
+        arch = self._arch_by_cid.get(container_id)
+        if arch in self._ARCH_NEEDS_LINUX32:
+            return ['linux32']
+        return []
+
     def exec(
         self,
         container_id: str,
@@ -165,6 +224,7 @@ class Container:
                 args.extend(['-e', f'{key}={value}'])
 
         args.append(container_id)
+        args.extend(self._personality_wrap(container_id))
         args.extend(command)
 
         logger.debug(f"Exec: {' '.join(args)}")
@@ -192,6 +252,7 @@ class Container:
             args.extend(['-w', workdir])
 
         args.append(container_id)
+        args.extend(self._personality_wrap(container_id))
         args.extend(command)
 
         logger.debug(f"Exec (streaming): {' '.join(args)}")
@@ -235,6 +296,10 @@ class Container:
 
         logger.debug(f"Remove: {container_id}")
         result = subprocess.run(args, capture_output=True, text=True)
+        # Drop the cached arch for this cid so the dict does not grow
+        # unbounded in long-running processes (urpmd, the build loop
+        # spinning many containers).
+        self._arch_by_cid.pop(container_id, None)
         return result.returncode == 0
 
     def stop(self, container_id: str, timeout: int = 10) -> bool:
