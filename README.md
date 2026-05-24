@@ -53,7 +53,7 @@ curl -s "https://api.github.com/repos/pvi-github/urpm-ng/releases/tags/$VER" | \
   grep browser_download_url | grep '\.rpm"' | cut -d'"' -f4 | \
   grep -v '\.src\.rpm' | grep -v '\-debuginfo' | grep -v '\-debugsource' | \
   grep "mga${MGAVER}" | grep "\.${ARCH}\.\|\.noarch\." | xargs -n1 curl -sLO && \
-if urpm --version 2>/dev/null | grep -qE 'urpm 0\.[3-9]\.|urpm [1-9]\.'; then \
+if urpm --version 2>/dev/null | grep -qE 'urpm (0\.([3-9]|[0-9]{2,})|[1-9][0-9]*)\.'; then \
   su -c "urpm i --reinstall $HOME/tmp/urpm-ng/urpm-ng-all-*.rpm"; \
 else \
   su -c "urpmi $HOME/tmp/urpm-ng/*.rpm && urpm mark auto \$(rpm -qa 'urpm-ng-*' | grep -v urpm-ng-all | sed 's/-[0-9].*//')"; \
