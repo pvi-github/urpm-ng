@@ -231,7 +231,14 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     bootstrap_set = set(bootstrap_packages)
     phase2_packages = [p for p in requested_packages if p not in bootstrap_set]
 
-    minimal_tag = f"{release}-minimal"
+    # Cache key MUST include the arch: the bootstrap chroot is
+    # arch-native (Phase 1 installs ``<arch>`` packages, so the
+    # resulting rpmdb is arch-specific).  A bare ``{release}-minimal``
+    # tag silently reused an x86_64 bootstrap for an i686 build and
+    # ended up promoting an x86_64 rpmdb under a ``cauldron-i686``
+    # tag — the upgrade then listed x86_64 packages because that is
+    # all the rpmdb knew about.
+    minimal_tag = f"{release}-{arch}-minimal"
 
     # Phase 1: bootstrap chroot -> minimal image (cached across runs)
     if not container.image_exists(minimal_tag):
