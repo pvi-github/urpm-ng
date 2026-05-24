@@ -369,22 +369,39 @@ def _phase2_container_promote(
             container.rm(cid, force=True)
 
 
-def _find_local_urpm_rpm() -> Path | None:
+def _find_local_urpm_rpm(arch: str | None = None) -> Path | None:
     """Search standard locations for a local urpm-ng RPM (fallback when
-    urpm-ng isn't yet in official repos)."""
+    urpm-ng isn't yet in official repos).
+
+    When ``arch`` is given, only RPMs whose filename ends with
+    ``.<arch>.rpm`` or ``.noarch.rpm`` are returned — installing an
+    x86_64 RPM into an i686 chroot fails late and unhelpfully, so we
+    rather report "no candidate" and let the caller surface a clearer
+    error.
+    """
     search_dirs = [
         Path.home() / 'Downloads',
         Path('./rpmbuild/RPMS'),
         Path.home() / 'rpmbuild/RPMS',
         Path('.'),
     ]
+
+    def _arch_matches(p: Path) -> bool:
+        if arch is None:
+            return True
+        n = p.name
+        return n.endswith(f'.{arch}.rpm') or n.endswith('.noarch.rpm')
+
     for search_dir in search_dirs:
-        if search_dir.exists():
-            candidates = list(search_dir.glob('**/urpm-ng-core-*.rpm'))
-            if not candidates:
-                candidates = list(search_dir.glob('**/urpm-ng-*.rpm'))
-            if candidates:
-                return max(candidates, key=lambda p: p.stat().st_mtime)
+        if not search_dir.exists():
+            continue
+        candidates = [p for p in search_dir.glob('**/urpm-ng-core-*.rpm')
+                      if _arch_matches(p)]
+        if not candidates:
+            candidates = [p for p in search_dir.glob('**/urpm-ng-*.rpm')
+                          if _arch_matches(p)]
+        if candidates:
+            return max(candidates, key=lambda p: p.stat().st_mtime)
     return None
 
 
@@ -600,14 +617,26 @@ def _phase1_bootstrap_chroot(
         # urpm-ng: try repos, fallback to local RPM
         print(_("  Installing urpm-ng..."))
         if _noscripts_install(['urpm-ng'], 'urpm-ng from repos') != 0:
-            print(_("    repos failed, looking for local urpm-ng RPM..."))
-            local_rpm = _find_local_urpm_rpm()
+            print(_("    repos failed, looking for local urpm-ng RPM "
+                    "({arch})...").format(arch=arch))
+            local_rpm = _find_local_urpm_rpm(arch)
             if local_rpm is not None:
                 prompt = _("  Found: {path}\n  Press Enter to use, or provide another path: "
                            ).format(path=local_rpm)
                 default_path = str(local_rpm)
             else:
-                prompt = _("  Path to urpm-ng RPM file: ")
+                # Foreign-arch builds (e.g. i686 from an x86_64 host)
+                # rarely have a local matching RPM lying around — make
+                # that clear in the prompt so the user understands why
+                # the auto-detection turned up empty.
+                print(colors.warning(_(
+                    "    No local urpm-ng RPM found matching arch "
+                    "'{arch}'.  Build one on a matching host (or in a "
+                    "{arch} container) and drop it into ~/Downloads "
+                    "or ./rpmbuild/RPMS/{arch}/."
+                ).format(arch=arch)))
+                prompt = _("  Path to urpm-ng RPM file ({arch}): "
+                           ).format(arch=arch)
                 default_path = ""
             user_input = input(prompt).strip()
             rpm_path = Path(user_input) if user_input else (Path(default_path) if default_path else None)
