@@ -541,6 +541,10 @@ def _phase1_bootstrap_chroot(
                 debug=None, watched=None, prefer=None,
                 all=False, test=False, sync=True,
                 allow_no_root=True, config_policy='replace', no_readme=True,
+                # Propagate the bootstrap arch so cmd_install does not
+                # fall back to the host's ``uname -m`` and end up
+                # trying to fetch x86_64 packages into an i686 chroot.
+                arch=arch,
             )
             return cmd_install(ns, chroot_db)
 
