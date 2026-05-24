@@ -439,9 +439,11 @@ def get_system_version(root: str = None) -> Optional[str]:
 def get_compatible_arches(arch: str) -> list:
     """Return the list of RPM architectures compatible with *arch*.
 
-    On x86_64 systems RPM can natively install i586 and i686 packages
-    (multilib).  This function encodes that compatibility so that media
-    filtering and resolver setup accept the right set of architectures.
+    Encodes the x86 lineage so media filtering and resolver setup
+    accept the right set of architectures.  Used both for x86_64
+    multilib hosts AND for foreign-arch containers (e.g. an i686
+    user-space on an x86_64 kernel, which Mageia 9 still labels its
+    media as ``i586`` for historical URL reasons).
 
     The result always includes ``'noarch'``.
 
@@ -451,9 +453,20 @@ def get_compatible_arches(arch: str) -> list:
     Returns:
         List of compatible architectures, most specific first.
     """
-    # x86_64 can run 32-bit x86 code (multilib)
+    # Intel/AMD lineage: each tier inherits its predecessors so an
+    # ``i686`` system accepts ``.i586.rpm`` (Mageia 9's actual
+    # mirror layout) and an ``x86_64`` system accepts everything
+    # back down to i386.
     if arch == 'x86_64':
-        return ['x86_64', 'i686', 'i586', 'noarch']
+        return ['x86_64', 'i686', 'i586', 'i486', 'i386', 'noarch']
+    if arch == 'i686':
+        return ['i686', 'i586', 'i486', 'i386', 'noarch']
+    if arch == 'i586':
+        return ['i586', 'i486', 'i386', 'noarch']
+    if arch == 'i486':
+        return ['i486', 'i386', 'noarch']
+    if arch == 'i386':
+        return ['i386', 'noarch']
     # ARM 64-bit can run armv7hl in some setups, but Mageia doesn't
     # ship multilib ARM — keep it simple for now.
     return [arch, 'noarch']
