@@ -798,6 +798,14 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     runtime_name = getattr(args, 'runtime', None)
     no_update = getattr(args, 'no_update', False)
     with_rpms_patterns = getattr(args, 'with_rpms', []) or []
+    subrel = getattr(args, 'subrel', None) or None  # treat '' as unset
+    rpmmacros_path = getattr(args, 'rpmmacros', None) or None
+    if rpmmacros_path:
+        rpmmacros_path = Path(rpmmacros_path)
+        if not rpmmacros_path.is_file():
+            print(colors.error(_("rpmmacros file not found: {path}").format(
+                path=rpmmacros_path)))
+            return 2
 
     # Expand glob patterns for --with-rpms
     with_rpms = []
@@ -869,7 +877,8 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
         """Build a single package. Returns (source, success, message)."""
         return _build_single_package(
             container, image, source_path, output_dir, keep_container,
-            with_rpms, no_update=no_update,
+            with_rpms, no_update=no_update, subrel=subrel,
+            rpmmacros_path=rpmmacros_path,
         )
 
     if parallel > 1 and len(valid_sources) > 1:
@@ -958,6 +967,8 @@ def _build_single_package(
     keep_container: bool,
     with_rpms: list = None,
     no_update: bool = False,
+    subrel: str | None = None,
+    rpmmacros_path: Path | None = None,
 ) -> tuple:
     """Build a single package in a container.
 
@@ -969,6 +980,16 @@ def _build_single_package(
         keep_container: Keep container after build for debugging
         with_rpms: List of local RPM paths to install before build
         no_update: Skip media sync and package update before building
+        subrel: Optional sub-release tag — injected as ``%subrel``
+            into ``/root/.rpmmacros`` of the container so Mageia
+            specs using ``%mkrel %{release}`` end up producing
+            ``NAME-VERSION-RELEASE.TAG.DIST.ARCH.rpm``.
+        rpmmacros_path: Optional host path to a complete rpmmacros file
+            that should be dropped as ``/root/.rpmmacros`` inside the
+            container.  When ``subrel`` is also given, the
+            ``%subrel TAG`` line is appended after this file's content
+            so ``--subrel`` takes precedence over anything the file
+            may define.
 
     Returns:
         Tuple of (source_path, success, message)
@@ -996,6 +1017,36 @@ def _build_single_package(
         # ``sysconfig.get_platform`` and friends all see the right
         # ``uname -m`` when this image is 32-bit on a 64-bit kernel.
         container.probe_arch(cid)
+
+        # Build ``/root/.rpmmacros`` from the optional user-supplied
+        # file plus the optional ``--subrel`` tag.  ``--subrel`` is
+        # appended last so it wins over any earlier definition.  We
+        # write the macros file host-side then ``container.cp`` it in
+        # rather than shell-quoting a macro containing ``%`` through
+        # a chain of subprocesses.  Use case for the full file:
+        # overriding ``%packager``, ``%vendor``, ``%dist`` or any
+        # other macro a third-party builder wants to set without
+        # touching the spec.
+        if rpmmacros_path or subrel:
+            macros_content = ''
+            if rpmmacros_path:
+                print(_("  rpmmacros: {path}").format(path=rpmmacros_path))
+                macros_content = rpmmacros_path.read_text()
+                if macros_content and not macros_content.endswith('\n'):
+                    macros_content += '\n'
+            if subrel:
+                print(_("  Sub-release tag: {tag}").format(tag=subrel))
+                macros_content += f'%subrel {subrel}\n'
+            with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.rpmmacros',
+                prefix='urpm-build-', delete=False,
+            ) as macros_tmp:
+                macros_tmp.write(macros_content)
+                macros_tmp_path = macros_tmp.name
+            try:
+                container.cp(macros_tmp_path, f'{cid}:/root/.rpmmacros')
+            finally:
+                Path(macros_tmp_path).unlink(missing_ok=True)
 
         # 2. Prepare rpmbuild directories
         container.exec(cid, ['mkdir', '-p', '/root/rpmbuild/SPECS'])

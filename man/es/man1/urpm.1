@@ -606,6 +606,21 @@ Número de compilaciones en paralelo (por defecto: 1).
 .TP
 .B \-\-keep\-container
 Conservar el contenedor después de compilar (para depuración).
+.TP
+.BR \-\-subrel " " \fItag\fR
+Etiquetar esta compilación con un marcador de sub\-release para que los
+RPM resultantes sean \fINOMBRE\-VERSIÓN\-RELEASE.TAG.DIST.ARCH.rpm\fR.
+Útil para distinguir compilaciones de terceros (por ej. \fBmlo\fR) de las
+oficiales en bugzilla y en las listas de paquetes. Se inyecta como
+\fB%subrel\fR en el entorno de compilación del contenedor y los specs de
+Mageia que usan \fB%mkrel\fR lo recogen automáticamente.
+.TP
+.BR \-\-rpmmacros " " \fIarchivo\fR
+Inyectar \fIarchivo\fR como \fB/root/.rpmmacros\fR dentro del contenedor
+de compilación. Útil para sobrescribir \fB%packager\fR, \fB%vendor\fR,
+\fB%dist\fR o cualquier otra macro rpm sin tocar el spec. Combinado con
+\fB\-\-subrel\fR, la línea \fB%subrel\fR se añade al final y tiene
+precedencia.
 .PP
 Las fuentes pueden ser archivos .src.rpm o .spec. Para archivos .spec,
 las fuentes se copian automáticamente desde el directorio SOURCES/ (soporta

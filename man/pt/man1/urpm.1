@@ -606,6 +606,21 @@ Número de compilações em paralelo (por omissão: 1).
 .TP
 .B \-\-keep\-container
 Manter o contentor após a compilação (para depuração).
+.TP
+.BR \-\-subrel " " \fItag\fR
+Marcar esta build com uma etiqueta de sub\-release para que os RPM
+produzidos fiquem \fINOME\-VERSÃO\-RELEASE.TAG.DIST.ARCH.rpm\fR. Útil
+para distinguir builds de terceiros (por ex. \fBmlo\fR) das oficiais no
+bugzilla e nas listas de pacotes. É injetado como \fB%subrel\fR no
+ambiente de build do contentor e apanhado automaticamente pelos specs
+Mageia que usam \fB%mkrel\fR.
+.TP
+.BR \-\-rpmmacros " " \fIficheiro\fR
+Injetar \fIficheiro\fR como \fB/root/.rpmmacros\fR dentro do contentor
+de build. Útil para sobrescrever \fB%packager\fR, \fB%vendor\fR,
+\fB%dist\fR ou qualquer outra macro rpm sem tocar no spec. Combinado
+com \fB\-\-subrel\fR, a linha \fB%subrel\fR é adicionada por último,
+tendo precedência.
 .PP
 As fontes podem ser ficheiros .src.rpm ou .spec. Para ficheiros .spec,
 as fontes são automaticamente copiadas a partir do directório SOURCES/ (suporta

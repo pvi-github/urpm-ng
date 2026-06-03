@@ -991,6 +991,12 @@ urpm build -i mageia:10-build SPECS/app.spec \
 # Multiple builds in parallel
 urpm build -i mageia:10-build *.src.rpm --parallel 4
 
+# Third-party builder: tag output as foo-1.0-1.mlo.mga10.x86_64.rpm
+urpm build -i mageia:10-build --subrel mlo SPECS/foo.spec
+
+# Override packager/vendor/dist without touching the spec
+urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
+
 # Options
 -i, --image <tag>             # Docker/Podman image to use
 -o, --output <dir>            # Output directory for SRPM builds (default: ./build-output)
@@ -999,6 +1005,8 @@ urpm build -i mageia:10-build *.src.rpm --parallel 4
 --runtime docker|podman       # Container runtime (default: auto-detect)
 -j, --parallel <N>            # Number of parallel builds (default: 1)
 --keep-container              # Keep container after build (for debugging)
+--subrel <tag>                # Inject %subrel TAG so output RPMs become NAME-VERSION-RELEASE.TAG.DIST.ARCH.rpm
+--rpmmacros <file>            # Inject FILE as /root/.rpmmacros in the build container (combinable with --subrel)
 ```
 
 ### Workspace layout

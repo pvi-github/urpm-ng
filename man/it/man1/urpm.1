@@ -987,6 +987,21 @@ Numero di compilazioni in parallelo (predefinito: 1).
 .TP
 .B \-\-keep\-container
 Conserva il container dopo la compilazione (utile per il debug).
+.TP
+.BR \-\-subrel " " \fItag\fR
+Contrassegna questa build con un marcatore di sub\-release in modo che i
+RPM prodotti diventino \fINOME\-VERSIONE\-RELEASE.TAG.DIST.ARCH.rpm\fR.
+Utile per distinguere le build di terze parti (ad es. \fBmlo\fR) da quelle
+ufficiali in bugzilla e nelle liste pacchetti. Viene iniettato come
+\fB%subrel\fR nell'ambiente di build del container e raccolto
+automaticamente dagli spec Mageia che usano \fB%mkrel\fR.
+.TP
+.BR \-\-rpmmacros " " \fIfile\fR
+Inietta \fIfile\fR come \fB/root/.rpmmacros\fR all'interno del container di
+build. Utile per sovrascrivere \fB%packager\fR, \fB%vendor\fR,
+\fB%dist\fR o qualsiasi altra macro rpm senza toccare lo spec. Combinato
+con \fB\-\-subrel\fR, la riga \fB%subrel\fR viene aggiunta per ultima ed
+ha la precedenza.
 .PP
 I sorgenti possono essere file .src.rpm o file .spec. Per i file .spec i
 sorgenti vengono copiati automaticamente dalla directory SOURCES/

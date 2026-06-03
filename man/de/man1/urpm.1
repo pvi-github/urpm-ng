@@ -605,6 +605,21 @@ Anzahl paralleler Builds (Standard: 1).
 .TP
 .B \-\-keep\-container
 Container nach dem Build beibehalten (für Fehlersuche).
+.TP
+.BR \-\-subrel " " \fItag\fR
+Diesen Build mit einem Sub\-Release\-Tag versehen, sodass die erzeugten
+RPMs zu \fINAME\-VERSION\-RELEASE.TAG.DIST.ARCH.rpm\fR werden. Nützlich,
+um Drittanbieter\-Builds (z. B. \fBmlo\fR) von den offiziellen in Bugzilla
+und in Paketlisten zu unterscheiden. Wird als \fB%subrel\fR in die
+Build\-Umgebung des Containers injiziert und automatisch von
+Mageia\-Specs übernommen, die \fB%mkrel\fR verwenden.
+.TP
+.BR \-\-rpmmacros " " \fIdatei\fR
+\fIdatei\fR als \fB/root/.rpmmacros\fR in den Build\-Container injizieren.
+Nützlich, um \fB%packager\fR, \fB%vendor\fR, \fB%dist\fR oder ein anderes
+rpm\-Makro zu überschreiben, ohne das Spec zu verändern. In Kombination
+mit \fB\-\-subrel\fR wird die \fB%subrel\fR\-Zeile zuletzt angehängt,
+sodass sie Vorrang hat.
 .PP
 Quellen können .src.rpm- oder .spec-Dateien sein. Bei .spec-Dateien werden die
 Quellen automatisch aus dem SOURCES/-Verzeichnis kopiert (unterstützt

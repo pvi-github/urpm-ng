@@ -948,6 +948,21 @@ Number of parallel builds (default: 1).
 .TP
 .B \-\-keep\-container
 Keep container after build (for debugging).
+.TP
+.BR \-\-subrel " " \fItag\fR
+Tag this build with a sub\-release marker so output RPMs become
+\fINAME\-VERSION\-RELEASE.TAG.DIST.ARCH.rpm\fR. Useful for
+distinguishing third\-party builds (e.g. \fBmlo\fR) from the official
+ones in bugzilla and on package lists. Injected as \fB%subrel\fR into
+the container build environment and picked up automatically by Mageia
+specs that use \fB%mkrel\fR.
+.TP
+.BR \-\-rpmmacros " " \fIfile\fR
+Inject \fIfile\fR as \fB/root/.rpmmacros\fR inside the build container.
+Useful to override \fB%packager\fR, \fB%vendor\fR, \fB%dist\fR or any
+other rpm macro without touching the spec. When combined with
+\fB\-\-subrel\fR, the \fB%subrel\fR line is appended last so it takes
+precedence over anything the file may define.
 .PP
 Sources can be .src.rpm files or .spec files. For .spec files, sources are
 automatically copied from the SOURCES/ directory (supports workspace/SPECS/

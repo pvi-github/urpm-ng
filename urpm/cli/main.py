@@ -818,6 +818,25 @@ Examples:
         action='store_true',
         help=_('Keep container after build (for debugging)')
     )
+    build_parser.add_argument(
+        '--subrel',
+        metavar='TAG',
+        help=_('Tag this build with a sub-release marker so output RPMs '
+               'become NAME-VERSION-RELEASE.TAG.DIST.ARCH.rpm — useful '
+               'for distinguishing third-party builds (e.g. "mlo") from '
+               'the official ones in bugzilla and on package lists. '
+               'Injected as %%subrel into the container build env, '
+               'picked up automatically by Mageia specs using %%mkrel.')
+    )
+    build_parser.add_argument(
+        '--rpmmacros',
+        metavar='FILE',
+        help=_('Inject FILE as /root/.rpmmacros inside the build container. '
+               'Useful to override %%packager, %%vendor, %%dist or any other '
+               'rpm macro without touching the spec. When combined with '
+               '--subrel, the %%subrel line is appended last so it takes '
+               'precedence.')
+    )
 
     # =========================================================================
     # erase / e (like rpm -e, urpme)

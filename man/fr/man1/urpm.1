@@ -975,6 +975,21 @@ Nombre de builds parallèles (défaut: 1).
 .TP
 .B \-\-keep\-container
 Conserver le conteneur après le build (pour debug).
+.TP
+.BR \-\-subrel " " \fItag\fR
+Marquer cette build avec un tag de sous-release afin que les RPM produits
+deviennent \fINOM\-VERSION\-RELEASE.TAG.DIST.ARCH.rpm\fR. Utile pour
+distinguer les builds tierces (par ex. \fBmlo\fR) des officielles dans
+bugzilla et dans les listes de paquets. Injecté en tant que \fB%subrel\fR
+dans l'environnement de build du conteneur, repris automatiquement par
+les specs Mageia qui utilisent \fB%mkrel\fR.
+.TP
+.BR \-\-rpmmacros " " \fIfichier\fR
+Injecter \fIfichier\fR en tant que \fB/root/.rpmmacros\fR dans le conteneur
+de build. Utile pour redéfinir \fB%packager\fR, \fB%vendor\fR, \fB%dist\fR
+ou toute autre macro rpm sans toucher au spec. Combiné avec
+\fB\-\-subrel\fR, la ligne \fB%subrel\fR est ajoutée en dernier de sorte
+qu'elle prévale sur le fichier.
 .PP
 Les sources peuvent être des fichiers .src.rpm ou .spec. Pour les fichiers .spec,
 les sources sont automatiquement copiées depuis le répertoire SOURCES/ (supporte

@@ -604,6 +604,21 @@ Aantal parallelle builds (standaard: 1).
 .TP
 .B \-\-keep\-container
 Bewaar de container na de build (voor debugging).
+.TP
+.BR \-\-subrel " " \fItag\fR
+Voorzie deze build van een sub\-release\-markering zodat de uitgevoerde
+RPM's de naam \fINAAM\-VERSIE\-RELEASE.TAG.DIST.ARCH.rpm\fR krijgen.
+Handig om externe builds (bijv. \fBmlo\fR) te onderscheiden van de
+officiële in bugzilla en in pakketlijsten. Wordt als \fB%subrel\fR in de
+buildomgeving van de container geïnjecteerd en automatisch opgepikt door
+Mageia\-specs die \fB%mkrel\fR gebruiken.
+.TP
+.BR \-\-rpmmacros " " \fIbestand\fR
+Injecteer \fIbestand\fR als \fB/root/.rpmmacros\fR in de buildcontainer.
+Handig om \fB%packager\fR, \fB%vendor\fR, \fB%dist\fR of een andere
+rpm\-macro te overschrijven zonder het spec aan te raken. In combinatie
+met \fB\-\-subrel\fR wordt de \fB%subrel\fR\-regel als laatste toegevoegd
+zodat die voorrang heeft.
 .PP
 Bronnen kunnen .src.rpm- of .spec-bestanden zijn. Voor .spec-bestanden worden
 bronnen automatisch gekopieerd uit de map SOURCES/ (ondersteunt workspace/SPECS/
