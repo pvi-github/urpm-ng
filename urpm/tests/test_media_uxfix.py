@@ -19,13 +19,28 @@ All tests use a real on-disk SQLite database via the ``db`` fixture.
 from __future__ import annotations
 
 import argparse
+import gettext
 import tempfile
 from pathlib import Path
 
 import pytest
 
+from urpm import i18n
 from urpm.cli.commands.media import cmd_media_add, cmd_media_list
 from urpm.core.database import PackageDatabase
+
+
+@pytest.fixture(autouse=True)
+def _force_null_translations(monkeypatch):
+    """Neutralise gettext so assertions match the English source strings.
+
+    ``urpm.i18n._translation`` is a module-level singleton initialised
+    from the dev machine's locale (often non-English).  Pinning it to
+    ``NullTranslations`` for the duration of the test makes every
+    ``_(...)`` call return its argument unchanged, regardless of
+    ``LANG`` or the loaded ``.mo`` file.
+    """
+    monkeypatch.setattr(i18n, "_translation", gettext.NullTranslations())
 
 
 @pytest.fixture

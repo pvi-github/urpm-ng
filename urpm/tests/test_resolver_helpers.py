@@ -91,8 +91,16 @@ def test_explicit_kwarg_wins_over_args_arch(stub_resolver):
 # --- Case 4 : args has no arch attribute, no kwarg --------------------
 
 def test_fallback_to_system_arch_when_no_attr(stub_resolver, monkeypatch):
-    """When args lacks 'arch' entirely, the helper falls back to system_arch()."""
-    monkeypatch.setattr(pkg_helpers.platform, 'machine', lambda: 'armv7hl')
+    """When args lacks 'arch' entirely, the helper falls back to system_arch().
+
+    Patches ``system_arch`` directly because the real implementation now
+    probes the rpmdb (``filesystem``/``glibc`` ARCH header) before
+    falling back to ``platform.machine()``, so mocking ``platform`` no
+    longer steers the result on a machine where those packages exist.
+    The contract under test is ``create_resolver -> resolve_target_arch
+    -> system_arch``, not ``system_arch``'s internal probe order.
+    """
+    monkeypatch.setattr(pkg_helpers, 'system_arch', lambda: 'armv7hl')
     args = _bare_args()  # No arch attribute at all.
     assert not hasattr(args, 'arch')
     r = resolver_helpers.create_resolver(db=None, args=args)

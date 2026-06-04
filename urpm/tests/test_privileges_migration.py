@@ -204,8 +204,6 @@ def _function_calls_require_privileges(fn, expected_action_id: str) -> bool:
      'org.mageia.urpm.media-manage'),
     ('urpm.cli.commands.config:_cmd_auto_upgrade_policy',
      'org.mageia.urpm.media-manage'),
-    ('urpm.cli.commands.query:cmd_find',
-     'org.mageia.urpm.media-manage'),
 ])
 def test_command_invokes_require_privileges_with_action_id(
     import_path, expected_action_id,
@@ -495,6 +493,8 @@ class TestSilentCrashSitesNowGuarded:
         'urpm.cli.commands.server:cmd_server_stats',
         'urpm.cli.commands.mirror:cmd_mirror_status',
         'urpm.cli.commands.readme:cmd_readme',
+        # ``urpm find`` queries the rpmdb and synthesis (both reads).
+        'urpm.cli.commands.query:cmd_find',
     ]
 
     @pytest.mark.parametrize("import_path", READ_ONLY_SITES)
