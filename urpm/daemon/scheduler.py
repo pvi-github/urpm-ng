@@ -112,6 +112,30 @@ class Scheduler:
         self.predownload_enabled = True
         self.max_predownload_size = 500 * 1024 * 1024  # 500 MB default
 
+        # Apply user-facing knobs from /etc/urpm/conf.d/20-daemon.cfg.
+        # See ``DaemonSettings`` for the contract.  Off means the
+        # corresponding periodic task is short-circuited; manual
+        # ``urpm media update`` keeps working regardless.
+        from ..core.settings import get_settings
+        daemon_cfg = get_settings().daemon
+        self.auto_update_metadata = daemon_cfg.auto_update_metadata
+        self.auto_replication = daemon_cfg.auto_replication
+        self.auto_fetch_server_dates = daemon_cfg.auto_fetch_server_dates
+        # predownload reuses the existing flag instead of a second one
+        self.predownload_enabled = daemon_cfg.auto_predownload
+        if daemon_cfg.metadata_interval is not None:
+            self.metadata_interval = daemon_cfg.metadata_interval
+
+        disabled = [name for name, on in (
+            ("metadata", self.auto_update_metadata),
+            ("predownload", self.predownload_enabled),
+            ("replication", self.auto_replication),
+            ("fetch_dates", self.auto_fetch_server_dates),
+        ) if not on]
+        if disabled:
+            logger.info("Scheduler tasks disabled by config: %s",
+                        ", ".join(disabled))
+
         # Idle detection thresholds (configurable)
         self.max_cpu_load = 0.5  # 1-minute load average threshold
         self.max_net_kbps = 100  # KB/s threshold for network "idle"
@@ -177,10 +201,16 @@ class Scheduler:
         try:
             while self._running:
                 try:
-                    # Detect wake-up from suspend/hibernate
+                    # Detect wake-up from suspend/hibernate.  When
+                    # auto_update_metadata is disabled by config, the
+                    # user has opted out of all automatic metadata
+                    # traffic, so the wake-up sync is also silenced.
                     if wakeup_detector.check():
                         logger.info("Wake-up from suspend detected")
-                        if has_default_route():
+                        if not self.auto_update_metadata:
+                            logger.info("auto_update_metadata disabled, "
+                                        "skipping wake-up sync")
+                        elif has_default_route():
                             logger.info("Network available, running immediate metadata sync")
                             self._run_metadata_check()
                         else:
@@ -188,7 +218,9 @@ class Scheduler:
                             self._wakeup_pending = True
 
                     # Handle deferred wake-up sync (waiting for network)
-                    if self._wakeup_pending and has_default_route():
+                    if (self._wakeup_pending
+                            and self.auto_update_metadata
+                            and has_default_route()):
                         logger.info("Network restored after wake-up, running deferred sync")
                         self._wakeup_pending = False
                         self._run_metadata_check()
@@ -214,7 +246,7 @@ class Scheduler:
         now = time.time()
 
         # Check metadata refresh (adaptive per-media interval)
-        if self._should_run_task('metadata', now):
+        if self.auto_update_metadata and self._should_run_task('metadata', now):
             self._run_metadata_check()
             # Ensure -wal/-shm are readable by non-root after DB writes
             self.db.ensure_wal_readable()
@@ -230,12 +262,12 @@ class Scheduler:
             self._schedule_next('predownload', now, self.predownload_interval)
 
         # Check replication (for media with replication_policy='full')
-        if self._should_run_task('replication', now):
+        if self.auto_replication and self._should_run_task('replication', now):
             self._run_replication()
             self._schedule_next('replication', now, self.replication_interval)
 
         # Fetch server dates for replication priority (runs more often, lightweight)
-        if self._should_run_task('fetch_dates', now):
+        if self.auto_fetch_server_dates and self._should_run_task('fetch_dates', now):
             self._run_fetch_server_dates()
             self._schedule_next('fetch_dates', now, self.fetch_dates_interval)
 

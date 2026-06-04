@@ -106,6 +106,38 @@ class DaemonSettings:
     (e.g. ``eth0,vboxnet0``) restricts broadcasts to those interfaces.
     """
 
+    auto_update_metadata: bool = True
+    """Run periodic metadata refresh in the background.
+
+    When False, the scheduler skips both the periodic synthesis HEAD
+    check and the immediate wake-up sync after resume.  ``urpm media
+    update`` invoked manually remains available.
+    """
+
+    auto_predownload: bool = True
+    """Pre-download RPMs for pending updates in the background."""
+
+    auto_replication: bool = True
+    """Replicate ``replication_policy=full`` media in the background.
+
+    Has no effect when no media is configured for full replication.
+    """
+
+    auto_fetch_server_dates: bool = True
+    """Periodically refresh per-server freshness dates.
+
+    Cheap probe used to rank mirrors; disable to silence all routine
+    background traffic from the daemon.
+    """
+
+    metadata_interval: Optional[int] = None
+    """Override the metadata check interval (seconds).
+
+    None keeps the built-in default (3600s in prod, 60s in dev) and the
+    adaptive per-media schedule on top.  Raise to slow refreshes without
+    disabling them entirely.
+    """
+
 
 @dataclass
 class ServerSettings:
@@ -320,10 +352,25 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
     # [daemon]
     if cp.has_section("daemon"):
         for key, raw in cp.items("daemon"):
-            if key == "discovery_interfaces":
-                val = raw.strip()
-                if val:
-                    settings.daemon.discovery_interfaces = val
+            try:
+                if key == "discovery_interfaces":
+                    val = raw.strip()
+                    if val:
+                        settings.daemon.discovery_interfaces = val
+                elif key == "auto_update_metadata":
+                    settings.daemon.auto_update_metadata = _as_bool(raw)
+                elif key == "auto_predownload":
+                    settings.daemon.auto_predownload = _as_bool(raw)
+                elif key == "auto_replication":
+                    settings.daemon.auto_replication = _as_bool(raw)
+                elif key == "auto_fetch_server_dates":
+                    settings.daemon.auto_fetch_server_dates = _as_bool(raw)
+                elif key == "metadata_interval":
+                    val = _as_int(raw)
+                    if val > 0:
+                        settings.daemon.metadata_interval = val
+            except ValueError:
+                pass
 
     # [transaction] — reserved for future settings; mode fields removed
     # (smart sync is now the default, --sync forces full sync)
@@ -425,6 +472,12 @@ def format_settings(settings: Settings = None) -> str:
     lines.append("")
     lines.append("[daemon]")
     lines.append(f"discovery_interfaces = {settings.daemon.discovery_interfaces}")
+    lines.append(f"auto_update_metadata = {str(settings.daemon.auto_update_metadata).lower()}")
+    lines.append(f"auto_predownload = {str(settings.daemon.auto_predownload).lower()}")
+    lines.append(f"auto_replication = {str(settings.daemon.auto_replication).lower()}")
+    lines.append(f"auto_fetch_server_dates = {str(settings.daemon.auto_fetch_server_dates).lower()}")
+    if settings.daemon.metadata_interval is not None:
+        lines.append(f"metadata_interval = {settings.daemon.metadata_interval}")
 
     lines.append("")
     lines.append("[server]")
