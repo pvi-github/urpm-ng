@@ -41,6 +41,71 @@ def generate_short_name(class_name: str, type_name: str) -> str:
     return f"{class_name}_{type_name}"
 
 
+class MediaNameCollision(Exception):
+    """A media display name cannot be safely placed in the DB.
+
+    Raised by :func:`disambiguate_media_name` when the requested
+    ``base_name`` is already taken AND the situation cannot be
+    salvaged by appending the arch suffix (because the candidate is
+    on the native arch, or the suffixed name is also taken).
+
+    Carries enough context for the CLI to print a helpful message
+    (existing media id, hint to pass ``--name`` explicitly).
+    """
+
+    def __init__(self, base_name: str, existing: dict):
+        super().__init__(f"Media name {base_name!r} already taken")
+        self.base_name = base_name
+        self.existing = existing
+
+
+def disambiguate_media_name(db, base_name: str, arch: str) -> str:
+    """Return a display name guaranteed not to collide in DB right now.
+
+    ``UNIQUE(media.name)`` would otherwise abort an insert when two
+    media share the same canonical display name across architectures
+    (a typical cross-arch sibling case).  Resolution rules:
+
+    * No existing row owns ``base_name`` → return ``base_name``.
+    * Existing row owns ``base_name`` and the new media is on a
+      **foreign** arch → return ``f"{base_name} ({arch})"`` after
+      checking that suffixed form is also free.  This matches the
+      urpmi convention where the native arch wears the canonical
+      name and cross-arch siblings carry the disambiguator.
+    * Existing row owns ``base_name`` and the new media is on the
+      **native** arch (or the suffixed form is also taken) →
+      raise :class:`MediaNameCollision`.  The caller is expected
+      to surface a clear error rather than invent a name silently.
+
+    The returned value is safe to feed into ``db.add_media`` only
+    immediately afterwards — there is no TOCTOU guard, but urpm-ng
+    CLI is single-process so the window is negligible.
+
+    Args:
+        db: Database accessor.
+        base_name: Desired display name.
+        arch: Architecture of the media being added.
+
+    Returns:
+        A display name that does not currently collide.
+
+    Raises:
+        MediaNameCollision: When no safe disambiguation is available.
+    """
+    existing = db.get_media(base_name)
+    if existing is None:
+        return base_name
+
+    from .package import system_arch
+    if arch == system_arch():
+        raise MediaNameCollision(base_name, existing)
+
+    suffixed = f"{base_name} ({arch})"
+    if db.get_media(suffixed) is None:
+        return suffixed
+    raise MediaNameCollision(base_name, existing)
+
+
 def generate_server_name(protocol: str, host: str) -> str:
     """Generate a server name from protocol and host.
 

@@ -15,6 +15,8 @@ from ..helpers.media import (
     KNOWN_ARCHES,
     KNOWN_CLASSES,
     KNOWN_TYPES,
+    MediaNameCollision,
+    disambiguate_media_name,
     generate_media_name as _generate_media_name,
     generate_short_name as _generate_short_name,
     generate_server_name as _generate_server_name,
@@ -1887,6 +1889,7 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
     from ...core.media_cfg import (
         fetch_media_cfg, parse_media_cfg, filter_media, decompose_url,
         detect_installed_categories, should_enable,
+        resolve_display_name, is_ugly_name,
     )
 
     url = args.url
@@ -2072,7 +2075,20 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
             force_32bit=force_32bit,
             force_enable_all=enable_all,
         )
-        media_name = f"mga{m.version}-{m.short_name}"
+        # ``parse_media_cfg`` already produces ``m.name`` from either
+        # the upstream ``name=`` field or a Title-Cased fallback built
+        # from the section path.  Only fall back to the network
+        # recovery path when the candidate looks like a raw snake-case
+        # artefact (e.g. ``mga10-urpm_release``), which means upstream
+        # set an ugly ``name=`` value explicitly.
+        media_name = m.name
+        if is_ugly_name(media_name):
+            media_url = f"{scheme}://{host}{base_path}/{m.relative_path}/"
+            media_name = resolve_display_name(
+                media_url=media_url,
+                section=m.section,
+                prefer="local",  # global is what we already saw and rejected
+            )
 
         existing = db.get_media_by_version_arch_shortname(
             m.version, m.architecture, m.short_name)
@@ -2081,6 +2097,18 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
             if not db.server_media_link_exists(server['id'], existing['id']):
                 db.link_server_media(server['id'], existing['id'])
             existed += 1
+            continue
+
+        try:
+            media_name = disambiguate_media_name(
+                db, media_name, m.architecture)
+        except MediaNameCollision as exc:
+            print(colors.error(_(
+                "  Skipping {section}: display name '{name}' already "
+                "taken by media #{id} ('{existing}')")
+                .format(section=m.section, name=exc.base_name,
+                        id=exc.existing['id'],
+                        existing=exc.existing['name'])))
             continue
 
         try:

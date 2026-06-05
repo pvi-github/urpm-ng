@@ -242,6 +242,173 @@ def filter_media(
     return result
 
 
+# ── Display name resolution ──────────────────────────────────────────────
+
+
+def is_ugly_name(name: str) -> bool:
+    """A name is "ugly" when it has neither an uppercase letter nor a space.
+
+    Caught patterns: ``mga10-common_release``, ``urpm_release``, ``core``,
+    ``backports_testing``.  The rule rejects pure snake_case / kebab-case
+    artefacts that surface in ``urpm media update`` listings without
+    looking like a human-curated name.
+    """
+    if not name:
+        return True
+    return (not any(c.isupper() for c in name)) and (' ' not in name)
+
+
+def _strip_to_last_media_segment(url: str) -> Optional[str]:
+    """Return the media-root URL by stripping back to the last ``/media/``.
+
+    ``https://host/.../10/i586/media/core/release/`` →
+    ``https://host/.../10/i586/media/``
+
+    Used to locate the global media.cfg shared by every media under
+    the same arch tree.  Returns ``None`` when the URL has no
+    ``/media/`` segment (custom layouts urpm-ng cannot reason about).
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(url)
+    idx = parsed.path.rfind('/media/')
+    if idx == -1:
+        return None
+    new_path = parsed.path[: idx + len('/media/')]
+    return urlunparse(parsed._replace(path=new_path))
+
+
+def _try_fetch_name(media_url: str, section: str, scope: str,
+                    timeout: int = 5) -> Optional[str]:
+    """Fetch a media.cfg and return a usable ``name=`` for ``section``.
+
+    ``scope`` selects which media.cfg to fetch:
+
+    * ``"local"``  → ``<media_url>/media_info/media.cfg`` (the media's
+      own descriptor — frequently incomplete because packagers forget
+      to fill ``name=``).
+    * ``"global"`` → ``<media_root>/media_info/media.cfg`` where
+      ``<media_root>`` is the URL stripped back to the last
+      ``/media/``.  The global file is the one used by
+      ``urpm media discover`` and is typically the better-maintained
+      source.
+
+    The candidate is accepted only when non-empty AND non-ugly.  For
+    the local scope, when no matching section is found we look at any
+    other (non-``media_info``) section, since a single-media descriptor
+    might label it under a different key.
+
+    Any network or parse error returns ``None`` so callers can fall
+    through to the next step.
+    """
+    if scope == "local":
+        cfg_base = media_url
+    elif scope == "global":
+        cfg_base = _strip_to_last_media_segment(media_url)
+        if cfg_base is None:
+            return None
+    else:
+        raise ValueError(f"scope must be 'local' or 'global', got {scope!r}")
+
+    try:
+        content = fetch_media_cfg(cfg_base, timeout=timeout)
+    except Exception:
+        return None
+
+    try:
+        cp = configparser.ConfigParser()
+        cp.read_string(content)
+    except configparser.Error:
+        return None
+
+    def _accept(value: str) -> Optional[str]:
+        v = (value or '').strip()
+        return v if (v and not is_ugly_name(v)) else None
+
+    if cp.has_section(section):
+        candidate = _accept(cp.get(section, 'name', fallback=''))
+        if candidate:
+            return candidate
+
+    if scope == "local":
+        for s in cp.sections():
+            if s == 'media_info':
+                continue
+            candidate = _accept(cp.get(s, 'name', fallback=''))
+            if candidate:
+                return candidate
+
+    return None
+
+
+def resolve_display_name(
+    *,
+    media_url: str,
+    section: str,
+    explicit_name: Optional[str] = None,
+    parent_cfg_sections: Optional[dict] = None,
+    prefer: str = "global",
+) -> str:
+    """Resolve the display name for a media, walking a fallback chain.
+
+    Order of attempts (first acceptable wins):
+
+    1. ``explicit_name`` — when the user passed ``--name`` we respect
+       it verbatim, no upstream lookup.
+    2. ``parent_cfg_sections[section]['name']`` — the parent media.cfg
+       parsed and handed in by the caller (``cmd_media_discover``
+       already has this in hand from ``parse_media_cfg``).
+    3. Network recovery, ordered by ``prefer``:
+
+       * ``"global"`` (default — discover / cleanup logic): try the
+         global media.cfg first, then the local one.
+       * ``"local"`` (manual ``media add``): try the local media.cfg
+         first, then the global one.
+
+    4. Computed fallback: Title-cased name built from ``section``.
+
+    A candidate from steps 2-3 is accepted only when it carries an
+    uppercase letter OR a space (see :func:`is_ugly_name`).  Network
+    errors at step 3 fall through to the next step without raising.
+
+    This function performs no database lookup; pair it with
+    :func:`urpm.cli.helpers.media.disambiguate_media_name` to obtain
+    a name safe to insert.
+
+    Args:
+        media_url: Full URL of the media being named (e.g.
+            ``https://host/.../media/core/release/``).
+        section: Section identifier as it appears (or would appear)
+            in the parent media.cfg, e.g. ``"core/release"``.
+        explicit_name: User-provided override.
+        parent_cfg_sections: Pre-parsed parent media.cfg, indexed by
+            section name.  Each value is a mapping with ``"name"`` and
+            other media.cfg options.
+        prefer: ``"global"`` or ``"local"`` — which media.cfg to try
+            first during step 3.
+
+    Returns:
+        A best-effort display name.  Never raises.
+    """
+    if explicit_name and explicit_name.strip():
+        return explicit_name.strip()
+
+    if parent_cfg_sections is not None:
+        opts = parent_cfg_sections.get(section)
+        if opts:
+            candidate = (opts.get('name') or '').strip()
+            if candidate and not is_ugly_name(candidate):
+                return candidate
+
+    order = ("local", "global") if prefer == "local" else ("global", "local")
+    for scope in order:
+        candidate = _try_fetch_name(media_url, section, scope)
+        if candidate:
+            return candidate
+
+    return _make_display_name(section)
+
+
 @dataclass
 class InstalledCategories:
     """Which non-default package categories are present on the system.
