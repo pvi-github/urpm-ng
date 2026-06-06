@@ -585,6 +585,13 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
                 print(_("For custom media, use: urpm media add --custom <name> <short_name> <url>"))
                 return 1
 
+        # ``--name`` is the user's explicit override.  Previously it was
+        # silently dropped on official URLs because ``parsed['name']``
+        # always won, hiding the collision behind a generic UNIQUE error.
+        explicit_name = getattr(args, 'name', None)
+        if explicit_name:
+            parsed['name'] = explicit_name
+
     # Extract parsed values
     protocol = parsed['protocol']
     host = parsed['host']
@@ -697,6 +704,38 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
 
     media_reactivated = False
     if not media:
+        # ``UNIQUE(media.name)`` would otherwise abort the INSERT when
+        # the display name is already taken by a different media (cross-
+        # arch sibling being the typical case).  Two regimes:
+        #
+        # * No ``--name``: name is auto-derived from the URL.  Apply the
+        #   silent arch-suffix convention via ``disambiguate_media_name``.
+        # * Explicit ``--name``: user authority.  No silent renaming —
+        #   surface a clear error and let the user pick another value.
+        explicit_name = (
+            not is_custom and getattr(args, 'name', None)
+        )
+        if explicit_name:
+            existing_by_name = db.get_media(name)
+            if existing_by_name:
+                print(colors.error(_(
+                    "Error: media name {name!r} already taken by "
+                    "media #{id} ({existing}); pass a different "
+                    "--name").format(
+                        name=name, id=existing_by_name['id'],
+                        existing=existing_by_name['name'])))
+                return 1
+        else:
+            try:
+                name = disambiguate_media_name(db, name, arch)
+            except MediaNameCollision as exc:
+                print(colors.error(_(
+                    "Error: derived name {name!r} already taken by "
+                    "media #{id} ({existing}); pass --name to "
+                    "override").format(
+                        name=exc.base_name, id=exc.existing['id'],
+                        existing=exc.existing['name'])))
+                return 1
         # Create new media
         media_id = db.add_media(
             name=name,
