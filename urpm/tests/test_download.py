@@ -4,9 +4,24 @@ from urpm.core.download import DownloadProgress, Downloader, DownloadItem, Downl
 import pytest
 from pathlib import Path
 
-def test_download_progress_samples_and_speed():
+def test_download_progress_samples_and_speed(monkeypatch):
+    # ``time.sleep`` under VM/CI load can stretch from 0.1s to 0.5s+ and
+    # send the measured speed below the expected band, flaking the test
+    # at random.  Replace ``time.time`` with a deterministic counter so
+    # ``add_sample`` records exact intervals; the maths under test
+    # (delta-bytes / delta-time in :meth:`DownloadProgress.get_speed`)
+    # is the same regardless of how it was driven.
+    fake_now = [0.0]
+
+    def _fake_time():
+        return fake_now[0]
+
+    monkeypatch.setattr(time, 'time', _fake_time)
+
+    def advance(seconds: float):
+        fake_now[0] += seconds
+
     # Test 1: Create DownloadProgress instance
-    print("Test 1: Creating DownloadProgress instance")
     progress = DownloadProgress(
         name="test-package",
         bytes_done=0,
@@ -16,44 +31,46 @@ def test_download_progress_samples_and_speed():
         start_time=time.time(),
         samples=[]
     )
-    print(f"Initial state - Bytes done: {progress.bytes_done}, Total: {progress.bytes_total}")
-    print()
+    assert progress.bytes_done == 0
+    assert progress.bytes_total == 10240
 
-    # Test 2: Test add_sample method
-    print("Test 2: Testing add_sample method")
-    time.sleep(0.1)
+    # Test 2: ``add_sample`` appends timestamp + byte count
+    advance(0.1)
     progress.add_sample(1024)
-    time.sleep(0.1)
+    advance(0.1)
     progress.add_sample(2048)
-    time.sleep(0.1)
+    advance(0.1)
     progress.add_sample(3072)
-    print(f"Number of samples: {len(progress.samples)}")
-    print(f"Samples: {progress.samples}")
-    print()
+    assert len(progress.samples) == 3
+    # Float addition drift (0.1 + 0.1 + 0.1 != 0.3 exactly): match on the
+    # byte component and approximate the timestamp.
+    last_t, last_b = progress.samples[-1]
+    assert last_b == 3072
+    assert last_t == pytest.approx(0.3)
 
-    # Test 3: Test get_speed method
-    # Note: timing-based tests are inherently variable due to system load
-    # We expect ~10240 bytes/sec (3072 bytes over ~0.3s) but allow wide margin
-    print("Test 3: Testing get_speed method")
+    # Test 3: ``get_speed`` returns delta-bytes / delta-time exactly
+    # 3072 - 1024 bytes over 0.3 - 0.1 = 0.2 s → 10240 B/s
     speed = progress.get_speed()
-    # Speed should be positive and in a reasonable range (5KB/s to 50KB/s)
-    assert speed > 5000.0, f"Speed too slow: {speed}"
-    assert speed < 50000.0, f"Speed too fast: {speed}"
-    print(f"Calculated speed: {speed:.2f} bytes/sec")
-    print()
+    assert speed == pytest.approx(10240.0)
 
-    # Test 4: Test speed calculation with more samples
-    print("Test 4: Testing with more samples")
+    # Test 4: rolling-window stays at the documented 10 samples
     for i in range(4, 11):
-        time.sleep(0.1)
+        advance(0.1)
         progress.add_sample(1024 * i)
+    # add_sample drops the oldest when len > 10; we added 3 + 7 = 10
+    # so nothing has been dropped yet.
+    assert len(progress.samples) == 10
+    # 10240 - 1024 bytes over 1.0 - 0.1 = 0.9 s → 10240 B/s
     speed = progress.get_speed()
-    # Same tolerance as above
-    assert speed > 5000.0, f"Speed too slow: {speed}"
-    assert speed < 50000.0, f"Speed too fast: {speed}"
-    print(f"Updated speed: {speed:.2f} bytes/sec")
-    print(f"Total samples: {len(progress.samples)}")
-    print()
+    assert speed == pytest.approx(10240.0)
+
+    # One more sample evicts the oldest:
+    advance(0.1)
+    progress.add_sample(11 * 1024)
+    assert len(progress.samples) == 10
+    first_t, first_b = progress.samples[0]
+    assert first_b == 2048  # the original (0.1, 1024) sample is gone
+    assert first_t == pytest.approx(0.2)
 
     # Test 5: Test edge cases
     print("Test 5: Testing edge cases")
