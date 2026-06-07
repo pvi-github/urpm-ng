@@ -150,6 +150,25 @@ class CacheMixin:
         conn.commit()
         return cursor.rowcount > 0
 
+    def unregister_cache_file(self, file_path: str) -> bool:
+        """Delete the cache record matching an absolute or relative file path.
+
+        Companion to :meth:`delete_cache_file` for callers that hold a
+        path on disk rather than a ``(filename, media_id)`` tuple — the
+        typical situation after a corrupt RPM has been detected and
+        unlinked.  Removing the row only; the file itself must already
+        be deleted by the caller.
+
+        Returns:
+            True if a row was deleted.
+        """
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "DELETE FROM cache_files WHERE file_path = ?", (file_path,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
     def get_cache_stats(self, media_id: int = None) -> Dict[str, Any]:
         """Get cache statistics.
 

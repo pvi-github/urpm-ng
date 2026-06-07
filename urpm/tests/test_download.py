@@ -187,3 +187,55 @@ def test_download_progress_display():
 
 if __name__ == "__main__":
     test_download_progress_display()
+
+class TestDownloadErrorGrammar:
+    """Tests for the typed network error classification.
+
+    Replaces the prior ``error.startswith("HTTP")`` discrimination
+    scattered through the multi-server retry loop, and fixes the
+    silent misclassification of pycurl errors as hard HTTP failures.
+    """
+
+    def test_hard_http_marks_is_hard(self):
+        from urpm.core.download import DownloadError, DownloadErrorKind
+        err = DownloadError(
+            kind=DownloadErrorKind.HARD_HTTP,
+            message="HTTP 404",
+            http_code=404,
+        )
+        assert err.is_hard is True
+        assert err.http_code == 404
+
+    def test_transient_network_is_not_hard(self):
+        from urpm.core.download import DownloadError, DownloadErrorKind
+        err = DownloadError(
+            kind=DownloadErrorKind.TRANSIENT_NETWORK,
+            message="libcurl error: timeout reached",
+        )
+        assert err.is_hard is False
+
+    def test_local_io_is_hard(self):
+        from urpm.core.download import DownloadError, DownloadErrorKind
+        err = DownloadError(
+            kind=DownloadErrorKind.LOCAL_IO,
+            message="No space left on device",
+        )
+        assert err.is_hard is True
+
+    def test_str_returns_message_for_logging_backward_compat(self):
+        from urpm.core.download import DownloadError, DownloadErrorKind
+        err = DownloadError(
+            kind=DownloadErrorKind.TRANSIENT_NETWORK,
+            message="DNS resolution failed",
+        )
+        # Existing log/append sites do f"{server}: {err}" — must keep
+        # producing the readable message.
+        assert str(err) == "DNS resolution failed"
+
+    def test_dataclass_is_frozen(self):
+        from urpm.core.download import DownloadError, DownloadErrorKind
+        err = DownloadError(
+            kind=DownloadErrorKind.UNKNOWN, message="x",
+        )
+        with pytest.raises(Exception):
+            err.message = "y"  # type: ignore[misc]

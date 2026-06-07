@@ -8,9 +8,9 @@ import logging
 import os
 import rpm
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +48,41 @@ def wait_rpm_children(timeout: int = 120):
 
 @dataclass
 class InstallResult:
-    """Result of an installation."""
+    """Result of an install or upgrade operation.
+
+    ``success`` reflects the outcome of the underlying rpm transaction.
+    It is **not** a "at least some packages installed" predicate:
+    partial failure is signalled by ``success=False`` together with
+    ``installed > 0`` and a non-empty ``errors`` list.
+
+    Concretely:
+
+    * **No-op** — nothing to install, queue empty → ``success=True``,
+      ``installed=0``.
+    * **Full success** — the transaction ran cleanly → ``success=True``,
+      ``installed`` = packages processed.
+    * **Reduced success** — some packages excluded by the pre-verify /
+      retry pipeline, but the reduced transaction succeeded →
+      ``success=True``, ``reduced_transaction=True``,
+      ``excluded_packages`` populated.
+    * **Partial failure** — the transaction ran but some operations
+      failed → ``success=False``, ``installed`` may still be ``> 0``,
+      ``errors`` describes per-operation failures.
+    * **Total failure** — every candidate package failed pre-verification
+      and no replacement could be fetched → ``success=False``,
+      ``installed=0``, ``errors=['All packages failed verification']``.
+
+    The lower-level :class:`Installer` only fills ``success``,
+    ``installed`` and ``errors``.  The resilient pipeline in
+    :mod:`urpm.core.resilient_install` additionally populates
+    ``excluded_packages``, ``reduced_transaction`` and ``queue_result``.
+    """
     success: bool
     installed: int = 0
-    errors: List[str] = None
-
-    def __post_init__(self):
-        if self.errors is None:
-            self.errors = []
+    errors: List[str] = field(default_factory=list)
+    excluded_packages: List[Tuple[str, str]] = field(default_factory=list)
+    reduced_transaction: bool = False
+    queue_result: Optional[object] = None
 
 
 @dataclass
@@ -224,231 +251,6 @@ class Installer:
 
         return InstallResult(success=True, installed=current[0])
 
-    def _find_sccs(self, graph: dict) -> List[List[str]]:
-        """Find strongly connected components using Tarjan's algorithm.
-
-        Returns list of SCCs, each SCC is a list of package names.
-        SCCs are returned in reverse topological order (dependencies last).
-        """
-        index_counter = [0]
-        stack = []
-        lowlinks = {}
-        index = {}
-        on_stack = {}
-        sccs = []
-
-        def strongconnect(node):
-            index[node] = index_counter[0]
-            lowlinks[node] = index_counter[0]
-            index_counter[0] += 1
-            stack.append(node)
-            on_stack[node] = True
-
-            # Sort successors for deterministic order
-            for successor in sorted(graph.get(node, [])):
-                if successor not in index:
-                    strongconnect(successor)
-                    lowlinks[node] = min(lowlinks[node], lowlinks[successor])
-                elif on_stack.get(successor, False):
-                    lowlinks[node] = min(lowlinks[node], index[successor])
-
-            if lowlinks[node] == index[node]:
-                scc = []
-                while True:
-                    w = stack.pop()
-                    on_stack[w] = False
-                    scc.append(w)
-                    if w == node:
-                        break
-                sccs.append(scc)
-
-        # Sort nodes for deterministic order
-        for node in sorted(graph.keys()):
-            if node not in index:
-                strongconnect(node)
-
-        return sccs
-
-    def _sort_by_dependencies(self, rpm_paths: List[Path]) -> List[Path]:
-        """Sort RPM paths by dependencies (dependencies first).
-
-        Uses RPM headers to build a dependency graph. Handles circular
-        dependencies by finding strongly connected components (SCCs)
-        and keeping them together.
-        """
-        if len(rpm_paths) <= 1:
-            return rpm_paths
-
-        # Read headers and build provides/requires maps
-        path_to_name = {}  # path -> package name
-        name_to_path = {}  # package name -> path
-        provides = {}  # capability -> package name
-        requires = {}  # package name -> set of required capabilities
-
-        ts = rpm.TransactionSet(self.root or '/')
-        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)  # Skip sig check for sorting
-
-        for path in rpm_paths:
-            try:
-                fd = os.open(str(path), os.O_RDONLY)
-                try:
-                    hdr = ts.hdrFromFdno(fd)
-                    name = hdr[rpm.RPMTAG_NAME]
-                    path_to_name[path] = name
-                    name_to_path[name] = path
-
-                    # Package provides itself
-                    provides[name] = name
-
-                    # Get explicit provides
-                    pkg_provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
-                    for prov in pkg_provides:
-                        provides[prov] = name
-
-                    # Get requires
-                    pkg_requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
-                    requires[name] = set(pkg_requires)
-                finally:
-                    os.close(fd)
-            except rpm.error:
-                # If we can't read header, keep original position
-                continue
-
-        # Build dependency graph (only for packages in our set)
-        graph = {name: set() for name in name_to_path}
-        for name, reqs in requires.items():
-            for req in reqs:
-                provider = provides.get(req)
-                if provider and provider in graph and provider != name:
-                    graph[name].add(provider)
-
-        # Find strongly connected components (handles cycles)
-        sccs = self._find_sccs(graph)
-        # Tarjan outputs SCCs with dependencies first, no reverse needed
-
-        # Flatten SCCs to get sorted package names
-        sorted_names = []
-        for scc in sccs:
-            # Sort within SCC for determinism
-            scc.sort()
-            sorted_names.extend(scc)
-
-        # Convert back to paths
-        sorted_paths = []
-        for name in sorted_names:
-            if name in name_to_path:
-                sorted_paths.append(name_to_path[name])
-
-        # Add any paths we couldn't process
-        processed = set(sorted_paths)
-        for path in rpm_paths:
-            if path not in processed:
-                sorted_paths.append(path)
-
-        return sorted_paths
-
-    def _build_dependency_graph(self, rpm_paths: List[Path], debug: bool = False) -> tuple:
-        """Build dependency graph from RPM files.
-
-        Maps ALL provides (including virtual provides) to their provider package.
-
-        Returns:
-            Tuple of (graph, name_to_path, path_to_name)
-            graph: dict mapping package name to set of dependency names
-        """
-        path_to_name = {}
-        name_to_path = {}
-        provides = {}  # capability -> provider package name
-        requires = {}  # package name -> set of required capabilities
-
-        ts = rpm.TransactionSet(self.root or '/')
-        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
-
-        for path in rpm_paths:
-            try:
-                fd = os.open(str(path), os.O_RDONLY)
-                try:
-                    hdr = ts.hdrFromFdno(fd)
-                    name = hdr[rpm.RPMTAG_NAME]
-                    path_to_name[path] = name
-                    name_to_path[name] = path
-
-                    # Package provides itself
-                    provides[name] = name
-
-                    # Get ALL explicit provides (includes virtual provides)
-                    pkg_provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
-                    for prov in pkg_provides:
-                        # Don't overwrite if already provided by another package
-                        # (first provider wins - deterministic based on processing order)
-                        if prov not in provides:
-                            provides[prov] = name
-                        elif debug:
-                            logger.debug(f"Provide '{prov}' already mapped to {provides[prov]}, "
-                                        f"ignoring {name}")
-
-                    requires[name] = set(hdr[rpm.RPMTAG_REQUIRENAME] or [])
-
-                    if debug:
-                        logger.debug(f"Package {name}: {len(pkg_provides)} provides, "
-                                    f"{len(requires[name])} requires")
-                finally:
-                    os.close(fd)
-            except rpm.error as e:
-                logger.warning(f"Failed to read {path}: {e}")
-                continue
-
-        # Build dependency graph: edges point from package to its dependencies
-        graph = {name: set() for name in name_to_path}
-        unresolved_count = 0
-
-        for name, reqs in requires.items():
-            for req in reqs:
-                provider = provides.get(req)
-                if provider and provider in graph and provider != name:
-                    graph[name].add(provider)
-                elif debug and not req.startswith('rpmlib(') and not req.startswith('/'):
-                    # Log unresolved deps (ignore rpmlib features and file deps)
-                    if provider is None:
-                        unresolved_count += 1
-                    elif provider not in graph:
-                        logger.debug(f"{name} requires '{req}' -> {provider} (not in install set)")
-
-        if debug:
-            total_edges = sum(len(deps) for deps in graph.values())
-            logger.debug(f"Dependency graph: {len(graph)} packages, {total_edges} edges, "
-                        f"{unresolved_count} unresolved deps (external)")
-
-        return graph, name_to_path, path_to_name
-
-    def install_batched(self, rpm_paths: List[Path],
-                         batch_size: int = 50,
-                         progress_callback: Callable[[str, int, int], None] = None,
-                         test: bool = False,
-                         verify_signatures: bool = True,
-                         force: bool = False,
-                         reinstall: bool = False) -> InstallResult:
-        """Install RPM packages in a single transaction.
-
-        Note: batch_size parameter is kept for API compatibility but ignored.
-        All packages are now installed in one transaction - the slow rpmdb sync
-        will be handled in background by the caller.
-
-        Args:
-            rpm_paths: List of paths to RPM files
-            batch_size: Ignored (kept for API compatibility)
-            progress_callback: Optional callback(name, current, total)
-            test: If True, only check, don't install
-            verify_signatures: If True, verify GPG signatures (default: True)
-            force: If True, ignore dependency problems and conflicts
-            reinstall: If True, reinstall already installed packages
-
-        Returns:
-            InstallResult with status
-        """
-        # Simply delegate to install() - single transaction, no batching
-        return self.install(rpm_paths, progress_callback, test, verify_signatures, force, reinstall)
-
     def erase(self, package_names: List[str],
               progress_callback: Callable[[str, int, int], None] = None,
               test: bool = False,
@@ -535,31 +337,6 @@ class Installer:
             return EraseResult(success=False, erased=current[0], errors=errors)
 
         return EraseResult(success=True, erased=current[0])
-
-    def erase_batched(self, package_names: List[str],
-                      batch_size: int = 50,
-                      progress_callback: Callable[[str, int, int], None] = None,
-                      test: bool = False,
-                      force: bool = False) -> EraseResult:
-        """Erase packages in a single transaction.
-
-        Note: batch_size parameter is kept for API compatibility but ignored.
-        All packages are now erased in one transaction - the slow rpmdb sync
-        will be handled in background by the caller.
-
-        Args:
-            package_names: List of package names to erase
-            batch_size: Ignored (kept for API compatibility)
-            progress_callback: Optional callback(name, current, total)
-            test: If True, only check, don't erase
-            force: If True, ignore dependency problems
-
-        Returns:
-            EraseResult with status
-        """
-        # Simply delegate to erase() - single transaction, no batching
-        return self.erase(package_names, progress_callback, test, force)
-
 
 def check_rpm_available() -> bool:
     """Check if rpm module is available."""

@@ -3,11 +3,14 @@
 TODO: Add --config-policy=merge for interactive diff/merge of config files
 """
 
+import logging
 import os
 import subprocess
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, List
+
+logger = logging.getLogger(__name__)
 
 from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
@@ -1139,7 +1142,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             ops.abort_transaction(transaction_id)
             return 130
 
-        installed_count = resilient_result.installed_count
+        installed_count = resilient_result.installed
         if remove_pkgs:
             print(colors.success("  " + _("{installed} packages installed, {removed} removed").format(installed=installed_count, removed=len(remove_pkgs))))
         else:
@@ -1173,8 +1176,11 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                         output = format_readme_output(messages)
                         if output:
                             print(output)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning(
+                            "README post-install display failed: %s",
+                            exc, exc_info=True,
+                        )
                 else:
                     # Interactive: display in pager for long output
                     try:
@@ -1195,8 +1201,11 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                                     print(output)
                             else:
                                 print(output)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning(
+                            "README post-install display failed (pager path): %s",
+                            exc, exc_info=True,
+                        )
 
         # Display captured scriptlet output (ldconfig, mime-db rebuild, etc.)
         from ..helpers.progress import display_scriptlet_output
@@ -1439,59 +1448,17 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
             print(_("\nAborted."))
             return 0
 
-    # Build download items
-    download_items = []
-    media_cache = {}
-    servers_cache = {}
-
-    for action in install_actions:
-        media_name = action.media_name
-        if media_name not in media_cache:
-            media = db.get_media(media_name)
-            media_cache[media_name] = media
-            if media and media.get('id'):
-                servers_cache[media['id']] = db.get_servers_for_media(
-                    media['id'], enabled_only=True
-                )
-
-        media = media_cache[media_name]
-        if not media:
-            print("  " + _("Warning: media '{media}' not found").format(media=media_name))
-            continue
-
-        # Parse EVR
-        evr = action.evr
-        if ':' in evr:
-            evr = evr.split(':', 1)[1]
-        version, release = evr.rsplit('-', 1) if '-' in evr else (evr, '1')
-
-        if media.get('relative_path'):
-            servers = servers_cache.get(media['id'], [])
-            servers = [dict(s) for s in servers]
-            download_items.append(DownloadItem(
-                name=action.name,
-                version=version,
-                release=release,
-                arch=action.arch,
-                media_id=media['id'],
-                relative_path=media['relative_path'],
-                is_official=bool(media.get('is_official', 1)),
-                servers=servers,
-                media_name=media_name,
-                size=action.size,
-            ))
-        elif media.get('url'):
-            download_items.append(DownloadItem(
-                name=action.name,
-                version=version,
-                release=release,
-                arch=action.arch,
-                media_url=media['url'],
-                media_name=media_name,
-                size=action.size,
-            ))
-        else:
-            print("  " + _("Warning: no URL or servers for media '{media}'").format(media=media_name))
+    # Build download items via the canonical operations helper so the
+    # cmd_install / cmd_upgrade / cmd_download paths agree on EVR
+    # parsing, media lookup, and the legacy-URL vs new-schema branch.
+    # The helper also picks ``action.filesize`` over ``action.size``
+    # when the former is set — a small accuracy win over the older
+    # inline code.
+    from ...core.operations import PackageOperations
+    ops = PackageOperations(db)
+    download_items, _local_paths = ops.build_download_items(
+        install_actions, resolver,
+    )
 
     if not download_items:
         print(colors.error(_("No packages to download")))

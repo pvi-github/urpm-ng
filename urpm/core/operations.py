@@ -21,8 +21,9 @@ from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from .database import PackageDatabase
 from .download import Downloader, DownloadItem
+from .install import InstallResult
 from .resilient_install import (
-    ResilientInstallResult, pre_verify_signatures, purge_failed_from_cache,
+    pre_verify_signatures, purge_failed_from_cache,
     find_dependents, retry_failed_downloads, _extract_name_from_path,
 )
 from .transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
@@ -343,18 +344,23 @@ class PackageOperations:
         orphan_names: List[str] = None,
         mode: str = "install",
         full_sync: bool = False,
-    ) -> "ResilientInstallResult":
+    ) -> "InstallResult":
         """Install or upgrade packages with signature pre-check, retry, and exclusion.
 
         This wraps :meth:`execute_install` or :meth:`execute_upgrade` with
         the resilient pipeline:
-          1. Pre-verify GPG signatures on all RPMs
-          2. Retry failed downloads from alternate mirrors
-          3. Exclude unrecoverable packages and their dependents
-          4. Execute a (possibly reduced) transaction
 
-        When ``options.verify_signatures`` is False (``--nosignature``),
-        the pre-verification step is skipped entirely.
+          1. Pre-verify GPG signatures on all RPMs — **skipped** when
+             ``options.verify_signatures`` is False (``--nosignature``).
+          2. Retry failed downloads from alternate mirrors (one pass
+             today; see :func:`retry_failed_downloads`).
+          3. Exclude unrecoverable packages and their dependents from
+             the transaction.
+          4. Execute a (possibly reduced) transaction via the queue.
+
+        See :class:`urpm.core.install.InstallResult` for the exact
+        contract of the returned ``success`` flag and the partial-failure
+        semantics.
 
         Args:
             rpm_paths: RPM file paths to install/upgrade.
@@ -374,7 +380,10 @@ class PackageOperations:
                 run triggers in the background.
 
         Returns:
-            :class:`ResilientInstallResult` with install outcome details.
+            :class:`urpm.core.install.InstallResult` with install
+            outcome details (resilient-specific fields populated:
+            ``excluded_packages``, ``reduced_transaction``,
+            ``queue_result``).
         """
         if options is None:
             options = InstallOptions()
@@ -438,9 +447,9 @@ class PackageOperations:
 
         # ── Step 4: Execute the (possibly reduced) transaction ──
         if not valid_paths and not (erase_names or orphan_names):
-            return ResilientInstallResult(
+            return InstallResult(
                 success=False,
-                installed_count=0,
+                installed=0,
                 excluded_packages=excluded,
                 errors=["All packages failed verification"],
             )
@@ -492,9 +501,9 @@ class PackageOperations:
             if not op_errors and queue_result.overall_error:
                 op_errors = [queue_result.overall_error]
 
-        return ResilientInstallResult(
+        return InstallResult(
             success=success,
-            installed_count=installed_count,
+            installed=installed_count,
             excluded_packages=excluded,
             errors=op_errors,
             reduced_transaction=bool(excluded),

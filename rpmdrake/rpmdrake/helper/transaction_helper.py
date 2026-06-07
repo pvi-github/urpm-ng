@@ -21,11 +21,14 @@ Protocol:
 """
 
 import json
+import logging
 import sys
 import signal
 import threading
 from pathlib import Path
 from typing import List
+
+logger = logging.getLogger(__name__)
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -441,8 +444,15 @@ class TransactionHelper:
                 if dep_packages:
                     try:
                         resolver.mark_as_dependency(dep_packages)
-                    except Exception:
-                        pass  # Non-critical, don't fail the transaction
+                    except Exception as exc:
+                        # Non-critical: the install itself succeeded, only
+                        # the explicit/dependency bookkeeping is degraded.
+                        # Surface it in the log so we notice if it becomes
+                        # systematic (e.g. DB schema drift).
+                        logger.warning(
+                            "mark_as_dependency failed for %d package(s): %s",
+                            len(dep_packages), exc, exc_info=True,
+                        )
 
             # Collect post-install README messages from the transaction result
             readme_messages = []
@@ -452,7 +462,7 @@ class TransactionHelper:
             done_msg = {
                 "type": "done",
                 "success": True,
-                "count": result.installed_count,
+                "count": result.installed,
                 "readme_messages": readme_messages,
             }
             # Report restart requirements to the GUI

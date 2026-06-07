@@ -951,3 +951,53 @@ class TestGetPackageExact:
         assert db.get_package_exact(
             'multiarch', '1.0', '1.mga9', 'i686',
         ) is None
+
+
+class TestUnregisterCacheFile:
+    """Tests for the path-based cache record removal helper used by
+    the resilient install pipeline when a corrupt RPM is purged.
+    """
+
+    def _seed_media(self, db, name="Core Release"):
+        return db.add_media(
+            name=name, short_name=name.lower().replace(' ', '_'),
+            mageia_version="9", architecture="x86_64",
+            relative_path="core/release", enabled=True,
+        )
+
+    def test_removes_existing_row(self, db):
+        media_id = self._seed_media(db)
+        db.register_cache_file(
+            filename="foo-1.0-1.mga9.x86_64.rpm",
+            media_id=media_id,
+            file_path="/var/cache/urpm/medias/Core Release/foo-1.0-1.mga9.x86_64.rpm",
+            file_size=1024,
+        )
+        ok = db.unregister_cache_file(
+            "/var/cache/urpm/medias/Core Release/foo-1.0-1.mga9.x86_64.rpm",
+        )
+        assert ok is True
+        # The row is gone — lookup by filename returns None.
+        assert db.get_cache_file(
+            "foo-1.0-1.mga9.x86_64.rpm", media_id=media_id,
+        ) is None
+
+    def test_returns_false_when_missing(self, db):
+        """Cache table is advisory: a missing path is not an error."""
+        ok = db.unregister_cache_file("/nowhere/never-registered.rpm")
+        assert ok is False
+
+    def test_does_not_touch_other_rows(self, db):
+        media_id = self._seed_media(db)
+        db.register_cache_file(
+            filename="keep.rpm", media_id=media_id,
+            file_path="/cache/keep.rpm", file_size=10,
+        )
+        db.register_cache_file(
+            filename="drop.rpm", media_id=media_id,
+            file_path="/cache/drop.rpm", file_size=20,
+        )
+        db.unregister_cache_file("/cache/drop.rpm")
+        # ``keep.rpm`` survives.
+        assert db.get_cache_file("keep.rpm", media_id=media_id) is not None
+        assert db.get_cache_file("drop.rpm", media_id=media_id) is None

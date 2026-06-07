@@ -6,6 +6,7 @@ Uses a queue-based architecture for robust parallel downloads with
 dynamic peer failure tracking and reassignment.
 """
 
+import enum
 import hashlib
 import logging
 import os
@@ -28,6 +29,57 @@ from .peer_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── Network error grammar ─────────────────────────────────────────────
+
+
+class DownloadErrorKind(enum.Enum):
+    """How to react to a download failure.
+
+    ``HARD_HTTP`` is a server-side rejection that will not change by
+    retrying the same URL (404, 410, 451…) — the caller should move on
+    to a different mirror instead of spinning on this one.
+
+    ``TRANSIENT_NETWORK`` is a recoverable failure (DNS, timeout,
+    connection reset, partial transfer cut by a proxy…); the caller is
+    expected to retry on the same mirror with a backoff.
+
+    ``LOCAL_IO`` covers cache write failures (disk full, permissions);
+    retrying is pointless until the local side is fixed.
+
+    ``UNKNOWN`` is for anything else; callers default to a single retry
+    and surface the message verbatim.
+    """
+
+    HARD_HTTP = "hard_http"
+    TRANSIENT_NETWORK = "transient"
+    LOCAL_IO = "local_io"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class DownloadError:
+    """Typed result of a failed download attempt.
+
+    ``str(err)`` returns ``message`` so existing logging / aggregation
+    sites that treated the error as a string keep working without
+    changes.
+    """
+
+    kind: DownloadErrorKind
+    message: str
+    http_code: Optional[int] = None
+
+    def __str__(self) -> str:  # noqa: D401 — short form
+        return self.message
+
+    @property
+    def is_hard(self) -> bool:
+        """True when retrying the same mirror is pointless."""
+        return self.kind in (
+            DownloadErrorKind.HARD_HTTP, DownloadErrorKind.LOCAL_IO,
+        )
 
 
 
@@ -547,7 +599,7 @@ class DownloadCoordinator:
 
             # Download from upstream - source will be set by download_one via callback
             result = self.downloader.download_one(
-                item, progress_callback=progress_cb, worker_slot=slot,
+                item, progress_callback=progress_cb,
                 start_callback=lambda source: self.start_download(
                     slot, item.name, item.size or 0, source, 'server'
                 )
@@ -950,7 +1002,7 @@ def _maybe_replan(work_queue, downloader, assignments, drift_threshold):
 class Downloader:
     """Download manager for RPM packages."""
 
-    def __init__(self, cache_dir: Path = None, max_workers: int = 4,
+    def __init__(self, cache_dir: Path = None,
                  use_peers: bool = True, only_peers: bool = False,
                  db: 'PackageDatabase' = None,
                  target_version: str = None, target_arch: str = None):
@@ -958,12 +1010,17 @@ class Downloader:
 
         Args:
             cache_dir: Directory to store downloaded RPMs
-            max_workers: Max parallel downloads
             use_peers: Whether to use P2P peer discovery for downloads
             only_peers: If True, only download from peers (no upstream fallback)
             db: Database for provenance tracking and blacklist (optional)
             target_version: Target Mageia version for P2P queries (e.g., "10")
             target_arch: Target architecture for P2P queries (e.g., "x86_64")
+
+        Note:
+            The number of parallel workers is read from
+            ``settings.download.parallel`` (defaults to 4); the prior
+            ``max_workers`` constructor argument was always overridden
+            and is gone.
         """
         self.cache_dir = cache_dir or get_base_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1074,13 +1131,20 @@ class Downloader:
                 )
                 logger.debug(f"Registered cache file: {item.filename} ({file_size} bytes)")
         except Exception as e:
-            # Don't fail the download if cache registration fails
-            logger.warning(f"Failed to register cache file {item.filename}: {e}")
+            # Don't fail the download if cache registration fails — the
+            # file is already on disk and usable; the cache_files row is
+            # advisory (used for LRU eviction and quota stats).  Surface
+            # the stacktrace so a schema drift or DB lock issue does
+            # not silently corrode the table.
+            logger.warning(
+                "Failed to register cache file %s: %s",
+                item.filename, e, exc_info=True,
+            )
 
     def _download_from_url(self, url: str, cache_path: Path,
                             progress_callback: Callable[[int, int], None] = None,
                             timeout: int = 30,
-                            ip_mode: str = 'auto') -> Tuple[bool, Optional[str]]:
+                            ip_mode: str = 'auto') -> Tuple[bool, Optional[DownloadError]]:
         """Download a file from URL to cache path.
 
         Uses **pycurl** (libcurl C bindings) so the entire transfer runs
@@ -1095,7 +1159,11 @@ class Downloader:
             ip_mode: 'auto', 'ipv4', 'ipv6', or 'dual'
 
         Returns:
-            Tuple of (success, error_message or None)
+            ``(True, None)`` on success, ``(False, DownloadError)`` on
+            failure.  The :class:`DownloadError` carries the
+            classification (``HARD_HTTP`` vs ``TRANSIENT_NETWORK`` vs
+            ``LOCAL_IO``) so callers can decide whether to retry on the
+            same mirror or move on.
         """
         temp_path = cache_path.with_suffix('.tmp')
         c = pycurl.Curl()
@@ -1135,7 +1203,11 @@ class Downloader:
 
             http_code = c.getinfo(pycurl.HTTP_CODE)
             if http_code >= 400:
-                return False, f"HTTP {http_code}"
+                return False, DownloadError(
+                    kind=DownloadErrorKind.HARD_HTTP,
+                    message=f"HTTP {http_code}",
+                    http_code=http_code,
+                )
 
             f.close()
             f = None
@@ -1143,10 +1215,25 @@ class Downloader:
             return True, None
 
         except pycurl.error as e:
+            # libcurl error → transient by default (DNS, timeout, connreset,
+            # partial transfer truncated by a proxy, …).  Distinguishing
+            # the rare hard-pycurl cases is not worth the table; we let the
+            # caller retry once or twice.
             code, msg = e.args
-            return False, f"HTTP error: {msg}"
-        except Exception as e:
-            return False, str(e)
+            return False, DownloadError(
+                kind=DownloadErrorKind.TRANSIENT_NETWORK,
+                message=f"libcurl error: {msg}",
+            )
+        except (OSError, IOError) as e:
+            # Local-side write failure (cache fs full, permissions, …).
+            # Retrying the same mirror will not help.
+            return False, DownloadError(
+                kind=DownloadErrorKind.LOCAL_IO,
+                message=str(e),
+            )
+        # Other unexpected exceptions (programmer error in pycurl
+        # handling, ResourceWarning, …) propagate — silencing them
+        # here masked real bugs as "download failed" in past releases.
         finally:
             c.close()
             if f is not None:
@@ -1168,7 +1255,6 @@ class Downloader:
                      progress_callback: Callable[[int, int], None] = None,
                      timeout: int = 30,
                      max_retries: int = 3,
-                     worker_slot: int = 0,
                      start_callback: Callable[[str], None] = None) -> DownloadResult:
         """Download a single package with multi-server failover.
 
@@ -1180,8 +1266,6 @@ class Downloader:
             progress_callback: Optional callback(downloaded, total)
             timeout: Connection timeout in seconds
             max_retries: Max retry attempts per server for transient errors
-            worker_slot: Worker slot number (kept for API compat, no longer
-                         used for server selection — see _plan_server_assignments).
             start_callback: Optional callback(source_name) called when starting download
 
         Returns:
@@ -1322,8 +1406,10 @@ class Downloader:
 
                         # Download failed on this attempt
                         all_errors.append(f"{server['name']}: {error}")
-                        if error and error.startswith("HTTP"):
-                            # Hard HTTP error — no point retrying this server
+                        if error is not None and error.is_hard:
+                            # Hard failure (4xx/5xx or local I/O) — no
+                            # point retrying this server, move on to
+                            # the next mirror.
                             if server_id and self.db:
                                 self.db.update_server_stats(
                                     server_id, success=False)
@@ -1400,8 +1486,9 @@ class Downloader:
                 )
 
             last_error = error
-            if error and error.startswith("HTTP"):
-                # HTTP error - don't retry
+            if error is not None and error.is_hard:
+                # Hard failure (4xx/5xx or local I/O) — retrying the
+                # same URL won't help.
                 break
             elif attempt < max_retries - 1:
                 time.sleep(1 * (attempt + 1))  # 1s, 2s, 3s backoff
@@ -1722,76 +1809,6 @@ class Downloader:
             'failed_peers': stats.get('failed_peers', []),
         }
         return results, downloaded_count, cached_count, peer_stats
-
-
-def get_download_items(db: PackageDatabase, packages: List[dict]) -> List[DownloadItem]:
-    """Convert package actions to download items.
-
-    Args:
-        db: Database instance
-        packages: List of package dicts with name, version, release, arch, media_name
-
-    Returns:
-        List of DownloadItem ready for download
-    """
-    items = []
-    media_cache = {}  # Cache media lookups
-    servers_cache = {}  # Cache servers lookups
-
-    for pkg in packages:
-        media_name = pkg.get('media_name', '')
-        if media_name not in media_cache:
-            media = db.get_media(media_name)
-            media_cache[media_name] = media
-            # Pre-load servers
-            if media and media.get('id'):
-                servers = db.get_servers_for_media(media['id'], enabled_only=True)
-                servers_cache[media['id']] = [dict(s) for s in servers]
-
-        media = media_cache[media_name]
-        if not media:
-            continue
-
-        # Parse EVR - remove epoch if present
-        evr = pkg.get('evr', '')
-        if ':' in evr:
-            evr = evr.split(':', 1)[1]  # Remove epoch
-
-        if '-' in evr:
-            version, release = evr.rsplit('-', 1)
-        else:
-            version = evr
-            release = '1'
-
-        # Use new schema if available, fallback to legacy URL
-        # Fallback to uncompressed size if filesize is zero
-        size = pkg.get('filesize', 0) if pkg.get('filesize', 0) != 0 else pkg.size
-        if media.get('relative_path'):
-            servers = servers_cache.get(media['id'], [])
-            items.append(DownloadItem(
-                name=pkg['name'],
-                version=version,
-                release=release,
-                arch=pkg['arch'],
-                media_id=media['id'],
-                relative_path=media['relative_path'],
-                is_official=bool(media.get('is_official', 1)),
-                servers=servers,
-                media_name=media_name,
-                size=size
-            ))
-        elif media.get('url'):
-            items.append(DownloadItem(
-                name=pkg['name'],
-                version=version,
-                release=release,
-                arch=pkg['arch'],
-                media_url=media['url'],
-                media_name=media_name,
-                size=size
-            ))
-
-    return items
 
 
 def format_speed(bytes_per_sec: float) -> str:

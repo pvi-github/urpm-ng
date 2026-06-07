@@ -15,9 +15,15 @@ in the CLI / GUI layers that call these functions.
 """
 
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Optional, TYPE_CHECKING
+
+# The resilient pipeline returns :class:`urpm.core.install.InstallResult`
+# (the same dataclass as the low-level :class:`Installer`).  The extra
+# fields ``excluded_packages``, ``reduced_transaction`` and
+# ``queue_result`` are populated here; the bottom layer leaves them at
+# their neutral defaults.  Callers import ``InstallResult`` from
+# :mod:`urpm.core.install` directly.
 
 if TYPE_CHECKING:
     from .operations import PackageOperations, InstallOptions
@@ -25,32 +31,6 @@ if TYPE_CHECKING:
     from .download import DownloadItem, DownloadResult
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Result dataclass
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ResilientInstallResult:
-    """Result of a resilient install pipeline.
-
-    Attributes:
-        success: True if at least some packages were installed successfully.
-        installed_count: Number of packages actually installed.
-        excluded_packages: List of (package_name, reason) tuples for
-            packages that were dropped from the transaction.
-        errors: Free-form error messages for logging / display.
-        reduced_transaction: True if some packages were excluded and the
-            transaction was smaller than originally requested.
-    """
-
-    success: bool
-    installed_count: int = 0
-    excluded_packages: List[Tuple[str, str]] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
-    reduced_transaction: bool = False
-    queue_result: Optional[object] = None
 
 
 # ---------------------------------------------------------------------------
@@ -138,20 +118,18 @@ def purge_failed_from_cache(
         except OSError as exc:
             logger.warning("Failed to delete %s: %s", path, exc)
 
-        # ── Best-effort DB cleanup ──
-        # The cache_files table stores (filename, media_id, file_path).
-        # We attempt a direct DELETE; if the method is not available yet
-        # or the record is missing, we silently continue.
+        # ── DB cleanup via the public API ──
+        # cache_files is advisory: a missing row is normal when the file
+        # was placed in cache outside of urpm-ng's own download path
+        # (e.g. a peer-served RPM that failed sig verification before
+        # being registered).  ``unregister_cache_file`` returns False
+        # silently in that case.
         try:
-            conn = db._get_connection()
-            conn.execute(
-                "DELETE FROM cache_files WHERE file_path = ?",
-                (str(path),),
-            )
-            conn.commit()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "No cache record to remove for %s: %s", path.name, exc
+            db.unregister_cache_file(str(path))
+        except Exception as exc:
+            logger.warning(
+                "Cache record cleanup failed for %s: %s",
+                path.name, exc, exc_info=True,
             )
 
 
@@ -303,15 +281,18 @@ def retry_failed_downloads(
         len(retry_items),
     )
 
-    # If we know which server served the bad file, filter it out of
-    # each item's pre-loaded server list so the downloader picks another.
+    # If we know which server served the bad file, push its id into
+    # the item's ``exclude_server_ids`` list — the downloader honours
+    # that field at server-selection time
+    # (see :meth:`Downloader.download_one` / the multi-server fallback
+    # path).  We append instead of overwrite so future retry passes
+    # accumulate excluded servers without losing the original
+    # ``item.servers`` pre-loaded list.
     if source_servers:
         for item in retry_items:
             bad_id = source_servers.get(item.name)
-            if bad_id is not None and item.servers:
-                item.servers = [
-                    s for s in item.servers if s.get("id") != bad_id
-                ]
+            if bad_id is not None and bad_id not in item.exclude_server_ids:
+                item.exclude_server_ids.append(bad_id)
 
     try:
         dl_results, _downloaded, _cached, _peer_stats = ops.download_packages(
@@ -320,7 +301,14 @@ def retry_failed_downloads(
             urpm_root=urpm_root,
         )
     except Exception as exc:
-        logger.error("Retry download failed: %s", exc)
+        # Carry the stacktrace so a regression in download_packages (DB
+        # lookup gone wrong, network plumbing breakage, …) leaves a
+        # diagnosable trail rather than a one-line "Retry download
+        # failed: <opaque>".
+        logger.error(
+            "Retry download failed for %d item(s): %s",
+            len(retry_items), exc, exc_info=True,
+        )
         return [], [(item.name, str(exc)) for item in retry_items]
 
     # ── Verify retried downloads ──
