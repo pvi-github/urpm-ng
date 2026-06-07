@@ -17,13 +17,11 @@ from .install import _apply_config_policy
 def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     """Handle upgrade command - upgrade packages."""
     import platform
-    import signal
     import time
 
     from .. import colors
     from ...core.background_install import (
         check_background_error, clear_background_error,
-        InstallLock
     )
     from ...core.operations import PackageOperations, InstallOptions
 
@@ -425,147 +423,52 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         cmd_line = "urpm update " + " ".join(package_names)
     transaction_id = ops.begin_transaction('upgrade', cmd_line, all_record_actions)
 
-    # Setup interrupt handler
-    interrupted = [False]
-    original_handler = signal.getsignal(signal.SIGINT)
+    from ...core.config import get_rpm_root
+    rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
+    upgrade_opts = InstallOptions(
+        verify_signatures=not getattr(args, 'nosignature', False),
+        force=getattr(args, 'force', False),
+        test=getattr(args, 'test', False),
+        root=rpm_root or "/",
+        use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
+        config_policy=getattr(args, 'config_policy', 'keep'),
+    )
 
-    def sigint_handler(signum, frame):
-        if interrupted[0]:
-            print(_("\n\nForce abort!"))
-            ops.abort_transaction(transaction_id)
-            signal.signal(signal.SIGINT, original_handler)
-            raise KeyboardInterrupt
-        else:
-            interrupted[0] = True
-            print(_("\n\nInterrupt requested - finishing current package..."))
+    remove_names = [a.name for a in removes] if removes else []
 
-    signal.signal(signal.SIGINT, sigint_handler)
+    if not rpm_paths and not remove_names and not orphan_names:
+        ops.complete_transaction(transaction_id)
+        return 0
 
-    try:
-        from ...core.config import get_rpm_root
-        rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        upgrade_opts = InstallOptions(
-            verify_signatures=not getattr(args, 'nosignature', False),
-            force=getattr(args, 'force', False),
-            test=getattr(args, 'test', False),
-            root=rpm_root or "/",
-            use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
-            config_policy=getattr(args, 'config_policy', 'keep'),
+    # Determine transaction mode: smart sync (default) or full sync (--sync)
+    # Full sync also required for --config-policy (needs rpmnew_files from ts.run).
+    full_sync = getattr(args, 'sync', False)
+    if getattr(args, 'config_policy', 'keep') != 'keep':
+        full_sync = True
+
+    # Force full sync if any package provides should-restart:system
+    restart_info = {}
+    if not full_sync:
+        from ...core.needs_restart import check_needs_restart_from_actions
+        restart_info = check_needs_restart_from_actions(
+            result.actions, resolver,
         )
-
-        remove_names = [a.name for a in removes] if removes else []
-
-        if not rpm_paths and not remove_names and not orphan_names:
-            ops.complete_transaction(transaction_id)
-            return 0
-
-        # Check if another install is in progress
-        # Use root path for lock file when upgrading in chroot
-        install_root = getattr(args, 'root', None) or getattr(args, 'urpm_root', None)
-        lock = InstallLock(root=install_root)
-        if not lock.acquire(blocking=False):
-            print(colors.warning(_("  RPM database is locked by another process.")))
-            print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
-            lock.acquire(blocking=True)
-        lock.release()  # Release - child will acquire its own lock
-
-        # Determine transaction mode: smart sync (default) or full sync (--sync)
-        # Full sync also required for --config-policy (needs rpmnew_files from ts.run).
-        import os
-        full_sync = getattr(args, 'sync', False)
-        if getattr(args, 'config_policy', 'keep') != 'keep':
+        if 'system' in restart_info:
             full_sync = True
-
-        # Force full sync if any package provides should-restart:system
-        restart_info = {}
-        if not full_sync:
-            from ...core.needs_restart import check_needs_restart_from_actions
-            restart_info = check_needs_restart_from_actions(
-                result.actions, resolver,
-            )
-            if 'system' in restart_info:
-                full_sync = True
-                pkgs = ', '.join(restart_info['system'])
-                print(colors.warning(
-                    _("System restart required ({packages}) — forcing full sync.").format(
-                        packages=pkgs,
-                    )
-                ))
-
-        from ..helpers.progress import make_progress_callback
-
-        queue_progress = make_progress_callback(
-            header_template="Upgrading {count} package...",
-            total=None,  # discovered from first callback
-            full_sync=full_sync,
-        )
-
-        all_erase_names = list(remove_names)
-        if orphan_names:
-            all_erase_names.extend(orphan_names)
-
-        resilient_result = ops.resilient_install(
-            rpm_paths,
-            download_items=download_items,
-            options=upgrade_opts,
-            erase_names=all_erase_names,
-            orphan_names=None,
-            mode="upgrade",
-            progress_callback=queue_progress,
-            root=upgrade_opts.root,
-            urpm_root=getattr(args, 'urpm_root', None),
-            full_sync=full_sync,
-        )
-
-        # Stop animation thread and clear 3-line progress
-        queue_progress.cleanup()
-        if queue_progress.state['header']:
-            print(f"\033[2A\r\033[K{queue_progress.state['header']}\n\033[K  " + _("done") + "\n\033[K", end='', flush=True)
-        else:
-            print()
-
-        if interrupted[0]:
-            print(colors.warning("\n  " + _("Operation interrupted")))
-            ops.abort_transaction(transaction_id)
-            return 130
-
-        # Process results from the resilient pipeline
-        queue_result = resilient_result.queue_result
-        upgrade_success = resilient_result.success
-
-        if queue_result is not None:
-            for op_result in queue_result.operations:
-                if op_result.operation_id == "upgrade":
-                    if op_result.success:
-                        msg_parts = []
-                        if op_result.count > 0:
-                            msg_parts.append(f"{op_result.count} packages upgraded")
-                        if remove_names:
-                            msg_parts.append(f"{len(remove_names)} removed (obsoleted)")
-                        if msg_parts:
-                            print(colors.success(f"  {', '.join(msg_parts)}"))
-                        if op_result.rpmnew_files:
-                            _apply_config_policy(op_result.rpmnew_files, upgrade_opts.config_policy)
-                    else:
-                        print(colors.error("\n" + _("Upgrade failed:")))
-                        for err in op_result.errors[:3]:
-                            print(f"  {colors.error(err)}")
-
-        if resilient_result.excluded_packages:
-            excluded_count = len(resilient_result.excluded_packages)
-            print(colors.warning("\n" + ngettext(
-                "{count} package could not be upgraded due to verification errors:",
-                "{count} packages could not be upgraded due to verification errors:",
-                excluded_count).format(count=excluded_count)))
-            for name, reason in resilient_result.excluded_packages[:10]:
-                print(f"  {colors.warning(name)}: {reason}")
+            pkgs = ', '.join(restart_info['system'])
             print(colors.warning(
-                _("These packages will be retried on the next update.")))
+                _("System restart required ({packages}) — forcing full sync.").format(
+                    packages=pkgs,
+                )
+            ))
 
-        if not upgrade_success:
-            ops.abort_transaction(transaction_id)
-            return 1
+    all_erase_names = list(remove_names)
+    if orphan_names:
+        all_erase_names.extend(orphan_names)
 
+    def _unmark_orphans(_qr):
+        """``after_complete`` hook: announce the orphans we just took
+        the time to remove and drop them from the deps list."""
         if orphan_names:
             print(colors.dim("  " + ngettext(
                 "{count} orphaned package removed",
@@ -573,33 +476,37 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                 len(orphan_names)).format(count=len(orphan_names))))
             resolver.unmark_packages(orphan_names)
 
-        # Persist scriptlet output to history DB before completing
-        ops.record_scriptlet_output(transaction_id, queue_result)
+    from ._install_pipeline import run_install_transaction
+    exit_code = run_install_transaction(
+        args, ops, resolver,
+        mode="upgrade",
+        result=result,
+        rpm_paths=rpm_paths,
+        download_items=download_items,
+        transaction_id=transaction_id,
+        install_opts=upgrade_opts,
+        full_sync=full_sync,
+        restart_info=restart_info,
+        header_template=ngettext(
+            "Upgrading {count} package...",
+            "Upgrading {count} packages...",
+            len(rpm_paths) if rpm_paths else 1,
+        ),
+        success_message_kind="upgraded",
+        erase_names=all_erase_names,
+        orphan_names=None,
+        after_complete=_unmark_orphans,
+    )
+    if exit_code != 0:
+        return exit_code
 
-        # Display captured scriptlet output (ldconfig, mime-db rebuild, etc.)
-        from ..helpers.progress import display_scriptlet_output
-        display_scriptlet_output(queue_result, verbose=getattr(args, 'verbose', False),
-                                 transaction_id=transaction_id)
+    # Post-success unmarks specific to upgrade: REMOVE actions also
+    # drop from the explicit deps list (the helper's
+    # mark_dependencies only handles install/upgrade actions).
+    removed = [a.name for a in result.actions if a.action.value == 'remove']
+    if removed:
+        resolver.unmark_packages(removed)
 
-        # Display restart recommendations
-        if restart_info:
-            from ...core.needs_restart import format_restart_messages
-            for msg in format_restart_messages(restart_info):
-                print(colors.warning(f"  ⚠ {msg}"))
-
-        ops.complete_transaction(transaction_id)
-
-        ops.mark_dependencies(resolver, result.actions)
-        removed = [a.name for a in result.actions if a.action.value == 'remove']
-        if removed:
-            resolver.unmark_packages(removed)
-
-        return partial_exit
-
-    except Exception as e:
-        ops.abort_transaction(transaction_id)
-        raise
-    finally:
-        signal.signal(signal.SIGINT, original_handler)
+    return partial_exit
 
 

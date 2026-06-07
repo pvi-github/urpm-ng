@@ -105,14 +105,12 @@ def _apply_config_policy(rpmnew_files: List[str], policy: str) -> int:
 
 def cmd_install(args, db: 'PackageDatabase') -> int:
     """Handle install command."""
-    import signal
     import solv
     from ...core.resolution.pool import lookup_all_requires
     from ...core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction, TransactionType
     from ...core.operations import PackageOperations, InstallOptions
     from ...core.background_install import (
         check_background_error, clear_background_error,
-        InstallLock
     )
     from .. import colors
 
@@ -995,27 +993,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     cmd_line = "urpm install " + " ".join(args.packages)
     transaction_id = ops.begin_transaction('install', cmd_line, result.actions)
 
-    # Setup Ctrl+C handler
-    interrupted = [False]
-    original_handler = signal.getsignal(signal.SIGINT)
-
-    def sigint_handler(signum, frame):
-        if interrupted[0]:
-            # Second Ctrl+C - force abort
-            print(_("\n\nForce abort!"))
-            ops.abort_transaction(transaction_id)
-            signal.signal(signal.SIGINT, original_handler)
-            raise KeyboardInterrupt
-        else:
-            interrupted[0] = True
-            print(_("\n\nInterrupt requested - finishing current package..."))
-            print(_("Press Ctrl+C again to force abort (may leave system inconsistent)"))
-
-    signal.signal(signal.SIGINT, sigint_handler)
-
-    # README is displayed AFTER install in sync mode (files must be on disk)
-    # Pre-fork README extraction is no longer needed.
-
     # Smart sync (default): parent waits for extraction, triggers run in background.
     # Full sync (--sync): parent waits for everything including triggers.
     # Full sync also required for --config-policy (needs rpmnew_files from ts.run).
@@ -1039,204 +1016,108 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 )
             ))
 
-    from ..helpers.progress import make_progress_callback
+    from ...core.config import get_rpm_root
+    rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
+    install_opts = InstallOptions(
+        verify_signatures=not getattr(args, 'nosignature', False),
+        force=getattr(args, 'force', False),
+        test=getattr(args, 'test', False),
+        reinstall=getattr(args, 'reinstall', False),
+        noscripts=getattr(args, 'noscripts', False),
+        root=rpm_root or "/",
+        use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
+        config_policy=getattr(args, 'config_policy', 'keep'),
+    )
 
-    # Kept as a fallback header for the cleanup print below; the live
-    # progress region (progress.py) owns the on-screen header during the
-    # install. Printing it here too would leave a duplicate stuck in the
-    # scrollback once the live region freezes.
-    _header_text = ngettext(
-        "Installing {count} package...",
-        "Installing {count} packages...",
-        len(rpm_paths)).format(count=len(rpm_paths))
-
-    # Check if another install is in progress
-    # Use root path for lock file when installing to chroot
-    install_root = getattr(args, 'root', None) or getattr(args, 'urpm_root', None)
-    lock = InstallLock(root=install_root)
-    if not lock.acquire(blocking=False):
-        print(colors.warning(_("  RPM database is locked by another process.")))
-        print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
-
-        def wait_cb(pid):
-            pass  # Just wait silently, message already shown
-
-        lock.acquire(blocking=True, wait_callback=wait_cb)
-    lock.release()  # Release - child will acquire its own lock
-
-    last_shown = [None]
-
-    try:
-        from ...core.config import get_rpm_root
-        rpm_root = get_rpm_root(getattr(args, 'root', None), getattr(args, 'urpm_root', None))
-        install_opts = InstallOptions(
-            verify_signatures=not getattr(args, 'nosignature', False),
-            force=getattr(args, 'force', False),
-            test=getattr(args, 'test', False),
-            reinstall=getattr(args, 'reinstall', False),
-            noscripts=getattr(args, 'noscripts', False),
-            root=rpm_root or "/",
-            use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
-            config_policy=getattr(args, 'config_policy', 'keep'),
-        )
-
-        queue_progress = make_progress_callback(
-            header_template="Installing {count} package...",
-            total=len(rpm_paths),
-            full_sync=full_sync,
-        )
-
-        # Use resilient pipeline for signature pre-check + retry + exclusion
-        resilient_result = ops.resilient_install(
-            rpm_paths=rpm_paths,
-            download_items=download_items,
-            options=install_opts,
-            actions=result.actions,
-            progress_callback=queue_progress,
-            root=rpm_root or '/',
-            urpm_root=getattr(args, 'urpm_root', None),
-            erase_names=remove_names or None,
-            full_sync=full_sync,
-        )
-
-        # Stop animation thread and clear 3-line progress
-        queue_progress.cleanup()
-        _hdr = queue_progress.state['header'] or _header_text
-        print(f"\033[2A\r\033[K{_hdr}\n\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done") + "\n\033[K", end='', flush=True)
-
-        # Show excluded packages warning
-        if resilient_result.excluded_packages:
-            excluded_count = len(resilient_result.excluded_packages)
-            print(colors.warning("\n" + ngettext(
-                "{count} package could not be installed due to verification errors:",
-                "{count} packages could not be installed due to verification errors:",
-                excluded_count).format(count=excluded_count)))
-            for name, reason in resilient_result.excluded_packages[:10]:
-                print(f"  {colors.warning(name)}: {reason}")
-            print(colors.warning(
-                _("These packages will be retried on the next update.")))
-
-        if not resilient_result.success:
-            print(colors.error("\n" + _("Installation failed:")))
-            for err in resilient_result.errors[:3]:
-                print(f"  {colors.error(err)}")
-            ops.abort_transaction(transaction_id)
-            return 1
-
-        if interrupted[0]:
-            print(colors.warning("\n  " + _("Installation interrupted")))
-            ops.abort_transaction(transaction_id)
-            return 130
-
-        installed_count = resilient_result.installed
-        if remove_pkgs:
-            print(colors.success("  " + _("{installed} packages installed, {removed} removed").format(installed=installed_count, removed=len(remove_pkgs))))
-        else:
-            print(colors.success("  " + ngettext("{count} package installed", "{count} packages installed", installed_count).format(count=installed_count)))
-
-        # Apply config policy for .rpmnew files
-        qr = resilient_result.queue_result
-        if qr is not None and qr.operations:
-            rpmnew_files = qr.operations[0].rpmnew_files
-            if rpmnew_files:
-                _apply_config_policy(rpmnew_files, install_opts.config_policy)
-
-        # Persist scriptlet output to history DB before completing
-        if qr is not None:
-            ops.record_scriptlet_output(transaction_id, qr)
-
-        ops.complete_transaction(transaction_id)
-
-        # Display README messages (post-install, files now on disk)
-        # Suppressed in mkimage context (no_readme flag)
-        if qr is not None and qr.operations and not getattr(args, 'no_readme', False):
-            readme_msgs = qr.operations[0].readme_messages
-            if readme_msgs:
-                if args.auto:
-                    # Non-interactive (-y): print README content, no pager
+    def _show_readme_after_commit(qr):
+        """``after_complete`` hook: display README messages between
+        ``complete_transaction`` and the scriptlet-output dump.  Files
+        are now on disk in sync mode, so README content extraction can
+        happen here without racing the install.  Suppressed by the
+        ``no_readme`` flag (used in mkimage context)."""
+        if qr is None or not qr.operations or getattr(args, 'no_readme', False):
+            return
+        readme_msgs = qr.operations[0].readme_messages
+        if not readme_msgs:
+            return
+        try:
+            from ...core.readme import format_readme_output, ReadmeMessage
+            messages = [ReadmeMessage(package=m['package'],
+                                      content=m['content'])
+                        for m in readme_msgs]
+            output = format_readme_output(messages)
+            if not output:
+                return
+            if args.auto:
+                # Non-interactive (-y): print README content, no pager.
+                print(output)
+            else:
+                # Interactive: display in pager for long output.
+                import shutil, subprocess as _sp
+                term_lines = shutil.get_terminal_size().lines
+                if output.count('\n') > term_lines - 5:
+                    pager = os.environ.get('PAGER', 'less')
                     try:
-                        from ...core.readme import format_readme_output, ReadmeMessage
-                        messages = [ReadmeMessage(package=m['package'],
-                                                  content=m['content'])
-                                    for m in readme_msgs]
-                        output = format_readme_output(messages)
-                        if output:
-                            print(output)
-                    except Exception as exc:
-                        logger.warning(
-                            "README post-install display failed: %s",
-                            exc, exc_info=True,
-                        )
+                        _sp.run([pager, '-R'], input=output,
+                                text=True, check=False)
+                    except FileNotFoundError:
+                        print(output)
                 else:
-                    # Interactive: display in pager for long output
-                    try:
-                        from ...core.readme import format_readme_output, ReadmeMessage
-                        messages = [ReadmeMessage(package=m['package'],
-                                                  content=m['content'])
-                                    for m in readme_msgs]
-                        output = format_readme_output(messages)
-                        if output:
-                            import shutil, subprocess as _sp
-                            term_lines = shutil.get_terminal_size().lines
-                            if output.count('\n') > term_lines - 5:
-                                pager = os.environ.get('PAGER', 'less')
-                                try:
-                                    _sp.run([pager, '-R'], input=output,
-                                            text=True, check=False)
-                                except FileNotFoundError:
-                                    print(output)
-                            else:
-                                print(output)
-                    except Exception as exc:
-                        logger.warning(
-                            "README post-install display failed (pager path): %s",
-                            exc, exc_info=True,
-                        )
+                    print(output)
+        except Exception as exc:
+            logger.warning(
+                "README post-install display failed: %s",
+                exc, exc_info=True,
+            )
 
-        # Display captured scriptlet output (ldconfig, mime-db rebuild, etc.)
-        from ..helpers.progress import display_scriptlet_output
-        display_scriptlet_output(qr, verbose=getattr(args, 'verbose', False),
-                                 transaction_id=transaction_id)
+    from ._install_pipeline import run_install_transaction
+    exit_code = run_install_transaction(
+        args, ops, resolver,
+        mode="install",
+        result=result,
+        rpm_paths=rpm_paths,
+        download_items=download_items,
+        transaction_id=transaction_id,
+        install_opts=install_opts,
+        full_sync=full_sync,
+        restart_info=restart_info,
+        header_template=ngettext(
+            "Installing {count} package...",
+            "Installing {count} packages...",
+            len(rpm_paths),
+        ),
+        success_message_kind="installed",
+        install_actions=result.actions,
+        erase_names=remove_names,
+        after_complete=_show_readme_after_commit,
+    )
+    if exit_code != 0:
+        return exit_code
 
-        # Display restart recommendations
-        if restart_info:
-            from ...core.needs_restart import format_restart_messages
-            for msg in format_restart_messages(restart_info):
-                print(colors.warning(f"  ⚠ {msg}"))
+    # Promote user-requested packages to explicit even when already
+    # installed (the resolver skips unchanged packages from its action
+    # list, so the helper's mark_dependencies alone would miss them).
+    if not builddeps:
+        user_requested = list(package_names)
+        for info in local_rpm_infos:
+            user_requested.append(info['name'])
+        if user_requested:
+            resolver.mark_as_explicit(user_requested)
 
-        # Update installed-through-deps.list for urpmi compatibility
-        ops.mark_dependencies(resolver, result.actions)
-        # Promote user-requested packages to explicit even when already
-        # installed (the resolver skips unchanged packages from its
-        # action list, so mark_dependencies alone would miss them).
-        if not builddeps:
-            user_requested = list(package_names)
-            for info in local_rpm_infos:
-                user_requested.append(info['name'])
-            if user_requested:
-                resolver.mark_as_explicit(user_requested)
-        dep_packages = [a.name for a in result.actions
-                        if a.reason != InstallReason.EXPLICIT]
-        # Track build dependencies for selective cleanup
-        if builddeps:
-            source_name = Path(builddeps).name if builddeps != 'AUTO' else source
-            all_names = [a.name for a in result.actions]
-            # BuildRequires get EXPLICIT reason in the solver but are not
-            # user-explicit — mark them as auto-installed first so
-            # mark_as_builddep() accepts them (it skips truly explicit pkgs)
-            explicit_bd = [a.name for a in result.actions
-                           if a.reason == InstallReason.EXPLICIT]
-            if explicit_bd:
-                resolver.mark_as_dependency(explicit_bd)
-            resolver.mark_as_builddep(all_names, source_name)
+    # Track build dependencies for selective cleanup
+    if builddeps:
+        source_name = Path(builddeps).name if builddeps != 'AUTO' else source
+        all_names = [a.name for a in result.actions]
+        # BuildRequires get EXPLICIT reason in the solver but are not
+        # user-explicit — mark them as auto-installed first so
+        # mark_as_builddep() accepts them (it skips truly explicit pkgs).
+        explicit_bd = [a.name for a in result.actions
+                       if a.reason == InstallReason.EXPLICIT]
+        if explicit_bd:
+            resolver.mark_as_dependency(explicit_bd)
+        resolver.mark_as_builddep(all_names, source_name)
 
-        return partial_exit
-
-    except Exception as e:
-        ops.abort_transaction(transaction_id)
-        raise
-    finally:
-        signal.signal(signal.SIGINT, original_handler)
+    return partial_exit
 
 
 def cmd_download(args, db: 'PackageDatabase') -> int:
