@@ -68,6 +68,21 @@ def pre_verify_signatures(
     ts.setVSFlags(0)  # Enable all signature / digest checks
 
     for path in rpm_paths:
+        # ── Cheap structural preflight first ──
+        # Empty files, files truncated to a few bytes, or files that
+        # do not start with the RPM magic (``\xed\xab\xee\xdb``) never
+        # reach the rpmlib parser — they pass directly to the retry
+        # path with a clear reason string so the caller can act on
+        # them in the same loop iteration as actual signature
+        # failures.
+        preflight_reason = preflight_check(path)
+        if preflight_reason is not None:
+            logger.warning(
+                "Preflight rejected %s: %s", path.name, preflight_reason,
+            )
+            failed.append((path, preflight_reason))
+            continue
+
         try:
             with open(path, "rb") as fd:
                 ts.hdrFromFdno(fd.fileno())
@@ -89,6 +104,46 @@ def pre_verify_signatures(
         )
 
     return valid, failed
+
+
+# ── RPM magic bytes (file header) ─────────────────────────────────────
+# https://refspecs.linuxbase.org/LSB_3.0.0/LSB-Core-generic/LSB-Core-generic/swinstall.html#FILEFORMAT
+_RPM_MAGIC = b"\xed\xab\xee\xdb"
+
+
+def preflight_check(path: Path) -> Optional[str]:
+    """Cheap structural verification of a cache-resident RPM.
+
+    Catches the failure modes that are obvious without invoking
+    rpmlib: an empty / truncated file, a stat error, or a file whose
+    first four bytes are not the RPM magic.  Per the user's spec for
+    the iteration-A retry loop (bug #3), these are treated exactly
+    like a signature failure — the cache file is unlinked and a
+    re-download is attempted from a different mirror.
+
+    Returns:
+        ``None`` when the file passes the preflight, otherwise a
+        short human-readable reason string suitable for the
+        ``failed`` list of :func:`pre_verify_signatures`.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return f"cannot stat: {exc}"
+
+    if size == 0:
+        return "empty file"
+
+    try:
+        with open(path, "rb") as fh:
+            magic = fh.read(4)
+    except OSError as exc:
+        return f"cannot read header: {exc}"
+
+    if magic != _RPM_MAGIC:
+        return f"wrong magic bytes ({magic!r})"
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -236,30 +291,46 @@ def retry_failed_downloads(
     options: "InstallOptions",
     source_servers: Optional[Dict[str, int]] = None,
     urpm_root: Optional[str] = None,
+    max_retries: Optional[int] = None,
 ) -> Tuple[List[Path], List[Tuple[str, str]]]:
-    """Re-download failed RPMs from alternate mirrors.
+    """Re-download failed RPMs from alternate mirrors, up to ``max_retries``.
 
-    For each corrupt file, tries to find an alternate server and
-    re-download.  The re-downloaded file is signature-verified before
-    being accepted.
+    Each iteration tries every still-failing item once; the server
+    that served the bad blob is recorded in the item's
+    ``exclude_server_ids`` so the next iteration lands on a different
+    mirror.  When a download returns "All servers excluded" the pool
+    has been fully swept for that item and it is given up early.
 
     Args:
-        failed_paths: Corrupt RPM file paths.
-        download_items: Original :class:`DownloadItem` list (used to
-            find the matching items for retry).
+        failed_paths: Corrupt RPM file paths from the initial pass.
+        download_items: Original :class:`DownloadItem` list (matched
+            by filename / package name to recover the retry items).
         ops: :class:`PackageOperations` instance with download ability.
         options: Install options controlling download behaviour.
         source_servers: Optional map of ``package_name → server_id``
-            identifying the server that served each bad file, so it
-            can be deprioritised on retry.
+            identifying the server that served each bad file BEFORE
+            we got involved (e.g. when the failing file was already
+            in cache from a previous in-session download).  Falls
+            into ``exclude_server_ids`` on the first retry attempt.
+            Predownloaded files have no provenance and pass ``None``
+            here (iteration A of bug #3 — see
+            ``urpm.core.settings.DownloadSettings.max_retries``).
         urpm_root: urpm state directory path.
+        max_retries: Maximum number of distinct mirrors tried per
+            file.  ``None`` reads :attr:`DownloadSettings.max_retries`
+            from the active configuration (default 3).
 
     Returns:
         A ``(recovered_paths, still_failed)`` tuple.  *still_failed*
-        contains ``(package_name, error_message)`` pairs.
+        contains ``(package_name, error_message)`` pairs reporting
+        the **last** failure observed for each unrecoverable item.
     """
     if not failed_paths:
         return [], []
+
+    if max_retries is None:
+        from .settings import get_settings
+        max_retries = get_settings().download.max_retries
 
     # Map failed filenames → download items for retry
     failed_filenames = {p.name for p in failed_paths}
@@ -276,68 +347,93 @@ def retry_failed_downloads(
             for p in failed_paths
         ]
 
-    logger.info(
-        "Retrying %d failed download(s) from alternate mirrors",
-        len(retry_items),
-    )
-
-    # If we know which server served the bad file, push its id into
-    # the item's ``exclude_server_ids`` list — the downloader honours
-    # that field at server-selection time
-    # (see :meth:`Downloader.download_one` / the multi-server fallback
-    # path).  We append instead of overwrite so future retry passes
-    # accumulate excluded servers without losing the original
-    # ``item.servers`` pre-loaded list.
+    # Caller-supplied "we know who served the original bad blob"
+    # exclusions land in the items before the first retry pass.  Each
+    # iteration after that derives its own exclusions from the
+    # ``DownloadResult.source_server_id`` of the file that just
+    # failed, so the same mirror is never re-tried for the same file.
     if source_servers:
         for item in retry_items:
             bad_id = source_servers.get(item.name)
             if bad_id is not None and bad_id not in item.exclude_server_ids:
                 item.exclude_server_ids.append(bad_id)
 
-    try:
-        dl_results, _downloaded, _cached, _peer_stats = ops.download_packages(
-            retry_items,
-            options=options,
-            urpm_root=urpm_root,
-        )
-    except Exception as exc:
-        # Carry the stacktrace so a regression in download_packages (DB
-        # lookup gone wrong, network plumbing breakage, …) leaves a
-        # diagnosable trail rather than a one-line "Retry download
-        # failed: <opaque>".
-        logger.error(
-            "Retry download failed for %d item(s): %s",
-            len(retry_items), exc, exc_info=True,
-        )
-        return [], [(item.name, str(exc)) for item in retry_items]
-
-    # ── Verify retried downloads ──
     recovered: List[Path] = []
-    still_failed: List[Tuple[str, str]] = []
+    items_still_failing = list(retry_items)
+    last_reasons: Dict[str, str] = {}
 
-    for result in dl_results:
-        if result.success and result.path:
-            valid, bad = pre_verify_signatures([result.path])
-            if valid:
-                recovered.append(result.path)
-            else:
+    attempt = 0
+    for attempt in range(1, max_retries + 1):
+        if not items_still_failing:
+            break
+
+        logger.info(
+            "Retry attempt %d/%d for %d package(s) from alternate mirrors",
+            attempt, max_retries, len(items_still_failing),
+        )
+
+        try:
+            dl_results, _downloaded, _cached, _peer_stats = ops.download_packages(
+                items_still_failing,
+                options=options,
+                urpm_root=urpm_root,
+            )
+        except Exception as exc:
+            logger.error(
+                "Retry download batch failed at attempt %d: %s",
+                attempt, exc, exc_info=True,
+            )
+            return recovered, [
+                (item.name, str(exc)) for item in items_still_failing
+            ]
+
+        next_round: List["DownloadItem"] = []
+        for result in dl_results:
+            if result.success and result.path:
+                valid, bad = pre_verify_signatures([result.path])
+                if valid:
+                    recovered.append(result.path)
+                    continue
                 reason = bad[0][1] if bad else "signature check failed"
-                still_failed.append((result.item.name, reason))
-                # Purge the re-downloaded bad file
+                last_reasons[result.item.name] = reason
                 try:
                     result.path.unlink()
                 except OSError:
                     pass
-        else:
-            still_failed.append((
-                result.item.name,
-                result.error or "download failed on retry",
-            ))
+                # Remember which server served this bad blob so the
+                # next attempt does not re-pick it.  ``source_server_id``
+                # is set by the downloader on every successful HTTP
+                # response, regardless of whether the body turns out
+                # to be a valid RPM.
+                bad_id = getattr(result, 'source_server_id', None)
+                if bad_id and bad_id not in result.item.exclude_server_ids:
+                    result.item.exclude_server_ids.append(bad_id)
+                next_round.append(result.item)
+                continue
+
+            # Download itself failed (network unreachable, "All
+            # servers excluded by exclude_server_ids", HTTP 4xx/5xx
+            # on every candidate).  No point retrying if the pool is
+            # empty for this item.
+            err = result.error or "download failed on retry"
+            last_reasons[result.item.name] = err
+            if "all servers excluded" in err.lower():
+                continue
+            next_round.append(result.item)
+
+        items_still_failing = next_round
+
+    recovered_names = {_extract_name_from_path(p) for p in recovered}
+    still_failed: List[Tuple[str, str]] = []
+    for item in retry_items:
+        if item.name in recovered_names:
+            continue
+        reason = last_reasons.get(item.name, "max retries exhausted")
+        still_failed.append((item.name, reason))
 
     logger.info(
-        "Retry results: %d recovered, %d still failed",
-        len(recovered),
-        len(still_failed),
+        "Retry final: %d recovered, %d still failed after %d attempt(s)",
+        len(recovered), len(still_failed), attempt,
     )
 
     return recovered, still_failed

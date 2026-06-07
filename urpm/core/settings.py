@@ -74,6 +74,28 @@ class DownloadSettings:
     max_per_server: int = 2
     """Maximum simultaneous downloads from a single server (guard-rail)."""
 
+    max_retries: int = 3
+    """Maximum number of **distinct** mirrors tried per corrupt RPM.
+
+    When the install pipeline detects a cache-resident RPM that is
+    structurally broken (empty / truncated / wrong magic) or fails
+    the signature pre-check, it unlinks the file and re-downloads
+    from an alternate mirror.  The server that just served the bad
+    blob is added to that file's ``exclude_server_ids`` so it is
+    never retried for that file in the same session.
+
+    Files predownloaded by ``urpmd`` in a previous process do not
+    carry server provenance (the ``cache_files`` table records the
+    file, not the mirror) — the first retry on those is therefore
+    free to land on the same bad server by chance.  From the second
+    detected failure onward the retry path knows the bad ``id`` and
+    excludes it like for in-session downloads.
+
+    Lower the value if you want a faster fail-and-tell on a poisoned
+    mirror set; raise it if your mirror pool is large and you would
+    rather sweep more peers before giving up.
+    """
+
 
 @dataclass
 class TransactionSettings:
@@ -346,6 +368,10 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
                     val = _as_int(raw)
                     if 1 <= val <= 16:
                         settings.download.max_per_server = val
+                elif key == "max_retries":
+                    val = _as_int(raw)
+                    if 0 <= val <= 10:
+                        settings.download.max_retries = val
             except ValueError:
                 pass
 

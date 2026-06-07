@@ -2898,3 +2898,280 @@ class TestSuggests(BaseUrpmiTest):
             ret = self._rpm_remove("cc")
             assert ret == False
             self.check_installed_names(pkgs + ['cc'] + common, remove=True)
+
+
+class TestPreflightCheck:
+    """Tests for the cheap structural preflight on cached RPMs.
+
+    Bug #3 (iteration A) catches obviously-broken files BEFORE they
+    reach rpmlib's parser: empty / truncated files, files whose first
+    four bytes are not the RPM magic, files that cannot be opened.
+    A None return means the file passes the preflight and the caller
+    proceeds with the signature/digest verification.
+    """
+
+    def _temp(self, content: bytes):
+        import tempfile
+        from pathlib import Path
+        with tempfile.NamedTemporaryFile(suffix='.rpm', delete=False) as f:
+            f.write(content)
+        return Path(f.name)
+
+    @pytest.mark.stable
+    def test_valid_magic_passes(self):
+        from urpm.core.resilient_install import preflight_check
+        # 4-byte RPM lead + arbitrary padding; rpmlib would reject this
+        # later (no proper header) but preflight only checks magic.
+        path = self._temp(b"\xed\xab\xee\xdb" + b"\x00" * 96)
+        try:
+            assert preflight_check(path) is None
+        finally:
+            path.unlink()
+
+    @pytest.mark.stable
+    def test_empty_file_rejected(self):
+        from urpm.core.resilient_install import preflight_check
+        path = self._temp(b"")
+        try:
+            assert preflight_check(path) == "empty file"
+        finally:
+            path.unlink()
+
+    @pytest.mark.stable
+    def test_html_error_page_rejected(self):
+        """Mirror serves an HTML error page when the RPM is missing —
+        the most common real-world non-RPM cache poisoning."""
+        from urpm.core.resilient_install import preflight_check
+        path = self._temp(b"<!DOCTYPE html><html><body>404</body></html>")
+        try:
+            reason = preflight_check(path)
+            assert reason is not None
+            assert "wrong magic" in reason
+        finally:
+            path.unlink()
+
+    @pytest.mark.stable
+    def test_truncated_below_magic_rejected(self):
+        """A file shorter than the 4-byte magic still fails on magic
+        comparison (read returns less than 4 bytes, never equals the
+        full sentinel)."""
+        from urpm.core.resilient_install import preflight_check
+        path = self._temp(b"\xed\xab")
+        try:
+            reason = preflight_check(path)
+            assert reason is not None
+            assert "wrong magic" in reason
+        finally:
+            path.unlink()
+
+    @pytest.mark.stable
+    def test_nonexistent_path_reports_stat_failure(self):
+        from urpm.core.resilient_install import preflight_check
+        from pathlib import Path
+        reason = preflight_check(Path("/definitely/does/not/exist.rpm"))
+        assert reason is not None
+        assert "cannot stat" in reason
+
+
+class TestRetryFailedDownloadsLoop:
+    """Tests for the iteration-A retry loop (bug #3, phase 2).
+
+    ``retry_failed_downloads`` is exercised with a stub
+    ``PackageOperations.download_packages`` so we can script the
+    sequence of mirror responses across attempts and confirm:
+
+    * recovered files do not consume extra attempts,
+    * each failure adds the serving server to
+      ``exclude_server_ids`` so the same mirror is not re-tried,
+    * ``"All servers excluded"`` bails out without burning the
+      remaining attempts,
+    * the final ``still_failed`` reports the last observed reason.
+    """
+
+    def _make_item(self, name):
+        from urpm.core.download import DownloadItem
+        return DownloadItem(
+            name=name,
+            version="1.0", release="1.mga10",
+            arch="x86_64",
+            media_id=1, relative_path="10/x86_64/media/core/release",
+            servers=[{'id': 1, 'name': 'A'}, {'id': 2, 'name': 'B'},
+                     {'id': 3, 'name': 'C'}, {'id': 4, 'name': 'D'}],
+        )
+
+    def _make_valid_rpm(self, tmp_path, name):
+        # 4-byte RPM magic + padding — passes preflight, but rpmlib
+        # would reject.  Tests stub pre_verify_signatures so this
+        # never goes to rpmlib in practice.
+        path = tmp_path / f"{name}-1.0-1.mga10.x86_64.rpm"
+        path.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 96)
+        return path
+
+    def _make_result(self, item, path, success, server_id=None, error=None):
+        from urpm.core.download import DownloadResult
+        return DownloadResult(
+            item=item, success=success, path=path,
+            source_server_id=server_id, error=error,
+        )
+
+    @pytest.mark.stable
+    def test_first_attempt_recovers(self, tmp_path, monkeypatch):
+        """A successful first retry returns immediately without
+        consuming further attempts."""
+        from urpm.core import resilient_install as ri
+
+        item = self._make_item("foo")
+        rpm_path = self._make_valid_rpm(tmp_path, "foo")
+
+        download_calls = []
+
+        def fake_download_packages(items, options=None, urpm_root=None):
+            download_calls.append([i.name for i in items])
+            return ([self._make_result(item, rpm_path, True, server_id=2)],
+                    1, 0, {})
+
+        monkeypatch.setattr(ri, 'pre_verify_signatures',
+                            lambda paths, root="/": (list(paths), []))
+
+        class StubOps:
+            download_packages = staticmethod(fake_download_packages)
+
+        recovered, still_failed = ri.retry_failed_downloads(
+            failed_paths=[rpm_path],
+            download_items=[item],
+            ops=StubOps(),
+            options=object(),
+            max_retries=3,
+        )
+
+        assert recovered == [rpm_path]
+        assert still_failed == []
+        assert len(download_calls) == 1, "should not loop after success"
+
+    @pytest.mark.stable
+    def test_excludes_failing_server_between_attempts(
+        self, tmp_path, monkeypatch,
+    ):
+        """The server that served a bad blob lands in
+        ``exclude_server_ids`` so the next attempt forces a different
+        mirror.  Same on-disk filename across attempts — that is
+        what happens in practice: the bad blob is unlinked and the
+        same logical RPM is re-fetched from another server.
+        """
+        from urpm.core import resilient_install as ri
+
+        item = self._make_item("foo")
+        rpm_path = self._make_valid_rpm(tmp_path, "foo")
+
+        attempt_servers = []
+
+        def fake_download_packages(items, options=None, urpm_root=None):
+            attempt_servers.append(list(items[0].exclude_server_ids))
+            # Re-create the file each call: mimics the downloader
+            # writing a fresh body to cache after a previous unlink.
+            rpm_path.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 96)
+            if len(attempt_servers) == 1:
+                # First retry: server 1 serves a bad blob.
+                return ([self._make_result(item, rpm_path, True, server_id=1)],
+                        1, 0, {})
+            # Second retry: server 2 serves a good one.
+            return ([self._make_result(item, rpm_path, True, server_id=2)],
+                    1, 0, {})
+
+        verify_calls = {'n': 0}
+
+        def fake_verify(paths, root="/"):
+            verify_calls['n'] += 1
+            if verify_calls['n'] == 1:
+                return ([], [(paths[0], "signature mismatch")])
+            return (list(paths), [])
+
+        monkeypatch.setattr(ri, 'pre_verify_signatures', fake_verify)
+
+        class StubOps:
+            download_packages = staticmethod(fake_download_packages)
+
+        recovered, still_failed = ri.retry_failed_downloads(
+            failed_paths=[rpm_path],
+            download_items=[item],
+            ops=StubOps(),
+            options=object(),
+            max_retries=3,
+        )
+
+        assert recovered == [rpm_path]
+        assert still_failed == []
+        # First attempt sees no exclusions; second attempt excludes server 1.
+        assert attempt_servers[0] == []
+        assert attempt_servers[1] == [1]
+
+    @pytest.mark.stable
+    def test_exhausted_returns_still_failed(self, tmp_path, monkeypatch):
+        """All ``max_retries`` failing leaves the item in
+        ``still_failed`` with the last reason recorded."""
+        from urpm.core import resilient_install as ri
+
+        item = self._make_item("foo")
+        bad_path = self._make_valid_rpm(tmp_path, "foo")
+
+        def fake_download_packages(items, options=None, urpm_root=None):
+            return ([self._make_result(item, bad_path, True, server_id=99)],
+                    1, 0, {})
+
+        def fake_verify(paths, root="/"):
+            return ([], [(paths[0], "signature mismatch")])
+
+        monkeypatch.setattr(ri, 'pre_verify_signatures', fake_verify)
+
+        class StubOps:
+            download_packages = staticmethod(fake_download_packages)
+
+        recovered, still_failed = ri.retry_failed_downloads(
+            failed_paths=[bad_path],
+            download_items=[item],
+            ops=StubOps(),
+            options=object(),
+            max_retries=3,
+        )
+
+        assert recovered == []
+        assert len(still_failed) == 1
+        assert still_failed[0][0] == "foo"
+        assert "signature mismatch" in still_failed[0][1]
+
+    @pytest.mark.stable
+    def test_all_servers_excluded_bails_early(self, tmp_path, monkeypatch):
+        """When the downloader reports the pool is empty for an item,
+        no further attempt is consumed for that item."""
+        from urpm.core import resilient_install as ri
+
+        item = self._make_item("foo")
+        bad_path = self._make_valid_rpm(tmp_path, "foo")
+
+        call_count = {'n': 0}
+
+        def fake_download_packages(items, options=None, urpm_root=None):
+            call_count['n'] += 1
+            return ([self._make_result(
+                items[0], None, False, error="All servers excluded by exclude_server_ids",
+            )], 0, 0, {})
+
+        monkeypatch.setattr(ri, 'pre_verify_signatures',
+                            lambda paths, root="/": (list(paths), []))
+
+        class StubOps:
+            download_packages = staticmethod(fake_download_packages)
+
+        recovered, still_failed = ri.retry_failed_downloads(
+            failed_paths=[bad_path],
+            download_items=[item],
+            ops=StubOps(),
+            options=object(),
+            max_retries=5,
+        )
+
+        assert recovered == []
+        assert len(still_failed) == 1
+        # Only one download_packages call: subsequent attempts skip the
+        # exhausted item.
+        assert call_count['n'] == 1
