@@ -130,21 +130,48 @@ class Installer:
         if not rpm_paths:
             return InstallResult(success=True, installed=0)
 
-        ts = rpm.TransactionSet(self.root or '/')
-
-        if verify_signatures:
-            # Verify all signatures and digests
-            ts.setVSFlags(0)
-        else:
-            # Skip signature verification (--nosignature)
-            ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
-
         errors = []
         headers = []
-
-        # Add packages to transaction
         signature_errors = []
-        for path in rpm_paths:
+
+        # ── Pass 1: signature verification (when enabled) ──
+        # Run as a separate ``hdrFromFdno`` with full VSFlags so we
+        # can attribute failures unambiguously to sig/digest issues.
+        # The earlier ``"signature" in err_str or "key" in err_str``
+        # substring check on the rpm error message was fragile to
+        # librpm wording / translation changes.
+        sig_passed: List[Path] = []
+        if verify_signatures:
+            from .download import verify_rpm_signature
+            for path in rpm_paths:
+                ok, sig_err = verify_rpm_signature(path)
+                if ok:
+                    sig_passed.append(path)
+                else:
+                    signature_errors.append(path.name)
+                    errors.append(
+                        f"{path.name}: signature verification failed - "
+                        f"{sig_err}"
+                    )
+            if signature_errors:
+                errors.append(
+                    "Use --nosignature to skip signature verification "
+                    "(not recommended)"
+                )
+                return InstallResult(success=False, errors=errors)
+        else:
+            sig_passed = list(rpm_paths)
+
+        # ── Pass 2: read headers and add to transaction ──
+        # Signatures are already settled (verified in pass 1, or
+        # explicitly skipped by the caller).  Disable rpm-level sig
+        # checks here so any error this pass raises is genuinely
+        # structural (truncated header, malformed RPM, …) — never a
+        # sig issue we would have to disambiguate by string-match.
+        ts = rpm.TransactionSet(self.root or '/')
+        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
+
+        for path in sig_passed:
             try:
                 fd = os.open(str(path), os.O_RDONLY)
                 try:
@@ -155,16 +182,9 @@ class Installer:
                 finally:
                     os.close(fd)
             except rpm.error as e:
-                err_str = str(e).lower()
-                if 'signature' in err_str or 'key' in err_str or 'gpg' in err_str:
-                    signature_errors.append(path.name)
-                    errors.append(f"{path.name}: signature verification failed - {e}")
-                else:
-                    errors.append(f"{path.name}: {e}")
+                errors.append(f"{path.name}: {e}")
 
         if errors:
-            if signature_errors and verify_signatures:
-                errors.append("Use --nosignature to skip signature verification (not recommended)")
             return InstallResult(success=False, errors=errors)
 
         # Check dependencies (skip if force)

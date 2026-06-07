@@ -2400,6 +2400,125 @@ class TestShouldRestart:
         assert 'Running' in desc or 'running' in desc.lower()
 
 
+class TestNeedsRestartFromActions:
+    """Tests for the unified :func:`check_needs_restart_from_actions`.
+
+    The function is a thin wrapper around the existing
+    :func:`check_needs_restart_from_provides` that pulls each action's
+    ``SOLVABLE_PROVIDES`` from the resolver pool — the canonical source
+    used by both CLI install/upgrade and the rpmdrake helper after R9.
+
+    Tests use fake resolver/pool/selection/solvable doubles so we do
+    not pull a real libsolv pool into the unit-test path.
+    """
+
+    def _fake_resolver(self, name_to_provides):
+        """Build a stub resolver whose ``pool.select(name).solvables()``
+        returns one solvable that lookup_deparray reports the given
+        provides string list for."""
+        from types import SimpleNamespace
+
+        class _Solvable:
+            def __init__(self, provides):
+                self._provides = provides
+
+            def lookup_deparray(self, _which):
+                return list(self._provides)
+
+        class _Selection:
+            def __init__(self, solvables):
+                self._sol = solvables
+
+            def solvables(self):
+                return self._sol
+
+        class _Pool:
+            def __init__(self, mapping):
+                self._mapping = mapping
+
+            def select(self, name, _flags):
+                provides = self._mapping.get(name, [])
+                return _Selection([_Solvable(provides)] if provides else [])
+
+        return SimpleNamespace(pool=_Pool(name_to_provides))
+
+    def _action(self, name, kind):
+        from urpm.core.resolver import TransactionType
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            name=name,
+            action=TransactionType[kind],
+        )
+
+    @pytest.mark.stable
+    def test_install_triggers_system_restart(self):
+        from urpm.core.needs_restart import check_needs_restart_from_actions
+
+        resolver = self._fake_resolver({
+            'kernel-desktop': ['should-restart:system'],
+        })
+        actions = [self._action('kernel-desktop', 'INSTALL')]
+        result = check_needs_restart_from_actions(actions, resolver)
+
+        assert result == {'system': ['kernel-desktop']}
+
+    @pytest.mark.stable
+    def test_upgrade_triggers_session_restart(self):
+        from urpm.core.needs_restart import check_needs_restart_from_actions
+
+        resolver = self._fake_resolver({
+            'polkit': ['should-restart:session'],
+        })
+        actions = [self._action('polkit', 'UPGRADE')]
+        result = check_needs_restart_from_actions(actions, resolver)
+
+        assert result == {'session': ['polkit']}
+
+    @pytest.mark.stable
+    def test_remove_actions_are_ignored(self):
+        from urpm.core.needs_restart import check_needs_restart_from_actions
+
+        # REMOVE never triggers a should-restart probe — uninstalling a
+        # kernel does not require a system-restart by itself.
+        resolver = self._fake_resolver({
+            'kernel-desktop': ['should-restart:system'],
+        })
+        actions = [self._action('kernel-desktop', 'REMOVE')]
+        result = check_needs_restart_from_actions(actions, resolver)
+
+        assert result == {}
+
+    @pytest.mark.stable
+    def test_empty_actions_is_no_op(self):
+        from urpm.core.needs_restart import check_needs_restart_from_actions
+
+        resolver = self._fake_resolver({})
+        result = check_needs_restart_from_actions([], resolver)
+
+        assert result == {}
+
+    @pytest.mark.stable
+    def test_mixed_categories_are_categorised(self):
+        from urpm.core.needs_restart import check_needs_restart_from_actions
+
+        resolver = self._fake_resolver({
+            'kernel-desktop': ['should-restart:system'],
+            'polkit': ['should-restart:session'],
+            'vim': ['vim-common'],
+        })
+        actions = [
+            self._action('kernel-desktop', 'UPGRADE'),
+            self._action('polkit', 'INSTALL'),
+            self._action('vim', 'INSTALL'),
+        ]
+        result = check_needs_restart_from_actions(actions, resolver)
+
+        assert result == {
+            'system': ['kernel-desktop'],
+            'session': ['polkit'],
+        }
+
+
 class TestSpecifyMedia(BaseUrpmiTest):
     """Tests for --media, --excludemedia and --sortmedia options.
 

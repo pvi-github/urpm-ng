@@ -1026,32 +1026,18 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Check if any package provides should-restart:system — force full sync
     restart_info = {}
     if not full_sync:
-        from ...core.needs_restart import check_needs_restart_from_provides
-        import solv
-        pkg_provides: dict[str, list[str]] = {}
-        for a in result.actions:
-            if a.action.value in ('install', 'upgrade'):
-                sel = resolver.pool.select(
-                    a.name, solv.Selection.SELECTION_NAME,
+        from ...core.needs_restart import check_needs_restart_from_actions
+        restart_info = check_needs_restart_from_actions(
+            result.actions, resolver,
+        )
+        if 'system' in restart_info:
+            full_sync = True
+            pkgs = ', '.join(restart_info['system'])
+            print(colors.warning(
+                _("System restart required ({packages}) — forcing full sync.").format(
+                    packages=pkgs,
                 )
-                for s in sel.solvables():
-                    provides = [
-                        str(d) for d in
-                        s.lookup_deparray(solv.SOLVABLE_PROVIDES)
-                    ]
-                    if provides:
-                        pkg_provides[a.name] = provides
-                        break
-        if pkg_provides:
-            restart_info = check_needs_restart_from_provides(pkg_provides)
-            if 'system' in restart_info:
-                full_sync = True
-                pkgs = ', '.join(restart_info['system'])
-                print(colors.warning(
-                    _("System restart required ({packages}) — forcing full sync.").format(
-                        packages=pkgs,
-                    )
-                ))
+            ))
 
     from ..helpers.progress import make_progress_callback
 

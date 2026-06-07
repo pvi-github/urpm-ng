@@ -403,15 +403,14 @@ class TransactionHelper:
                 data["script"] = tp.script_name
             self._send(data)
 
-        # Check if any package provides should-restart:system — force full sync
-        from urpm.core.needs_restart import check_needs_restart_from_provides
-        restart_info = {}
-        for a in resolution.actions:
-            if a.action.name in ('INSTALL', 'UPGRADE'):
-                pkg_info = self.db.get_package(a.name)
-                if pkg_info and pkg_info.get('provides'):
-                    restart_info[a.name] = pkg_info['provides']
-        needs_restart = check_needs_restart_from_provides(restart_info)
+        # Check if any package provides should-restart:system — force full sync.
+        # Goes through the resolver pool (same source as the CLI install /
+        # upgrade paths) so virtual-provides reach all three callers
+        # identically.
+        from urpm.core.needs_restart import check_needs_restart_from_actions
+        needs_restart = check_needs_restart_from_actions(
+            resolution.actions, resolver,
+        )
 
         # Smart sync (default): return after extraction + per-package scripts.
         # Generic triggers (shared-mime-info, ldconfig, etc.) run in background.

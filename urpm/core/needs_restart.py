@@ -161,6 +161,55 @@ def needs_system_restart(package_names: List[str], root: str = "/") -> bool:
     return 'system' in restart
 
 
+def check_needs_restart_from_actions(
+    actions: List,
+    resolver,
+) -> Dict[str, List[str]]:
+    """Check should-restart from a resolution's actions.
+
+    Single entry point used by ``cmd_install``, ``cmd_upgrade`` and
+    the rpmdrake helper to decide whether to force ``full_sync``
+    transactions.  Pulls ``SOLVABLE_PROVIDES`` from the resolver pool
+    that produced the actions, so every caller sees the same data the
+    resolver itself worked from — the pre-R9 setup had two callers
+    reading the pool and a third going through ``db.get_package``,
+    which guaranteed divergence on virtual packages whose pool view
+    and rpmdb view drifted.
+
+    Args:
+        actions: ``PackageAction`` list from a ``Resolution``.
+        resolver: Live :class:`urpm.core.resolver.Resolver` whose pool
+            was used to build the actions.
+
+    Returns:
+        Same format as :func:`check_needs_restart_from_provides`:
+        ``component → list of package names that triggered it``.
+        Empty dict when nothing needs a restart.
+    """
+    import solv
+    # Lazy import to dodge the resolver→needs_restart cycle that
+    # would otherwise appear at module load time.
+    from .resolver import TransactionType
+
+    pkg_provides: Dict[str, List[str]] = {}
+    for action in actions:
+        if action.action not in (TransactionType.INSTALL,
+                                 TransactionType.UPGRADE):
+            continue
+        sel = resolver.pool.select(
+            action.name, solv.Selection.SELECTION_NAME,
+        )
+        for s in sel.solvables():
+            provides = [
+                str(d) for d in s.lookup_deparray(solv.SOLVABLE_PROVIDES)
+            ]
+            if provides:
+                pkg_provides[action.name] = provides
+                break
+
+    return check_needs_restart_from_provides(pkg_provides)
+
+
 def check_needs_restart_from_provides(
     package_provides: Dict[str, List[str]],
 ) -> Dict[str, List[str]]:

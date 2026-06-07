@@ -479,23 +479,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         # Force full sync if any package provides should-restart:system
         restart_info = {}
         if not full_sync:
-            from ...core.needs_restart import check_needs_restart_from_provides
-            import solv
-            pkg_provides: dict[str, list[str]] = {}
-            for action in result.actions:
-                if action.action.value in ('install', 'upgrade'):
-                    sel = resolver.pool.select(
-                        action.name, solv.Selection.SELECTION_NAME,
-                    )
-                    for s in sel.solvables():
-                        provides = [
-                            str(d) for d in
-                            s.lookup_deparray(solv.SOLVABLE_PROVIDES)
-                        ]
-                        if provides:
-                            pkg_provides[action.name] = provides
-                            break
-            restart_info = check_needs_restart_from_provides(pkg_provides)
+            from ...core.needs_restart import check_needs_restart_from_actions
+            restart_info = check_needs_restart_from_actions(
+                result.actions, resolver,
+            )
             if 'system' in restart_info:
                 full_sync = True
                 pkgs = ', '.join(restart_info['system'])
