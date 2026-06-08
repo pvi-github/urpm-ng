@@ -1017,6 +1017,13 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
         else:
             print("\n" + colors.info(_("Total")) + ": " + colors.success(str(total_packages)) + " " + _("packages from {count} media in {elapsed}").format(count=len(results), elapsed=format_elapsed(sync_elapsed)))
 
+        # Pre-3fafe62 ugly-name cleanup, if any media is still queued.
+        # No-op (single stat()) when the queue file does not exist —
+        # which is the common case once the migration has drained or
+        # on fresh installs.  See ``urpm/core/_pending_media_rename.py``
+        # for the lifecycle.
+        from ...core._pending_media_rename import drain_queue
+        drain_queue(db)
 
         return 1 if errors else 0
 
