@@ -401,7 +401,45 @@ class PackageOperations:
 
         # ── Step 2: Retry failed from alternate mirrors ──
         if sig_failed:
-            failed_paths = [p for p, _reason in sig_failed]
+            failed_paths = [f.path for f in sig_failed]
+
+            # ── Bug #3 iteration B: route by category ──
+            # A ``signature`` failure is a compromise indicator
+            # (key/signature/digest-from-key) — the source server is
+            # blacklisted from every pool until a human acts on it
+            # via ``urpm server unblacklist``.  ``preflight`` and
+            # ``structural`` are corruption events: they cost
+            # reputation score but do not blacklist.
+            for failure in sig_failed:
+                source_id = self.db.get_cache_file_server_id(
+                    str(failure.path),
+                )
+                if failure.category == "signature":
+                    if source_id is not None:
+                        self.db.blacklist_server(
+                            source_id,
+                            reason=(
+                                f"served '{failure.path.name}' with "
+                                f"failing signature ({failure.reason})"
+                            ),
+                        )
+                        server_row = self.db.get_server_by_id(source_id) or {}
+                        server_name = server_row.get('name') or f"#{source_id}"
+                        logger.error(
+                            "SECURITY ALERT: server '%s' potentially "
+                            "compromised after signature failure on '%s' "
+                            "(%s) — blacklisted.  Detail: "
+                            "urpm server status %s",
+                            server_name, failure.path.name,
+                            failure.reason, server_name,
+                        )
+                else:
+                    if source_id is not None:
+                        self.db.record_server_failure(
+                            source_id, category="corrupt",
+                            detail=f"{failure.path.name}: {failure.reason}",
+                        )
+
             purge_failed_from_cache(failed_paths, self.db)
 
             recovered, still_failed = retry_failed_downloads(

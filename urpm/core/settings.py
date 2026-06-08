@@ -212,6 +212,19 @@ class ServerSettings:
     server is always enough for serial downloads).
     """
 
+    reputation_window_hours: int = 24
+    """Sliding-window width used by the mirror selector to score
+    servers from the failure event log (bug #3 iteration B).
+
+    A failure (corrupt body / HTTP 4xx / HTTP 5xx / network glitch /
+    sustained slow transfer) recorded by the download path counts
+    against the server until it slides out of this window — score is
+    ``100 - SUM(weight)`` of recent events, clamped to 0.  The score
+    only orders the pool, never excludes a server outright; binary
+    exclusion is reserved for the manual security blacklist
+    (signature failure → ``urpm server unblacklist``).
+    """
+
 
 @dataclass
 class Settings:
@@ -411,6 +424,10 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
                     val = float(raw)
                     if val >= 1.0:
                         settings.server.pool_ratio = val
+                elif key == "reputation_window_hours":
+                    val = _as_int(raw)
+                    if 1 <= val <= 720:  # 1h .. 30 days
+                        settings.server.reputation_window_hours = val
                 elif key in (
                     "country_blacklist",
                     "country_whitelist",

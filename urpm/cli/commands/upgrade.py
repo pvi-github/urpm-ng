@@ -20,10 +20,15 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     import time
 
     from .. import colors
+    from ..helpers.security import emit_blacklist_alert_if_any
     from ...core.background_install import (
         check_background_error, clear_background_error,
     )
     from ...core.operations import PackageOperations, InstallOptions
+
+    # Re-display the security banner if anything is blacklisted
+    # (bug #3 iteration B).
+    emit_blacklist_alert_if_any(db)
 
     # Check for previous background install errors
     prev_error = check_background_error()

@@ -491,6 +491,7 @@ class TestSilentCrashSitesNowGuarded:
         'urpm.cli.commands.cache:cmd_cache_stats',
         'urpm.cli.commands.server:cmd_server_list',
         'urpm.cli.commands.server:cmd_server_stats',
+        'urpm.cli.commands.server:cmd_server_status',
         'urpm.cli.commands.mirror:cmd_mirror_status',
         'urpm.cli.commands.readme:cmd_readme',
         # ``urpm find`` queries the rpmdb and synthesis (both reads).

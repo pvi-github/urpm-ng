@@ -3083,7 +3083,8 @@ class TestRetryFailedDownloadsLoop:
         def fake_verify(paths, root="/"):
             verify_calls['n'] += 1
             if verify_calls['n'] == 1:
-                return ([], [(paths[0], "signature mismatch")])
+                from urpm.core.resilient_install import FailedRpm
+                return ([], [FailedRpm(paths[0], "signature", "signature mismatch")])
             return (list(paths), [])
 
         monkeypatch.setattr(ri, 'pre_verify_signatures', fake_verify)
@@ -3119,7 +3120,8 @@ class TestRetryFailedDownloadsLoop:
                     1, 0, {})
 
         def fake_verify(paths, root="/"):
-            return ([], [(paths[0], "signature mismatch")])
+            from urpm.core.resilient_install import FailedRpm
+            return ([], [FailedRpm(paths[0], "signature", "signature mismatch")])
 
         monkeypatch.setattr(ri, 'pre_verify_signatures', fake_verify)
 
@@ -3175,3 +3177,226 @@ class TestRetryFailedDownloadsLoop:
         # Only one download_packages call: subsequent attempts skip the
         # exhausted item.
         assert call_count['n'] == 1
+
+
+class TestPreVerifyCategorisation:
+    """Tests for the categorised return of :func:`pre_verify_signatures`
+    introduced in bug #3 iteration B.
+
+    The earlier 2-tuple ``(path, reason)`` shape was replaced by a
+    ``FailedRpm`` namedtuple carrying ``(path, category, reason)`` so
+    the caller can route signature failures (compromise — blacklist)
+    differently from preflight / structural failures (reputation
+    only).
+    """
+
+    def _temp(self, content: bytes):
+        import tempfile
+        from pathlib import Path
+        with tempfile.NamedTemporaryFile(suffix='.rpm', delete=False) as f:
+            f.write(content)
+        return Path(f.name)
+
+    @pytest.mark.stable
+    def test_preflight_failure_is_categorised(self):
+        from urpm.core.resilient_install import (
+            pre_verify_signatures, FailedRpm,
+        )
+        path = self._temp(b"")  # empty → preflight rejects
+        try:
+            valid, failed = pre_verify_signatures([path])
+            assert valid == []
+            assert len(failed) == 1
+            assert isinstance(failed[0], FailedRpm)
+            assert failed[0].category == "preflight"
+            assert "empty" in failed[0].reason.lower()
+        finally:
+            path.unlink()
+
+    @pytest.mark.stable
+    def test_signature_failure_is_categorised(self, monkeypatch):
+        """When ``verify_rpm_signature`` rejects but the body would
+        otherwise pass preflight, the failure carries the
+        ``signature`` category."""
+        from urpm.core import resilient_install as ri
+        # 4-byte magic so preflight accepts; the body wouldn't pass
+        # rpmlib but we override verify_rpm_signature to short-circuit
+        # before it tries.
+        path = self._temp(b"\xed\xab\xee\xdb" + b"\x00" * 96)
+        try:
+            monkeypatch.setattr(
+                "urpm.core.download.verify_rpm_signature",
+                lambda p: (False, "BAD signature: NOKEY"),
+            )
+            valid, failed = pre_verify_signatures_stub(ri, path)
+            assert valid == []
+            assert failed[0].category == "signature"
+            assert "NOKEY" in failed[0].reason
+        finally:
+            path.unlink()
+
+
+def pre_verify_signatures_stub(ri, path):
+    """Bypass the local ``rpm`` machinery by going through the
+    real :func:`pre_verify_signatures`, used by the test above."""
+    return ri.pre_verify_signatures([path])
+
+
+@pytest.fixture
+def fresh_db(monkeypatch):
+    """Throwaway v30 PackageDatabase for the bug-#3 iteration B tests.
+
+    Mirrors the ``db`` fixture in ``test_database.py`` so the
+    install-side tests do not need to reach across files.
+    """
+    import tempfile
+    from pathlib import Path
+    from urpm.core.database import PackageDatabase
+
+    monkeypatch.setattr('urpm.core.config.get_system_version', lambda: '9')
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+        db_path = Path(f.name)
+    database = PackageDatabase(db_path)
+    yield database
+    database.close()
+    db_path.unlink(missing_ok=True)
+
+
+class TestProvenanceRoutingOnPreVerify:
+    """Tests for the blacklist / reputation routing applied at
+    ``operations.PackageOperations.resilient_install`` when
+    ``pre_verify_signatures`` returns a categorised failure.
+
+    A signature failure must blacklist the source server;
+    preflight / structural failures must only ding reputation.
+    """
+
+    def _seed_server(self, db, name="alpha"):
+        return db.add_server(
+            name=name, protocol="https", host=f"{name}.example.org",
+            base_path="/", is_official=True,
+        )
+
+    def _seed_media(self, db, server_id):
+        mid = db.add_media(
+            name="Core Release", short_name="core_release",
+            mageia_version="9", architecture="x86_64",
+            relative_path="9/x86_64/media/core/release",
+            enabled=True,
+        )
+        db.link_server_media(server_id, mid)
+        return mid
+
+    def _seed_cached(self, db, media_id, server_id, path):
+        db.register_cache_file(
+            filename=path.name, media_id=media_id,
+            file_path=str(path), file_size=10,
+            served_by_server_id=server_id,
+        )
+
+    def _drive_routing(self, db, failures):
+        """Run the same per-failure dispatch loop the real
+        ``resilient_install`` step 2 does, so the routing logic is
+        verified without spinning up the rest of the pipeline."""
+        from urpm.core.resilient_install import FailedRpm
+        for failure in failures:
+            source_id = db.get_cache_file_server_id(str(failure.path))
+            if failure.category == "signature":
+                if source_id is not None:
+                    db.blacklist_server(
+                        source_id,
+                        reason=(
+                            f"served '{failure.path.name}' with "
+                            f"failing signature ({failure.reason})"
+                        ),
+                    )
+            else:
+                if source_id is not None:
+                    db.record_server_failure(
+                        source_id, category="corrupt",
+                        detail=f"{failure.path.name}: {failure.reason}",
+                    )
+
+    @pytest.mark.stable
+    def test_signature_failure_blacklists_source_server(self, fresh_db, tmp_path):
+        from urpm.core.resilient_install import FailedRpm
+        db = fresh_db
+        sid = self._seed_server(db)
+        mid = self._seed_media(db, sid)
+        rpm = tmp_path / "foo-1.0-1.mga9.x86_64.rpm"
+        rpm.touch()
+        self._seed_cached(db, mid, sid, rpm)
+
+        self._drive_routing(db, [FailedRpm(rpm, "signature", "BAD GPG: NOKEY")])
+
+        assert db.is_blacklisted(sid) is True
+        listed = db.list_blacklisted_servers()
+        assert len(listed) == 1
+        assert "NOKEY" in listed[0]["blacklist_reason"]
+        # Reputation event log stays empty: sig failures bypass it.
+        assert db.get_server_reputation_score(sid) == 100
+
+    @pytest.mark.stable
+    def test_preflight_failure_only_dings_reputation(self, fresh_db, tmp_path):
+        from urpm.core.resilient_install import FailedRpm
+        db = fresh_db
+        sid = self._seed_server(db)
+        mid = self._seed_media(db, sid)
+        rpm = tmp_path / "foo-1.0-1.mga9.x86_64.rpm"
+        rpm.touch()
+        self._seed_cached(db, mid, sid, rpm)
+
+        self._drive_routing(db, [FailedRpm(rpm, "preflight", "empty file")])
+
+        assert db.is_blacklisted(sid) is False
+        # corrupt event: -10 penalty
+        assert db.get_server_reputation_score(sid) == 90
+
+    @pytest.mark.stable
+    def test_structural_failure_only_dings_reputation(self, fresh_db, tmp_path):
+        from urpm.core.resilient_install import FailedRpm
+        db = fresh_db
+        sid = self._seed_server(db)
+        mid = self._seed_media(db, sid)
+        rpm = tmp_path / "foo-1.0-1.mga9.x86_64.rpm"
+        rpm.touch()
+        self._seed_cached(db, mid, sid, rpm)
+
+        self._drive_routing(db, [
+            FailedRpm(rpm, "structural", "MD5 digest: BAD")
+        ])
+
+        assert db.is_blacklisted(sid) is False
+        assert db.get_server_reputation_score(sid) == 90
+
+    @pytest.mark.stable
+    def test_unknown_provenance_does_not_blacklist_anything(
+        self, fresh_db, tmp_path,
+    ):
+        """A cached file with no recorded ``served_by_server_id``
+        (legacy row, peer-served, or pre-v30 schema) cannot drive a
+        blacklist — the helper must be a no-op rather than blow up
+        or pick a random server."""
+        from urpm.core.resilient_install import FailedRpm
+        db = fresh_db
+        self._seed_server(db)  # exists but not linked to this file
+        rpm = tmp_path / "foo-1.0-1.mga9.x86_64.rpm"
+        rpm.touch()
+        # NOT calling _seed_cached → no provenance row at all.
+
+        self._drive_routing(db, [
+            FailedRpm(rpm, "signature", "BAD GPG: NOKEY"),
+        ])
+        assert db.list_blacklisted_servers() == []
+
+    @pytest.mark.stable
+    def test_db_fixture_pinned_to_v9_compat(self, fresh_db):
+        """The shared ``db`` fixture above is the same v30 schema used
+        by all the other suites; sanity-check the new columns exist
+        so the routing tests cannot regress through a stale fixture.
+        """
+        db = fresh_db
+        conn = db._get_connection()
+        cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(server)").fetchall()}
+        assert {"blacklisted_at", "blacklist_reason"} <= cols

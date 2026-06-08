@@ -14,7 +14,8 @@ class CacheMixin:
     """
 
     def register_cache_file(self, filename: str, media_id: int, file_path: str,
-                            file_size: int) -> int:
+                            file_size: int,
+                            served_by_server_id: Optional[int] = None) -> int:
         """Register a cached file for quota tracking.
 
         Args:
@@ -22,19 +23,48 @@ class CacheMixin:
             media_id: Associated media ID
             file_path: Relative path from medias/ directory
             file_size: File size in bytes
+            served_by_server_id: ID of the server that served the file.
+                ``None`` for peer-served files or pre-v30 cache rows.
+                Persisted to ``cache_files.served_by_server_id`` so the
+                retry path (bug #3 iteration B) can exclude the source
+                server when the same file shows up corrupt later, even
+                across urpm-ng process restarts.
 
         Returns:
-            Cache file ID
+            Cache file ID.
         """
         with self._lock:
             now = int(time.time())
             cursor = self.conn.execute("""
                 INSERT OR REPLACE INTO cache_files
-                (filename, media_id, file_path, file_size, added_time, last_accessed, is_referenced)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
-            """, (filename, media_id, file_path, file_size, now, now))
+                (filename, media_id, file_path, file_size, added_time,
+                 last_accessed, is_referenced, served_by_server_id)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+            """, (filename, media_id, file_path, file_size, now, now,
+                  served_by_server_id))
             self.conn.commit()
             return cursor.lastrowid
+
+    def get_cache_file_server_id(self, file_path: str) -> Optional[int]:
+        """Return the server id that served a cached file, or None.
+
+        Used by the install retry path (bug #3 iteration B) when a
+        cached RPM turns out to be corrupt: the source server is
+        excluded on the first retry attempt rather than after burning
+        a wasted attempt on the same bad mirror.
+
+        Returns ``None`` for rows predating the v30 schema, rows where
+        the file was served by a peer, or paths absent from the cache
+        table altogether.
+        """
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT served_by_server_id FROM cache_files WHERE file_path = ?",
+            (file_path,),
+        ).fetchone()
+        if row is None:
+            return None
+        return row["served_by_server_id"]
 
     def get_cache_file(self, filename: str, media_id: int = None) -> Optional[Dict]:
         """Get cache file info by filename. Thread-safe."""

@@ -87,7 +87,7 @@ def _register_rpm_collation(conn: sqlite3.Connection) -> None:
     conn.create_collation('rpm_version_compare', _rpm_version_collation)
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -259,8 +259,37 @@ CREATE TABLE IF NOT EXISTS server (
     success_count INTEGER DEFAULT 0,
     last_check INTEGER,
     added_timestamp INTEGER,
+    -- Security blacklist (bug #3 iteration B).  When NOT NULL the
+    -- server is considered actively compromised (e.g. served an
+    -- RPM whose signature did not match the media key); it stays
+    -- out of every mirror pool until a human runs
+    -- ``urpm server unblacklist <name>`` after manual verification.
+    blacklisted_at INTEGER,
+    blacklist_reason TEXT,
+    -- Acknowledgement of the security alert.  When the user runs
+    -- ``urpm server ack-blacklist <name>``, this column is set to
+    -- ``now`` so the persistent banner reminder stops nagging at
+    -- every CLI invocation.  The server itself stays blacklisted
+    -- until the user explicitly reactivates it.  Cleared together
+    -- with ``blacklisted_at`` on ``unblacklist``.
+    blacklist_acknowledged_at INTEGER,
     UNIQUE(host, base_path)
 );
+
+-- Per-server failure events (bug #3 iteration B, reputation track).
+-- Append-only log used to compute a sliding-window reputation score
+-- consulted by the mirror selector for ordering — *not* for binary
+-- exclusion (that role belongs to ``server.blacklisted_at``).
+CREATE TABLE IF NOT EXISTS server_failure_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    ts INTEGER NOT NULL,                    -- Unix timestamp of the event
+    category TEXT NOT NULL,                 -- 'corrupt' | 'http_4xx' | 'http_5xx' | 'network' | 'slow'
+    weight INTEGER NOT NULL,                -- Penalty applied; positive number subtracted from baseline 100
+    detail TEXT,                            -- Optional debug context (filename, error message)
+    FOREIGN KEY (server_id) REFERENCES server(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sfe_server_ts ON server_failure_events(server_id, ts);
 
 -- N:M link between servers and media
 CREATE TABLE IF NOT EXISTS server_media (
@@ -377,7 +406,15 @@ CREATE TABLE IF NOT EXISTS cache_files (
     added_time INTEGER NOT NULL,      -- Download timestamp
     last_accessed INTEGER,            -- Last access time (for LRU)
     is_referenced INTEGER DEFAULT 1,  -- Still in current synthesis?
+    -- Provenance (bug #3 iteration B): the server that served this
+    -- file.  Set by the downloader at write time; NULL when the file
+    -- came in through a non-server path (peer transfer, manual copy)
+    -- or pre-dates the v30 schema.  Read by ``retry_failed_downloads``
+    -- to exclude the source server on the first retry of a corrupt
+    -- predownloaded file.
+    served_by_server_id INTEGER,
     FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE,
+    FOREIGN KEY (served_by_server_id) REFERENCES server(id) ON DELETE SET NULL,
     UNIQUE(filename, media_id)
 );
 
@@ -760,6 +797,45 @@ MIGRATIONS = {
     # as ``synthesis_md5`` for synthesis.hdlist.cz.
     28: (29, """
         ALTER TABLE media ADD COLUMN files_xml_md5 TEXT;
+    """),
+    29: (30, """
+        -- Migration v29 -> v30: server blacklist + reputation event log
+        -- + cache_files provenance (bug #3 iteration B).
+        --
+        -- ``blacklisted_at`` is set by the install pipeline when a
+        -- server is observed serving an RPM with a signature failure
+        -- (active tampering signal).  The column survives across
+        -- restarts and is only cleared by the explicit
+        -- ``urpm server unblacklist`` CLI command after a human has
+        -- verified media integrity.
+        --
+        -- ``server_failure_events`` records the continuous-scoring
+        -- failures (corrupt body, 4xx/5xx, network glitches, slow
+        -- downloads).  The mirror selector reads it through a
+        -- sliding-window SUM(weight) query to compute a reputation
+        -- score used only for ordering, never for exclusion.
+        --
+        -- ``cache_files.served_by_server_id`` lets the retry path
+        -- know which mirror served a corrupt cached file even when
+        -- the file landed there in a previous urpm-ng process
+        -- (typically ``urpmd`` background predownload).
+        ALTER TABLE server ADD COLUMN blacklisted_at INTEGER;
+        ALTER TABLE server ADD COLUMN blacklist_reason TEXT;
+        ALTER TABLE server ADD COLUMN blacklist_acknowledged_at INTEGER;
+
+        CREATE TABLE IF NOT EXISTS server_failure_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            server_id INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            weight INTEGER NOT NULL,
+            detail TEXT,
+            FOREIGN KEY (server_id) REFERENCES server(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_sfe_server_ts
+            ON server_failure_events(server_id, ts);
+
+        ALTER TABLE cache_files ADD COLUMN served_by_server_id INTEGER;
     """),
 }
 

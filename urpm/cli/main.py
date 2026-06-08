@@ -83,6 +83,7 @@ from .commands.server import (
     cmd_server_list, cmd_server_add, cmd_server_remove,
     cmd_server_enable, cmd_server_disable, cmd_server_priority,
     cmd_server_test, cmd_server_ipmode, cmd_server_autoconfig, cmd_server_stats,
+    cmd_server_status, cmd_server_unblacklist, cmd_server_ack_blacklist,
 )
 from .commands.mirror import (
     cmd_mirror_status, cmd_mirror_enable, cmd_mirror_disable,
@@ -1815,6 +1816,27 @@ Examples:
     )
     server_stats.add_argument('name', help=_('Server name'))
 
+    server_status = server_subparsers.add_parser(
+        'status',
+        help=_('Show full status of a server including security '
+               'blacklist and reputation history')
+    )
+    server_status.add_argument('name', help=_('Server name'))
+
+    server_unblacklist = server_subparsers.add_parser(
+        'unblacklist',
+        help=_('Clear the security blacklist on a server (root, '
+               'requires manual confirmation)')
+    )
+    server_unblacklist.add_argument('name', help=_('Server name'))
+
+    server_ack_blacklist = server_subparsers.add_parser(
+        'ack-blacklist',
+        help=_('Acknowledge a blacklist alert so the persistent '
+               'reminder stops nagging at every CLI invocation')
+    )
+    server_ack_blacklist.add_argument('name', help=_('Server name'))
+
     server_autoconfig = server_subparsers.add_parser(
         'autoconfig', aliases=['auto'],
         help=_('Auto-discover and add servers from Mageia mirrorlist'),
@@ -2510,6 +2532,12 @@ def main(argv=None) -> int:
                 return cmd_server_autoconfig(args, db)
             elif args.server_command == 'stats':
                 return cmd_server_stats(args, db)
+            elif args.server_command == 'status':
+                return cmd_server_status(args, db)
+            elif args.server_command == 'unblacklist':
+                return cmd_server_unblacklist(args, db)
+            elif args.server_command == 'ack-blacklist':
+                return cmd_server_ack_blacklist(args, db)
             else:
                 return cmd_not_implemented(args, db)
 

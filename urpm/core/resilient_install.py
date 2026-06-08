@@ -15,8 +15,28 @@ in the CLI / GUI layers that call these functions.
 """
 
 import logging
+from collections import namedtuple
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Optional, TYPE_CHECKING
+
+
+# Categorised result of :func:`pre_verify_signatures` failure.  The
+# category steers the caller toward the right remediation path (bug
+# #3 iteration B):
+#
+#   * ``'preflight'``  — empty file, missing magic, unreadable: a
+#                        cache corruption that costs reputation but
+#                        does not signal active tampering.
+#   * ``'signature'``  — GPG signature verification failed.  Treated
+#                        as a compromise event: the source server is
+#                        blacklisted unconditionally and the user
+#                        gets a visible alert.
+#   * ``'structural'`` — header read failed with sig checks disabled
+#                        (rpm.error after preflight succeeded —
+#                        usually a digest mismatch or malformed
+#                        header).  Counts toward reputation, not
+#                        blacklist.
+FailedRpm = namedtuple("FailedRpm", ["path", "category", "reason"])
 
 # The resilient pipeline returns :class:`urpm.core.install.InstallResult`
 # (the same dataclass as the low-level :class:`Installer`).  The extra
@@ -60,41 +80,72 @@ def pre_verify_signatures(
         return [], []
 
     import rpm
+    from .download import verify_rpm_signature
 
     valid: List[Path] = []
-    failed: List[Tuple[Path, str]] = []
+    failed: List[FailedRpm] = []
 
-    ts = rpm.TransactionSet(root)
-    ts.setVSFlags(0)  # Enable all signature / digest checks
-
+    # ── Pass 0: cheap structural preflight ──
+    # Empty files, files truncated below the magic, or files that
+    # simply do not start with ``\xed\xab\xee\xdb`` never reach
+    # rpmlib — they exit straight into the retry path with a
+    # transparent ``preflight`` category.
+    sig_pending: List[Path] = []
     for path in rpm_paths:
-        # ── Cheap structural preflight first ──
-        # Empty files, files truncated to a few bytes, or files that
-        # do not start with the RPM magic (``\xed\xab\xee\xdb``) never
-        # reach the rpmlib parser — they pass directly to the retry
-        # path with a clear reason string so the caller can act on
-        # them in the same loop iteration as actual signature
-        # failures.
         preflight_reason = preflight_check(path)
         if preflight_reason is not None:
             logger.warning(
                 "Preflight rejected %s: %s", path.name, preflight_reason,
             )
-            failed.append((path, preflight_reason))
+            failed.append(FailedRpm(path, "preflight", preflight_reason))
             continue
+        sig_pending.append(path)
 
-        try:
-            with open(path, "rb") as fd:
-                ts.hdrFromFdno(fd.fileno())
-            valid.append(path)
-        except rpm.error as exc:
-            err_msg = str(exc)
-            logger.warning("Signature check failed for %s: %s", path.name, err_msg)
-            failed.append((path, err_msg))
-        except (IOError, OSError) as exc:
-            err_msg = str(exc)
-            logger.warning("Cannot read RPM %s: %s", path.name, err_msg)
-            failed.append((path, err_msg))
+    # ── Pass 1: signature verification ──
+    # Run as a dedicated call (``verify_rpm_signature`` enables all
+    # VSFlags) so the failure mode is unambiguous — any error from
+    # this pass is a sig/digest-from-key failure and we label it as
+    # such.  This is the categorisation that drives the
+    # compromise-vs-corruption decision in
+    # ``operations.resilient_install``: signature failures get the
+    # source server blacklisted; everything else only nudges the
+    # reputation score.
+    header_pending: List[Path] = []
+    for path in sig_pending:
+        ok, sig_err = verify_rpm_signature(path)
+        if not ok:
+            logger.warning(
+                "Signature check failed for %s: %s", path.name, sig_err,
+            )
+            failed.append(FailedRpm(path, "signature", str(sig_err)))
+            continue
+        header_pending.append(path)
+
+    # ── Pass 2: header read with sigs disabled ──
+    # Sigs already settled (verified above), so any rpm.error here
+    # is genuinely a structural problem (digest mismatch, truncated
+    # body past the lead, malformed header…), never a sig issue we
+    # would have to disambiguate by string-match.
+    if header_pending:
+        ts = rpm.TransactionSet(root)
+        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
+        for path in header_pending:
+            try:
+                with open(path, "rb") as fd:
+                    ts.hdrFromFdno(fd.fileno())
+                valid.append(path)
+            except rpm.error as exc:
+                err_msg = str(exc)
+                logger.warning(
+                    "Header check failed for %s: %s", path.name, err_msg,
+                )
+                failed.append(FailedRpm(path, "structural", err_msg))
+            except (IOError, OSError) as exc:
+                err_msg = str(exc)
+                logger.warning(
+                    "Cannot read RPM %s: %s", path.name, err_msg,
+                )
+                failed.append(FailedRpm(path, "structural", err_msg))
 
     if failed:
         logger.info(
@@ -394,7 +445,8 @@ def retry_failed_downloads(
                 if valid:
                     recovered.append(result.path)
                     continue
-                reason = bad[0][1] if bad else "signature check failed"
+                failure = bad[0] if bad else None
+                reason = failure.reason if failure else "signature check failed"
                 last_reasons[result.item.name] = reason
                 try:
                     result.path.unlink()
@@ -406,6 +458,39 @@ def retry_failed_downloads(
                 # response, regardless of whether the body turns out
                 # to be a valid RPM.
                 bad_id = getattr(result, 'source_server_id', None)
+
+                # Route by category (bug #3 iteration B):
+                #   * a fresh ``signature`` failure on a retry attempt
+                #     is an active tampering signal — blacklist the
+                #     server we just got it from.
+                #   * other failure categories ding the reputation
+                #     score so the same misbehaving mirror sinks in
+                #     future selections without being banned outright.
+                if failure is not None and bad_id is not None and getattr(ops, 'db', None) is not None:
+                    if failure.category == "signature":
+                        ops.db.blacklist_server(
+                            bad_id,
+                            reason=(
+                                f"served '{result.path.name}' with "
+                                f"failing signature ({failure.reason})"
+                            ),
+                        )
+                        server_row = ops.db.get_server_by_id(bad_id) or {}
+                        server_name = server_row.get('name') or f"#{bad_id}"
+                        logger.error(
+                            "SECURITY ALERT: server '%s' potentially "
+                            "compromised after signature failure on retry "
+                            "of '%s' (%s) — blacklisted.  Detail: "
+                            "urpm server status %s",
+                            server_name, result.path.name,
+                            failure.reason, server_name,
+                        )
+                    else:
+                        ops.db.record_server_failure(
+                            bad_id, category="corrupt",
+                            detail=f"{result.path.name}: {failure.reason}",
+                        )
+
                 if bad_id and bad_id not in result.item.exclude_server_ids:
                     result.item.exclude_server_ids.append(bad_id)
                 next_round.append(result.item)

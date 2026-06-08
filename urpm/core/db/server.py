@@ -4,6 +4,21 @@ import time
 from typing import Dict, List, Optional
 
 
+# ── Reputation event categories ───────────────────────────────────────
+# Penalty applied to the rolling reputation score per failure.  Higher
+# numbers deprioritise the server faster in mirror selection.  Kept here
+# because the values are referenced by both the recording site
+# (downloader / retry path) and the read site (``get_servers_for_media``)
+# and we want a single source of truth.
+REPUTATION_WEIGHTS = {
+    "corrupt": 10,    # RPM body fails preflight or rpm-level digest
+    "http_5xx": 5,    # Server-side error response
+    "network": 5,     # Timeout / DNS / connreset / partial transfer
+    "http_4xx": 3,    # Not-found / not-allowed: missing content on this mirror
+    "slow": 2,        # Sustained slow transfer (informational deprioritisation)
+}
+
+
 class ServerMixin:
     """Mixin providing server CRUD operations.
 
@@ -232,34 +247,254 @@ class ServerMixin:
             conn.commit()
 
     def get_servers_for_media(self, media_id: int, enabled_only: bool = True,
-                               limit: int = None) -> List[Dict]:
+                               limit: int = None,
+                               reputation_window_hours: int = 24,
+                               include_blacklisted: bool = False) -> List[Dict]:
         """Get all servers that can serve a media, ordered by preference. Thread-safe.
 
-        Ordering: manual priority first (user intent), then measured bandwidth
-        as tiebreaker (higher = faster). Servers with no measurement yet are
-        treated as 0 KB/s within their priority tier until data is collected.
+        Ordering precedence (bug #3 iteration B):
+
+        1. Manual priority (user intent — highest first).
+        2. Sliding-window reputation score — servers with recent
+           corruption / 4xx / 5xx / network / slow events sink to the
+           bottom of their priority tier.  Servers with no events score
+           a clean 100.
+        3. Measured bandwidth as tiebreaker (higher = faster).  Servers
+           never measured count as 0 KB/s.
+
+        Blacklisted servers (``blacklisted_at`` IS NOT NULL — set by
+        :meth:`blacklist_server` on a signature failure) are filtered
+        out unconditionally unless ``include_blacklisted=True`` is
+        passed.  That flag exists only for diagnostic / admin commands
+        like ``urpm server list``.
 
         Args:
-            media_id: Media ID
-            enabled_only: Only return enabled servers
-            limit: Maximum number of servers to return
+            media_id: Media ID.
+            enabled_only: Only return enabled servers.
+            limit: Maximum number of servers to return.
+            reputation_window_hours: Width of the sliding window used
+                to compute the reputation score.  24 by default.
+            include_blacklisted: When True, do not filter out
+                blacklisted servers (used by admin UIs).
 
         Returns:
-            List of server dicts, best server first
+            List of server dicts, best server first.  Each dict carries
+            a ``reputation_score`` key (integer 0-100) computed inline.
         """
         conn = self._get_connection()
+        cutoff = int(time.time()) - reputation_window_hours * 3600
+        # Subquery uses the (server_id, ts) index for an efficient
+        # sliding-window SUM(weight).  No event rows → 0 penalty →
+        # score 100, preserving today's ordering for healthy mirrors.
         query = """
-            SELECT s.* FROM server s
+            SELECT s.*,
+                   MAX(0, 100 - COALESCE((
+                       SELECT SUM(weight)
+                       FROM server_failure_events
+                       WHERE server_id = s.id AND ts > ?
+                   ), 0)) AS reputation_score
+            FROM server s
             JOIN server_media sm ON s.id = sm.server_id
             WHERE sm.media_id = ?
         """
+        params: List = [cutoff, media_id]
         if enabled_only:
             query += " AND s.enabled = 1"
-        query += " ORDER BY s.priority DESC, COALESCE(s.bandwidth_kbps, 0) DESC, s.name"
+        if not include_blacklisted:
+            query += " AND s.blacklisted_at IS NULL"
+        query += (
+            " ORDER BY s.priority DESC, reputation_score DESC, "
+            "COALESCE(s.bandwidth_kbps, 0) DESC, s.name"
+        )
         if limit:
             query += f" LIMIT {limit}"
 
-        cursor = conn.execute(query, (media_id,))
+        cursor = conn.execute(query, params)
+        return [dict(row) for row in cursor]
+
+    # ── Security blacklist ────────────────────────────────────────────
+
+    def blacklist_server(self, server_id: int, reason: str,
+                         detail: Optional[str] = None) -> None:
+        """Mark a server as compromised — out of every mirror pool.
+
+        Triggered when the install pipeline observes a signature
+        failure on an RPM the server just served.  Reactivation
+        requires a human running ``urpm server unblacklist <name>``
+        after manual verification (intentional: a security
+        blacklisting does not auto-clear).
+
+        Also appends an event row to ``server_failure_events`` with
+        category ``'signature'`` and weight 0, so ``urpm server status``
+        can show the full compromise history (filename, message, when)
+        — the short ``blacklist_reason`` on the server row only
+        captures the most recent event.
+
+        Args:
+            server_id: Server that just served the tampered RPM.
+            reason: Short human-readable summary stored on the
+                server row (last-write-wins).  Shown in the alert
+                banner and ``urpm server list``.
+            detail: Optional longer context for the event log.  When
+                ``None``, ``reason`` is reused so the event row is
+                self-explanatory.
+        """
+        now = int(time.time())
+        conn = self._get_connection()
+        # Reset acknowledgement: a fresh blacklisting event always
+        # re-arms the persistent banner reminder even if the user had
+        # acknowledged a previous one.
+        conn.execute(
+            "UPDATE server SET blacklisted_at = ?, blacklist_reason = ?, "
+            "blacklist_acknowledged_at = NULL WHERE id = ?",
+            (now, reason, server_id),
+        )
+        conn.execute(
+            "INSERT INTO server_failure_events "
+            "(server_id, ts, category, weight, detail) VALUES (?, ?, ?, ?, ?)",
+            (server_id, now, "signature", 0, detail or reason),
+        )
+        conn.commit()
+
+    def unblacklist_server(self, server_id: int) -> bool:
+        """Clear the security blacklist on a server.
+
+        Also clears the acknowledgement timestamp so a subsequent
+        blacklisting event will trigger the banner again from
+        scratch.
+
+        Returns:
+            True if a row was actually cleared (the server existed and
+            was blacklisted), False if it was not blacklisted to begin
+            with.
+        """
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "UPDATE server SET blacklisted_at = NULL, blacklist_reason = NULL, "
+            "blacklist_acknowledged_at = NULL "
+            "WHERE id = ? AND blacklisted_at IS NOT NULL",
+            (server_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def acknowledge_blacklist(self, server_id: int) -> bool:
+        """Stop nagging the persistent banner for this server.
+
+        The server stays in the mirror-pool exclusion list (manual
+        ``unblacklist`` still required to reactivate); this only marks
+        "the user has seen the alert and is handling it".
+
+        Returns:
+            True when an acknowledgement was actually stored, False
+            when the server is not blacklisted or already
+            acknowledged.
+        """
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "UPDATE server SET blacklist_acknowledged_at = ? "
+            "WHERE id = ? AND blacklisted_at IS NOT NULL "
+            "AND blacklist_acknowledged_at IS NULL",
+            (int(time.time()), server_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def is_blacklisted(self, server_id: int) -> bool:
+        """Return True when ``server_id`` is currently blacklisted."""
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT blacklisted_at FROM server WHERE id = ?", (server_id,),
+        ).fetchone()
+        return bool(row and row["blacklisted_at"] is not None)
+
+    def list_blacklisted_servers(self, unacknowledged_only: bool = False) -> List[Dict]:
+        """Return every currently blacklisted server with its reason.
+
+        Used by the persistent banner reminder shown at the start of
+        ``urpm install`` / ``upgrade`` / ``media update`` runs while
+        any compromise is unresolved, and by ``urpm server list`` /
+        ``urpm server status`` for admin inspection.
+
+        Args:
+            unacknowledged_only: When True, skip servers the user
+                already acknowledged with ``urpm server ack-blacklist``.
+                Used by the persistent banner so it stops nagging
+                after the user has seen the alert.
+        """
+        conn = self._get_connection()
+        query = "SELECT * FROM server WHERE blacklisted_at IS NOT NULL"
+        if unacknowledged_only:
+            query += " AND blacklist_acknowledged_at IS NULL"
+        query += " ORDER BY blacklisted_at DESC"
+        cursor = conn.execute(query)
+        return [dict(row) for row in cursor]
+
+    # ── Reputation event log ──────────────────────────────────────────
+
+    def record_server_failure(self, server_id: int, category: str,
+                              detail: Optional[str] = None,
+                              weight: Optional[int] = None) -> None:
+        """Append a failure event for ``server_id``.
+
+        The reputation score consulted by :meth:`get_servers_for_media`
+        is a sliding-window ``SUM(weight)`` over this table.
+
+        Args:
+            server_id: Server that misbehaved.
+            category: One of the keys in :data:`REPUTATION_WEIGHTS`.
+                Unknown categories are recorded with weight 0 so the
+                row stays in the audit log but does not move the
+                score — callers should still use the canonical names.
+            detail: Optional debugging context (filename, error
+                message…).  Not consulted by the scoring path; visible
+                in ``urpm server status`` for forensics.
+            weight: Override the category default (rarely needed).
+        """
+        if weight is None:
+            weight = REPUTATION_WEIGHTS.get(category, 0)
+        conn = self._get_connection()
+        conn.execute(
+            "INSERT INTO server_failure_events "
+            "(server_id, ts, category, weight, detail) VALUES (?, ?, ?, ?, ?)",
+            (server_id, int(time.time()), category, weight, detail),
+        )
+        conn.commit()
+
+    def get_server_reputation_score(self, server_id: int,
+                                    window_hours: int = 24) -> int:
+        """Return the reputation score in ``[0, 100]`` for ``server_id``.
+
+        Score is ``100 - SUM(weight)`` of events recorded within the
+        last ``window_hours`` hours, clamped to 0 below.  100 means no
+        recent failures.
+        """
+        conn = self._get_connection()
+        cutoff = int(time.time()) - window_hours * 3600
+        row = conn.execute(
+            "SELECT COALESCE(SUM(weight), 0) AS total "
+            "FROM server_failure_events "
+            "WHERE server_id = ? AND ts > ?",
+            (server_id, cutoff),
+        ).fetchone()
+        return max(0, 100 - (row["total"] if row else 0))
+
+    def get_server_recent_failures(self, server_id: int,
+                                   window_hours: int = 24,
+                                   limit: int = 20) -> List[Dict]:
+        """Return the recent failure events for forensic inspection.
+
+        Used by ``urpm server status <name>`` to show why a mirror's
+        reputation is low.
+        """
+        conn = self._get_connection()
+        cutoff = int(time.time()) - window_hours * 3600
+        cursor = conn.execute(
+            "SELECT * FROM server_failure_events "
+            "WHERE server_id = ? AND ts > ? "
+            "ORDER BY ts DESC LIMIT ?",
+            (server_id, cutoff, limit),
+        )
         return [dict(row) for row in cursor]
 
     def get_media_for_server(self, server_id: int) -> List[Dict]:

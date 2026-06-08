@@ -113,6 +113,13 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         check_background_error, clear_background_error,
     )
     from .. import colors
+    from ..helpers.security import emit_blacklist_alert_if_any
+
+    # Re-display the security banner at every privileged invocation
+    # while a blacklist is unresolved (bug #3 iteration B): the user
+    # may have scrolled past the original alert at install time, or
+    # the alert was set by an ``urpmd`` background run.
+    emit_blacklist_alert_if_any(db)
 
     # Set up debug if requested
     _debug = getattr(args, 'debug', None) or ''

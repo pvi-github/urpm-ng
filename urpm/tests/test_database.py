@@ -1001,3 +1001,346 @@ class TestUnregisterCacheFile:
         # ``keep.rpm`` survives.
         assert db.get_cache_file("keep.rpm", media_id=media_id) is not None
         assert db.get_cache_file("drop.rpm", media_id=media_id) is None
+
+
+class TestSchemaV30Migration:
+    """Tests for the v29 → v30 schema bump (bug #3 iteration B).
+
+    A fresh database boots straight to v30; an existing v29 database
+    is upgraded by the ``MIGRATIONS`` dict.  Both paths must end up
+    with the same final schema.
+    """
+
+    def _expected_v30_shape(self, db):
+        conn = db._get_connection()
+
+        # server gained two security columns
+        server_cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(server)").fetchall()}
+        assert {"blacklisted_at", "blacklist_reason"} <= server_cols
+
+        # cache_files gained the provenance column
+        cache_cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(cache_files)").fetchall()}
+        assert "served_by_server_id" in cache_cols
+
+        # server_failure_events table exists with the documented shape
+        sfe_cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(server_failure_events)").fetchall()]
+        assert sfe_cols == [
+            "id", "server_id", "ts", "category", "weight", "detail",
+        ]
+
+        # The query path of mirror selection relies on this index
+        idx = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND name='idx_sfe_server_ts'"
+        ).fetchone()
+        assert idx is not None
+
+    def test_fresh_db_bootstraps_to_v30(self, db):
+        from urpm.core.database import SCHEMA_VERSION
+        assert SCHEMA_VERSION == 30
+        # Bootstrap path through CREATE TABLE IF NOT EXISTS:
+        self._expected_v30_shape(db)
+
+    def test_v29_db_is_upgraded_to_v30(self, monkeypatch):
+        """A pre-existing v29 database must accept the migration and
+        end up structurally identical to a fresh v30."""
+        import tempfile
+        import sqlite3
+        from pathlib import Path
+        from urpm.core.database import PackageDatabase
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = Path(f.name)
+
+        # Build a minimal v29 image by hand: just the tables that the
+        # migration touches, with the v29-shape schema (no blacklist
+        # columns, no event table, no served_by_server_id).
+        raw = sqlite3.connect(str(db_path))
+        raw.executescript("""
+            CREATE TABLE server (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                protocol TEXT,
+                host TEXT NOT NULL,
+                base_path TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE media (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE cache_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                media_id INTEGER,
+                file_path TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                added_time INTEGER NOT NULL,
+                UNIQUE(filename, media_id)
+            );
+            CREATE TABLE schema_info (
+                version INTEGER PRIMARY KEY
+            );
+            INSERT INTO schema_info (version) VALUES (29);
+        """)
+        raw.commit()
+        raw.close()
+
+        monkeypatch.setattr(
+            'urpm.core.config.get_system_version', lambda: '10',
+        )
+        db = PackageDatabase(db_path)
+        try:
+            self._expected_v30_shape(db)
+        finally:
+            db.close()
+            db_path.unlink(missing_ok=True)
+
+
+class TestSecurityBlacklist:
+    """Tests for the iteration-B security blacklist (bug #3)."""
+
+    def _seed_server(self, db, name="alpha"):
+        return db.add_server(
+            name=name, protocol="https", host=f"{name}.example.org",
+            base_path="/", is_official=True,
+        )
+
+    def test_fresh_server_is_not_blacklisted(self, db):
+        sid = self._seed_server(db)
+        assert db.is_blacklisted(sid) is False
+        assert db.list_blacklisted_servers() == []
+
+    def test_blacklist_records_reason_and_timestamp(self, db):
+        sid = self._seed_server(db)
+        db.blacklist_server(sid, reason="tampered RPM in core/release")
+
+        assert db.is_blacklisted(sid) is True
+        listed = db.list_blacklisted_servers()
+        assert len(listed) == 1
+        assert listed[0]["name"] == "alpha"
+        assert listed[0]["blacklist_reason"] == "tampered RPM in core/release"
+        assert listed[0]["blacklisted_at"] is not None
+
+    def test_unblacklist_clears_the_state(self, db):
+        sid = self._seed_server(db)
+        db.blacklist_server(sid, reason="bad sig")
+
+        cleared = db.unblacklist_server(sid)
+        assert cleared is True
+        assert db.is_blacklisted(sid) is False
+        assert db.list_blacklisted_servers() == []
+
+    def test_unblacklist_idempotent_on_clean_server(self, db):
+        """No-op on a server that was not blacklisted to begin with."""
+        sid = self._seed_server(db)
+        cleared = db.unblacklist_server(sid)
+        assert cleared is False
+
+    def test_blacklisted_server_excluded_from_mirror_pool(self, db):
+        a = self._seed_server(db, "alpha")
+        b = self._seed_server(db, "beta")
+        mid = db.add_media(
+            name="Core Release", short_name="core_release",
+            mageia_version="10", architecture="x86_64",
+            relative_path="10/x86_64/media/core/release",
+            enabled=True,
+        )
+        db.link_server_media(a, mid)
+        db.link_server_media(b, mid)
+
+        # Both visible initially
+        names_before = {s["name"] for s in db.get_servers_for_media(mid)}
+        assert names_before == {"alpha", "beta"}
+
+        db.blacklist_server(a, reason="signature failure")
+        names_after = {s["name"] for s in db.get_servers_for_media(mid)}
+        assert names_after == {"beta"}
+
+        # include_blacklisted=True bypasses the filter (admin path)
+        names_admin = {
+            s["name"]
+            for s in db.get_servers_for_media(mid, include_blacklisted=True)
+        }
+        assert names_admin == {"alpha", "beta"}
+
+
+class TestReputationScoring:
+    """Tests for the sliding-window reputation event log (bug #3 iter B)."""
+
+    def _seed_server(self, db, name="alpha"):
+        return db.add_server(
+            name=name, protocol="https", host=f"{name}.example.org",
+            base_path="/", is_official=True,
+        )
+
+    def test_fresh_server_scores_100(self, db):
+        sid = self._seed_server(db)
+        assert db.get_server_reputation_score(sid) == 100
+
+    def test_corrupt_event_costs_10(self, db):
+        sid = self._seed_server(db)
+        db.record_server_failure(
+            sid, category="corrupt",
+            detail="foo-1.0-1.mga10.x86_64.rpm",
+        )
+        assert db.get_server_reputation_score(sid) == 90
+
+    def test_multiple_events_accumulate(self, db):
+        sid = self._seed_server(db)
+        db.record_server_failure(sid, "corrupt")     # -10
+        db.record_server_failure(sid, "http_4xx")    # -3
+        db.record_server_failure(sid, "network")     # -5
+        assert db.get_server_reputation_score(sid) == 100 - 10 - 3 - 5
+
+    def test_score_clamps_to_zero(self, db):
+        sid = self._seed_server(db)
+        # 11 corrupt events × 10 = 110 penalty; floor at 0, not negative
+        for _ in range(11):
+            db.record_server_failure(sid, "corrupt")
+        assert db.get_server_reputation_score(sid) == 0
+
+    def test_unknown_category_does_not_move_score(self, db):
+        sid = self._seed_server(db)
+        db.record_server_failure(sid, "unknown_category")
+        assert db.get_server_reputation_score(sid) == 100
+        # ...but the row is still in the log for forensics
+        recent = db.get_server_recent_failures(sid)
+        assert len(recent) == 1
+        assert recent[0]["category"] == "unknown_category"
+
+    def test_explicit_weight_overrides_default(self, db):
+        sid = self._seed_server(db)
+        db.record_server_failure(sid, "corrupt", weight=20)
+        assert db.get_server_reputation_score(sid) == 80
+
+    def test_events_outside_window_do_not_count(self, db, monkeypatch):
+        sid = self._seed_server(db)
+        import time
+
+        # Force an old timestamp directly into the table.
+        conn = db._get_connection()
+        old_ts = int(time.time()) - 48 * 3600  # 2 days ago
+        conn.execute(
+            "INSERT INTO server_failure_events "
+            "(server_id, ts, category, weight) VALUES (?, ?, ?, ?)",
+            (sid, old_ts, "corrupt", 10),
+        )
+        conn.commit()
+
+        # 24-hour window: the event is outside, score stays at 100.
+        assert db.get_server_reputation_score(sid, window_hours=24) == 100
+        # 72-hour window: the event is inside, score drops.
+        assert db.get_server_reputation_score(sid, window_hours=72) == 90
+
+    def test_reputation_breaks_mirror_pool_tie(self, db):
+        a = self._seed_server(db, "alpha")
+        b = self._seed_server(db, "beta")
+        mid = db.add_media(
+            name="Core Release", short_name="core_release",
+            mageia_version="10", architecture="x86_64",
+            relative_path="10/x86_64/media/core/release",
+            enabled=True,
+        )
+        db.link_server_media(a, mid)
+        db.link_server_media(b, mid)
+
+        # alpha picks up two corrupt events; beta stays clean.
+        db.record_server_failure(a, "corrupt")
+        db.record_server_failure(a, "corrupt")
+
+        servers = db.get_servers_for_media(mid)
+        # beta first (score 100), alpha second (score 80)
+        assert servers[0]["name"] == "beta"
+        assert servers[0]["reputation_score"] == 100
+        assert servers[1]["name"] == "alpha"
+        assert servers[1]["reputation_score"] == 80
+
+
+class TestBlacklistAcknowledge:
+    """Tests for the user-side acknowledgement of a security
+    blacklist (bug #3 iteration B).
+
+    The ack stops the persistent banner from re-displaying the alert
+    at every CLI invocation without reactivating the server.
+    """
+
+    def _seed_server(self, db, name="alpha"):
+        return db.add_server(
+            name=name, protocol="https", host=f"{name}.example.org",
+            base_path="/", is_official=True,
+        )
+
+    def test_blacklist_logs_event_to_failure_log(self, db):
+        sid = self._seed_server(db)
+        db.blacklist_server(
+            sid, reason="served bad sig",
+            detail="foo-1.0-1.mga10.x86_64.rpm — BAD signature: NOKEY",
+        )
+        failures = db.get_server_recent_failures(sid)
+        # The blacklist event lands as a 'signature' row with weight 0
+        # so the reputation score is unaffected (compromise drives the
+        # binary blacklist, not the gradient score).
+        assert len(failures) == 1
+        assert failures[0]["category"] == "signature"
+        assert failures[0]["weight"] == 0
+        assert "BAD signature" in failures[0]["detail"]
+
+    def test_blacklist_does_not_move_reputation_score(self, db):
+        sid = self._seed_server(db)
+        db.blacklist_server(sid, reason="r")
+        assert db.get_server_reputation_score(sid) == 100
+
+    def test_acknowledge_sets_timestamp(self, db):
+        sid = self._seed_server(db)
+        db.blacklist_server(sid, reason="r")
+        assert db.acknowledge_blacklist(sid) is True
+        row = db.get_server_by_id(sid)
+        assert row["blacklist_acknowledged_at"] is not None
+
+    def test_acknowledge_on_clean_server_is_noop(self, db):
+        sid = self._seed_server(db)
+        assert db.acknowledge_blacklist(sid) is False
+
+    def test_double_acknowledge_is_noop(self, db):
+        sid = self._seed_server(db)
+        db.blacklist_server(sid, reason="r")
+        assert db.acknowledge_blacklist(sid) is True
+        assert db.acknowledge_blacklist(sid) is False  # second call
+
+    def test_unacknowledged_only_filter(self, db):
+        a = self._seed_server(db, "alpha")
+        b = self._seed_server(db, "beta")
+        db.blacklist_server(a, reason="r1")
+        db.blacklist_server(b, reason="r2")
+        db.acknowledge_blacklist(a)
+
+        all_listed = db.list_blacklisted_servers()
+        assert {s["name"] for s in all_listed} == {"alpha", "beta"}
+
+        nag_listed = db.list_blacklisted_servers(unacknowledged_only=True)
+        # alpha was acknowledged, only beta remains in the nag queue.
+        assert {s["name"] for s in nag_listed} == {"beta"}
+
+    def test_new_blacklist_event_re_arms_the_alert(self, db):
+        """A fresh blacklisting after an ack must start nagging
+        again — a new compromise event means new mistrust."""
+        sid = self._seed_server(db)
+        db.blacklist_server(sid, reason="first failure")
+        db.acknowledge_blacklist(sid)
+        # First incident is now silent.
+        assert db.list_blacklisted_servers(unacknowledged_only=True) == []
+
+        # A second failure is detected: blacklist_server re-arms.
+        db.blacklist_server(sid, reason="second failure")
+        nagged = db.list_blacklisted_servers(unacknowledged_only=True)
+        assert len(nagged) == 1
+        assert nagged[0]["blacklist_reason"] == "second failure"
+
+    def test_unblacklist_clears_acknowledgement(self, db):
+        sid = self._seed_server(db)
+        db.blacklist_server(sid, reason="r")
+        db.acknowledge_blacklist(sid)
+        db.unblacklist_server(sid)
+        row = db.get_server_by_id(sid)
+        assert row["blacklisted_at"] is None
+        assert row["blacklist_acknowledged_at"] is None

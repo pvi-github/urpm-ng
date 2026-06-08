@@ -1048,7 +1048,13 @@ class Downloader:
         # flushed on the main thread after all downloads complete.
         # This avoids "database is locked" errors from concurrent SQLite
         # writes during parallel downloads.
-        self._pending_cache_registrations: List[Tuple[DownloadItem, Path]] = []
+        # ``(item, cache_path, source_server_id_or_None)`` — server_id
+        # is carried through to ``cache_files.served_by_server_id`` so
+        # the install retry path can exclude the source mirror on a
+        # corrupt-RPM detection even across process restarts.
+        self._pending_cache_registrations: List[
+            Tuple[DownloadItem, Path, Optional[int]]
+        ] = []
         self._pending_cache_lock = threading.Lock()
 
 
@@ -1097,12 +1103,16 @@ class Downloader:
         except OSError:
             return False
 
-    def _register_cache_file(self, item: DownloadItem, cache_path: Path):
+    def _register_cache_file(self, item: DownloadItem, cache_path: Path,
+                             served_by_server_id: Optional[int] = None):
         """Register a downloaded file in the cache database for quota tracking.
 
         Args:
             item: Download item with media info
             cache_path: Path where the file was saved
+            served_by_server_id: ID of the server that served the file,
+                or None for peer-served bodies.  Persisted to
+                ``cache_files.served_by_server_id``.
         """
         if not self.db:
             return
@@ -1127,7 +1137,8 @@ class Downloader:
                     filename=item.filename,
                     media_id=media_id,
                     file_path=rel_path,
-                    file_size=file_size
+                    file_size=file_size,
+                    served_by_server_id=served_by_server_id,
                 )
                 logger.debug(f"Registered cache file: {item.filename} ({file_size} bytes)")
         except Exception as e:
@@ -1393,10 +1404,13 @@ class Downloader:
                                 f"Downloaded {item.filename} from "
                                 f"{server['name']}")
                             # Defer cache registration to main thread
-                            # to avoid SQLite "database is locked" errors
+                            # to avoid SQLite "database is locked" errors.
+                            # ``server_id`` flows through so the
+                            # provenance lands in
+                            # ``cache_files.served_by_server_id``.
                             with self._pending_cache_lock:
                                 self._pending_cache_registrations.append(
-                                    (item, cache_path))
+                                    (item, cache_path, server_id))
                             return DownloadResult(
                                 item=item,
                                 success=True,
@@ -1475,10 +1489,12 @@ class Downloader:
                     last_error = rpm_error
                     break  # Don't retry, server is probably broken
 
-                # Defer cache registration to main thread
+                # Defer cache registration to main thread.  This is
+                # the legacy URL download path (no server pool, hence
+                # no provenance id).
                 with self._pending_cache_lock:
                     self._pending_cache_registrations.append(
-                        (item, cache_path))
+                        (item, cache_path, None))
                 return DownloadResult(
                     item=item,
                     success=True,
@@ -1600,10 +1616,12 @@ class Downloader:
                         host=peer.host, port=peer.port,
                         reason="bad signature"))
 
-            # Defer cache registration to main thread
+            # Defer cache registration to main thread.  Peer downloads
+            # carry no server-pool provenance — pass None for the
+            # ``served_by_server_id`` column.
             with self._pending_cache_lock:
                 self._pending_cache_registrations.append(
-                    (item, cache_path))
+                    (item, cache_path, None))
 
             return DownloadResult(
                 item=item, success=True, path=cache_path,
@@ -1752,12 +1770,15 @@ class Downloader:
         logger.debug(f"Downloads completed in {t_dl_end - t_dl_start:.2f}s")
 
         # Flush deferred cache registrations on the main thread.
-        # Workers collected (item, cache_path) tuples instead of writing
-        # to SQLite directly, avoiding "database is locked" errors.
+        # Workers collected (item, cache_path, server_id_or_None) tuples
+        # instead of writing to SQLite directly, avoiding "database is
+        # locked" errors.  Server id is forwarded to
+        # ``cache_files.served_by_server_id``.
         if self._pending_cache_registrations:
             registered = 0
-            for reg_item, reg_path in self._pending_cache_registrations:
-                self._register_cache_file(reg_item, reg_path)
+            for reg_item, reg_path, reg_server_id in self._pending_cache_registrations:
+                self._register_cache_file(reg_item, reg_path,
+                                          served_by_server_id=reg_server_id)
                 registered += 1
             logger.debug(f"Registered {registered} cache files")
             self._pending_cache_registrations.clear()

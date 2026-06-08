@@ -286,6 +286,15 @@ def run_install_transaction(
         # ── Update installed-through-deps.list for urpmi compat ──
         ops.mark_dependencies(resolver, result.actions)
 
+        # ── Surface any blacklist set during this run ──
+        # The detection happened deep in the resilient pipeline
+        # (operations.resilient_install or retry_failed_downloads)
+        # which only knows about ``logger.error`` — print the full
+        # banner here so it lands in the user's terminal even when
+        # log output is redirected.
+        from ..helpers.security import emit_blacklist_alert_if_any
+        emit_blacklist_alert_if_any(ops.db)
+
         return 0
 
     except Exception:

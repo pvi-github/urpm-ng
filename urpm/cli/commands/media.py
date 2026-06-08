@@ -846,10 +846,16 @@ def cmd_media_disable(args, db: 'PackageDatabase') -> int:
 def cmd_media_update(args, db: 'PackageDatabase') -> int:
     """Handle media update command."""
     from .. import colors
+    from ..helpers.security import emit_blacklist_alert_if_any
     from ...core.sync import sync_media, sync_all_media
     from ...auth.privileges import require_privileges
     from ...core.sync_lock import SyncLock
     import threading
+
+    # Re-display the security banner if anything is blacklisted
+    # (bug #3 iteration B): media update could otherwise re-fetch
+    # synthesis from the bad server before the user has acted.
+    emit_blacklist_alert_if_any(db)
 
     # Check root privileges (media update writes to database)
     require_privileges(action_id="org.mageia.urpm.refresh")

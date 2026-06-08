@@ -30,7 +30,14 @@ def cmd_server_list(args, db: 'PackageDatabase') -> int:
     print("-" * (name_width + host_width + 62))
 
     for srv in servers:
-        status = colors.success(_("enabled")) if srv['enabled'] else colors.dim(_("disabled"))
+        # Security blacklist trumps enabled/disabled in the status
+        # column — a user MUST see this without scrolling.
+        if srv.get('blacklisted_at'):
+            status = colors.error(_("BLACKLIST"))
+        elif srv['enabled']:
+            status = colors.success(_("enabled"))
+        else:
+            status = colors.dim(_("disabled"))
         ip_mode = srv.get('ip_mode') or 'auto'
         # Pad first, then colorize (ANSI codes break alignment)
         ip_padded = f"{ip_mode:>6}"
@@ -781,4 +788,202 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
         "Added {added} servers, now have {total} enabled",
         len(added)).format(added=len(added), total=existing_count + len(added)))
 
+    return 0
+
+
+def cmd_server_unblacklist(args, db: 'PackageDatabase') -> int:
+    """Clear the security blacklist on a server.
+
+    Bug #3 iteration B — a server gets blacklisted automatically
+    when the install pipeline detects a signature failure on an RPM
+    it just served.  Clearing the blacklist is a deliberate human
+    decision: it requires root, ``--auto`` does *not* bypass the
+    confirmation prompt (security boundary).
+    """
+    from .. import colors
+    from ...auth.privileges import require_privileges
+    import datetime as _dt
+
+    name = args.name
+    server = db.get_server(name)
+    if server is None:
+        print(colors.error(_("Error: server '{name}' not found").format(name=name)))
+        return 1
+
+    if not server.get('blacklisted_at'):
+        print(colors.info(
+            _("Server '{name}' is not blacklisted.").format(name=name)))
+        return 0
+
+    # Show context so the user understands what they are about to
+    # reactivate.  Translated for the CLI but the underlying reason
+    # string is recorded verbatim from the detection site.
+    when = _dt.datetime.fromtimestamp(
+        server['blacklisted_at']).strftime("%Y-%m-%d %H:%M")
+    print(colors.error("\n" + _("⚠ You are about to re-enable a BLACKLISTED server.")))
+    print(colors.error(_("  Server:  ") + name))
+    print(colors.error(_("  Reason:  ") + (server.get('blacklist_reason') or "?")))
+    print(colors.error(_("  Since:   ") + when))
+    print(colors.error(_(
+        "\n  Re-enabling means you have manually verified the media"
+    )))
+    print(colors.error(_(
+        "  integrity (GPG keys, mirror source authenticity)."
+    )))
+    print()
+
+    # Confirmation prompt — intentionally NOT bypassed by ``-y``.
+    # ``confirm_yes`` accepts both "yes" and the localised equivalent.
+    response = input(_("Type 'yes' to confirm reactivation: ")).strip().lower()
+    if response not in ("yes", _("yes")):
+        print(_("Aborted."))
+        return 1
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
+
+    cleared = db.unblacklist_server(server['id'])
+    if cleared:
+        # Logged at ERROR level so re-enables show up in audit logs
+        # alongside the original blacklisting event.
+        import logging
+        logging.getLogger(__name__).error(
+            "SECURITY: server #%d (%s) un-blacklisted by user",
+            server['id'], name,
+        )
+        print(colors.success(
+            _("Server '{name}' is no longer blacklisted.").format(name=name)
+        ))
+        return 0
+    # Race: somebody else cleared it between our check and the update.
+    print(colors.warning(
+        _("Server '{name}' was no longer blacklisted (cleared concurrently).")
+        .format(name=name)))
+    return 0
+
+
+def cmd_server_status(args, db: 'PackageDatabase') -> int:
+    """Show detailed status of a single server, including the
+    sliding-window reputation score and the recent failure events
+    that drove it.
+
+    Read-only command, no privileges required.
+    """
+    from .. import colors
+    import datetime as _dt
+
+    name = args.name
+    server = db.get_server(name)
+    if server is None:
+        print(colors.error(_("Error: server '{name}' not found").format(name=name)))
+        return 1
+
+    print(colors.bold(f"\n{name}"))
+    print(f"  {_('Protocol'):<10} {server['protocol']}")
+    print(f"  {_('Host'):<10} {server['host']}")
+    print(f"  {_('Path'):<10} {server.get('base_path') or '/'}")
+
+    if server.get('blacklisted_at'):
+        when = _dt.datetime.fromtimestamp(
+            server['blacklisted_at']).strftime("%Y-%m-%d %H:%M")
+        print()
+        print(colors.error(_("  Security blacklist: ACTIVE")))
+        print(colors.error(_("    Reason: ") + (
+            server.get('blacklist_reason') or "?")))
+        print(colors.error(_("    Since:  ") + when))
+        ack_ts = server.get('blacklist_acknowledged_at')
+        if ack_ts:
+            ack_when = _dt.datetime.fromtimestamp(
+                ack_ts).strftime("%Y-%m-%d %H:%M")
+            print(colors.dim(_("    Ack'd:  ") + ack_when +
+                             _(" (persistent reminder silenced)")))
+        else:
+            print(colors.dim(_(
+                "    Run 'urpm server ack-blacklist {name}' to silence "
+                "the reminder while you investigate.").format(name=name)))
+        print(colors.dim(_(
+            "    Run 'urpm server unblacklist {name}' after manual "
+            "verification to re-enable.").format(name=name)))
+        print()
+
+        # Show the full compromise history (events with category
+        # 'signature') even after acknowledgement.
+        compromise_events = [
+            f for f in db.get_server_recent_failures(server['id'])
+            if f.get('category') == 'signature'
+        ]
+        if compromise_events:
+            print(colors.bold(_("  Compromise history (signature failures):")))
+            for ev in compromise_events:
+                ev_when = _dt.datetime.fromtimestamp(
+                    ev['ts']).strftime("%Y-%m-%d %H:%M:%S")
+                detail = ev.get('detail') or '?'
+                print(colors.error(f"    {ev_when}  {detail}"))
+            print()
+    elif server.get('enabled'):
+        print(f"  {_('Status'):<10} {colors.success(_('enabled'))}")
+    else:
+        print(f"  {_('Status'):<10} {colors.dim(_('disabled'))}")
+
+    # Reputation
+    score = db.get_server_reputation_score(server['id'])
+    score_str = colors.success(f"{score}/100")
+    if score < 50:
+        score_str = colors.error(f"{score}/100")
+    elif score < 80:
+        score_str = colors.warning(f"{score}/100")
+    print(f"  {_('Reputation'):<10} {score_str}")
+
+    failures = db.get_server_recent_failures(server['id'])
+    if failures:
+        print(colors.bold(_("\nRecent failures (last 24h):")))
+        for f in failures:
+            when = _dt.datetime.fromtimestamp(f['ts']).strftime("%H:%M:%S")
+            detail = f.get('detail') or ''
+            cat_padded = f"{f['category']:<10}"
+            weight_str = f"-{f['weight']:>3}"
+            print(f"  {when}  {colors.dim(cat_padded)}  "
+                  f"{weight_str}  {detail}")
+
+    print()
+    return 0
+
+
+def cmd_server_ack_blacklist(args, db: 'PackageDatabase') -> int:
+    """Acknowledge a blacklist alert so the persistent banner stops
+    re-displaying it at every CLI invocation.
+
+    The server itself stays blacklisted and out of every mirror pool
+    — only the banner reminder is silenced.  Use ``urpm server
+    unblacklist <name>`` to actually reactivate, ``urpm server status
+    <name>`` to inspect the compromise history.
+
+    Read-only with respect to the security posture; no privilege
+    elevation needed.
+    """
+    from .. import colors
+
+    name = args.name
+    server = db.get_server(name)
+    if server is None:
+        print(colors.error(
+            _("Error: server '{name}' not found").format(name=name)))
+        return 1
+
+    if not server.get('blacklisted_at'):
+        print(colors.info(_(
+            "Server '{name}' is not blacklisted.").format(name=name)))
+        return 0
+
+    if server.get('blacklist_acknowledged_at'):
+        print(colors.info(_(
+            "Server '{name}' was already acknowledged."
+        ).format(name=name)))
+        return 0
+
+    db.acknowledge_blacklist(server['id'])
+    print(colors.success(_(
+        "Acknowledged blacklist of '{name}'.  The persistent reminder "
+        "is now silenced; the server stays out of every mirror pool "
+        "until you run 'urpm server unblacklist {name}'."
+    ).format(name=name)))
     return 0
