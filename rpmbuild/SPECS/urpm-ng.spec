@@ -419,13 +419,21 @@ fi
 # created.  The queue is drained at the next ``urpm media update``
 # (which proves network is alive) by
 # ``urpm.core._pending_media_rename.drain_queue``.
+#
+# CRITICAL: opens the DB with ``read_only=True``.  The default open
+# would auto-detect root and trigger ``_apply_migrations``, which in
+# turn would contend with the running ``urpmd`` for the schema lock
+# and stall the rpm transaction for up to 5 minutes (10 retries ×
+# 30 s busy_timeout).  Schema migrations stay lazy — they happen on
+# the next normal CLI invocation as before.
+#
 # REMOVE THIS STANZA when ``urpm/core/_pending_media_rename.py`` is
 # dropped from the source (cf. doc/TODO_LATER.md).
 /usr/bin/python3 -c "
 from urpm.core.database import PackageDatabase
 from urpm.core._pending_media_rename import write_queue
 try:
-    db = PackageDatabase()
+    db = PackageDatabase(read_only=True)
     write_queue(db)
     db.close()
 except Exception:

@@ -864,12 +864,25 @@ class PackageDatabase(
     # Timeout for waiting on locked database (30 seconds)
     BUSY_TIMEOUT_MS = 30000
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None,
+                 *, read_only: Optional[bool] = None):
         """Initialize database connection.
 
         Args:
             db_path: Path to SQLite database file.
                      If None, auto-detects based on .urpm.local or environment.
+            read_only: When ``True``, opens the database via ``mode=ro``
+                regardless of the file's write permissions: no schema
+                migration is attempted and no exclusive lock is taken,
+                so the call never contends with a running urpmd.
+                Required for short-lived read paths invoked from a
+                privileged but timing-sensitive context — typically
+                the RPM ``%post`` scriptlet — where triggering the
+                lazy migration would block the rpm transaction for
+                minutes against urpmd's connection.  ``None`` (default)
+                keeps the historical auto-detection from ``os.W_OK``,
+                so ALTER TABLEs still run lazily at the next normal
+                CLI invocation that opens the database read-write.
         """
         if db_path is None:
             from .config import get_db_path
@@ -877,11 +890,15 @@ class PackageDatabase(
         self.db_path = Path(db_path)
 
         import os
-        # Read-only mode: DB exists but current user can't write to it.
+        # Read-only mode: caller forced it via ``read_only=True``, OR
+        # the DB exists but the current user cannot write to it.
         # Non-root users open with mode=ro and rely on -wal/-shm files
         # being readable (644), maintained by root processes (urpm, urpmd).
-        self.read_only = (self.db_path.exists()
-                          and not os.access(self.db_path, os.W_OK))
+        if read_only is True:
+            self.read_only = True
+        else:
+            self.read_only = (self.db_path.exists()
+                              and not os.access(self.db_path, os.W_OK))
 
         if not self.read_only:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1344,3 +1344,105 @@ class TestBlacklistAcknowledge:
         row = db.get_server_by_id(sid)
         assert row["blacklisted_at"] is None
         assert row["blacklist_acknowledged_at"] is None
+
+
+class TestReadOnlyKwarg:
+    """Tests for the explicit ``read_only=True`` kwarg on
+    ``PackageDatabase.__init__``.
+
+    Added so the RPM ``%post`` queue-write hook can scan ``media``
+    without forcing the lazy schema migration to run in the middle
+    of an rpm transaction (where urpmd's open connection would stall
+    every ALTER TABLE for the full 10-retries × 30-second
+    busy_timeout window — observed 5min44s in production).
+    """
+
+    def test_default_is_writable_when_owner(self, tmp_path):
+        path = tmp_path / "rw.db"
+        db = PackageDatabase(path)
+        try:
+            assert db.read_only is False
+        finally:
+            db.close()
+
+    def test_forced_read_only_overrides_writability(self, tmp_path):
+        """A writable file opened with ``read_only=True`` is still
+        treated as read-only (no schema migration attempted)."""
+        path = tmp_path / "rw.db"
+        # First open: create the DB at current schema.
+        db = PackageDatabase(path)
+        db.close()
+
+        # Second open: force RO even though the file is owner-writable.
+        db = PackageDatabase(path, read_only=True)
+        try:
+            assert db.read_only is True
+        finally:
+            db.close()
+
+    def test_forced_read_only_skips_init_schema(
+        self, tmp_path, monkeypatch,
+    ):
+        """``_init_schema`` (which calls ``_apply_migrations``)
+        must NOT be invoked when ``read_only=True`` is forced — that
+        is the whole point of the flag for the %post path."""
+        path = tmp_path / "schema.db"
+        # Bootstrap a fresh DB so subsequent opens have a schema.
+        PackageDatabase(path).close()
+
+        called = {'n': 0}
+        original = PackageDatabase._init_schema
+
+        def spy(self_):
+            called['n'] += 1
+            return original(self_)
+
+        monkeypatch.setattr(PackageDatabase, '_init_schema', spy)
+        db = PackageDatabase(path, read_only=True)
+        try:
+            assert called['n'] == 0
+        finally:
+            db.close()
+
+    def test_default_open_still_runs_init_schema(
+        self, tmp_path, monkeypatch,
+    ):
+        """The lazy migration path stays unchanged when the kwarg is
+        not passed: regular CLI commands continue to migrate the
+        schema on first open after an upgrade."""
+        path = tmp_path / "schema.db"
+        PackageDatabase(path).close()  # bootstrap
+
+        called = {'n': 0}
+        original = PackageDatabase._init_schema
+
+        def spy(self_):
+            called['n'] += 1
+            return original(self_)
+
+        monkeypatch.setattr(PackageDatabase, '_init_schema', spy)
+        db = PackageDatabase(path)
+        try:
+            assert called['n'] == 1
+        finally:
+            db.close()
+
+    def test_read_only_db_can_select(self, tmp_path):
+        """SELECTs still work on a forced-RO open — that's exactly
+        what ``write_queue`` needs in the %post."""
+        path = tmp_path / "rw.db"
+        bootstrap = PackageDatabase(path)
+        bootstrap.add_media(
+            name="Core Release", short_name="core_release",
+            mageia_version="10", architecture="x86_64",
+            relative_path="10/x86_64/media/core/release",
+            enabled=True,
+        )
+        bootstrap.close()
+
+        db = PackageDatabase(path, read_only=True)
+        try:
+            rows = db.list_media()
+            assert any(m['name'] == "Core Release" for m in rows)
+        finally:
+            db.close()
