@@ -311,3 +311,45 @@ Phase 5 — Intégration avancée
   ├── Pruning automatique des deltas
   └── Monitoring / métriques
 ```
+
+---
+
+## Filtrage des composants AppStream (livré)
+
+Pour éviter de polluer GNOME Software / Discover avec des dizaines de
+milliers de composants `<component type="generic">` sans valeur
+d'affichage (paquets `-devel`, `-debuginfo`, libs runtime pures, etc.),
+`AppStreamManager.extract_from_rpm` court-circuite la génération si TOUS
+les fichiers du paquet matchent un set de locations non-user-facing
+(défini en tête de `urpm/core/appstream.py` dans
+`_NON_USER_FACING_PATH_PATTERNS` et `_is_non_user_facing`).
+
+Les locations actuellement filtrées :
+- `/usr/lib/debug/`, `/usr/src/debug/` — debuginfo / debugsource
+- `/usr/include/` — headers C/C++
+- `/usr/lib*/pkgconfig/`, `/usr/lib*/cmake/` — config devel
+- `/usr/lib*/lib*.so` (symlink linker sans version)
+- `/usr/lib*/lib*.a`, `/usr/lib*/lib*.la` — archives statique / libtool
+- `/usr/lib*/lib*.so.*` — runtime lib versionné
+- `/usr/share/doc/<pkgname>/`, `/usr/share/licenses/<pkgname>/` — auto-shippé par rpmbuild
+
+Les meta-paquets (zéro fichier) sont émis : ils représentent des
+raccourcis installables que l'utilisateur peut légitimement chercher.
+
+Le résultat enrichit `pkg_result` avec `filtered: bool` et
+`filter_reason: str | None` (valeur unique `"non_user_facing"` pour
+l'instant — cf. ci-dessous pour la ventilation future).
+
+### À traiter plus tard
+
+- **Ventiler `filter_reason`** en plusieurs valeurs (`"devel"`,
+  `"debug"`, `"static"`, `"library"`) si la télémétrie d'usage en
+  production remonte le besoin de compteurs agrégés par type.
+- **Détection spécifique des fonts/codecs/IM** pour émettre un
+  `<component type="font|codec|inputmethod">` au lieu du composant
+  générique. Demande son propre cycle de design (heuristiques
+  groupe-RPM + parser TTF pour fonts, namespace gstreamer pour codecs).
+- **Évaluer en production** si des paquets de doc shippant uniquement
+  dans `/usr/share/doc/<pkgname>/` (sans man pages ni `gtk-doc`) sont
+  injustement filtrés. Si oui, raffiner la classification de
+  `/usr/share/doc/`.
