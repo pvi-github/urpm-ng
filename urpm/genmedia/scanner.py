@@ -92,8 +92,8 @@ class RpmScanner:
         for i in range(0, len(changelogname)):
             changelog.append([
                 changelogtime[i],
-                self._encode_xml(changelogname[i]),
-                self._encode_xml(changelogtext[i])
+                changelogname[i],
+                changelogtext[i]
                 ])
         """List of ``(timestamp: int, author: str, text: str)`` tuples."""
 
@@ -145,9 +145,9 @@ class RpmScanner:
             hdr[rpm.RPMTAG_SUMMARY],
             hdr[rpm.RPMTAG_DESCRIPTION],
             hdr[rpm.RPMTAG_GROUP],
-            self._encode_xml(hdr[rpm.RPMTAG_LICENSE]),
-            self._encode_xml(hdr[rpm.RPMTAG_URL]),
-            self._encode_xml(hdr[rpm.RPMTAG_SOURCERPM]),
+            hdr[rpm.RPMTAG_LICENSE],
+            hdr[rpm.RPMTAG_URL],
+            hdr[rpm.RPMTAG_SOURCERPM],
             hdr[rpm.RPMTAG_PACKAGER],
             hdr[rpm.RPMTAG_SIZE],  # Installed size in bytes.
             hdr[rpm.RPMTAG_LONGSIGSIZE] + 440,  # Size of the .rpm file on disk.  440 is the rpm toc size
@@ -185,11 +185,3 @@ class RpmScanner:
                 else:
                     reqs.append(name)
         return reqs
-
-    def _encode_xml(self, entry: str) -> str:
-        if entry is not None:
-            output = entry.replace('&', '&amp;')
-            output = output.replace('>', '&gt;')
-            output = output.replace('<', '&lt;')
-            return output
-        return None
