@@ -565,7 +565,7 @@ class AppStreamManager:
             return pkg_result
         rpm_name = os.path.basename(metadata.filename)
         # package_info = self.synthesis[rpm_name]
-        rpm_path = cache_dir / rpm_name
+        rpm_path = Path(metadata.filename)
         file_list = metadata.files
         # ── Filtrage metainfo ──────────────────────────────────────────
         metainfo_targets = [
