@@ -117,6 +117,51 @@ ICONS_SUBDIR = "icons"  # Subdirectory to store extracted icons
 ORG = "org.mageia"
 
 
+# Patterns matching file locations that carry no user-visible value.
+# Used by :func:`_is_non_user_facing` to classify per-file paths.
+_NON_USER_FACING_PATH_PATTERNS = [
+    re.compile(r'^/usr/lib/debug/'),                       # debuginfo
+    re.compile(r'^/usr/src/debug/'),                       # debugsource
+    re.compile(r'^/usr/include/'),                         # devel headers
+    re.compile(r'^/usr/lib(64)?/pkgconfig/.*\.pc$'),       # devel pkg-config
+    re.compile(r'^/usr/lib(64)?/cmake/'),                  # devel cmake config
+    re.compile(r'^/usr/lib(64)?/lib[^/]+\.so$'),           # unversioned linker symlink
+    re.compile(r'^/usr/lib(64)?/lib[^/]+\.a$'),            # static archive
+    re.compile(r'^/usr/lib(64)?/lib[^/]+\.la$'),           # libtool archive
+    re.compile(r'^/usr/lib(64)?/lib[^/]+\.so\.'),          # versioned runtime library
+]
+
+
+def _is_non_user_facing(file_path: str, pkgname: str) -> bool:
+    """Return True when *file_path* lives in a known non-user-facing location.
+
+    A package is considered non-user-facing for AppStream purposes when ALL
+    of its files match this predicate.  The set of locations covers the
+    classic technical sub-packages (devel headers, debug symbols, static
+    archives, pure runtime libraries) plus the auto-shipped doc/license
+    directories that rpmbuild materialises for every binary RPM.
+
+    Args:
+        file_path: Absolute path of one file owned by the RPM (typically
+            an entry of ``RpmMetadata.files``).
+        pkgname:   Package name, used to recognise the auto-shipped
+            ``/usr/share/doc/<pkgname>/`` and ``/usr/share/licenses/<pkgname>/``
+            entries as neutral.
+
+    Returns:
+        ``True`` if the file is located in a non-user-facing area,
+        ``False`` otherwise.
+    """
+    for pat in _NON_USER_FACING_PATH_PATTERNS:
+        if pat.match(file_path):
+            return True
+    if file_path.startswith(f'/usr/share/doc/{pkgname}/'):
+        return True
+    if file_path.startswith(f'/usr/share/licenses/{pkgname}/'):
+        return True
+    return False
+
+
 class AppStreamManager:
     """Manages AppStream metadata for all media."""
 
@@ -557,7 +602,14 @@ class AppStreamManager:
             Path to the cached metainfo XML file, or None on failure.
         """
 
-        pkg_result = {"extracted": [], "generated": None, "error": None, "skipped": False}
+        pkg_result = {
+            "extracted": [],
+            "generated": None,
+            "error": None,
+            "skipped": False,
+            "filtered": False,
+            "filter_reason": None,
+        }
         # SHA-256 is already computed on hdr.unload() in add_pkg()
         pkg_result["sha256"] = metadata.header_sha256
         if state_sha256 == pkg_result["sha256"] and not force:
@@ -567,6 +619,22 @@ class AppStreamManager:
         # package_info = self.synthesis[rpm_name]
         rpm_path = Path(metadata.filename)
         file_list = metadata.files
+
+        # Skip packages whose content is entirely non-user-facing — devel
+        # headers, debug symbols, static archives, pure runtime libraries.
+        # Meta-packages (zero files) are emitted: they represent installable
+        # task-style shortcuts that users may legitimately search for.
+        # filter_reason is a single value for now ("non_user_facing").
+        # Ventilate later (e.g. "devel", "debug", "static", "library") if
+        # telemetry asks for finer breakdown.  See doc/TODO_GENMEDIA.md.
+        if file_list and all(
+            _is_non_user_facing(f, metadata.name) for f in file_list
+        ):
+            pkg_result["filtered"] = True
+            pkg_result["filter_reason"] = "non_user_facing"
+            self.results[rpm_name] = pkg_result
+            return pkg_result
+
         # ── Filtrage metainfo ──────────────────────────────────────────
         metainfo_targets = [
             f for f in file_list
