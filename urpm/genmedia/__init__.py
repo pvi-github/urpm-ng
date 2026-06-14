@@ -30,7 +30,14 @@ class RpmMetadata:
     """
 
     filename: str
-    """RPM filename on disk, e.g. ``foo-1.0-1.mga10.x86_64.rpm``."""
+    """Path to the RPM file as opened by the scanner.
+
+    Holds the value of ``rpm_file.name`` from the scanner, which is
+    ``rpms_dir / basename`` — absolute when ``rpms_dir`` was passed
+    as an absolute path to :meth:`RpmScanner.scan`, relative otherwise.
+    Always points inside the scanned directory; never references the
+    urpm/urpmd client cache or the daemon's storage.
+    """
 
     name: str
     epoch: int
