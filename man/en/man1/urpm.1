@@ -830,6 +830,72 @@ Create the OS metainfo file required by Discover and GNOME Software.
 \fB\-\-force\fR overwrites an existing file.
 .RE
 .TP
+.B genmedia \fIrpms_dir\fR
+Generate media metadata (hdlist.cz, synthesis.hdlist.cz, files.xml.lzma,
+info.xml.lzma, changelog.xml.lzma, MD5SUM) from a directory of RPM files.
+This is the server-side counterpart of
+.BR appstream :
+where the latter consumes catalogs to populate client databases,
+.B genmedia
+produces the full set of metadata a Mageia mirror serves to its clients.
+Packaged separately as
+.IR urpm-ng-genmedia
+to keep the base client install lean.
+.RS
+.TP
+.B \-\-incremental
+Skip RPMs whose SHA-256 has not changed since the previous run (uses the
+state cache in
+.IR rpms_dir/.genhdlist/state.json ).
+.TP
+.B \-\-no\-hdlist
+Skip the
+.I hdlist.cz
+output (faster when only the synthesis is needed).
+.TP
+.B \-\-no\-md5sum
+Skip the
+.I MD5SUM
+file (handy for tests; clients reject media that lack it).
+.TP
+.B \-\-xml\-info
+Force regeneration of the XML info files even when the corresponding
+RPMs have not changed.
+.TP
+.B \-\-appstream\-info
+Generate an AppStream catalog from the embedded
+.I metainfo.xml
+files, falling back to a minimal component derived from RPM header fields.
+Packages whose content is entirely non-user-facing (devel headers, debug
+symbols, static archives, pure runtime libraries) are filtered out rather
+than emitted with a generic
+.B System
+category.
+.TP
+.B \-\-allow\-empty\-media
+Tolerate an empty input directory instead of aborting.
+.TP
+.B \-\-hdlist\-filter \fIFILTER\fR
+Override the compression filter for
+.IR hdlist.cz
+(default:
+.IR ".cz:gzip -9" ).
+.TP
+.B \-\-synthesis\-filter \fIFILTER\fR
+Override the compression filter for
+.IR synthesis.hdlist.cz
+(default:
+.IR ".cz:xz -7" ).
+.TP
+.B \-\-xml\-info\-filter \fIFILTER\fR
+Override the compression filter for the XML info files (default:
+.IR ".lzma:xz -7" ).
+.RE
+The
+.I media_info/
+output directory is locked while a generation runs so concurrent clients
+always see a consistent snapshot.
+.TP
 .B download \fIpackage\fR ...
 Download packages to cache without installing.
 .RS

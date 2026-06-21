@@ -865,6 +865,73 @@ Crea il file metainfo del sistema operativo necessario a Discover e GNOME
 Software. \fB\-\-force\fR sovrascrive un file esistente.
 .RE
 .TP
+.B genmedia \fIdirectory_rpms\fR
+Genera i metadati dei media (hdlist.cz, synthesis.hdlist.cz,
+files.xml.lzma, info.xml.lzma, changelog.xml.lzma, MD5SUM) a partire da
+una directory di file RPM. È la controparte server di
+.BR appstream :
+mentre quest'ultima consuma i cataloghi per popolare i database dei
+client,
+.B genmedia
+produce l'insieme completo dei metadati che un mirror Mageia serve ai
+suoi client. Pacchettizzato separatamente come
+.IR urpm-ng-genmedia
+per mantenere leggera l'installazione client di base.
+.RS
+.TP
+.B \-\-incremental
+Salta gli RPM il cui SHA-256 non è cambiato dall'ultima esecuzione (la
+cache di stato è in
+.IR directory_rpms/.genhdlist/state.json ).
+.TP
+.B \-\-no\-hdlist
+Non scrive il file
+.I hdlist.cz
+(più veloce quando serve solo il synthesis).
+.TP
+.B \-\-no\-md5sum
+Non scrive il file
+.IR MD5SUM
+(utile per i test; i client rifiutano i media che ne sono privi).
+.TP
+.B \-\-xml\-info
+Forza la rigenerazione dei file XML info anche quando gli RPM
+corrispondenti non sono cambiati.
+.TP
+.B \-\-appstream\-info
+Genera un catalogo AppStream a partire dai file
+.I metainfo.xml
+incorporati, con un ripiego su un componente minimo derivato dai campi
+dell'header RPM. I pacchetti il cui contenuto è interamente
+non-user-facing (header di sviluppo, simboli di debug, archivi statici,
+librerie runtime pure) vengono filtrati anziché emessi sotto una
+categoria generica
+.BR System .
+.TP
+.B \-\-allow\-empty\-media
+Tollera una directory di input vuota anziché interrompere.
+.TP
+.B \-\-hdlist\-filter \fIFILTRO\fR
+Sovrascrive il filtro di compressione per
+.IR hdlist.cz
+(predefinito:
+.IR ".cz:gzip -9" ).
+.TP
+.B \-\-synthesis\-filter \fIFILTRO\fR
+Sovrascrive il filtro di compressione per
+.IR synthesis.hdlist.cz
+(predefinito:
+.IR ".cz:xz -7" ).
+.TP
+.B \-\-xml\-info\-filter \fIFILTRO\fR
+Sovrascrive il filtro di compressione per i file XML info (predefinito:
+.IR ".lzma:xz -7" ).
+.RE
+La directory di output
+.I media_info/
+è bloccata durante la generazione, in modo che i client che leggono in
+parallelo vedano sempre uno snapshot coerente.
+.TP
 .B download \fIpacchetto\fR ...
 Scarica i pacchetti nella cache senza installarli.
 .RS

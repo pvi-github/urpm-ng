@@ -857,6 +857,74 @@ Crée le fichier metainfo OS requis par Discover et GNOME Software.
 \fB\-\-force\fR écrase un fichier existant.
 .RE
 .TP
+.B genmedia \fIrepertoire_rpms\fR
+Génère les métadonnées media (hdlist.cz, synthesis.hdlist.cz,
+files.xml.lzma, info.xml.lzma, changelog.xml.lzma, MD5SUM) à partir d'un
+répertoire de fichiers RPM. C'est le pendant côté serveur de la commande
+.BR appstream :
+là où cette dernière consomme les catalogues pour alimenter les bases
+clientes,
+.B genmedia
+produit l'ensemble des métadonnées qu'un miroir Mageia sert à ses clients.
+Empaqueté séparément dans
+.IR urpm-ng-genmedia
+pour ne pas alourdir l'installation cliente de base.
+.RS
+.TP
+.B \-\-incremental
+Ignore les RPMs dont le SHA-256 n'a pas changé depuis le dernier run (le
+cache d'état se trouve dans
+.IR repertoire_rpms/.genhdlist/state.json ).
+.TP
+.B \-\-no\-hdlist
+N'écrit pas le fichier
+.I hdlist.cz
+(plus rapide quand seul le synthesis est nécessaire).
+.TP
+.B \-\-no\-md5sum
+N'écrit pas le fichier
+.IR MD5SUM
+(pratique pour les tests ; les clients rejettent les media qui en
+manquent).
+.TP
+.B \-\-xml\-info
+Force la régénération des fichiers XML info même quand les RPMs
+correspondants n'ont pas changé.
+.TP
+.B \-\-appstream\-info
+Génère un catalogue AppStream à partir des fichiers
+.I metainfo.xml
+embarqués, avec un repli sur un composant minimal dérivé des champs du
+header RPM. Les paquets dont le contenu est entièrement non-user-facing
+(headers de développement, symboles de debug, archives statiques,
+bibliothèques runtime pures) sont filtrés au lieu d'être émis sous une
+catégorie générique
+.BR System .
+.TP
+.B \-\-allow\-empty\-media
+Tolère un répertoire d'entrée vide au lieu d'avorter.
+.TP
+.B \-\-hdlist\-filter \fIFILTRE\fR
+Remplace le filtre de compression pour
+.IR hdlist.cz
+(défaut :
+.IR ".cz:gzip -9" ).
+.TP
+.B \-\-synthesis\-filter \fIFILTRE\fR
+Remplace le filtre de compression pour
+.IR synthesis.hdlist.cz
+(défaut :
+.IR ".cz:xz -7" ).
+.TP
+.B \-\-xml\-info\-filter \fIFILTRE\fR
+Remplace le filtre de compression pour les fichiers XML info (défaut :
+.IR ".lzma:xz -7" ).
+.RE
+Le répertoire de sortie
+.I media_info/
+est verrouillé pendant la génération, de sorte que les clients qui lisent
+en parallèle voient toujours un instantané cohérent.
+.TP
 .B download \fIpaquet\fR ...
 Télécharge les paquets dans le cache sans les installer.
 .RS

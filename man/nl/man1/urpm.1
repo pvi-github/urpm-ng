@@ -486,6 +486,70 @@ Mageia-versie (bijv. 10, cauldron).
 Initialiseer in een chroot-map.
 .RE
 .TP
+.B genmedia \fIrpms_map\fR
+Genereert media-metadata (hdlist.cz, synthesis.hdlist.cz,
+files.xml.lzma, info.xml.lzma, changelog.xml.lzma, MD5SUM) vanuit een
+map met RPM-bestanden. Dit is de tegenhanger aan de serverzijde:
+.B genmedia
+produceert de volledige set metadata die een Mageia-mirror aan zijn
+clients aanbiedt. Apart verpakt als
+.IR urpm-ng-genmedia
+om de basisinstallatie van de client licht te houden.
+.RS
+.TP
+.B \-\-incremental
+Slaat RPM's over waarvan de SHA-256 sinds de vorige run niet is
+veranderd (de toestandcache staat in
+.IR rpms_map/.genhdlist/state.json ).
+.TP
+.B \-\-no\-hdlist
+Schrijft het bestand
+.I hdlist.cz
+niet (sneller wanneer alleen de synthesis nodig is).
+.TP
+.B \-\-no\-md5sum
+Schrijft het bestand
+.I MD5SUM
+niet (handig voor tests; clients weigeren media die het missen).
+.TP
+.B \-\-xml\-info
+Forceert het opnieuw genereren van de XML-infobestanden, ook wanneer
+de bijbehorende RPM's niet zijn veranderd.
+.TP
+.B \-\-appstream\-info
+Genereert een AppStream-catalogus vanuit de ingebedde
+.I metainfo.xml
+-bestanden, met een terugval op een minimaal component afgeleid van de
+RPM-header-velden. Pakketten waarvan de inhoud volledig
+niet-gebruikersgericht is (ontwikkel-headers, debug-symbolen, statische
+archieven, pure runtime-bibliotheken) worden gefilterd in plaats van
+uitgezonden onder een generieke
+.BR System -categorie.
+.TP
+.B \-\-allow\-empty\-media
+Tolereert een lege invoermap in plaats van af te breken.
+.TP
+.B \-\-hdlist\-filter \fIFILTER\fR
+Vervangt het compressiefilter voor
+.IR hdlist.cz
+(standaard:
+.IR ".cz:gzip -9" ).
+.TP
+.B \-\-synthesis\-filter \fIFILTER\fR
+Vervangt het compressiefilter voor
+.IR synthesis.hdlist.cz
+(standaard:
+.IR ".cz:xz -7" ).
+.TP
+.B \-\-xml\-info\-filter \fIFILTER\fR
+Vervangt het compressiefilter voor de XML-infobestanden (standaard:
+.IR ".lzma:xz -7" ).
+.RE
+De uitvoermap
+.I media_info/
+wordt vergrendeld tijdens de generatie, zodat clients die parallel
+lezen altijd een consistente momentopname zien.
+.TP
 .B download \fIpakket\fR ...
 Download pakketten naar de cache zonder te installeren.
 .RS

@@ -488,6 +488,71 @@ Versão Mageia (ex: 10, cauldron).
 Inicializa num directório chroot.
 .RE
 .TP
+.B genmedia \fIdir_rpms\fR
+Gera os metadados de media (hdlist.cz, synthesis.hdlist.cz,
+files.xml.lzma, info.xml.lzma, changelog.xml.lzma, MD5SUM) a partir de
+um directório de ficheiros RPM. É a contraparte do lado do servidor:
+.B genmedia
+produz o conjunto completo de metadados que um mirror Mageia fornece
+aos seus clientes. Empacotado em separado como
+.IR urpm-ng-genmedia
+para manter leve a instalação cliente de base.
+.RS
+.TP
+.B \-\-incremental
+Ignora os RPM cujo SHA-256 não mudou desde a execução anterior (a
+cache de estado fica em
+.IR dir_rpms/.genhdlist/state.json ).
+.TP
+.B \-\-no\-hdlist
+Não escreve o ficheiro
+.I hdlist.cz
+(mais rápido quando só é preciso o synthesis).
+.TP
+.B \-\-no\-md5sum
+Não escreve o ficheiro
+.I MD5SUM
+(útil para testes; os clientes rejeitam os media que dele carecem).
+.TP
+.B \-\-xml\-info
+Força a regeneração dos ficheiros XML info mesmo quando os RPM
+correspondentes não foram alterados.
+.TP
+.B \-\-appstream\-info
+Gera um catálogo AppStream a partir dos ficheiros
+.I metainfo.xml
+embebidos, com fallback para um componente mínimo derivado dos campos
+do header RPM. Os pacotes cujo conteúdo é inteiramente
+não-orientado-ao-utilizador (headers de desenvolvimento, símbolos de
+depuração, arquivos estáticos, bibliotecas runtime puras) são
+filtrados em vez de emitidos sob uma categoria genérica
+.BR System .
+.TP
+.B \-\-allow\-empty\-media
+Tolera um directório de entrada vazio em vez de abortar.
+.TP
+.B \-\-hdlist\-filter \fIFILTRO\fR
+Substitui o filtro de compressão para
+.IR hdlist.cz
+(predefinição:
+.IR ".cz:gzip -9" ).
+.TP
+.B \-\-synthesis\-filter \fIFILTRO\fR
+Substitui o filtro de compressão para
+.IR synthesis.hdlist.cz
+(predefinição:
+.IR ".cz:xz -7" ).
+.TP
+.B \-\-xml\-info\-filter \fIFILTRO\fR
+Substitui o filtro de compressão para os ficheiros XML info
+(predefinição:
+.IR ".lzma:xz -7" ).
+.RE
+O directório de saída
+.I media_info/
+fica bloqueado durante a geração, para que os clientes que lêem em
+paralelo vejam sempre um instantâneo coerente.
+.TP
 .B download \fIpacote\fR ...
 Descarrega os pacotes para a cache sem os instalar.
 .RS

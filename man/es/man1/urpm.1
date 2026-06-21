@@ -488,6 +488,71 @@ Versión de Mageia (ej: 10, cauldron).
 Inicializa en un directorio chroot.
 .RE
 .TP
+.B genmedia \fIdir_rpms\fR
+Genera los metadatos del medio (hdlist.cz, synthesis.hdlist.cz,
+files.xml.lzma, info.xml.lzma, changelog.xml.lzma, MD5SUM) a partir de
+un directorio de archivos RPM. Es el contrapunto del lado servidor:
+.B genmedia
+produce el conjunto completo de metadatos que un mirror Mageia sirve a
+sus clientes. Empaquetado por separado como
+.IR urpm-ng-genmedia
+para no recargar la instalación cliente básica.
+.RS
+.TP
+.B \-\-incremental
+Omite los RPM cuyo SHA-256 no ha cambiado desde la ejecución anterior
+(la cache de estado vive en
+.IR dir_rpms/.genhdlist/state.json ).
+.TP
+.B \-\-no\-hdlist
+No escribe el archivo
+.I hdlist.cz
+(más rápido cuando solo se necesita el synthesis).
+.TP
+.B \-\-no\-md5sum
+No escribe el archivo
+.I MD5SUM
+(útil para pruebas; los clientes rechazan los medios que no lo tienen).
+.TP
+.B \-\-xml\-info
+Fuerza la regeneración de los archivos XML info incluso cuando los RPM
+correspondientes no han cambiado.
+.TP
+.B \-\-appstream\-info
+Genera un catálogo AppStream a partir de los archivos
+.I metainfo.xml
+incrustados, con un respaldo en un componente mínimo derivado de los
+campos del header RPM. Los paquetes cuyo contenido es enteramente
+no-user-facing (headers de desarrollo, símbolos de depuración, archivos
+estáticos, bibliotecas runtime puras) son filtrados en lugar de ser
+emitidos bajo una categoría genérica
+.BR System .
+.TP
+.B \-\-allow\-empty\-media
+Tolera un directorio de entrada vacío en lugar de abortar.
+.TP
+.B \-\-hdlist\-filter \fIFILTRO\fR
+Sustituye el filtro de compresión para
+.IR hdlist.cz
+(por defecto:
+.IR ".cz:gzip -9" ).
+.TP
+.B \-\-synthesis\-filter \fIFILTRO\fR
+Sustituye el filtro de compresión para
+.IR synthesis.hdlist.cz
+(por defecto:
+.IR ".cz:xz -7" ).
+.TP
+.B \-\-xml\-info\-filter \fIFILTRO\fR
+Sustituye el filtro de compresión para los archivos XML info (por
+defecto:
+.IR ".lzma:xz -7" ).
+.RE
+El directorio de salida
+.I media_info/
+queda bloqueado mientras corre la generación, de modo que los clientes
+que leen en paralelo siempre ven una instantánea coherente.
+.TP
 .B download \fIpaquete\fR ...
 Descarga paquetes a la cache sin instalarlos.
 .RS

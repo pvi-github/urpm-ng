@@ -487,6 +487,71 @@ Mageia-Version (z.B. 10, cauldron).
 Initialisiert in einem Chroot-Verzeichnis.
 .RE
 .TP
+.B genmedia \fIrpms_verzeichnis\fR
+Generiert die Media-Metadaten (hdlist.cz, synthesis.hdlist.cz,
+files.xml.lzma, info.xml.lzma, changelog.xml.lzma, MD5SUM) aus einem
+Verzeichnis von RPM-Dateien. Dies ist die Server-seitige Komponente:
+.B genmedia
+produziert die vollständige Menge von Metadaten, die ein Mageia-Mirror
+seinen Clients ausliefert. Separat als
+.IR urpm-ng-genmedia
+paketiert, um die Basisinstallation des Clients schlank zu halten.
+.RS
+.TP
+.B \-\-incremental
+Überspringt RPMs, deren SHA-256 sich seit dem letzten Lauf nicht
+geändert hat (der Zustands-Cache liegt unter
+.IR rpms_verzeichnis/.genhdlist/state.json ).
+.TP
+.B \-\-no\-hdlist
+Schreibt die Datei
+.I hdlist.cz
+nicht (schneller, wenn nur das Synthesis benötigt wird).
+.TP
+.B \-\-no\-md5sum
+Schreibt die Datei
+.I MD5SUM
+nicht (praktisch für Tests; Clients lehnen Medien ohne sie ab).
+.TP
+.B \-\-xml\-info
+Erzwingt die Neuerzeugung der XML-Info-Dateien, auch wenn die
+entsprechenden RPMs sich nicht geändert haben.
+.TP
+.B \-\-appstream\-info
+Generiert einen AppStream-Katalog aus den eingebetteten
+.I metainfo.xml
+-Dateien, mit Fallback auf eine minimale Komponente aus den
+RPM-Header-Feldern. Pakete, deren Inhalt vollständig nicht-user-facing
+ist (Entwicklungs-Header, Debug-Symbole, statische Archive, reine
+Runtime-Bibliotheken), werden herausgefiltert, anstatt unter einer
+generischen
+.BR System -Kategorie
+emittiert zu werden.
+.TP
+.B \-\-allow\-empty\-media
+Toleriert ein leeres Eingabeverzeichnis, anstatt abzubrechen.
+.TP
+.B \-\-hdlist\-filter \fIFILTER\fR
+Überschreibt den Kompressionsfilter für
+.IR hdlist.cz
+(Standard:
+.IR ".cz:gzip -9" ).
+.TP
+.B \-\-synthesis\-filter \fIFILTER\fR
+Überschreibt den Kompressionsfilter für
+.IR synthesis.hdlist.cz
+(Standard:
+.IR ".cz:xz -7" ).
+.TP
+.B \-\-xml\-info\-filter \fIFILTER\fR
+Überschreibt den Kompressionsfilter für die XML-Info-Dateien (Standard:
+.IR ".lzma:xz -7" ).
+.RE
+Das Ausgabeverzeichnis
+.I media_info/
+wird während der Generierung gesperrt, sodass parallel lesende Clients
+immer einen konsistenten Snapshot sehen.
+.TP
 .B download \fIPaket\fR ...
 Lädt Pakete in den Cache herunter, ohne sie zu installieren.
 .RS
