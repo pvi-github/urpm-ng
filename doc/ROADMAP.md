@@ -91,6 +91,18 @@ de paquets est un composant critique qui merite un code exemplaire.
 - **mkimage** -- creation d'images conteneur (Docker/Podman) pour build isole
 - **build** -- construction de RPMs dans un conteneur avec workspace standard
 - **Profils YAML** -- build, ci, minimal (systeme et personnalises)
+
+### Generation de media (cote serveur)
+
+- **urpm genmedia** -- generation des metadonnees media (hdlist, synthesis,
+  files.xml, info.xml, changelog.xml, MD5SUM) a partir d'un repertoire
+  de RPMs.  Reecriture Python complete de genhdlist3.
+- **AppStream** -- extraction des metainfo embarques dans les RPMs,
+  generation a partir des headers RPM pour les paquets sans metainfo,
+  filtrage structurel des paquets non-user-facing (devel/debug/lib pure)
+  pour eviter de polluer GNOME Software / Discover.
+- **Lock de generation** -- verrouillage du repertoire media_info/
+  pendant la generation pour eviter les races.
 - **--with-rpms** -- pre-installation de RPMs locaux dans le conteneur
 - **--buildrequires** -- installation des dependances de build depuis spec/SRPM avec tracking
 - **autoremove --buildrequires** -- nettoyage des dependances de build trackees

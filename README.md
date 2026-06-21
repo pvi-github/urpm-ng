@@ -1064,6 +1064,54 @@ urpm appstream init-distro           # Create the OS metainfo file (needed by Di
 urpm appstream init-distro --force   # Overwrite an existing metainfo
 ```
 
+## Media generation (urpm genmedia)
+
+`urpm genmedia` is the server-side companion of `urpm appstream`: where
+`appstream` consumes catalogs to populate client databases, `genmedia`
+**produces** the full set of media metadata that a Mageia mirror serves
+to its clients.  It is a Python rewrite of the historical
+`genhdlist3`, integrated into urpm-ng and packaged separately as
+`urpm-ng-genmedia` so the dependency footprint stays out of the base
+client install.
+
+From a directory of RPM files:
+
+```bash
+urpm genmedia /path/to/rpms          # Default: full generation
+urpm genmedia /path/to/rpms --incremental   # Skip RPMs whose SHA-256 has not changed
+urpm genmedia /path/to/rpms --no-hdlist     # Skip the hdlist.cz output
+urpm genmedia /path/to/rpms --xml-info      # Force regeneration of XML info files
+urpm genmedia /path/to/rpms --appstream-info  # Generate AppStream catalog
+urpm genmedia /path/to/rpms --no-md5sum     # Skip MD5SUM (faster for tests)
+urpm genmedia /path/to/rpms --allow-empty-media  # Tolerate an empty input dir
+```
+
+The command produces the canonical layout expected by every urpm-ng
+or urpmi client:
+
+```
+media_info/
+  hdlist.cz                # Compressed binary package headers
+  synthesis.hdlist.cz      # Lightweight dependency synthesis
+  files.xml.lzma           # Per-package file lists
+  info.xml.lzma            # URL, sourcerpm, licence, description
+  changelog.xml.lzma       # Per-package changelogs
+  appstream.xml.gz         # When --appstream-info is set
+  MD5SUM                   # Checksums of the above
+```
+
+The AppStream pass extracts the embedded `*.metainfo.xml` files
+shipped by upstream applications (KDE, GNOME, etc.) and generates a
+minimal component from RPM header fields for packages that need one
+but ship none.  Packages whose content is entirely non-user-facing
+(devel headers, debug symbols, static archives, pure runtime
+libraries) are **filtered out** rather than emitted with a fallback
+``System`` category — they would clutter Discover and GNOME Software
+without ever being installable through an app store.
+
+The `media_info/` directory is locked while a generation runs, so
+clients reading concurrently always see a consistent snapshot.
+
 ## Package README messages
 
 `urpm readme` shows package README messages displayed to the user during

@@ -92,30 +92,62 @@ Verify:
 - Transitive conflicts
 - Obsoletes with version
 
-### pytest structure
+### pytest structure (actual layout)
+
+The tests live inside the package source tree, not in a separate
+top-level `tests/` directory:
 
 ```
-tests/
-├── conftest.py          # Shared fixtures
-├── test_database.py     # Database unit tests
-├── test_resolver.py     # Dependency resolution tests
-├── test_parsing.py      # Synthesis/hdlist parsing tests
-├── test_install.py      # Install integration tests
-├── test_erase.py        # Erase integration tests
-├── test_upgrade.py      # Upgrade integration tests
-└── fixtures/
-    ├── rpms/            # Generated test RPMs
-    └── repos/           # Test repositories
+urpm/tests/
+├── conftest.py                        # Shared fixtures
+├── gen_test_rpms.py                   # Synthetic RPM generator
+├── media/                             # Generated test repositories
+├── test_database.py                   # Database unit tests
+├── test_resolver.py                   # Dependency resolution tests
+├── test_synthesis.py                  # Synthesis/hdlist parsing tests
+├── test_install.py                    # Install integration tests
+├── test_genmedia.py                   # Media generation tests
+├── test_orphans.py                    # Orphan detection tests
+├── ... (many more — run `pytest --collect-only` for the full list)
 ```
 
-### To implement
+The total stands at ~640 tests as of branch 0.8.x, with handful of
+deliberate skips and one `xfail` (cf. `doc/TODO_XFAILS.md` for the
+running tally and rationale).
 
-- [ ] Test RPM generation script (spec files + rpmbuild)
-- [ ] pytest fixture for temporary DB with test media
-- [ ] Fixture for isolated RPM environment (chroot or container)
-- [ ] Unit tests: parsing, resolver, database
-- [ ] Integration tests: install/erase/upgrade end-to-end
-- [ ] GitHub Actions CI
+### Coverage status — honest assessment
+
+The test suite has grown well past the initial bootstrap but is **not
+yet at a satisfactory coverage**.  Several subsystems remain
+under-exercised end-to-end (P2P discovery, AppStream catalog merge,
+GUI helper integration with the daemon) and the integration tests
+that do exist run under non-root unshare which inherits a few
+limitations (cpio chown, vboxsf quirks — see `doc/TODO_XFAILS.md`).
+
+Treat the green pytest run as a regression net, **not** as a
+guarantee of full functional coverage.  Manual testing of new
+features remains required before any release.
+
+### Currently in place
+
+- Test RPM generation via `gen_test_rpms.py` (spec files + rpmbuild,
+  populates `urpm/tests/media/`).
+- `BaseUrpmiTest` shared helper class with chroot setup and rpm
+  wrappers; autouse pytest fixture for tmpdir cleanup so failing
+  tests no longer leak.
+- Database unit tests, resolver tests, parsing tests, install /
+  upgrade / erase / orphans integration tests.
+
+### Known gaps to close
+
+- Coverage of cross-arch CLI and daemon edge cases.
+- AppStream merge across multiple media (currently exercised only
+  per-media).
+- GitHub Actions CI — pytest happens locally only; no public run
+  guards regressions yet.
+- `urpm test` container wrapper that would let the 18 `rootonly`
+  cpio-chown tests pass without being root on the host (tracked in
+  `/TODO.md` "Test container").
 
 ---
 

@@ -1,72 +1,65 @@
+# Tableau de bord — index des TODO urpm-ng
 
-  Dette technique identifiée (supplements/weak deps)
+Ce document est un **index synthétique** pointant vers les TODO détaillés
+du projet.  Pour le contenu opérationnel (items, prios, efforts, statuts),
+suivre les liens vers les documents spécialisés.
 
-  ┌─────┬─────────┬──────────────────────────────────────────────────────────────────────────────┬────────┐
-  │  #  │  Prio   │                                    Sujet                                     │ Effort │
-  ├─────┼─────────┼──────────────────────────────────────────────────────────────────────────────┼────────┤
-  │ 3   │ MOYENNE │ --with-suggests ignoré en mode upgrade                                       │ Petit  │
-  ├─────┼─────────┼──────────────────────────────────────────────────────────────────────────────┼────────┤
-  │ 5   │ BASSE   │ _supplement_repo_requires ne couvre que REQUIRES                             │ Petit  │
-  ├─────┼─────────┼──────────────────────────────────────────────────────────────────────────────┼────────┤
-  │ 6   │ BASSE   │ find_all_orphans n'inclut pas SUGGESTNAME                                    │ Petit  │
-  └─────┴─────────┴──────────────────────────────────────────────────────────────────────────────┴────────┘                      
-   
-  Infra stabilité / perf
+> **Convention** : ce fichier ne porte pas la dette technique en propre.
+> Toute action concrète doit vivre dans un `TODO_*.md` thématique ou dans
+> le `TODO.md` racine.  Ce dashboard sert uniquement à se repérer.
 
-  ┌─────┬─────────┬────────────────────────────────────────────────────────────────────────────────────────────────┬─────────┐
-  │  #  │  Prio   │                                             Sujet                                              │ Effort  │
-  ├─────┼─────────┼────────────────────────────────────────────────────────────────────────────────────────────────┼─────────┤
-  │ B   │ MOYENNE │ Fix libsolv add_mdk (PREREQMARKER + 35 droppés) → élimine la rustine -1.9s/pool                │ Gros    │
-  │     │         │                                                                                                │ (C)     │
-  ├─────┼─────────┼────────────────────────────────────────────────────────────────────────────────────────────────┼─────────┤
-  │ C   │ BASSE   │ Bugs annexes libsolv (@recommends@ offset, @supplements@/@enhances@ non parsés)                │ Petit   │
-  │     │         │                                                                                                │ (C)     │
-  └─────┴─────────┴────────────────────────────────────────────────────────────────────────────────────────────────┴─────────┘
+---
 
-  Fait
+## Backlog général
 
-  - [A] Media Update Lock — voir doc/archives/DONE_MU_LOCK.md
-  - [G] Fichier de préférences /etc/urpm/conf.d/ pour --prefer persistants (settings.py:36, 245-254)
-  - [H] Feedback utilisateur : contrôle auto-ajout serveurs + filtrage géo (server_pool.py:68-115)
-  - [T1] test_resolver.py (couverture résolveur en place)
-  - [#1] Orphan detector honore désormais Supplements/Enhances — cf3264d
-  - [#2] add_local_rpms charge supplements/enhances — cf3264d
-  - [#4] Setting install_recommends opérationnel (lu par resolver.py:364,390,715,1275 ; settings.py:292-293 charge depuis conf)
-                                                                                                                                 
-  Fonctionnalités P2P (schéma en place, code manquant)                                                                           
-   
-  ┌─────┬─────────┬────────────────────────────────────────────────────────┬────────┐                                            
-  │  #  │  Prio   │                         Sujet                          │ Effort │
-  ├─────┼─────────┼────────────────────────────────────────────────────────┼────────┤
-  │ D   │ MOYENNE │ replication_policy (none/on_demand/seed) — enforcement │ Moyen  │
-  ├─────┼─────────┼────────────────────────────────────────────────────────┼────────┤
-  │ E   │ MOYENNE │ quota_mb — vérification et éviction                    │ Moyen  │                                            
-  ├─────┼─────────┼────────────────────────────────────────────────────────┼────────┤                                            
-  │ F   │ MOYENNE │ retention_days — nettoyage temporel scheduler          │ Petit  │                                            
-  └─────┴─────────┴────────────────────────────────────────────────────────┴────────┘                                            
-                  
-  Roadmap Phase 1 (doc/ROADMAP.md)                                                                                               
-                  
-  ┌─────┬─────────┬────────────────────────────────────────────────────┬────────┐                                                
-  │  #  │  Prio   │                       Sujet                        │ Effort │
-  ├─────┼─────────┼────────────────────────────────────────────────────┼────────┤                                                
-  │ P1a │ HAUTE   │ urpm system-upgrade (dist upgrade N→N+1)           │ Gros   │
-  ├─────┼─────────┼────────────────────────────────────────────────────┼────────┤
-  │ P1b │ HAUTE   │ Groups/rpmsrate (sélection par catégorie)          │ Moyen  │                                                
-  ├─────┼─────────┼────────────────────────────────────────────────────┼────────┤                                                
-  │ P1c │ MOYENNE │ needs-restarting (détection services à redémarrer) │ Moyen  │                                                
-  ├─────┼─────────┼────────────────────────────────────────────────────┼────────┤                                                
-  │ P1d │ MOYENNE │ builddep (installer deps de build d'un SRPM)       │ Petit  │
-  ├─────┼─────────┼────────────────────────────────────────────────────┼────────┤                                                
-  │ P1e │ BASSE   │ dnf-automatic (updates programmées)                │ Moyen  │
-  └─────┴─────────┴────────────────────────────────────────────────────┴────────┘                                                
-                  
-  Tests / CI                                                                                                                     
-                  
-  ┌─────┬─────────┬───────────────────────────────────────────────────┬────────┐
-  │  #  │  Prio   │                       Sujet                       │ Effort │
-  ├─────┼─────────┼───────────────────────────────────────────────────┼────────┤
-  │ T2  │ MOYENNE │ GitHub Actions CI                                 │ Petit  │                                                 
-  └─────┴─────────┴───────────────────────────────────────────────────┴────────┘      
+- [`/TODO.md`](../TODO.md) — backlog vivant racine, organisé par phases
+  (Phase 1 priorité haute, Phase 2 prochaines features, Phase 3 GUI,
+  Phase 4 advisories).  Source canonique pour les items non-spécialisés.
 
+## Chantiers en cours et features livrées
 
+- [`TODO_GENMEDIA.md`](TODO_GENMEDIA.md) — intégration `urpm genmedia`
+  (réécriture genhdlist3 + AppStream).  Statut des bugs `upanier.py`,
+  filtrage des composants AppStream, plan d'implémentation phasé.
+- [`PLAN_GENMEDIA.md`](PLAN_GENMEDIA.md) — plan initial mars 2026
+  (référence historique, voir TODO_GENMEDIA.md pour le courant).
+
+## Dette technique identifiée
+
+- [`TODO_SUPPLEMENTS.md`](TODO_SUPPLEMENTS.md) — audit weak deps
+  (Recommends/Suggests/Supplements/Enhances).  Items #3, #5, #6 ouverts.
+- [`TODO_DEBUG_LIBSOLV.md`](TODO_DEBUG_LIBSOLV.md) — bugs résiduels
+  libsolv (`add_mdk`, `@recommends@` offset, `@supplements@`/`@enhances@`
+  non parsés côté Python).
+- [`TODO_LEX_SORT_AUDIT.md`](TODO_LEX_SORT_AUDIT.md) — items résiduels
+  après le fix libreoffice mga9 (3 sites à inspecter).
+- [`TODO_XFAILS.md`](TODO_XFAILS.md) — statut des `xfail`/`skip` dans la
+  suite de tests, familles A-F.
+
+## Infra et performance
+
+- [`TODO_SHRINK_FILES_DB.md`](TODO_SHRINK_FILES_DB.md) — plan pour
+  ramener `files.xml.lzma` parsé de 3,8 Go à ~150 Mo via scan streaming.
+- [`TODO_MANAGE_BUILDDEPS.md`](TODO_MANAGE_BUILDDEPS.md) — évolution
+  multi-source du tracking des BuildRequires.
+
+## Tests et CI
+
+- [`TESTING.md`](TESTING.md) — état de la couverture pytest, sites
+  manuels, plan d'infra.
+- GitHub Actions CI — à faire (entrée dans `/TODO.md`).
+
+## Documents archivés
+
+- [`archives/DONE_MU_LOCK.md`](archives/DONE_MU_LOCK.md) — Media Update
+  Lock (livré).
+
+---
+
+## Comment contribuer à ce dashboard
+
+- **Ne pas dupliquer** d'items déjà tracés dans un `TODO_*.md` thématique.
+- **Ajouter ici** uniquement les nouveaux thèmes (créer un `TODO_*.md`
+  dédié si le volume le justifie) et leur référence en index.
+- Quand une feature est livrée, déplacer son `TODO_*.md` vers
+  `archives/DONE_*.md` et mettre à jour le lien ici.

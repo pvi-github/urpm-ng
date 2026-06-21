@@ -1,5 +1,9 @@
 # TODO — urpm genmedia (intégration de upanier + incrémental + AppStream)
 
+> **Note** : ce document est le **plan initial** de l'intégration genmedia
+> (mars 2026).  Pour le statut courant des travaux, la liste des bugs
+> résolus, et les actions en cours, voir [`TODO_GENMEDIA.md`](TODO_GENMEDIA.md).
+
 ## Contexte
 
 Intégrer une réécriture de `genhdlist3` dans urpm-ng sous la forme d'une commande
