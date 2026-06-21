@@ -238,7 +238,7 @@
 **Database locked**
 - [ ] Erreurs "database is locked" quand rpmdrake tente d'accéder à la DB pendant un lock
   - Le programme devrait retry automatiquement (backoff) au lieu de planter
-  - Voir aussi : `doc/TODO_MU_LOCK.md` pour le fix côté CLI/daemon
+  - Voir aussi : `doc/archives/DONE_MU_LOCK.md` (fix côté CLI/daemon, livré)
 
 #### Refonte UX — priorité haute (retours utilisateurs)
 
