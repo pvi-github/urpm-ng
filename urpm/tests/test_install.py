@@ -55,6 +55,38 @@ class BaseUrpmiTest:
     base_dir = media_dir.parent
 
     # ------------------------------------------------------------------
+    # Auto-cleanup
+    # ------------------------------------------------------------------
+
+    @pytest.fixture(autouse=True)
+    def _auto_cleanup_tmpdir(self):
+        """Guarantee that the tmpdir created by self.prepare() is removed
+        even when a test fails or skips its explicit cleanup.
+
+        Tests still call self.prepare() to set up the chroot; the
+        explicit self.tmpdir.cleanup() at the end of well-behaved tests
+        remains in place and is harmless (TemporaryDirectory.cleanup is
+        idempotent).  Without this safety net, a test that raises before
+        its explicit cleanup leaks the tmpdir until garbage collection
+        — costly under ``pytest -n auto`` where workers accumulate
+        tmpdirs in /tmp.  Post-rebase audit: 87 prepare() vs 75 cleanup()
+        sites = 12 deterministic leaks per full run, all caught here.
+
+        A future refactor towards pure yield-fixtures (migrating the
+        prepare()/cleanup() pattern across the 12 subclass overrides
+        and ~85 call sites) is deferred — this safety net achieves the
+        no-leak goal with a 25-line, single-site change.
+        """
+        yield
+        tmpdir = getattr(self, 'tmpdir', None)
+        if tmpdir is not None:
+            try:
+                tmpdir.cleanup()
+            except (FileNotFoundError, OSError):
+                pass  # already gone
+            self.tmpdir = None
+
+    # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
 
