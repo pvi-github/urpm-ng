@@ -793,8 +793,8 @@ msgid "Show all dependencies recursively (flat list)"
 msgstr "Afficher toutes les dépendances récursivement (liste à plat)"
 
 #: urpm/cli/main.py:1046
-msgid "Show raw capabilities (like urpmq/dnf)"
-msgstr "Afficher les capacités brutes (comme urpmq/dnf)"
+msgid "Show raw capabilities (like urpmq)"
+msgstr "Afficher les capacités brutes (comme urpmq)"
 
 #: urpm/cli/main.py:1051
 msgid ""

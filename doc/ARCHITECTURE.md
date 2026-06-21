@@ -183,7 +183,7 @@ Eviction priority:
 
 ### Engine: libsolv
 
-urpm-ng uses libsolv (same engine as DNF) for dependency resolution.
+urpm-ng uses libsolv for dependency resolution.
 
 ### Supported dependency types
 
@@ -276,8 +276,6 @@ Periodic tasks:
 ## 8. Prerequisites
 
 ```bash
-dnf install python3-libsolv python3-zstandard
-# or
 urpmi python3-solv python3-zstandard
 ```
 

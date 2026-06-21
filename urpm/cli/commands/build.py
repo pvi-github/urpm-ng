@@ -1176,7 +1176,7 @@ def _build_single_package(
         #
         # This is a retry-on-failure loop using an exit code as control flow.
         # It is the exact pattern documented by rpm upstream and implemented by
-        # mock(1), dnf builddep, and koji. We do not have a cleaner option if
+        # mock(1) and koji. We do not have a cleaner option if
         # we want to build mainstream Python/Rust packages without forcing
         # every packager to duplicate pyproject.toml/Cargo.toml deps by hand
         # in their .spec — which would drift and rot.

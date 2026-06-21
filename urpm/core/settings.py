@@ -55,7 +55,7 @@ class ResolverSettings:
     """
 
     install_recommends: bool = True
-    """Automatically install Recommended packages (like DNF default)."""
+    """Automatically install Recommended packages by default."""
 
 
 @dataclass

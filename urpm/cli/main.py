@@ -1119,7 +1119,7 @@ Examples:
     depends_parser.add_argument(
         '--legacy',
         action='store_true',
-        help=_('Show raw capabilities (like urpmq/dnf)')
+        help=_('Show raw capabilities (like urpmq)')
     )
     depends_parser.add_argument(
         '--prefer',

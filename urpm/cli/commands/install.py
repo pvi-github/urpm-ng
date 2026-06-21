@@ -359,7 +359,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     prefer_str = getattr(args, 'prefer', None)
     preferences = PreferencesMatcher(prefer_str)
 
-    # Install recommends by default (like DNF/apt), opt-out with --without-recommends.
+    # Install recommends by default, opt-out with --without-recommends.
     # In interactive mode, the user will be asked to confirm (lines 620+).
     initial_recommends = not without_recommends
 
