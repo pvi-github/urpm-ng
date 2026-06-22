@@ -645,68 +645,67 @@ msgstr ""
 
 #: urpm/cli/main.py:850
 msgid "Generate media metadata from RPM directory"
-msgstr ""
+msgstr "Medien-Metadaten aus RPM-Verzeichnis erzeugen"
 
 #: urpm/cli/main.py:854
 msgid "Directory containing *.rpm files"
-msgstr ""
+msgstr "Verzeichnis, das *.rpm-Dateien enthält"
 
 #: urpm/cli/main.py:858
 msgid "Output directory (default: rpms_dir/media_info)"
-msgstr ""
+msgstr "Ausgabeverzeichnis (Standard: rpms_dir/media_info)"
 
 #: urpm/cli/main.py:862
 msgid "Compression filter for hdlist (default: .cz:gzip -9)"
-msgstr ""
+msgstr "Kompressionsfilter für hdlist (Standard: .cz:gzip -9)"
 
 #: urpm/cli/main.py:866
 msgid "Compression filter for synthesis (default: .cz:xz -7)"
-msgstr ""
+msgstr "Kompressionsfilter für synthesis (Standard: .cz:xz -7)"
 
 #: urpm/cli/main.py:870
 msgid "Compression filter for XML info (default: .lzma:xz -7)"
-msgstr ""
+msgstr "Kompressionsfilter für XML-Info (Standard: .lzma:xz -7)"
 
 #: urpm/cli/main.py:874
 msgid "Do not generate hdlist.cz"
-msgstr ""
+msgstr "hdlist.cz nicht erzeugen"
 
 #: urpm/cli/main.py:878
 msgid "Do not generate MD5SUM"
-msgstr ""
+msgstr "MD5SUM nicht erzeugen"
 
 #: urpm/cli/main.py:882
 msgid "Force generation of XML info files"
-msgstr ""
+msgstr "Erzeugung der XML-Info-Dateien erzwingen"
 
 #: urpm/cli/main.py:886
-#, fuzzy
 msgid "Generate AppStream metadata"
-msgstr "AppStream-Metadaten-Synchronisierung überspringen"
+msgstr "AppStream-Metadaten erzeugen"
 
 #: urpm/cli/main.py:890
 msgid "Full rebuild (do not use incremental mode)"
-msgstr ""
+msgstr "Vollständiger Neuaufbau (Inkrementmodus nicht verwenden)"
 
 #: urpm/cli/main.py:894
 msgid "Prefix output files with timestamp"
-msgstr ""
+msgstr "Ausgabedateien mit Zeitstempel präfixen"
 
 #: urpm/cli/main.py:898
 msgid "Allow empty media (no RPMs)"
-msgstr ""
+msgstr "Leere Medien erlauben (keine RPMs)"
 
 #: urpm/cli/main.py:902
 msgid "Do not lock media_info/ directory"
-msgstr ""
+msgstr "Das Verzeichnis media_info/ nicht sperren"
 
 #: urpm/cli/main.py:906
 msgid "Skip bad RPMs instead of failing"
-msgstr ""
+msgstr "Fehlerhafte RPMs überspringen, statt abzubrechen"
 
 #: urpm/cli/main.py:910
 msgid "Walk Mageia tree (sections/type)"
-msgstr ""
+msgstr "Den Mageia-Baum durchlaufen (Sektionen/Typ)"
 
 #: urpm/cli/main.py:922
 msgid "Erase (remove) packages"
@@ -805,9 +804,8 @@ msgid "File pattern"
 msgstr "Dateimuster"
 
 #: urpm/cli/main.py:1077
-#, fuzzy
 msgid "Search only in available packages (default: search both)"
-msgstr "Nur in installierten Paketen suchen (Standard: beide durchsuchen)"
+msgstr "Nur in verfügbaren Paketen suchen (Standard: beide durchsuchen)"
 
 #: urpm/cli/main.py:1082
 msgid "Search only in installed packages (default: search both)"
@@ -818,6 +816,8 @@ msgid ""
 "Show every version of every match (default: only the highest version per "
 "package, mimicking what would be installed)"
 msgstr ""
+"Jede Version jedes Treffers anzeigen (Standard: nur die höchste Version pro "
+"Paket, entsprechend dem, was installiert würde)"
 
 #: urpm/cli/main.py:1094
 msgid "Maximum number of results (default: 100)"
@@ -908,7 +908,7 @@ msgstr "Name der zu aktualisierenden Medien (Standard: alle)"
 
 #: urpm/cli/main.py:1270 urpm/cli/main.py:1587
 msgid "Re-download and re-parse even if metadata is unchanged"
-msgstr ""
+msgstr "Erneut herunterladen und auswerten, auch wenn die Metadaten unverändert sind"
 
 #: urpm/cli/main.py:1278
 msgid "Upgrade packages (all if none specified)"
@@ -1448,17 +1448,23 @@ msgid ""
 "Show full status of a server including security blacklist and reputation "
 "history"
 msgstr ""
+"Vollständigen Status eines Servers anzeigen, einschließlich Sicherheits-"
+"Blacklist und Reputationsverlauf"
 
 #: urpm/cli/main.py:1903
 msgid ""
 "Clear the security blacklist on a server (root, requires manual confirmation)"
 msgstr ""
+"Die Sicherheits-Blacklist eines Servers leeren (root, manuelle Bestätigung "
+"erforderlich)"
 
 #: urpm/cli/main.py:1910
 msgid ""
 "Acknowledge a blacklist alert so the persistent reminder stops nagging at "
 "every CLI invocation"
 msgstr ""
+"Eine Blacklist-Warnung bestätigen, damit die persistente Erinnerung nicht "
+"mehr bei jedem CLI-Aufruf erscheint"
 
 #: urpm/cli/main.py:1917
 msgid "Auto-discover and add servers from Mageia mirrorlist"
@@ -2861,10 +2867,11 @@ msgstr ""
 "Verfügbar:"
 
 #: urpm/cli/commands/query.py:695
-#, fuzzy
 msgid ""
 "No files.xml.lzma available on disk. Run 'sudo urpm media update' first."
-msgstr "Keine Komponenten gefunden. Führen Sie zuerst 'urpm media update' aus."
+msgstr ""
+"Keine files.xml.lzma auf der Festplatte verfügbar. Führen Sie zuerst 'sudo "
+"urpm media update' aus."
 
 #: urpm/cli/commands/query.py:720
 #, python-brace-format
@@ -2872,6 +2879,8 @@ msgid ""
 "Note: {count} enabled media have no files.xml.lzma on disk (run 'urpm media "
 "update' to fetch)."
 msgstr ""
+"Hinweis: {count} aktivierte Medien haben keine files.xml.lzma auf der "
+"Festplatte (mit 'urpm media update' abrufen)."
 
 #: urpm/cli/commands/query.py:726
 #, python-brace-format
@@ -3247,12 +3256,16 @@ msgid ""
 "Error: media name {name!r} already taken by media #{id} ({existing}); pass a "
 "different --name"
 msgstr ""
+"Fehler: Medienname {name!r} wird bereits von Medium #{id} ({existing}) "
+"verwendet; geben Sie ein anderes --name an"
 
 #: urpm/cli/commands/media.py:733
 msgid ""
 "Error: derived name {name!r} already taken by media #{id} ({existing}); pass "
 "--name to override"
 msgstr ""
+"Fehler: abgeleiteter Name {name!r} wird bereits von Medium #{id} ({existing}) "
+"verwendet; geben Sie --name an, um ihn zu überschreiben"
 
 #: urpm/cli/commands/media.py:754
 #, python-brace-format
@@ -3495,9 +3508,8 @@ msgstr ""
 "Führen Sie 'urpm media update' aus, um Paketlisten zu holen"
 
 #: urpm/cli/commands/media.py:1388
-#, fuzzy
 msgid "Media name required"
-msgstr "Medienname"
+msgstr "Medienname erforderlich"
 
 #: urpm/cli/commands/media.py:1411
 #, python-brace-format
@@ -3518,12 +3530,11 @@ msgid "No changes specified"
 msgstr "Keine Änderungen angegeben"
 
 #: urpm/cli/commands/media.py:1448
-#, fuzzy
 msgid ""
 "Use --shared, --replication, --seeds, --quota, --retention or --priority"
 msgstr ""
-"Verwenden Sie --shared, --replication, --seeds, --quota, --retention, --"
-"priority, --sync-files oder --no-sync-files"
+"Verwenden Sie --shared, --replication, --seeds, --quota, --retention oder "
+"--priority"
 
 #: urpm/cli/commands/media.py:1471
 #, python-brace-format
@@ -3830,6 +3841,8 @@ msgid ""
 "  Skipping {section}: display name '{name}' already taken by media #{id} "
 "('{existing}')"
 msgstr ""
+"  Überspringe {section}: Anzeigename '{name}' wird bereits von Medium #{id} "
+"('{existing}') verwendet"
 
 #: urpm/cli/commands/media.py:2182
 #, python-brace-format
@@ -3889,9 +3902,8 @@ msgid "Status"
 msgstr "Status"
 
 #: urpm/cli/commands/server.py:36
-#, fuzzy
 msgid "BLACKLIST"
-msgstr "AUF SPERRLISTE"
+msgstr "BLACKLIST"
 
 #: urpm/cli/commands/server.py:106
 #, python-brace-format
@@ -4206,80 +4218,81 @@ msgstr[1] "{added} Server hinzugefügt, jetzt {total} aktiviert"
 
 #: urpm/cli/commands/server.py:810 urpm/cli/commands/server.py:877
 #: urpm/cli/commands/server.py:969
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Error: server '{name}' not found"
-msgstr "Medium '{name}' nicht gefunden"
+msgstr "Fehler: Server '{name}' nicht gefunden"
 
 #: urpm/cli/commands/server.py:815 urpm/cli/commands/server.py:974
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Server '{name}' is not blacklisted."
-msgstr "Peer {host} ist nicht auf der Sperrliste."
+msgstr "Server '{name}' ist nicht auf der Sperrliste."
 
 #: urpm/cli/commands/server.py:823
 msgid "⚠ You are about to re-enable a BLACKLISTED server."
-msgstr ""
+msgstr "⚠ Sie sind dabei, einen GESPERRTEN Server wieder zu aktivieren."
 
 #: urpm/cli/commands/server.py:824
-#, fuzzy
 msgid "  Server:  "
-msgstr " Server hinzugefügt: {name}"
+msgstr "  Server:  "
 
 #: urpm/cli/commands/server.py:825
 msgid "  Reason:  "
-msgstr ""
+msgstr "  Grund:   "
 
 #: urpm/cli/commands/server.py:826
 msgid "  Since:   "
-msgstr ""
+msgstr "  Seit:    "
 
 #: urpm/cli/commands/server.py:828
 msgid ""
 "\n"
 "  Re-enabling means you have manually verified the media"
 msgstr ""
+"\n"
+"  Eine Reaktivierung bedeutet, dass Sie die Integrität der Medien manuell"
 
 #: urpm/cli/commands/server.py:831
 msgid "  integrity (GPG keys, mirror source authenticity)."
-msgstr ""
+msgstr "  geprüft haben (GPG-Schlüssel, Authentizität der Mirror-Quelle)."
 
 #: urpm/cli/commands/server.py:837
 msgid "Type 'yes' to confirm reactivation: "
-msgstr ""
+msgstr "Geben Sie 'yes' ein, um die Reaktivierung zu bestätigen: "
 
 #: urpm/cli/commands/server.py:854
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Server '{name}' is no longer blacklisted."
-msgstr "Peer {host} ist nicht auf der Sperrliste."
+msgstr "Server '{name}' ist nicht mehr auf der Sperrliste."
 
 #: urpm/cli/commands/server.py:859
 #, python-brace-format
 msgid "Server '{name}' was no longer blacklisted (cleared concurrently)."
 msgstr ""
+"Server '{name}' war nicht mehr auf der Sperrliste (zwischenzeitlich entfernt)."
 
 #: urpm/cli/commands/server.py:883
-#, fuzzy
 msgid "Path"
-msgstr "Pfad:"
+msgstr "Pfad"
 
 #: urpm/cli/commands/server.py:889
 msgid "  Security blacklist: ACTIVE"
-msgstr ""
+msgstr "  Sicherheits-Blacklist: AKTIV"
 
 #: urpm/cli/commands/server.py:890
 msgid "    Reason: "
-msgstr ""
+msgstr "    Grund:  "
 
 #: urpm/cli/commands/server.py:892
 msgid "    Since:  "
-msgstr ""
+msgstr "    Seit:   "
 
 #: urpm/cli/commands/server.py:897
 msgid "    Ack'd:  "
-msgstr ""
+msgstr "    Best.:  "
 
 #: urpm/cli/commands/server.py:898
 msgid " (persistent reminder silenced)"
-msgstr ""
+msgstr " (persistente Erinnerung stummgeschaltet)"
 
 #: urpm/cli/commands/server.py:901
 #, python-brace-format
@@ -4287,6 +4300,8 @@ msgid ""
 "    Run 'urpm server ack-blacklist {name}' to silence the reminder while you "
 "investigate."
 msgstr ""
+"    Führen Sie 'urpm server ack-blacklist {name}' aus, um die Erinnerung "
+"stummzuschalten, während Sie die Ursache untersuchen."
 
 #: urpm/cli/commands/server.py:904
 #, python-brace-format
@@ -4294,25 +4309,29 @@ msgid ""
 "    Run 'urpm server unblacklist {name}' after manual verification to re-"
 "enable."
 msgstr ""
+"    Führen Sie 'urpm server unblacklist {name}' nach manueller Prüfung aus, "
+"um den Server wieder zu aktivieren."
 
 #: urpm/cli/commands/server.py:915
 msgid "  Compromise history (signature failures):"
-msgstr ""
+msgstr "  Verlauf von Kompromittierungen (Signaturfehler):"
 
 #: urpm/cli/commands/server.py:934
 msgid "Reputation"
-msgstr ""
+msgstr "Reputation"
 
 #: urpm/cli/commands/server.py:938
 msgid ""
 "\n"
 "Recent failures (last 24h):"
 msgstr ""
+"\n"
+"Aktuelle Fehler (letzte 24 h):"
 
 #: urpm/cli/commands/server.py:979
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Server '{name}' was already acknowledged."
-msgstr "Peer {host} ist bereits auf der Sperrliste."
+msgstr "Server '{name}' wurde bereits bestätigt."
 
 #: urpm/cli/commands/server.py:985
 #, python-brace-format
@@ -4321,6 +4340,9 @@ msgid ""
 "silenced; the server stays out of every mirror pool until you run 'urpm "
 "server unblacklist {name}'."
 msgstr ""
+"Blacklist von '{name}' bestätigt. Die persistente Erinnerung ist jetzt "
+"stummgeschaltet; der Server bleibt aus allen Mirror-Pools ausgeschlossen, bis "
+"Sie 'urpm server unblacklist {name}' ausführen."
 
 #: urpm/cli/commands/cache.py:20
 msgid "Cache:"
@@ -6358,9 +6380,9 @@ msgid "  Installing urpm-ng..."
 msgstr " Installiere rpm-build..."
 
 #: urpm/cli/commands/build.py:627
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    repos failed, looking for local urpm-ng RPM ({arch})..."
-msgstr " urpm nicht in Repositories gefunden, suche lokales RPM..."
+msgstr "    Repos fehlgeschlagen, suche lokales urpm-ng-RPM ({arch})..."
 
 #: urpm/cli/commands/build.py:631
 #, python-brace-format
@@ -6378,11 +6400,14 @@ msgid ""
 "matching host (or in a {arch} container) and drop it into ~/Downloads or ./"
 "rpmbuild/RPMS/{arch}/."
 msgstr ""
+"    Kein lokales urpm-ng-RPM für Architektur '{arch}' gefunden. Bauen Sie "
+"eines auf einem passenden Host (oder in einem {arch}-Container) und legen "
+"Sie es in ~/Downloads oder ./rpmbuild/RPMS/{arch}/ ab."
 
 #: urpm/cli/commands/build.py:645
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  Path to urpm-ng RPM file ({arch}): "
-msgstr "  Pfad zur urpm-ng RPM-Datei: "
+msgstr "  Pfad zur urpm-ng-RPM-Datei ({arch}): "
 
 #: urpm/cli/commands/build.py:651
 msgid "No urpm-ng RPM provided or file not found"
@@ -6677,21 +6702,20 @@ msgid "  Copying SRPMs to {path}/"
 msgstr " Kopiere SRPMs nach {path}/"
 
 #: urpm/cli/commands/build.py:1355
-#, fuzzy
 msgid "Dynamic BuildRequires cannot be satisfied:"
-msgstr " Neuinstallation fehlgeschlagen:"
+msgstr "Dynamische BuildRequires können nicht erfüllt werden:"
 
 #: urpm/cli/commands/build.py:1371
 msgid "want"
-msgstr ""
+msgstr "benötigt"
 
 #: urpm/cli/commands/build.py:1372
 msgid "have"
-msgstr ""
+msgstr "vorhanden"
 
 #: urpm/cli/commands/build.py:1378
 msgid "no provider in any enabled medium"
-msgstr ""
+msgstr "kein Anbieter in einem aktivierten Medium"
 
 #: urpm/cli/commands/build.py:1467
 msgid "No container images found."
@@ -6919,8 +6943,12 @@ msgstr[1] ""
 msgid "{count} package could not be upgraded due to verification errors:"
 msgid_plural ""
 "{count} packages could not be upgraded due to verification errors:"
-msgstr[0] "{count} Paket kann aktualisiert werden"
-msgstr[1] "{count} Pakete können aktualisiert werden"
+msgstr[0] ""
+"{count} Paket konnte aufgrund von Verifizierungsfehlern nicht aktualisiert "
+"werden:"
+msgstr[1] ""
+"{count} Pakete konnten aufgrund von Verifizierungsfehlern nicht aktualisiert "
+"werden:"
 
 #: urpm/cli/commands/_install_pipeline.py:224
 msgid "These packages will be retried on the next update."
@@ -7078,103 +7106,94 @@ msgid "You should restart {service} for {packages}"
 msgstr "Sie sollten {service} neu starten für {packages}"
 
 #: urpm/core/triggers.py:26
-#, fuzzy
 msgid "Rebuilding MIME database"
-msgstr "Baue Cache-Datenbank neu auf..."
+msgstr "Baue MIME-Datenbank neu auf"
 
 #: urpm/core/triggers.py:27
 msgid "Updating desktop database"
-msgstr ""
+msgstr "Aktualisiere Desktop-Datenbank"
 
 #: urpm/core/triggers.py:28
-#, fuzzy
 msgid "Updating icon cache"
-msgstr "Aktualisiere {name}..."
+msgstr "Aktualisiere Icon-Cache"
 
 #: urpm/core/triggers.py:29
-#, fuzzy
 msgid "Updating man page index"
-msgstr "Aktualisiere Image {tag}..."
+msgstr "Aktualisiere Index der Manpages"
 
 #: urpm/core/triggers.py:30
-#, fuzzy
 msgid "Updating menus"
-msgstr "Aktualisiere {name}..."
+msgstr "Aktualisiere Menüs"
 
 #: urpm/core/triggers.py:31 urpm/core/triggers.py:44
 msgid "Updating shared library links"
-msgstr ""
+msgstr "Aktualisiere Links auf gemeinsame Bibliotheken"
 
 #: urpm/core/triggers.py:32
-#, fuzzy
 msgid "Rebuilding font cache"
-msgstr "Baue {count} Paket"
+msgstr "Baue Schriften-Cache neu auf"
 
 #: urpm/core/triggers.py:33
 msgid "Updating GTK icon cache"
-msgstr ""
+msgstr "Aktualisiere GTK-Icon-Cache"
 
 #: urpm/core/triggers.py:34
 msgid "Updating GDK pixbuf loaders"
-msgstr ""
+msgstr "Aktualisiere GDK-Pixbuf-Loader"
 
 #: urpm/core/triggers.py:35
 msgid "Compiling GSettings schemas"
-msgstr ""
+msgstr "Kompiliere GSettings-Schemata"
 
 #: urpm/core/triggers.py:36
-#, fuzzy
 msgid "Reloading systemd units"
-msgstr "System-Upgrade wird aufgelöst..."
+msgstr "Lade systemd-Units neu"
 
 #: urpm/core/triggers.py:37
 msgid "Updating TeX file database"
-msgstr ""
+msgstr "Aktualisiere TeX-Datei-Datenbank"
 
 #: urpm/core/triggers.py:38
 msgid "Updating CA certificates"
-msgstr ""
+msgstr "Aktualisiere CA-Zertifikate"
 
 #: urpm/core/triggers.py:39
-#, fuzzy
 msgid "Updating XML catalog"
-msgstr "Aktualisiere Image {tag}..."
+msgstr "Aktualisiere XML-Katalog"
 
 #: urpm/core/triggers.py:40
 msgid "Updating SGML catalog"
-msgstr ""
+msgstr "Aktualisiere SGML-Katalog"
 
 #: urpm/core/triggers.py:41
-#, fuzzy
 msgid "Updating info directory"
-msgstr "Arbeitsverzeichnis"
+msgstr "Aktualisiere info-Verzeichnis"
 
 #: urpm/core/triggers.py:42
 msgid "Updating GConf schemas"
-msgstr ""
+msgstr "Aktualisiere GConf-Schemata"
 
 #: urpm/core/triggers.py:43
 msgid "Updating GIO modules"
-msgstr ""
+msgstr "Aktualisiere GIO-Module"
 
 #: urpm/core/triggers.py:67
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Running: {package}"
-msgstr "Führe aus: {script_name}"
+msgstr "Führe aus: {package}"
 
 #: urpm/auth/privileges.py:109
-#, fuzzy
 msgid "This operation requires root privileges."
-msgstr "Fehler: Löschen erfordert Root-Rechte"
+msgstr "Dieser Vorgang erfordert Root-Rechte."
 
 #: urpm/auth/privileges.py:111
 #, python-brace-format
 msgid "Run: {cmd}"
-msgstr ""
+msgstr "Ausführen: {cmd}"
 
 #: urpm/auth/privileges.py:113
 msgid "Try one of:"
-msgstr ""
+msgstr "Versuchen Sie eines von:"
 
 #~ msgid "Installation interrupted"
 #~ msgstr "Installation unterbrochen"
