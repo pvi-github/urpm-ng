@@ -115,6 +115,8 @@ def _format_columns(
     terminal_width: Optional[int]
 ) -> List[str]:
     """Format packages in multi-column layout."""
+    from ..i18n import _
+
     # Get terminal width
     width = terminal_width or get_terminal_width()
     usable_width = width - indent
@@ -163,7 +165,7 @@ def _format_columns(
 
     # Add "and X more" message if truncated
     if hidden_count > 0:
-        result.append(prefix + f"... and {hidden_count} more")
+        result.append(prefix + "... " + _("and {count} more").format(count=hidden_count))
 
     return result
 

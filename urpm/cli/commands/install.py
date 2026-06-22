@@ -1018,7 +1018,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             full_sync = True
             pkgs = ', '.join(restart_info['system'])
             print(colors.warning(
-                _("System restart required ({packages}) — forcing full sync.").format(
+                _("System restart required ({packages}) — triggers will run in synchronous mode.").format(
                     packages=pkgs,
                 )
             ))
