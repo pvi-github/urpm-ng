@@ -2437,6 +2437,20 @@ class TestShouldRestart:
     needing RPM or chroot.
     """
 
+    @pytest.fixture(autouse=True)
+    def _force_null_translations(self, monkeypatch):
+        """Neutralise gettext so assertions match the English source.
+
+        ``urpm.i18n._translation`` is a module-level singleton
+        initialised from the dev machine's locale (often non-English).
+        Pinning it to ``NullTranslations`` makes every ``_(...)`` call
+        return its argument unchanged, regardless of ``LANG`` or the
+        loaded ``.mo`` file.
+        """
+        import gettext
+        from urpm import i18n
+        monkeypatch.setattr(i18n, "_translation", gettext.NullTranslations())
+
     @pytest.mark.stable
     def test_check_needs_restart_from_provides_system(self):
         """Package providing should-restart:system is detected."""
@@ -2671,11 +2685,16 @@ class TestSpecifyMedia(BaseUrpmiTest):
 
     def prepare(self):
         super().prepare()
-        # Create the symlink 'media/various_bis' -> 'media/various'
+        # Create the symlink 'media/various_bis' -> 'media/various'.
+        # Use is_symlink() rather than exists() since exists() follows
+        # the symlink and reports False when the link is broken — which
+        # leaves a stale broken link in place that makes symlink_to()
+        # fail with FileExistsError on the next run.
         src = self.media_dir / "various"
         dst = self.media_dir / "various_bis"
-        if not dst.exists():
-            dst.symlink_to(src.resolve())
+        if dst.is_symlink() or dst.exists():
+            dst.unlink()
+        dst.symlink_to(src.resolve())
 
         for medium in self.MEDIA:
             ret, _ = self._addmedia(f"media/{medium}")
