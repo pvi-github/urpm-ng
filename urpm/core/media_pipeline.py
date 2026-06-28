@@ -49,7 +49,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
-from typing import Optional
+from typing import Callable, Optional, Tuple
 from urllib.parse import urlparse
 
 from urpm.cli.helpers.media import (
@@ -140,12 +140,18 @@ class UpsertResult:
     Attributes:
         server_id: ID of the server upserted from the input URL.
         server_name: Display name of the server.
+        server_was_created: ``True`` when the server entry was
+            inserted during this call, ``False`` when an existing
+            row matched ``(protocol, host, base_path)`` and was
+            reused.  Useful for the CLI to display ``(new)`` vs
+            ``(existing)`` next to the server name.
         outcomes: One :class:`UpsertOutcome` per media candidate
             discovered at the URL (zero for an empty catalogue).
     """
 
     server_id: int
     server_name: str
+    server_was_created: bool
     outcomes: list[UpsertOutcome]
 
 
@@ -333,6 +339,10 @@ def upsert_media_tree(
     mode: str = "discover",
     server_priority: int = 50,
     server_is_official: Optional[bool] = None,
+    catalogue: Optional[Tuple[MediaCfgInfo, list[DiscoveredMedia]]] = None,
+    raw_catalogue: Optional[str] = None,
+    media_filter: Optional[Callable[[DiscoveredMedia], bool]] = None,
+    enabled_policy: Optional[Callable[[DiscoveredMedia], bool]] = None,
 ) -> UpsertResult:
     """Insert or reconcile media entries discovered at *url*.
 
@@ -363,6 +373,29 @@ def upsert_media_tree(
             catalogue / URL parser.  Pass an explicit value to
             override (e.g. for community repos served from official
             mirror hosts).
+        catalogue: Pre-parsed ``(MediaCfgInfo, [DiscoveredMedia])``
+            tuple.  When provided, the primitive skips the network
+            fetch and uses this catalogue directly.  Used by callers
+            that need to preview the catalogue (display plan, dry-run)
+            before performing the actual upsert — avoids a second
+            HTTP round-trip.
+        raw_catalogue: Companion to ``catalogue`` — the raw text of
+            the media.cfg used to feed ``resolve_display_name``'s
+            ``parent_cfg_sections`` argument.  When ``catalogue`` is
+            passed but ``raw_catalogue`` is not, display-name
+            resolution falls back to the network or the computed
+            Title-Cased default.
+        media_filter: Optional ``DiscoveredMedia -> bool`` callable.
+            Media for which the filter returns False are silently
+            skipped (no outcome produced).  Default: include
+            everything from the catalogue.  Used by ``cmd_media_discover``
+            to drop SRPMS / debug media before any DB write.
+        enabled_policy: Optional ``DiscoveredMedia -> bool`` callable
+            that decides the ``enabled`` field for each media row.
+            Default: ``not media.noauto`` (the catalogue marker).
+            Used by ``cmd_media_discover`` to apply smart-enable
+            policies based on detected installed categories
+            (nonfree, tainted, 32-bit).
 
     Returns:
         An :class:`UpsertResult` summarising what happened.
@@ -381,18 +414,25 @@ def upsert_media_tree(
 
     hint = hint or {}
 
-    # ── Step 1: probe the catalogue. ────────────────────────────────
+    # ── Step 1: probe the catalogue (unless pre-loaded). ────────────
     info: Optional[MediaCfgInfo] = None
     medias: list[DiscoveredMedia] = []
     catalogue_url = url.rstrip("/") + "/"
+    raw = raw_catalogue
 
-    try:
-        raw = fetch_media_cfg(catalogue_url)
-    except Exception as exc:  # pycurl / network / 4xx / 5xx
-        logger.debug("catalogue fetch failed for %s: %s", url, exc)
-        raw = None
+    if catalogue is not None:
+        info, medias = catalogue
+        # raw is whatever the caller passed (may be None).
+    else:
+        try:
+            raw = fetch_media_cfg(catalogue_url)
+        except Exception as exc:  # pycurl / network / 4xx / 5xx
+            logger.debug("catalogue fetch failed for %s: %s", url, exc)
+            raw = None
 
-    if raw is not None:
+    if raw is not None and catalogue is None:
+        # Only parse if we fetched the raw text ourselves; when the caller
+        # passed a pre-parsed catalogue, info/medias are already set.
         media_root = _build_relative_path(
             _extract_version_from_url(url) or hint.get("version") or "",
             _extract_arch_from_url(url) or hint.get("arch") or "",
@@ -427,6 +467,7 @@ def upsert_media_tree(
     )
 
     server = db.get_server_by_location(protocol, host, base_path)
+    server_was_created = False
     if server is None:
         server_name = generate_server_name(protocol, host)
         server_id = _add_server_with_unique_name(
@@ -435,6 +476,7 @@ def upsert_media_tree(
             priority=server_priority,
         )
         server = {"id": server_id, "name": server_name}
+        server_was_created = True
     server_id = server["id"]
     server_name = server["name"]
 
@@ -443,6 +485,9 @@ def upsert_media_tree(
     parent_cfg_sections = _build_parent_sections_map(raw, medias) if raw else None
 
     for media in medias:
+        # Caller-supplied filter (e.g. drop SRPMS/debug for ``discover``).
+        if media_filter is not None and not media_filter(media):
+            continue
         outcome = _process_one_media(
             db,
             server_id=server_id,
@@ -452,12 +497,14 @@ def upsert_media_tree(
             hint=hint,
             mode=mode,
             parent_cfg_sections=parent_cfg_sections,
+            enabled_policy=enabled_policy,
         )
         outcomes.append(outcome)
 
     return UpsertResult(
         server_id=server_id,
         server_name=server_name,
+        server_was_created=server_was_created,
         outcomes=outcomes,
     )
 
@@ -595,6 +642,7 @@ def _process_one_media(
     hint: dict,
     mode: str,
     parent_cfg_sections: Optional[dict],
+    enabled_policy: Optional[Callable[[DiscoveredMedia], bool]] = None,
 ) -> UpsertOutcome:
     """Apply the decision tree to a single media candidate.
 
@@ -650,7 +698,13 @@ def _process_one_media(
         else media.is_official
     )
     allow_unsigned = bool(hint.get("allow_unsigned", False))
-    enabled = bool(hint.get("enabled", not media.noauto))
+    # Enabled value cascade: hint > policy callback > catalogue noauto flag.
+    if "enabled" in hint:
+        enabled = bool(hint["enabled"])
+    elif enabled_policy is not None:
+        enabled = bool(enabled_policy(media))
+    else:
+        enabled = not media.noauto
     update_media = bool(hint.get("update_media", media.is_update))
     priority = int(hint.get("priority", 50))
 

@@ -1941,7 +1941,6 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
     from ...core.media_cfg import (
         fetch_media_cfg, parse_media_cfg, filter_media, decompose_url,
         detect_installed_categories, should_enable,
-        resolve_display_name, is_ugly_name,
     )
 
     url = args.url
@@ -2091,95 +2090,64 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
         print(colors.warning(_("\nDry run — no changes made")))
         return 0
 
-    # ── Create server ────────────────────────────────────────────────
-    server = db.get_server_by_location(scheme, host, base_path)
+    # ── Delegate to the canonical primitive ──────────────────────────
+    # The primitive handles server upsert, per-media decision tree,
+    # display-name resolution (single source of truth), invariant
+    # enforcement (no orphan media, no ugly synthesized names).
+    # We supply:
+    #   * the already-parsed catalogue (avoids a second fetch);
+    #   * a per-media enabled policy that applies smart-enable rules
+    #     from detected installed categories + CLI overrides.
+    from ...core.media_pipeline import (
+        MediaTreeAttributeError,
+        MediaTreeFetchError,
+        upsert_media_tree,
+    )
 
-    if not server:
-        server_name = _generate_server_name(scheme, host)
-        base_server_name = server_name
-        counter = 1
-        while db.get_server(server_name):
-            counter += 1
-            server_name = f"{base_server_name}-{counter}"
-
-        is_official = any(m.is_official for m in media_list)
-        server_id = db.add_server(
-            name=server_name,
-            protocol=scheme,
-            host=host,
-            base_path=base_path,
-            is_official=is_official,
-        )
-        server = db.get_server(server_name)
-        print(colors.info(_("  Server: {name} (new)").format(name=server_name)))
-    else:
-        print(colors.info(_("  Server: {name} (existing)").format(name=server['name'])))
-
-    # ── Create media and link ────────────────────────────────────────
-    added = 0
-    existed = 0
-
-    for m in media_list:
-        enabled = should_enable(
+    def _enabled_for(m):
+        return should_enable(
             m, installed,
             force_nonfree=force_nonfree,
             force_tainted=force_tainted,
             force_32bit=force_32bit,
             force_enable_all=enable_all,
         )
-        # ``parse_media_cfg`` already produces ``m.name`` from either
-        # the upstream ``name=`` field or a Title-Cased fallback built
-        # from the section path.  Only fall back to the network
-        # recovery path when the candidate looks like a raw snake-case
-        # artefact (e.g. ``mga10-urpm_release``), which means upstream
-        # set an ugly ``name=`` value explicitly.
-        media_name = m.name
-        if is_ugly_name(media_name):
-            media_url = f"{scheme}://{host}{base_path}/{m.relative_path}/"
-            media_name = resolve_display_name(
-                media_url=media_url,
-                section=m.section,
-                prefer="local",  # global is what we already saw and rejected
-            )
 
-        existing = db.get_media_by_version_arch_shortname(
-            m.version, m.architecture, m.short_name)
+    try:
+        result = upsert_media_tree(
+            db,
+            url,
+            mode="discover",
+            catalogue=(info, media_list),
+            raw_catalogue=content,
+            enabled_policy=_enabled_for,
+        )
+    except MediaTreeFetchError as exc:
+        print(colors.error(str(exc)))
+        return 1
+    except MediaTreeAttributeError as exc:
+        print(colors.error(_(
+            "Cannot determine {field} for media — {exc}").format(
+                field=exc.field, exc=exc)))
+        return 1
 
-        if existing:
-            if not db.server_media_link_exists(server['id'], existing['id']):
-                db.link_server_media(server['id'], existing['id'])
-            existed += 1
-            continue
+    server = {"id": result.server_id, "name": result.server_name}
+    if result.server_was_created:
+        print(colors.info(_("  Server: {name} (new)").format(name=server["name"])))
+    else:
+        print(colors.info(_("  Server: {name} (existing)").format(name=server["name"])))
 
-        try:
-            media_name = disambiguate_media_name(
-                db, media_name, m.architecture)
-        except MediaNameCollision as exc:
-            print(colors.error(_(
-                "  Skipping {section}: display name '{name}' already "
-                "taken by media #{id} ('{existing}')")
-                .format(section=m.section, name=exc.base_name,
-                        id=exc.existing['id'],
-                        existing=exc.existing['name'])))
-            continue
+    # Surface any skipped entries so the user knows what was not
+    # ingested and why.
+    for outcome in result.outcomes:
+        if outcome.action == "skipped":
+            print(colors.error("  " + outcome.reason))
 
-        try:
-            media_id = db.add_media(
-                name=media_name,
-                short_name=m.short_name,
-                mageia_version=m.version,
-                architecture=m.architecture,
-                relative_path=m.relative_path,
-                is_official=m.is_official,
-                allow_unsigned=not m.is_official,
-                enabled=enabled,
-                update_media=m.is_update,
-            )
-            db.link_server_media(server['id'], media_id)
-            added += 1
-        except Exception as e:
-            print(colors.error(
-                _("  Failed to add {name}: {err}").format(name=media_name, err=e)))
+    added = sum(1 for o in result.outcomes if o.action == "created")
+    existed = sum(
+        1 for o in result.outcomes
+        if o.action in ("noop", "relinked", "updated")
+    )
 
     # ── Link other enabled servers (MD5 verified) ─────────────────────
     other_servers = [s for s in db.list_servers(enabled_only=True)

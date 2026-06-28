@@ -368,3 +368,110 @@ class TestHintOverrides:
 
         assert result.outcomes[0].action == "created"
         assert db.get_media("mgabiz-stable") is not None
+
+
+# ── Pre-parsed catalogue, filter and enabled_policy hooks ────────────
+
+
+class TestCatalogueParam:
+    """``catalogue=...`` lets the caller pre-load the parsed catalogue
+    (preview + dry-run flow) and skip the second fetch."""
+
+    def test_pre_parsed_catalogue_avoids_fetch(self, db, monkeypatch):
+        # Make any fetch attempt blow up — proves it never runs.
+        from urpm.core import media_cfg
+
+        def boom(*_args, **_kw):
+            raise AssertionError("fetch_media_cfg must not be called")
+
+        monkeypatch.setattr(media_pipeline, "fetch_media_cfg", boom)
+        monkeypatch.setattr(media_cfg, "fetch_media_cfg", boom)
+
+        raw = load_media_cfg("official_mageia_9_x86_64")
+        info_medias = parse_pre_loaded(raw)
+
+        result = upsert_media_tree(
+            db,
+            "https://mirror.example/mageia/9/x86_64/media/",
+            catalogue=info_medias,
+            raw_catalogue=raw,
+        )
+
+        assert len(result.outcomes) == 8
+        assert {o.action for o in result.outcomes} == {"created"}
+
+
+class TestMediaFilter:
+    """``media_filter`` lets the caller drop entries before any DB write."""
+
+    def test_filter_keeps_only_release_media(self, db, serve_catalogue):
+        serve_catalogue("official_mageia_9_x86_64")
+
+        # Keep only release media (drop updates, backports, etc.).
+        def only_release(m):
+            return m.section.endswith("/release")
+
+        result = upsert_media_tree(
+            db, "https://mirror.example/mageia/9/x86_64/media/",
+            media_filter=only_release,
+        )
+
+        # core/release, nonfree/release, tainted/release = 3 entries
+        assert len(result.outcomes) == 3
+        assert all(o.short_name.endswith("_release") for o in result.outcomes)
+
+    def test_filter_skip_all_yields_zero_outcomes(
+        self, db, serve_catalogue,
+    ):
+        serve_catalogue("official_mageia_9_x86_64")
+        result = upsert_media_tree(
+            db, "https://mirror.example/mageia/9/x86_64/media/",
+            media_filter=lambda m: False,
+        )
+        assert result.outcomes == []
+        # Server still upserted even when no media is processed —
+        # consistent with the "discover what's there" semantics.
+        assert result.server_id is not None
+
+
+class TestEnabledPolicy:
+    """``enabled_policy`` overrides the default ``not noauto`` rule."""
+
+    def test_policy_forces_everything_off(self, db, serve_catalogue):
+        serve_catalogue("official_mageia_9_x86_64")
+        upsert_media_tree(
+            db, "https://mirror.example/mageia/9/x86_64/media/",
+            enabled_policy=lambda m: False,
+        )
+
+        for media in db.list_media():
+            assert media["enabled"] == 0
+
+    def test_policy_forces_backports_on(self, db, serve_catalogue):
+        serve_catalogue("official_mageia_9_x86_64")
+
+        # noauto=1 backports are normally disabled; force them on for
+        # this run while leaving the rest at catalogue default.
+        def smart(m):
+            if m.section.startswith("core/backports"):
+                return True
+            return not m.noauto
+
+        upsert_media_tree(
+            db, "https://mirror.example/mageia/9/x86_64/media/",
+            enabled_policy=smart,
+        )
+
+        backports = next(
+            m for m in db.list_media() if m["short_name"] == "core_backports"
+        )
+        assert backports["enabled"] == 1
+
+
+# Helper used by TestCatalogueParam.
+def parse_pre_loaded(raw):
+    """Re-parse a media.cfg locally to mimic what a CLI command would do
+    before passing the result to ``upsert_media_tree`` via ``catalogue=``.
+    """
+    from urpm.core.media_cfg import parse_media_cfg
+    return parse_media_cfg(raw, "9/x86_64/media")
