@@ -662,122 +662,120 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
                 print(colors.error(_("  Failed to import key")))
                 return 1
 
-    # --- Server upsert ---
-    # Check if server already exists by protocol+host+base_path
-    server = db.get_server_by_location(protocol, host, base_path)
-    server_created = False
+    # --- Pre-check: explicit --name collision is a hard error ---
+    # The primitive's ``disambiguate_media_name`` would happily suffix
+    # an auto-derived name with " ({arch})" when a foreign-arch sibling
+    # already owns the canonical form.  That convenience is wrong when
+    # the user explicitly typed --name X — we must refuse, not silently
+    # rename.  Detect this pre-emptively at the CLI layer where we know
+    # the name came from --name (not from URL parsing).
+    explicit_name = (
+        not is_custom and getattr(args, 'name', None)
+    )
+    if explicit_name:
+        existing_by_name = db.get_media(name)
+        if existing_by_name:
+            print(colors.error(_(
+                "Error: media name {name!r} already taken by "
+                "media #{id} ({existing}); pass a different "
+                "--name").format(
+                    name=name, id=existing_by_name['id'],
+                    existing=existing_by_name['name'])))
+            return 1
 
-    if not server:
-        # Create new server
-        server_name = _generate_server_name(protocol, host)
-        # Make server name unique if needed
-        base_server_name = server_name
-        counter = 1
-        while True:
-            try:
-                server_id = db.add_server(
-                    name=server_name,
-                    protocol=protocol,
-                    host=host,
-                    base_path=base_path,
-                    is_official=is_official,
-                    enabled=True,
-                    priority=50
-                )
-                server_created = True
-                print(_("  Created server '{name}' (id={id})").format(name=server_name, id=server_id))
-                server = {'id': server_id, 'name': server_name}
-                break
-            except Exception as e:
-                if 'UNIQUE constraint' in str(e) and 'name' in str(e):
-                    counter += 1
-                    server_name = f"{base_server_name}-{counter}"
-                else:
-                    raise
+    # --- Delegate to the canonical primitive ---
+    # The primitive enforces the invariants (no orphan media, no
+    # placeholder values persisted, single-source display name
+    # resolution).  Build a hint dict that carries the CLI overrides
+    # (-‍-name / --custom / --version / --disabled / --update /
+    # --allow-unsigned) and let ``upsert_single_media`` do the rest.
+    from ...core.media_pipeline import (
+        MediaTreeAttributeError,
+        MediaTreeFetchError,
+        upsert_single_media,
+    )
+
+    hint = {
+        "name": name,
+        "short_name": short_name,
+        "version": version,
+        "arch": arch,
+        "relative_path": relative_path,
+        "is_official": is_official,
+        "allow_unsigned": allow_unsigned,
+        "enabled": not getattr(args, "disabled", False),
+        "update_media": getattr(args, "update", False),
+    }
+
+    try:
+        result = upsert_single_media(db, url, hint=hint, mode="discover")
+    except MediaTreeFetchError as exc:
+        print(colors.error(_("Error: URL not recognized as a media tree.")))
+        print(_("For official media, URL must contain: .../version/arch/media/class/type/"))
+        print(_("For custom media, use: urpm media add --custom <name> <short_name> <url>"))
+        print(colors.dim(f"  {exc}"))
+        return 1
+    except MediaTreeAttributeError as exc:
+        print(colors.error(_("Cannot determine {field} for this media — {exc}").format(
+            field=exc.field, exc=exc)))
+        return 1
+
+    outcome = result.outcomes[0]
+
+    # Re-fetch the row so we can show its current state (and react to
+    # the disabled-on-disk case below).
+    media_row = (
+        db.get_media_by_version_arch_shortname(version, arch, short_name)
+        or {"id": outcome.media_id, "name": outcome.media_name, "enabled": 1}
+    )
+    final_name = media_row["name"]
+
+    if result.server_was_created:
+        print(_("  Created server '{name}' (id={id})").format(
+            name=result.server_name, id=result.server_id))
     else:
-        print(_("  Using existing server '{name}' (id={id})").format(name=server['name'], id=server['id']))
+        print(_("  Using existing server '{name}' (id={id})").format(
+            name=result.server_name, id=result.server_id))
 
-    # --- Media upsert ---
-    # Check if media already exists by version+arch+short_name
-    media = db.get_media_by_version_arch_shortname(version, arch, short_name)
-    media_created = False
+    if outcome.action == "skipped":
+        # Display-name collision the primitive declined to resolve
+        # silently.  Surface it as a clear error and exit non-zero so
+        # the user knows nothing was added.
+        print(colors.error("  " + outcome.reason))
+        print(colors.dim(_("Pass --name to choose a different display name, "
+                           "or remove the colliding media first.")))
+        return 1
 
+    if outcome.action == "created":
+        print(_("  Created media '{name}' (id={id})").format(
+            name=final_name, id=outcome.media_id))
+    else:
+        print(_("  Using existing media '{name}' (id={id})").format(
+            name=final_name, id=outcome.media_id))
+
+    # Re-enable a previously-disabled media when the user re-adds it
+    # explicitly (without --disabled).  The primitive's discover mode
+    # doesn't touch the ``enabled`` flag on existing rows; the
+    # re-enable on re-add is a deliberate CLI affordance.
     media_reactivated = False
-    if not media:
-        # ``UNIQUE(media.name)`` would otherwise abort the INSERT when
-        # the display name is already taken by a different media (cross-
-        # arch sibling being the typical case).  Two regimes:
-        #
-        # * No ``--name``: name is auto-derived from the URL.  Apply the
-        #   silent arch-suffix convention via ``disambiguate_media_name``.
-        # * Explicit ``--name``: user authority.  No silent renaming —
-        #   surface a clear error and let the user pick another value.
-        explicit_name = (
-            not is_custom and getattr(args, 'name', None)
-        )
-        if explicit_name:
-            existing_by_name = db.get_media(name)
-            if existing_by_name:
-                print(colors.error(_(
-                    "Error: media name {name!r} already taken by "
-                    "media #{id} ({existing}); pass a different "
-                    "--name").format(
-                        name=name, id=existing_by_name['id'],
-                        existing=existing_by_name['name'])))
-                return 1
-        else:
-            try:
-                name = disambiguate_media_name(db, name, arch)
-            except MediaNameCollision as exc:
-                print(colors.error(_(
-                    "Error: derived name {name!r} already taken by "
-                    "media #{id} ({existing}); pass --name to "
-                    "override").format(
-                        name=exc.base_name, id=exc.existing['id'],
-                        existing=exc.existing['name'])))
-                return 1
-        # Create new media
-        media_id = db.add_media(
-            name=name,
-            short_name=short_name,
-            mageia_version=version,
-            architecture=arch,
-            relative_path=relative_path,
-            is_official=is_official,
-            allow_unsigned=allow_unsigned,
-            enabled=not getattr(args, 'disabled', False),
-            update_media=getattr(args, 'update', False),
-            priority=50,
-            url=None  # No legacy URL needed with server/media model
-        )
-        media_created = True
-        print(_("  Created media '{name}' (id={id})").format(name=name, id=media_id))
-        media = {'id': media_id, 'name': name}
-    else:
-        print(_("  Using existing media '{name}' (id={id})").format(name=media['name'], id=media['id']))
-        media_id = media['id']
-        # Re-enable a previously-disabled media: ``urpm media add`` is the
-        # natural way for a user to re-introduce a media after disabling
-        # it, and silently leaving ``enabled=0`` makes the media invisible
-        # to ``urpm media update`` (Bug 1).  Honour ``--disabled`` if the
-        # user explicitly asked to keep it off.
-        if not media.get('enabled') and not getattr(args, 'disabled', False):
-            db.enable_media(media['name'], enabled=True)
+    if outcome.action in ("noop", "relinked", "updated") and not media_row.get("enabled"):
+        if not getattr(args, "disabled", False):
+            db.enable_media(media_row["name"], enabled=True)
             media_reactivated = True
-            print(colors.success(_("  Media '{name}' re-enabled (was disabled)").format(name=media['name'])))
+            print(colors.success(_("  Media '{name}' re-enabled (was disabled)").format(
+                name=final_name)))
 
-    # --- Link server to media ---
-    if not db.server_media_link_exists(server['id'], media['id']):
-        db.link_server_media(server['id'], media['id'])
-        print(_("  Linked server '{server}' -> media '{media}'").format(server=server['name'], media=media['name']))
-    else:
-        print(_("  Link already exists: server '{server}' -> media '{media}'").format(server=server['name'], media=media['name']))
+    if outcome.action in ("created", "updated", "relinked"):
+        print(_("  Linked server '{server}' -> media '{media}'").format(
+            server=result.server_name, media=final_name))
+    else:  # noop
+        print(_("  Link already exists: server '{server}' -> media '{media}'").format(
+            server=result.server_name, media=final_name))
 
-    # Summary — always reference the media actually processed (``media['name']``).
-    # Using the URL-derived ``name`` here misreports cases where the existing
-    # media's display name differs from what we just parsed (Bug 2).
-    final_name = media['name']
+    # ── Summary line ─────────────────────────────────────────────────
     print()
+    server_created = result.server_was_created
+    media_created = outcome.action == "created"
     if server_created and media_created:
         print(colors.success(_("Added media '{name}' with new server").format(name=final_name)))
     elif media_created:

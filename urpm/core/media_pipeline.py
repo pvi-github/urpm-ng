@@ -174,23 +174,30 @@ def _is_placeholder(value: Optional[str]) -> bool:
 def _split_url(url: str) -> tuple[str, str, str]:
     """Split *url* into ``(protocol, host, base_path)``.
 
-    ``base_path`` is everything before the ``<version>/<arch>/media/``
-    suffix when present, or the full path when no Mageia pattern is
-    recognised.  Strips the trailing slash.
+    ``base_path`` is everything *before* the first ``<version>/<arch>``
+    segment pair, when such a Mageia-style pattern is detected.  When
+    no pattern is recognised (custom file:// URLs, community repos
+    that don't follow the Mageia layout), ``base_path`` is the empty
+    string and the entire path is expected to live in the media's
+    ``relative_path``.  This matches the existing
+    ``parse_custom_media_url`` convention so the server URL the rest
+    of the codebase reconstructs from ``server.base_path`` and
+    ``media.relative_path`` never duplicates path segments.
     """
     parsed = urlparse(url.rstrip("/"))
     protocol = parsed.scheme or "https"
     host = parsed.netloc
     path = parsed.path or ""
 
-    # Heuristic: find the last `<version>/<arch>` segment pair and
+    # Heuristic: find the first `<version>/<arch>` segment pair and
     # treat everything before it as the server base_path.
     parts = [p for p in path.split("/") if p]
     for i in range(len(parts) - 1):
         if _VERSION_RE.fullmatch(parts[i]) and parts[i + 1] in _KNOWN_ARCHES:
             base = "/" + "/".join(parts[:i]) if parts[:i] else ""
             return protocol, host, base
-    return protocol, host, path
+    # No Mageia pattern recognised — leave base_path empty.
+    return protocol, host, ""
 
 
 def _extract_version_from_url(url: str) -> str:
@@ -506,6 +513,83 @@ def upsert_media_tree(
         server_name=server_name,
         server_was_created=server_was_created,
         outcomes=outcomes,
+    )
+
+
+def upsert_single_media(
+    db,
+    url: str,
+    *,
+    hint: Optional[dict] = None,
+    mode: str = "discover",
+) -> UpsertResult:
+    """Insert exactly one media identified by its URL, no tree discovery.
+
+    Thin wrapper around :func:`upsert_media_tree` for callers that
+    know they want to upsert one specific media (``urpm media add``,
+    ``urpm media import`` on URL-direct entries) rather than walk an
+    entire catalogue.  Forces the URL-parser fallback path: skips
+    the catalogue fetch entirely and builds a synthetic
+    :class:`DiscoveredMedia` from the URL pattern + caller hints.
+
+    Why this exists: when the caller passes a per-media URL like
+    ``https://mirror/9/x86_64/media/core/release/``, blindly calling
+    ``upsert_media_tree`` could try to fetch a catalogue at that URL
+    (which would fetch the per-media manifest if it exists), with
+    ambiguous semantics.  This wrapper sidesteps the question by
+    going straight to URL parsing.
+
+    Args:
+        db: Database accessor (same contract as
+            :func:`upsert_media_tree`).
+        url: URL of one specific media (must match a known Mageia or
+            custom pattern that the URL parsers can decompose).
+        hint: Same semantics as in :func:`upsert_media_tree`.  Used
+            here to carry ``--name`` / ``--custom`` overrides.
+        mode: Same values as :func:`upsert_media_tree`.
+
+    Returns:
+        An :class:`UpsertResult` with exactly one outcome.
+
+    Raises:
+        MediaTreeFetchError: When neither URL parser recognises *url*.
+        MediaTreeAttributeError: When the cascade cannot resolve a
+            required attribute.
+    """
+    hint = hint or {}
+    parsed = parse_mageia_media_url(url) or parse_custom_media_url(url)
+    if parsed is None:
+        raise MediaTreeFetchError(
+            f"URL {url!r} does not match any known media URL pattern"
+        )
+
+    # An "unidentifiable" URL is one where neither the URL parser nor
+    # the caller-provided hint supplies a version/arch.  When the
+    # caller has explicit values (e.g. ``urpm media add --custom`` +
+    # explicit ``--version``, or a ``file://`` URL where the test
+    # passes version+arch out-of-band), the URL itself doesn't need
+    # to embed them.
+    final_version = parsed.get("version") or hint.get("version") or ""
+    final_arch = parsed.get("arch") or hint.get("arch") or ""
+    if not final_version or not final_arch:
+        raise MediaTreeFetchError(
+            f"URL {url!r} does not embed a recognised "
+            f"version/arch pattern, and the caller did not provide "
+            f"these via hint either"
+        )
+
+    info = MediaCfgInfo(
+        version=final_version,
+        arch=final_arch,
+        branch="",
+    )
+    synthetic = _synthesise_media_from_url_parse(parsed, hint)
+    return upsert_media_tree(
+        db,
+        url,
+        hint=hint,
+        mode=mode,
+        catalogue=(info, [synthetic]),
     )
 
 
