@@ -1809,108 +1809,111 @@ def cmd_media_autoconfig(args, db: 'PackageDatabase') -> int:
         print(colors.warning(_("all mirrors unreachable")))
         return 1
 
-    # Sort by latency and pick top 3
+    # Sort by latency and pick top N (3 by default — gives parallel
+    # download targets without depending on a single host).
     latencies.sort(key=lambda x: x[0])
     best_mirrors = latencies[:3]
     print(_("best: {latency:.0f}ms").format(latency=best_mirrors[0][0]*1000))
 
-    # Extract base URL from mirror URL
-    # Mirror URL format: https://mirror.example.com/path/distrib/<release>/<arch>
-    # We need: https://mirror.example.com/path/distrib/
-    def extract_base_url(mirror_url, release, arch):
-        """Extract base URL from distrib URL."""
-        # Pattern to match and remove: /<release>/<arch> at the end
-        pattern = rf'/{re.escape(str(release))}/{re.escape(arch)}/?$'
-        base = re.sub(pattern, '', mirror_url).rstrip('/')
-        return base
+    # ── Delegate to the canonical primitive ──────────────────────────
+    # Replace the historic hardcoded media-types loop (which
+    # synthesised ugly names like ``mga{release}-{class}-{type}``)
+    # with a call to ``upsert_media_tree`` per mirror.  The primitive
+    # fetches ``media_info/media.cfg`` from each chosen mirror, so
+    # display names come from the upstream catalogue (e.g. ``Core
+    # Release``) — the single source of truth required by invariant
+    # (b).  Each subsequent mirror after the first re-links the
+    # already-created media, so all best_mirrors end up wired to the
+    # full set (this also closes the historic bug where only the
+    # single best mirror was attached as a server).
+    from ...core.media_pipeline import (
+        MediaTreeAttributeError,
+        MediaTreeFetchError,
+        upsert_media_tree,
+    )
 
-    # Check existing media to avoid duplicates
-    existing_media = db.list_media()
-    existing_names = {m['name'] for m in existing_media}
+    # Apply --no-nonfree / --no-tainted via the primitive's
+    # media_filter hook.  The filter inspects the parsed
+    # ``DiscoveredMedia`` from the catalogue, not a hardcoded list.
+    def _wanted(m):
+        if no_nonfree and m.is_nonfree:
+            return False
+        if no_tainted and m.is_tainted:
+            return False
+        # Don't pick SRPMs / debug media in autoconfig — users who
+        # want them go through ``urpm media discover --sources / --debug``.
+        if m.is_srpms or m.is_debug:
+            return False
+        # Backports / testing are noauto in catalogue and stay disabled,
+        # but they end up in the DB so users can flip them on later.
+        return True
 
-    # Add media
+    if dry_run:
+        # Surface what would happen without writing to the database.
+        # We do a single fetch to preview the catalogue from the
+        # primary best mirror.
+        from ...core.media_cfg import fetch_media_cfg, parse_media_cfg
+        primary = best_mirrors[0][1].rstrip('/') + '/media/'
+        try:
+            content = fetch_media_cfg(primary)
+        except Exception as exc:
+            print(colors.error(_("Failed to fetch catalogue: {error}").format(error=exc)))
+            return 1
+        info, all_media = parse_media_cfg(
+            content, f"{release}/{arch}/media",
+        )
+        wanted = [m for m in all_media if _wanted(m)]
+        print(_("Dry run — would attach {n} media from {n_mirrors} mirror(s):").format(
+            n=len(wanted), n_mirrors=len(best_mirrors)))
+        for m in wanted:
+            print(f"    {m.name} ({m.architecture})")
+        return 0
+
+    # Iterate over the best mirrors.  First call creates media +
+    # links the first server; subsequent calls re-link the same
+    # media to additional servers.
     added = 0
-    skipped = 0
+    relinked = 0
+    server_count = 0
 
-    # First, add servers from best mirrors
-    server_to_use = None
-    for latency, mirror_url in best_mirrors[:1]:  # Just use the best one
-        base_url = extract_base_url(mirror_url, release, arch)
-        parsed = urlparse(base_url)
-        server_name = parsed.hostname
-        country = _mirror_country.get(mirror_url) or None
-
-        # Check if server already exists
-        existing_server = db.get_server(server_name)
-        if existing_server:
-            server_to_use = existing_server
-        elif not dry_run:
-            db.add_server(
-                name=server_name,
-                protocol=parsed.scheme,
-                host=parsed.hostname,
-                base_path=parsed.path,
-                country=country,
+    for latency, mirror_url in best_mirrors:
+        catalogue_url = mirror_url.rstrip('/') + '/media/'
+        try:
+            result = upsert_media_tree(
+                db,
+                catalogue_url,
+                mode="discover",
+                media_filter=_wanted,
             )
-            print(_("  Added server: {name}").format(name=server_name))
-            server_to_use = db.get_server(server_name)
-        else:
-            print(_("  Would add server: {name} ({url})").format(name=server_name, url=base_url))
-
-    # Add each media type
-    for media_type, repo, name_suffix in media_types:
-        # Media name: e.g., "mga10-core-release" or "mga10-x86_64-core-release" for non-host arch
-        if arch == system_arch():
-            media_name = f"mga{release}-{media_type}-{repo}"
-        else:
-            media_name = f"mga{release}-{arch}-{media_type}-{repo}"
-
-        if media_name in existing_names:
-            print(_("  Skipping {name} (already exists)").format(name=media_name))
-            skipped += 1
+        except MediaTreeFetchError as exc:
+            print(colors.warning(_("  Skipping {url}: {exc}").format(
+                url=mirror_url, exc=exc)))
+            continue
+        except MediaTreeAttributeError as exc:
+            print(colors.warning(_("  Skipping {url}: missing {field}").format(
+                url=mirror_url, field=exc.field)))
             continue
 
-        # Relative path for this media: <release>/<arch>/media/<type>/<repo>/
-        relative_path = f"{release}/{arch}/media/{media_type}/{repo}"
+        if result.server_was_created:
+            server_count += 1
+            print(_("  Added server: {name} ({lat:.0f}ms)").format(
+                name=result.server_name, lat=latency * 1000))
 
-        if dry_run:
-            print(_("  Would add media: {name} -> {path}").format(name=media_name, path=relative_path))
-        else:
-            # Add the media
-            is_update = (repo == 'updates')
-            db.add_media(
-                name=media_name,
-                short_name=media_name,  # Already filesystem-safe
-                mageia_version=str(release),
-                architecture=arch,
-                relative_path=relative_path,
-                is_official=True,
-                update_media=is_update
-            )
-            print(_("  Added media: {name}").format(name=media_name))
-
-            # Link media to other enabled servers (MD5 verified)
-            media = db.get_media(media_name)
-            if media:
-                from ...core.server_pool import verify_media_match
-                from ...core.config import build_server_url
-                for srv in db.list_servers(enabled_only=True):
-                    if db.server_media_link_exists(srv['id'], media['id']):
-                        continue
-                    srv_url = build_server_url(srv)
-                    if verify_media_match(srv_url, media, db):
-                        db.link_server_media(srv['id'], media['id'])
-
-        added += 1
+        for outcome in result.outcomes:
+            if outcome.action == "created":
+                added += 1
+            elif outcome.action == "relinked":
+                relinked += 1
+            elif outcome.action == "skipped":
+                print(colors.warning("  " + outcome.reason))
 
     # Summary
     print()
-    if dry_run:
-        print(colors.warning(_("Dry run: would add {added} media, {skipped} already exist").format(added=added, skipped=skipped)))
-    else:
-        print(colors.success(_("Added {added} media, {skipped} already existed").format(added=added, skipped=skipped)))
-        if added > 0:
-            print(colors.dim(_("Run 'urpm media update' to sync metadata")))
+    print(colors.success(_(
+        "Added {servers} server(s), {added} new media, {relinked} re-linked"
+    ).format(servers=server_count, added=added, relinked=relinked)))
+    if added or relinked:
+        print(colors.dim(_("Run 'urpm media update' to sync metadata")))
 
     return 0
 
