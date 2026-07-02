@@ -1133,99 +1133,44 @@ def parse_urpmi_cfg(filepath: str) -> list:
 
 
 def _import_single_media(db: 'PackageDatabase', media: dict, colors) -> bool:
-    """Import a single media from urpmi.cfg into v8 schema.
+    """Import a single URL-direct media from urpmi.cfg via the primitive.
 
     Args:
-        db: Database instance
-        media: Dict with 'name', 'url', 'enabled', 'update' from parse_urpmi_cfg
-        colors: Colors module
+        db: Database instance.
+        media: Dict from parse_urpmi_cfg with ``name``, ``url``,
+            ``enabled``, ``update``.
+        colors: Colours module (kept for signature compatibility;
+            error rendering is now the caller's responsibility).
 
     Returns:
-        True if successful, False otherwise
+        True if the media was ingested (created / already present),
+        False on hard failure.
+
+    Raises:
+        Nothing.  Errors are logged via the primitive's exception
+        chain but converted to a False return here for backwards
+        compatibility with the existing ``cmd_media_import`` loop.
     """
-    url = media['url']
-    name = media['name']
-    enabled = media['enabled']
-    update = media['update']
+    from ...core.media_pipeline import (
+        MediaTreeError,
+        upsert_single_media,
+    )
 
-    # Parse URL to extract server and media info
-    parsed = parse_mageia_media_url(url)
+    url = media["url"]
+    hint = {
+        "name": media["name"],
+        "enabled": media["enabled"],
+        "update_media": media["update"],
+    }
 
-    if not parsed:
-        # Fallback to legacy mode for non-Mageia URLs
-        db.add_media_legacy(
-            name=name,
-            url=url,
-            enabled=enabled,
-            update=update
-        )
-        return True
-
-    # Extract parsed values
-    protocol = parsed['protocol']
-    host = parsed['host']
-    base_path = parsed['base_path']
-    relative_path = parsed['relative_path']
-    version = parsed['version']
-    arch = parsed['arch']
-    short_name = parsed['short_name']
-    is_official = parsed['is_official']
-
-    # --- Server upsert ---
-    server = db.get_server_by_location(protocol, host, base_path)
-
-    if not server:
-        # Create new server
-        server_name = _generate_server_name(protocol, host)
-        # Make server name unique if needed
-        base_server_name = server_name
-        counter = 1
-        while True:
-            try:
-                server_id = db.add_server(
-                    name=server_name,
-                    protocol=protocol,
-                    host=host,
-                    base_path=base_path,
-                    is_official=is_official,
-                    enabled=True,
-                    priority=50
-                )
-                server = {'id': server_id, 'name': server_name}
-                break
-            except Exception as e:
-                if 'UNIQUE constraint' in str(e) and 'name' in str(e):
-                    counter += 1
-                    server_name = f"{base_server_name}-{counter}"
-                else:
-                    raise
-
-    # --- Media upsert ---
-    existing_media = db.get_media_by_version_arch_shortname(version, arch, short_name)
-
-    if not existing_media:
-        # Create new media with the name from urpmi.cfg (preserves user's naming)
-        media_id = db.add_media(
-            name=name,  # Use original name from urpmi.cfg
-            short_name=short_name,
-            mageia_version=version,
-            architecture=arch,
-            relative_path=relative_path,
-            is_official=is_official,
-            allow_unsigned=False,
-            enabled=enabled,
-            update_media=update,
-            priority=50,
-            url=None
-        )
-        existing_media = {'id': media_id, 'name': name}
-    else:
-        media_id = existing_media['id']
-
-    # --- Link server to media ---
-    if not db.server_media_link_exists(server['id'], existing_media['id']):
-        db.link_server_media(server['id'], existing_media['id'])
-
+    try:
+        upsert_single_media(db, url, hint=hint, mode="reconcile")
+    except MediaTreeError as exc:
+        # Surface the reason so the caller's loop can classify it as
+        # an error.  We deliberately do NOT fall through to
+        # ``add_media_legacy`` — the primitive's refusal is the whole
+        # point of the invariants.
+        raise RuntimeError(str(exc)) from exc
     return True
 
 
@@ -1260,6 +1205,23 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
     # Get existing media names
     existing = {m['name'].lower(): m['name'] for m in db.list_media()}
 
+    # Resolve target version + arch for mirrorlist entries.  urpmi.cfg
+    # doesn't carry these values on mirrorlist-based media, so we
+    # cascade: --release CLI flag > /etc/mageia-release > give up.
+    #  and: --arch CLI flag > platform.machine().
+    release_hint = getattr(args, "release", None)
+    arch_hint = getattr(args, "arch", None) or system_arch()
+    if not release_hint:
+        try:
+            with open("/etc/mageia-release", encoding="utf-8") as fh:
+                import re as _re
+                m = _re.search(r"\b(\d+|cauldron)\b", fh.readline(),
+                               _re.IGNORECASE)
+                if m:
+                    release_hint = m.group(1).lower()
+        except OSError:
+            pass
+
     # Categorize direct URL media
     to_add = []
     to_skip = []
@@ -1274,14 +1236,34 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
         else:
             to_add.append(media)
 
+    # Categorize mirrorlist media (all considered to-add: even if the
+    # canonical key already exists the primitive's noop path handles
+    # it idempotently).
+    mirrorlist_to_add = list(mirrorlist_media)
+    mirrorlist_unresolvable = []
+    if mirrorlist_media and not release_hint:
+        # Without a version we cannot build a relative_path and thus
+        # cannot let ``urpm server autoconfig`` link a server later.
+        mirrorlist_unresolvable = mirrorlist_to_add
+        mirrorlist_to_add = []
+
     # Show summary
     print("\n" + colors.bold(_("Import from:")) + " " + filepath)
     print("  " + _("Found: {total} media ({direct} with URL, {mirrorlist} mirrorlist-based)").format(total=len(media_list), direct=len(direct_media), mirrorlist=len(mirrorlist_media)))
 
-    if mirrorlist_media:
-        print("\n  " + colors.warning(_("Skipped (mirrorlist-based):")) + " " + str(len(mirrorlist_media)))
-        print(colors.dim(_("    These use $MIRRORLIST and require autoconfig.")))
-        print(colors.dim(_("    Run: urpm media autoconfig -r <version>")))
+    if mirrorlist_unresolvable:
+        print("\n  " + colors.warning(_("Cannot resolve version for {n} mirrorlist media").format(n=len(mirrorlist_unresolvable))))
+        print(colors.dim(_("    Pass --release <version> so the target Mageia version is known.")))
+
+    if mirrorlist_to_add:
+        print("\n  " + colors.success(_("Mirrorlist-based to add (server links via `urpm server autoconfig`):")) + " " + str(len(mirrorlist_to_add)))
+        for m in mirrorlist_to_add:
+            status = ""
+            if not m['enabled']:
+                status = " (disabled)"
+            if m['update']:
+                status += " [update]"
+            print(f"    {m['name']}{status}")
 
     if to_add:
         print("\n  " + colors.success(_("To add:")) + " " + str(len(to_add)))
@@ -1303,14 +1285,15 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
         for m in to_skip:
             print(f"    {m['name']}")
 
-    if not to_add and not to_replace:
+    if not to_add and not to_replace and not mirrorlist_to_add:
         print(colors.info(_("\nNothing to import")))
         return 0
 
     # Confirmation
     if not args.auto:
+        total_to_import = len(to_add) + len(to_replace) + len(mirrorlist_to_add)
         try:
-            response = input("\n" + _("Import {count} media? [y/N] ").format(count=len(to_add) + len(to_replace)))
+            response = input("\n" + _("Import {count} media? [y/N] ").format(count=total_to_import))
             if not confirm_yes(response):
                 print(_("Aborted."))
                 return 0
@@ -1344,11 +1327,51 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
             print("  " + colors.error(_("Error:")) + " " + media['name'] + ": " + str(e))
             errors += 1
 
-    print("\n" + colors.bold(_("Summary:")) + " " + _("{added} added, {replaced} replaced, {errors} errors").format(added=added, replaced=replaced, errors=errors))
+    # Import mirrorlist entries into the pending state (media rows
+    # with no server link yet — ``urpm server autoconfig`` will link
+    # them via HEAD MD5SUM scan on relative_path).
+    from ...core.media_pipeline import (
+        MediaTreeError,
+        insert_pending_mirrorlist_media,
+    )
+    mirrorlist_added = 0
+    for media in mirrorlist_to_add:
+        try:
+            outcome = insert_pending_mirrorlist_media(
+                db,
+                with_dir=media.get("with_dir") or "",
+                version=release_hint,
+                arch=arch_hint,
+                name=media["name"],
+                enabled=media["enabled"],
+                update=media["update"],
+                is_official=True,
+            )
+            if outcome.action == "created":
+                mirrorlist_added += 1
+                print("  " + colors.success(_("Pending:")) + " " + media["name"])
+            elif outcome.action == "noop":
+                print("  " + colors.dim(_("Already present:") + " " + media["name"]))
+            elif outcome.action == "skipped":
+                print("  " + colors.warning(_("Skipped:")) + " "
+                      + media["name"] + " — " + outcome.reason)
+                errors += 1
+        except MediaTreeError as exc:
+            print("  " + colors.error(_("Error:")) + " " + media["name"] + ": " + str(exc))
+            errors += 1
+
+    print("\n" + colors.bold(_("Summary:")) + " " + _(
+        "{added} added, {mirrorlist} mirrorlist-based, "
+        "{replaced} replaced, {errors} errors"
+    ).format(added=added, mirrorlist=mirrorlist_added,
+             replaced=replaced, errors=errors))
+
+    if mirrorlist_added:
+        print(colors.dim(_("Run 'urpm server autoconfig' to attach servers to the mirrorlist media")))
 
     # Probe all enabled servers that lack bandwidth data — covers servers
     # just imported from urpmi.cfg that were never probed.
-    if added + replaced > 0:
+    if added + replaced + mirrorlist_added > 0:
         from ...core.server_pool import _probe_bandwidth
         servers_to_probe = []
         for s in db.list_servers(enabled_only=True):

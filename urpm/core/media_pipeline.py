@@ -516,6 +516,142 @@ def upsert_media_tree(
     )
 
 
+def insert_pending_mirrorlist_media(
+    db,
+    *,
+    with_dir: str,
+    version: str,
+    arch: str,
+    name: str = "",
+    enabled: bool = True,
+    update: bool = False,
+    is_official: bool = True,
+) -> UpsertOutcome:
+    """Create a media record for a ``mirrorlist:`` entry in urpmi.cfg.
+
+    Unlike :func:`upsert_media_tree`, this function creates the media
+    **without linking any server**.  Mirrorlist entries by definition
+    do not carry a single server URL — the ``$MIRRORLIST`` macro
+    expands at sync time to the mirror pool.  Caller is expected to
+    invoke ``urpm server autoconfig`` afterwards to attach servers via
+    HEAD MD5SUM scan on ``relative_path``.
+
+    This is a **documented exception** to invariant (a) of
+    :func:`upsert_media_tree`: the media exists in the DB with no
+    server link until autoconfig completes the picture.  The
+    invariant holds for the higher-level *pipeline* (import + then
+    autoconfig), not for this single call in isolation.
+
+    Args:
+        db: Database accessor.
+        with_dir: Value of the ``with-dir:`` line in urpmi.cfg
+            (e.g. ``"media/core/release"``).
+        version: Mageia version this media targets (``"9"``,
+            ``"10"``, ``"cauldron"``).  Must be non-empty.
+        arch: Target architecture.  Must be non-empty.
+        name: Display name from urpmi.cfg (e.g. ``"Core Release"``).
+            When empty, a name is computed from ``with_dir`` via the
+            standard Title-Cased fallback.
+        enabled: Corresponds to the absence of ``ignore`` in the
+            urpmi.cfg entry.
+        update: Corresponds to the ``update`` marker in urpmi.cfg.
+        is_official: Whether the media should be marked as official.
+            Mirrorlist entries in urpmi.cfg are typically the
+            distribution's own mirrors, so defaults to True.
+
+    Returns:
+        An :class:`UpsertOutcome` describing what happened
+        (``created`` for new, ``noop`` for already-present).
+
+    Raises:
+        MediaTreeAttributeError: If version or arch is empty.
+    """
+    if not version:
+        raise MediaTreeAttributeError(
+            "mageia_version",
+            ["urpmi.cfg entry has no version (was --release passed?)"],
+        )
+    if not arch:
+        raise MediaTreeAttributeError(
+            "architecture",
+            ["urpmi.cfg entry has no arch (was --arch passed?)"],
+        )
+
+    # Compute the canonical short_name from the with-dir path.
+    #   "media/core/release" → "core_release"
+    #   "media/nonfree/updates" → "nonfree_updates"
+    normalised = with_dir.strip("/").removeprefix("media/")
+    short_name = normalised.replace("/", "_") or "media"
+
+    # Build the on-disk relative path: {version}/{arch}/media/{sub}
+    if with_dir.startswith("media/"):
+        relative_path = f"{version}/{arch}/{with_dir}"
+    elif with_dir.startswith("/"):
+        relative_path = f"{version}/{arch}{with_dir}"
+    else:
+        relative_path = f"{version}/{arch}/media/{with_dir}"
+
+    # Idempotency: if the same canonical key already exists, no-op.
+    existing = db.get_media_by_version_arch_shortname(
+        version, arch, short_name,
+    )
+    if existing is not None:
+        return UpsertOutcome(
+            action="noop",
+            media_id=existing["id"],
+            media_name=existing["name"],
+            short_name=short_name,
+        )
+
+    # Resolve display name via the canonical cascade (respects the
+    # urpmi.cfg name; falls back to Title-Cased when empty / ugly).
+    display_name = resolve_display_name(
+        media_url="",  # no network probing possible without a server
+        section=normalised,
+        explicit_name=name or None,
+        parent_cfg_sections=None,
+        prefer="global",
+    )
+
+    # Disambiguate against existing rows on the same or foreign arch.
+    try:
+        display_name = disambiguate_media_name(db, display_name, arch)
+    except MediaNameCollision as collision:
+        # Native-arch collision — cannot silently rename.  Skip this
+        # entry and let the caller surface the situation.
+        return UpsertOutcome(
+            action="skipped",
+            media_id=None,
+            media_name=display_name,
+            short_name=short_name,
+            reason=(f"display name {display_name!r} already taken by "
+                    f"media #{collision.existing.get('id')} "
+                    f"(short_name={collision.existing.get('short_name')!r}) "
+                    "on native arch — pass a different --name in "
+                    "urpmi.cfg or edit the collision away"),
+        )
+
+    media_id = db.add_media(
+        name=display_name,
+        short_name=short_name,
+        mageia_version=version,
+        architecture=arch,
+        relative_path=relative_path,
+        is_official=is_official,
+        allow_unsigned=False,
+        enabled=enabled,
+        update_media=update,
+        priority=50,
+        url=None,
+    )
+    return UpsertOutcome(
+        action="created",
+        media_id=media_id,
+        media_name=display_name,
+        short_name=short_name,
+    )
+
+
 def upsert_single_media(
     db,
     url: str,

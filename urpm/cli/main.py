@@ -1608,6 +1608,14 @@ For legacy mode (non-Mageia URL with explicit name):
         help=_('Replace existing media with same name')
     )
     media_import.add_argument(
+        '--release', '-r',
+        help=_('Mageia version for mirrorlist-based entries (default: /etc/mageia-release)')
+    )
+    media_import.add_argument(
+        '--arch',
+        help=_('Target architecture for mirrorlist-based entries (default: system arch)')
+    )
+    media_import.add_argument(
         '--auto', '-y',
         action='store_true',
         help=_('No confirmation')
