@@ -54,7 +54,6 @@ from .media import (
     cmd_media_link,
     cmd_media_autoconfig,
     parse_urpmi_cfg,
-    STANDARD_MEDIA_TYPES,
 )
 from .query import (
     cmd_search,
@@ -154,7 +153,6 @@ __all__ = [
     'cmd_media_link',
     'cmd_media_autoconfig',
     'parse_urpmi_cfg',
-    'STANDARD_MEDIA_TYPES',
     # Query commands
     'cmd_search',
     'cmd_show',

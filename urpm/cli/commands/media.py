@@ -102,17 +102,6 @@ def cmd_media_list(args, db: 'PackageDatabase') -> int:
     return 0
 
 
-# Standard Mageia media types (class/type combinations)
-STANDARD_MEDIA_TYPES = [
-    ('core', 'release'),
-    ('core', 'updates'),
-    ('nonfree', 'release'),
-    ('nonfree', 'updates'),
-    ('tainted', 'release'),
-    ('tainted', 'updates'),
-]
-
-
 def cmd_init(args, db: 'PackageDatabase') -> int:
     """Initialize urpm setup with standard Mageia media from mirrorlist.
 
@@ -441,59 +430,54 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         print(colors.error(_("No servers could be added")))
         return 1
 
-    # Add standard media
-    print(_("\nAdding standard media for Mageia {version} ({arch})...").format(version=version, arch=arch))
-    media_added = []
+    # Discover and add media from each mirror's real catalogue.
+    #
+    # ``upsert_media_tree`` fetches ``<server>/<version>/<arch>/media_info/media.cfg``,
+    # parses the manifest, and — for each media it advertises — creates a
+    # DB row (if new) and links the server. Reconcile mode adopts any
+    # pre-existing placeholder rows (legacy imports) instead of skipping
+    # them, so ``urpm init`` on an already-populated DB self-heals.
+    #
+    # Iterating over every discovered server ensures each server ends
+    # up linked to exactly the media it hosts (subsequent servers hit
+    # the ``relinked``/``noop`` branches for media the first server
+    # already inserted).
+    print(_("\nDiscovering media for Mageia {version} ({arch})...").format(version=version, arch=arch))
+    from ...core.media_pipeline import upsert_media_tree, MediaTreeError
+    from ...core.config import build_server_url
 
-    for media_class, media_type in STANDARD_MEDIA_TYPES:
-        name = f"{media_class.capitalize()} {media_type.capitalize()}"
-        short_name = f"{media_class}_{media_type}"
-        relative_path = f"{version}/{arch}/media/{media_class}/{media_type}"
-        is_update = (media_type == 'updates')
+    media_by_id: dict[int, dict] = {}
+    tally = {"created": 0, "relinked": 0, "noop": 0, "skipped": 0}
 
-        # Check if media already exists
-        existing = db.get_media_by_version_arch_shortname(version, arch, short_name)
-        if existing:
-            print(_("  {name}: already exists").format(name=name))
-            media_added.append(existing)
-            continue
-
+    for server in servers_added:
+        srv_url = build_server_url(server)
+        catalogue_url = f"{srv_url.rstrip('/')}/{version}/{arch}/"
         try:
-            media_id = db.add_media(
-                name=name,
-                short_name=short_name,
-                mageia_version=version,
-                architecture=arch,
-                relative_path=relative_path,
-                is_official=True,
-                allow_unsigned=False,
-                enabled=True,
-                update_media=is_update,
-                priority=50,
-                url=None
-            )
-            print(_("  {name} (id={id})").format(name=name, id=media_id))
-            media_added.append({'id': media_id, 'name': name, 'short_name': short_name, 'relative_path': relative_path})
-        except Exception as e:
-            print(colors.error(_("  Failed to add {name}: {error}").format(name=name, error=e)))
+            result = upsert_media_tree(db, catalogue_url, mode='reconcile')
+        except MediaTreeError as exc:
+            print(colors.warning(_("  {name}: {error}").format(name=server['name'], error=exc)))
+            continue
+        for outcome in result.outcomes:
+            tally[outcome.action] = tally.get(outcome.action, 0) + 1
+            if outcome.media_id is not None and outcome.media_id not in media_by_id:
+                media_by_id[outcome.media_id] = {
+                    'id': outcome.media_id,
+                    'name': outcome.media_name,
+                    'short_name': outcome.short_name,
+                }
+
+    media_added = list(media_by_id.values())
 
     if not media_added:
         print(colors.error(_("No media could be added")))
         return 1
 
-    # Link servers to media (MD5 verified)
-    print(_("\nLinking servers to media..."))
-    from ...core.server_pool import verify_media_match
-    from ...core.config import build_server_url
-    for server in servers_added:
-        srv_url = build_server_url(server)
-        for media in media_added:
-            if db.server_media_link_exists(server['id'], media['id']):
-                continue
-            if verify_media_match(srv_url, media, db):
-                db.link_server_media(server['id'], media['id'])
+    for m in media_added:
+        print(_("  {name} (id={id})").format(name=m['name'], id=m['id']))
 
-    print(colors.success(_("\nInitialized with {servers} server(s) and {media} media").format(servers=len(servers_added), media=len(media_added))))
+    print(colors.success(_(
+        "\nInitialized with {servers} server(s) and {media} media"
+    ).format(servers=len(servers_added), media=len(media_added))))
 
     # Sync media unless --no-sync
     if not getattr(args, 'no_sync', False):
