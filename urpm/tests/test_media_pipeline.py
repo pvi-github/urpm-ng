@@ -254,12 +254,23 @@ class TestReconcileBranch:
     def test_reconcile_updates_unknown_unknown_row(
         self, db, serve_catalogue,
     ):
-        # Simulate a row inserted by ``add_media_legacy`` — the
-        # placeholder fingerprint.
-        db.add_media_legacy(
-            name="Core Release",
-            url="https://mirror.example/9/x86_64/media/core/release",
+        # Simulate a pre-refactor legacy row: mageia_version='unknown',
+        # architecture='unknown', relative_path=''. This is the
+        # placeholder fingerprint reconcile mode is designed to adopt.
+        import time
+        db.conn.execute(
+            """
+            INSERT INTO media (name, url, mirrorlist, enabled, update_media,
+                              short_name, mageia_version, architecture,
+                              relative_path, is_official, added_timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("Core Release",
+             "https://mirror.example/9/x86_64/media/core/release",
+             None, 1, 0, "core_release", "unknown", "unknown", "", 1,
+             int(time.time())),
         )
+        db.conn.commit()
         # Verify the placeholder shape we're about to repair.
         leg = db.get_media("Core Release")
         assert leg["mageia_version"] == "unknown"

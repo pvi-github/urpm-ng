@@ -50,20 +50,6 @@ class TestMedia:
         assert media['short_name'] == "core_release"
         assert media['mageia_version'] == "9"
 
-    def test_add_media_legacy(self, db):
-        """Test legacy add_media API for backwards compatibility."""
-        media_id = db.add_media_legacy(
-            name="Legacy Media",
-            url="http://example.com/media",
-            enabled=True,
-            update=False
-        )
-        assert media_id > 0
-
-        media = db.get_media("Legacy Media")
-        assert media is not None
-        assert media['url'] == "http://example.com/media"
-
     def test_list_media(self, db):
         """Test listing multiple media sources."""
         db.add_media(

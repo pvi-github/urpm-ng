@@ -53,28 +53,6 @@ class MediaMixin:
         self.conn.commit()
         return cursor.lastrowid
 
-    def add_media_legacy(self, name: str, url: str = None, mirrorlist: str = None,
-                         enabled: bool = True, update: bool = False) -> int:
-        """Add a new media source (legacy API for compatibility).
-
-        DEPRECATED: Use add_media() with new parameters instead.
-
-        Returns:
-            Media ID
-        """
-        cursor = self.conn.execute("""
-            INSERT INTO media (name, url, mirrorlist, enabled, update_media,
-                              short_name, mageia_version, architecture,
-                              relative_path, is_official, added_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, url, mirrorlist, int(enabled), int(update),
-              name.lower().replace(' ', '_'),  # short_name placeholder
-              'unknown', 'unknown', '',  # version, arch, path placeholders
-              1,  # is_official default
-              int(time.time())))
-        self.conn.commit()
-        return cursor.lastrowid
-
     def remove_media(self, name: str):
         """Remove a media source and all its packages."""
         self.conn.execute("DELETE FROM media WHERE name = ?", (name,))

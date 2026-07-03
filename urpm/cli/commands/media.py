@@ -552,22 +552,10 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
         parsed = parse_mageia_media_url(url)
 
         if not parsed:
-            # Fallback: try legacy mode if --name is provided
-            if hasattr(args, 'name') and args.name:
-                print(colors.dim(_("URL not recognized as official Mageia, using legacy mode")))
-                media_id = db.add_media_legacy(
-                    name=args.name,
-                    url=url,
-                    enabled=not getattr(args, 'disabled', False),
-                    update=getattr(args, 'update', False)
-                )
-                print(_("Added media '{name}' (id={id}) [legacy mode]").format(name=args.name, id=media_id))
-                return 0
-            else:
-                print(colors.error(_("Error: URL not recognized as official Mageia media")))
-                print(_("For official media, URL must contain: .../version/arch/media/class/type/"))
-                print(_("For custom media, use: urpm media add --custom <name> <short_name> <url>"))
-                return 1
+            print(colors.error(_("Error: URL not recognized as official Mageia media")))
+            print(_("For official media, URL must contain: .../version/arch/media/class/type/"))
+            print(_("For custom media, use: urpm media add --custom <name> <short_name> <url>"))
+            return 1
 
         # ``--name`` is the user's explicit override.  Previously it was
         # silently dropped on official URLs because ``parsed['name']``
@@ -999,14 +987,6 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
         else:
             print("\n" + colors.info(_("Total")) + ": " + colors.success(str(total_packages)) + " " + _("packages from {count} media in {elapsed}").format(count=len(results), elapsed=format_elapsed(sync_elapsed)))
 
-        # Pre-3fafe62 ugly-name cleanup, if any media is still queued.
-        # No-op (single stat()) when the queue file does not exist —
-        # which is the common case once the migration has drained or
-        # on fresh installs.  See ``urpm/core/_pending_media_rename.py``
-        # for the lifecycle.
-        from ...core._pending_media_rename import drain_queue
-        drain_queue(db)
-
         return 1 if errors else 0
 
 
@@ -1141,8 +1121,16 @@ def _import_single_media(db: 'PackageDatabase', media: dict, colors) -> bool:
     )
 
     url = media["url"]
+    name = media["name"]
+    # For URL-based urpmi.cfg entries, the section (short_name) is not
+    # discoverable from the URL when it doesn't match the standard
+    # Mageia layout (e.g. ``MLO_core``, ``mgabiz``).  The name IS the
+    # identifier by urpmi.cfg convention, so sanitise it into a
+    # short_name to satisfy the primitive's invariants.
+    short_name = name.strip().lower().replace(" ", "_").replace("/", "_")
     hint = {
-        "name": media["name"],
+        "name": name,
+        "short_name": short_name,
         "enabled": media["enabled"],
         "update_media": media["update"],
     }
@@ -1151,9 +1139,8 @@ def _import_single_media(db: 'PackageDatabase', media: dict, colors) -> bool:
         upsert_single_media(db, url, hint=hint, mode="reconcile")
     except MediaTreeError as exc:
         # Surface the reason so the caller's loop can classify it as
-        # an error.  We deliberately do NOT fall through to
-        # ``add_media_legacy`` — the primitive's refusal is the whole
-        # point of the invariants.
+        # an error.  There is deliberately no placeholder-row fallback:
+        # the primitive's refusal is the whole point of the invariants.
         raise RuntimeError(str(exc)) from exc
     return True
 

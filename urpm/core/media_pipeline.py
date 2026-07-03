@@ -34,10 +34,11 @@ Modes:
 * ``'discover'`` — default.  Insert new media, link the server,
   refuse to silently fuse with placeholder entries.
 * ``'reconcile'`` — when the canonical key matches an existing media
-  that carries placeholder attributes (the legacy
-  ``add_media_legacy`` footprint), the primitive *adopts* that row,
-  updates its placeholders with proper values, then links the
-  server.  Used by the repair path for previously broken imports.
+  that carries placeholder attributes (``mageia_version='unknown'``,
+  ``architecture='unknown'``, empty ``relative_path`` — the footprint
+  left by pre-0.8 imports), the primitive *adopts* that row, updates
+  its placeholders with proper values, then links the server.  Used
+  by the repair path for previously broken imports.
 * ``'deep'`` — like ``'discover'`` but also performs a per-media
   manifest probe (``<media>/media_info/media.cfg``) to validate
   existence before insertion.  More network traffic, more guarantees.
@@ -83,10 +84,9 @@ class MediaTreeFetchError(MediaTreeError):
     """Neither the catalogue at ``<url>/media_info/media.cfg`` nor a
     fallback URL pattern parser yielded anything usable.
 
-    The primitive refuses to fall back on ``add_media_legacy`` and to
-    persist a placeholder row.  The caller must surface a clear error
-    to the user (typically "URL inaccessible or not a recognised Mageia
-    media tree").
+    The primitive refuses to persist a placeholder row on this path.
+    The caller must surface a clear error to the user (typically "URL
+    inaccessible or not a recognised Mageia media tree").
     """
 
 
@@ -1009,11 +1009,12 @@ def _process_one_media(
 
 
 def _looks_like_placeholder_row(row: dict) -> bool:
-    """Return True if *row* looks like an ``add_media_legacy`` footprint.
+    """Return True if *row* carries the legacy-placeholder fingerprint.
 
     Recognises the sentinel triple ``mageia_version='unknown'`` /
     ``architecture='unknown'`` / ``relative_path=''`` written by
-    legacy import paths.
+    pre-0.8 import paths.  Used by reconcile mode to decide whether
+    an existing row can be adopted and repaired.
     """
     return (
         _is_placeholder(row.get("mageia_version"))

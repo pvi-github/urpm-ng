@@ -1,6 +1,6 @@
 %define name urpm-ng
-%define version 0.7.15
-%define release 1
+%define version 0.8.0
+%define release 3
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
@@ -410,35 +410,6 @@ fi
 # gnome-software, KDE Discover, PackageKit offline, and dnf-automatic.
 # This runs on every install/upgrade to catch newly installed components.
 /usr/bin/python3 -c "from urpm.core.auto_upgrade_policy import enforce_all; enforce_all()" 2>/dev/null || :
-
-# One-shot queue of media rows whose display name still carries the
-# obsolete ``mga{version}-{short_name}`` pattern produced by the
-# pre-3fafe62 ``urpm media discover`` bug.  ``write_queue`` writes
-# /var/lib/urpm/pending-name-cleanup.list (one media_id per line)
-# only when at least one buggy row is found — otherwise no file is
-# created.  The queue is drained at the next ``urpm media update``
-# (which proves network is alive) by
-# ``urpm.core._pending_media_rename.drain_queue``.
-#
-# CRITICAL: opens the DB with ``read_only=True``.  The default open
-# would auto-detect root and trigger ``_apply_migrations``, which in
-# turn would contend with the running ``urpmd`` for the schema lock
-# and stall the rpm transaction for up to 5 minutes (10 retries ×
-# 30 s busy_timeout).  Schema migrations stay lazy — they happen on
-# the next normal CLI invocation as before.
-#
-# REMOVE THIS STANZA when ``urpm/core/_pending_media_rename.py`` is
-# dropped from the source (cf. doc/TODO_LATER.md).
-/usr/bin/python3 -c "
-from urpm.core.database import PackageDatabase
-from urpm.core._pending_media_rename import write_queue
-try:
-    db = PackageDatabase(read_only=True)
-    write_queue(db)
-    db.close()
-except Exception:
-    pass
-" 2>/dev/null || :
 
 if [ $1 -eq 1 ]; then
     # First install: import media from urpmi and auto-configure servers

@@ -1,6 +1,8 @@
 """Server management commands."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
+from urllib.request import Request, urlopen
 
 from ...i18n import _, ngettext, pgettext
 if TYPE_CHECKING:
@@ -460,6 +462,64 @@ def cmd_server_stats(args, db: 'PackageDatabase') -> int:
     return 0
 
 
+def _link_new_servers_to_media(db: 'PackageDatabase', added: list[dict]) -> int:
+    """Probe each newly-added server for every known media and link matches.
+
+    For every server in *added*, issues a parallel HEAD against
+    ``<server>/<relative_path>/media_info/MD5SUM`` for each media in the
+    DB.  A 2xx response creates a ``(server, media)`` link.
+
+    Scans **both enabled and disabled** media so that a later
+    ``urpm media enable`` never leaves a media stranded without a
+    server (invariant a of the media-pipeline refactor: every media
+    must have at least one server link once autoconfig has run).  A
+    disabled Backports/Testing/Debug/32bit media inserted by
+    ``urpm media import`` from a mirrorlist entry is the typical case.
+
+    Media rows without a ``relative_path`` are skipped: they cannot
+    be probed at all.
+
+    Args:
+        db: Package database.
+        added: List of server dicts (each with ``id`` and ``name``),
+            typically the return value of the add-loop in
+            :func:`autoconfig_servers`.
+
+    Returns:
+        Total number of new links created across all servers.
+    """
+    from ...core.config import build_server_url
+
+    media_to_scan = [(m['id'], m['name'], m.get('relative_path', ''))
+                     for m in db.list_media() if m.get('relative_path')]
+    if not media_to_scan:
+        return 0
+
+    total_links = 0
+    for srv in added:
+        server = db.get_server(srv['name'])
+        base_url = build_server_url(server)
+
+        def check_media(media_id, media_name, relative_path):
+            test_url = f"{base_url}/{relative_path}/media_info/MD5SUM"
+            try:
+                req = Request(test_url, method='HEAD')
+                urlopen(req, timeout=3)
+                return media_id
+            except Exception:
+                return None
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(check_media, mid, mname, rpath): mid
+                      for mid, mname, rpath in media_to_scan}
+            for future in as_completed(futures):
+                media_id = future.result()
+                if media_id and not db.server_media_link_exists(srv['id'], media_id):
+                    db.link_server_media(srv['id'], media_id)
+                    total_links += 1
+    return total_links
+
+
 def autoconfig_servers(
     db: 'PackageDatabase',
     version: str,
@@ -738,48 +798,15 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     if not added:
         return 0
 
-    # ── Link new servers to enabled media ─────────────────────────────
-    all_media = db.list_media()
-    enabled_media = [m for m in all_media if m.get('enabled', 1)]
-    if not enabled_media:
-        print(_("\nNo enabled media to scan"))
-        return 0
-
-    media_to_scan = [(m['id'], m['name'], m.get('relative_path', ''))
-                     for m in enabled_media if m.get('relative_path')]
-
-    if not media_to_scan:
-        return 0
-
-    print("\n" + _("Scanning {count} enabled media...").format(
-        count=len(media_to_scan)), end=' ', flush=True)
-
-    from ...core.config import build_server_url
-
-    total_links = 0
-    for srv in added:
-        server = db.get_server(srv['name'])
-        base_url = build_server_url(server)
-
-        def check_media(media_id, media_name, relative_path):
-            test_url = f"{base_url}/{relative_path}/media_info/MD5SUM"
-            try:
-                req = Request(test_url, method='HEAD')
-                urlopen(req, timeout=3)
-                return media_id
-            except Exception:
-                return None
-
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(check_media, mid, mname, rpath): mid
-                      for mid, mname, rpath in media_to_scan}
-            for future in as_completed(futures):
-                media_id = future.result()
-                if media_id:
-                    db.link_server_media(srv['id'], media_id)
-                    total_links += 1
-
-    print(_("{count} links created").format(count=total_links))
+    # ── Link new servers to every known media (invariant a) ──────────
+    scan_count = sum(1 for m in db.list_media() if m.get('relative_path'))
+    if scan_count == 0:
+        print(_("\nNo media to scan"))
+    else:
+        print("\n" + _("Scanning {count} media...").format(
+            count=scan_count), end=' ', flush=True)
+        total_links = _link_new_servers_to_media(db, added)
+        print(_("{count} links created").format(count=total_links))
 
     # ── Summary ───────────────────────────────────────────────────────
     existing_count = len(db.list_servers(enabled_only=True)) - len(added)
