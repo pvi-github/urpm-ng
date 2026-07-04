@@ -1,6 +1,6 @@
 %define name urpm-ng
 %define version 0.8.0
-%define release 3
+%define release 7
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
@@ -259,6 +259,25 @@ done
 # Install Python package
 %pyproject_install
 %pyproject_save_files urpm
+
+# Harden the auto-generated entry-point wrappers against dev-checkout
+# shadowing.  Without this, running ``urpm image make`` from a shell
+# whose CWD happens to be a source checkout containing an ``urpm/``
+# subtree would import that subtree instead of the RPM-installed
+# package (Python prepends the empty string, i.e. CWD, to sys.path).
+# Python 3.11+ has ``-P`` for this; mga9 ships Python 3.10 which
+# doesn't recognise it (and the shebang fails outright).  A plain
+# ``-s`` shebang + explicit sys.path scrub in the wrapper body works
+# uniformly across every supported Python version.
+for wrapper in %{buildroot}%{_bindir}/urpm \
+               %{buildroot}%{_bindir}/urpmd \
+               %{buildroot}%{_bindir}/urpm-dbus-service; do
+    [ -f "$wrapper" ] || continue
+    sed -i \
+        -e '1s|^#!.*python3.*|#! /usr/bin/python3 -s|' \
+        -e '/^import sys$/a if sys.path and sys.path[0] == "": sys.path.pop(0)  # dev-checkout defense' \
+        "$wrapper"
+done
 
 # Install PackageKit backend
 cd pk-backend-urpm
