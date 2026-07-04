@@ -164,21 +164,22 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         print(_("Preparing chroot filesystem..."))
         root_path = Path(urpm_root)
 
-        # Create essential directories
+        # Create only the directories that no package will provide:
+        #  - /dev, /proc, /sys : mount targets (external to any RPM)
+        #  - /etc              : for pre-install writes (resolv.conf, mtab)
+        #  - /var/tmp          : rpm scratch space at extract time
+        #  - /var/lib/rpm      : target of the ``rpm --initdb`` call below
+        # Everything else (/usr/{bin,sbin,lib,lib64} + UsrMove symlinks,
+        # /run, /tmp, /etc subtree) is created by the ``filesystem``
+        # package's %pretrans Lua when it installs — nothing to
+        # anticipate here.
         essential_dirs = [
             'dev', 'dev/pts', 'dev/shm',
             'proc', 'sys',
             'etc', 'var/tmp', 'var/lib/rpm',
-            'run', 'tmp',
-            # UsrMerge target directories
-            'usr/bin', 'usr/sbin', 'usr/lib', 'usr/lib64'
         ]
         for d in essential_dirs:
             (root_path / d).mkdir(parents=True, exist_ok=True)
-
-        # Note: UsrMerge symlinks (/bin -> usr/bin, etc.) are created by
-        # the filesystem package. Don't create them here or it will conflict.
-        # We only create the target directories (usr/bin, etc.) above.
 
         # Set proper permissions for /tmp and /var/tmp
         (root_path / 'tmp').chmod(0o1777)
@@ -338,37 +339,11 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             except (OSError, IOError):
                 pass
 
-        # Create minimal /etc/passwd and /etc/group for RPM
-        # These are needed before the first package installation
-        passwd_file = root_path / 'etc/passwd'
-        if not passwd_file.exists():
-            try:
-                passwd_file.write_text("root:x:0:0:root:/root:/bin/bash\n")
-            except (OSError, IOError):
-                pass
-
-        group_file = root_path / 'etc/group'
-        if not group_file.exists():
-            try:
-                # Minimal groups needed by common packages
-                group_file.write_text(
-                    "root:x:0:\n"
-                    "bin:x:1:\n"
-                    "daemon:x:2:\n"
-                    "sys:x:3:\n"
-                    "tty:x:5:\n"
-                    "disk:x:6:\n"
-                    "wheel:x:10:\n"
-                    "mail:x:12:\n"
-                    "man:x:15:\n"
-                    "utmp:x:22:\n"
-                    "audio:x:63:\n"
-                    "video:x:39:\n"
-                    "users:x:100:\n"
-                    "nobody:x:65534:\n"
-                )
-            except (OSError, IOError):
-                pass
+        # /etc/passwd and /etc/group are shipped by the ``setup`` RPM
+        # (via %files, with the correct Mageia UIDs/GIDs baked in).  The
+        # first installs (filesystem + makedev in --noscripts) ship only
+        # root-owned files, so RPM extraction resolves UIDs to 0 by
+        # default and does not need a pre-seeded passwd file.
 
         # Initialize empty rpmdb in the chroot
         rpmdb_dir = root_path / "var/lib/rpm"
@@ -451,7 +426,11 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
 
     for server in servers_added:
         srv_url = build_server_url(server)
-        catalogue_url = f"{srv_url.rstrip('/')}/{version}/{arch}/"
+        # The real Mageia catalogue lives at ``<srv>/<version>/<arch>/media/``
+        # (with the trailing ``/media/`` — the manifest ``media.cfg`` sits
+        # in ``media/media_info/media.cfg``).  Dropping that segment probes
+        # the wrong path and every mirror 404s.
+        catalogue_url = f"{srv_url.rstrip('/')}/{version}/{arch}/media/"
         try:
             result = upsert_media_tree(db, catalogue_url, mode='reconcile')
         except MediaTreeError as exc:
@@ -479,23 +458,141 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         "\nInitialized with {servers} server(s) and {media} media"
     ).format(servers=len(servers_added), media=len(media_added))))
 
-    # Sync media unless --no-sync
+    # Two paths depending on the media's ``enabled`` bit:
+    #  - ENABLED media get a full sync (metadata download).  Success or
+    #    failure of the sync itself is the availability signal.
+    #  - DISABLED media get a HEAD probe against every linked server.
+    #    No download — just a lightweight liveness check that builds
+    #    (or confirms) the ``server_media`` link table for the media
+    #    the user has NOT yet asked to sync.
+    #
+    # HEADs are parallelised per-server, sequential within each server:
+    # one worker per mirror, walking that mirror's linked media in
+    # order.  This keeps the load-per-mirror low (no burst that could
+    # trigger rate-limit / IPS counter-measures) while still exploiting
+    # the fact that different mirrors are independent hosts.
     if not getattr(args, 'no_sync', False):
-        print(_("\nSyncing media metadata..."))
-        # Trigger sync for all media
-        for media in media_added:
-            media_name = media.get('name', '')
-            short_name = media.get('short_name', media_name)
-            print(_("  Syncing {name}...").format(name=short_name), end=' ', flush=True)
-            try:
-                from ...core.sync import sync_media
-                result = sync_media(db, media_name, urpm_root=urpm_root)
-                if result.success:
-                    print(ngettext("{count} package", "{count} packages", result.packages_count).format(count=result.packages_count))
+        enabled_rows = []
+        disabled_rows = []
+        for m in media_added:
+            row = db.get_media(m['name'])
+            if row is None:
+                continue
+            (enabled_rows if row.get('enabled', 1) else disabled_rows).append(row)
+
+        # ── Enabled: full sync ──────────────────────────────────────
+        if enabled_rows:
+            from ...core.sync import sync_media
+            print(_("\nSyncing metadata for {n} enabled media...").format(
+                n=len(enabled_rows)))
+            for row in enabled_rows:
+                short_name = row.get('short_name') or row['name']
+                print(_("  Syncing {name}...").format(name=short_name),
+                      end=' ', flush=True)
+                try:
+                    result = sync_media(db, row['name'], urpm_root=urpm_root)
+                    if result.success:
+                        print(ngettext(
+                            "{count} package", "{count} packages",
+                            result.packages_count
+                        ).format(count=result.packages_count))
+                    else:
+                        print(colors.warning(_("failed: {error}").format(
+                            error=result.error or 'unknown')))
+                except Exception as e:
+                    print(colors.warning(_("failed: {error}").format(error=e)))
+
+        # ── Disabled: per-server HEAD probe ─────────────────────────
+        orphans = []               # media with no linked server at all
+        partial_failures = []      # (media_name, [failed_server_names])
+        if disabled_rows:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from urllib.request import Request, urlopen
+
+            from ...core.config import build_server_url
+
+            # Group probes by server so each mirror sees sequential HEADs
+            # coming from us, never a burst.  ``per_server[server_id]``
+            # holds ``(server_row, [media_row, ...])``.
+            per_server: dict[int, tuple[dict, list[dict]]] = {}
+            for row in disabled_rows:
+                servers = db.get_servers_for_media(row['id'], enabled_only=True)
+                if not servers:
+                    orphans.append(row['name'])
+                    continue
+                for srv in servers:
+                    slot = per_server.setdefault(srv['id'], (srv, []))
+                    slot[1].append(row)
+
+            def _probe_one_server(srv: dict, rows: list[dict]) -> list[tuple[dict, bool]]:
+                base_url = build_server_url(srv)
+                out = []
+                for row in rows:
+                    url = f"{base_url}/{row['relative_path']}/media_info/MD5SUM"
+                    try:
+                        urlopen(Request(url, method='HEAD'), timeout=3)
+                        out.append((row, True))
+                    except Exception:
+                        out.append((row, False))
+                return out
+
+            print(_(
+                "\nProbing mirror availability for {n} disabled media "
+                "({s} mirrors, HEAD only, no download)..."
+            ).format(n=len(disabled_rows), s=len(per_server)))
+
+            # media_id -> { server_id -> bool } — the coverage matrix
+            matrix: dict[int, dict[int, bool]] = {}
+            with ThreadPoolExecutor(max_workers=max(1, len(per_server))) as ex:
+                futures = {
+                    ex.submit(_probe_one_server, srv, rows): srv
+                    for srv, rows in per_server.values()
+                }
+                for fut in as_completed(futures):
+                    srv = futures[fut]
+                    for row, ok in fut.result():
+                        matrix.setdefault(row['id'], {})[srv['id']] = ok
+
+            # Aggregate: covered / orphan / partial (mixed 200 + 404).
+            covered = 0
+            for row in disabled_rows:
+                statuses = matrix.get(row['id'], {})
+                if not statuses:
+                    continue  # was already appended to orphans above
+                oks = [sid for sid, ok in statuses.items() if ok]
+                fails = [sid for sid, ok in statuses.items() if not ok]
+                if not oks:
+                    orphans.append(row['name'])
                 else:
-                    print(colors.warning(_("failed: {error}").format(error=result.error or 'unknown')))
-            except Exception as e:
-                print(colors.warning(_("failed: {error}").format(error=e)))
+                    covered += 1
+                    if fails:
+                        fail_names = [
+                            per_server[sid][0]['name'] for sid in fails
+                        ]
+                        partial_failures.append((row['name'], fail_names))
+
+            print("  " + colors.success(_(
+                "{n}/{total} disabled media covered by at least one mirror"
+            ).format(n=covered, total=len(disabled_rows))))
+            # Partial coverage: some mirrors 404'd. Kept as links; a
+            # future urpmd job (see doc/TODO_LATER.md, "stale server_media
+            # link cleanup") will accumulate repeated 404s across probes
+            # and prune the link when the threshold is crossed, then
+            # notify the user.
+            for name, fail_names in partial_failures:
+                print(colors.dim("  " + _(
+                    "{name}: 404 on {srv} (kept for retry)"
+                ).format(name=name, srv=", ".join(fail_names))))
+
+        # ── Orphan report: invariant (a) violation ──────────────────
+        if orphans:
+            print("\n  " + colors.warning(ngettext(
+                "{n} orphan media (no mirror hosts them):",
+                "{n} orphan media (no mirror hosts them):",
+                len(orphans),
+            ).format(n=len(orphans))))
+            for name in orphans:
+                print("    " + colors.warning(name))
 
     print(colors.success(_("\nDone! You can now install packages.")))
     if urpm_root:

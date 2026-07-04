@@ -1,13 +1,29 @@
 # mkimage profile: bootstrap
-# Minimal irreducible set installable with --noscripts in phase 1 of mkimage.
-# The chroot must be bootable, have network access, and allow a full urpm
-# install (scriptlets active) to run cleanly in phase 2 (container promote).
+# Package set for a minimal bootable Mageia chroot (mkimage phase 1).
+#
+# Install order is enforced by _phase1_bootstrap_chroot, not by this list:
+#   1. ``filesystem``            alone, WITH scriptlets — its Lua %pretrans
+#      lays down the FHS + UsrMove symlinks (/bin -> usr/bin, ...) before
+#      any other package extracts files under those paths.
+#   2. ``makedev``               alone, with --noscripts — its shell
+#      %posttrans needs a populated chroot; skipped here.
+#   3. ``setup``                 with scriptlets — /etc/passwd/group/shadow
+#      via %files.
+#   4. ``basesystem-minimal``    with scriptlets — the solver pulls in
+#      glibc, bash, coreutils, shadow-utils, kmod, timezone, utempter, ...
+#   5. Any remaining names below with scriptlets — mostly already pulled
+#      transitively, listed explicitly for reproducibility.
+#
+# The resulting chroot must be bootable, have network access, and allow a
+# full urpm install (scriptlets active) to run cleanly in phase 2
+# (container promote).
 
-description: Minimal bootable chroot for mkimage phase 1 (noscripts bootstrap)
+description: Minimal bootable Mageia chroot for mkimage phase 1
 
 packages:
-  - setup
   - filesystem
+  - makedev
+  - setup
   - basesystem-minimal
   - glibc
   - bash

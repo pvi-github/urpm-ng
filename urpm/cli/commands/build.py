@@ -412,68 +412,6 @@ def _find_local_urpm_rpm(arch: str | None = None) -> Path | None:
     return None
 
 
-def _ensure_system_accounts(chroot: str) -> None:
-    """Pre-seed /etc/passwd and /etc/group with system accounts needed by
-    bootstrap packages installed in --noscripts mode.
-
-    Entries follow Mageia UID/GID conventions. Idempotent: lines are only
-    appended when the name is not already present. No systemd dependency —
-    plain text file manipulation only.
-    """
-    passwd_path = Path(chroot) / 'etc/passwd'
-    group_path = Path(chroot) / 'etc/group'
-    passwd_path.parent.mkdir(parents=True, exist_ok=True)
-    if not passwd_path.exists():
-        passwd_path.write_text(
-            'root:x:0:0:root:/root:/bin/bash\n'
-            'bin:x:1:1:bin:/bin:/sbin/nologin\n'
-            'daemon:x:2:2:daemon:/sbin:/sbin/nologin\n'
-        )
-    if not group_path.exists():
-        group_path.write_text('root:x:0:\nbin:x:1:\ndaemon:x:2:\n')
-
-    # (name, uid, gid, gecos, home, shell) — matches Mageia rpm-mageia-setup
-    users = [
-        ('rpm',         37, 37, 'RPM database owner', '/var/lib/rpm', '/sbin/nologin'),
-        ('messagebus',  81, 81, 'D-Bus system daemon', '/',            '/sbin/nologin'),
-        ('polkitd',    997, 997, 'PolicyKit daemon',   '/',            '/sbin/nologin'),
-    ]
-    # (name, gid, members) — groups without a matching user
-    groups = [
-        ('shadow',          15, ''),
-        ('utempter',        35, ''),
-        ('systemd-journal', 190, ''),
-    ]
-
-    passwd_text = passwd_path.read_text()
-    existing_users = {line.split(':', 1)[0] for line in passwd_text.splitlines() if line}
-    new_passwd = []
-    new_group_members = {}
-    for name, uid, gid, gecos, home, shell in users:
-        if name in existing_users:
-            continue
-        new_passwd.append(f"{name}:x:{uid}:{gid}:{gecos}:{home}:{shell}")
-        new_group_members[name] = gid
-
-    if new_passwd:
-        with passwd_path.open('a') as f:
-            f.write('\n'.join(new_passwd) + '\n')
-
-    group_text = group_path.read_text()
-    existing_groups = {line.split(':', 1)[0] for line in group_text.splitlines() if line}
-    new_group = []
-    for name, gid in new_group_members.items():
-        if name not in existing_groups:
-            new_group.append(f"{name}:x:{gid}:")
-    for name, gid, members in groups:
-        if name not in existing_groups:
-            new_group.append(f"{name}:x:{gid}:{members}")
-
-    if new_group:
-        with group_path.open('a') as f:
-            f.write('\n'.join(new_group) + '\n')
-
-
 def _phase1_bootstrap_chroot(
     args,
     release: str,
@@ -485,13 +423,29 @@ def _phase1_bootstrap_chroot(
 ) -> int:
     """Build a minimal bootstrap chroot and import it as ``minimal_tag``.
 
-    Phase 1 of mkimage. Installs only the packages from the ``bootstrap``
-    profile with ``--noscripts`` (setup, filesystem, glibc, bash,
-    coreutils, grep/sed/awk/findutils, util-linux, shadow-utils, rpm,
-    urpmi, ca-certificates, curl). Then installs urpm-ng separately
-    (repo first, local RPM fallback) since it is not yet in Mageia's
-    official repos. Phase 2 will boot this image and rejoue les
-    scriptlets via `urpm upgrade` before installing any extras.
+    Phase 1 of mkimage.  Delegates the chroot population to the Mageia
+    packages themselves (``filesystem`` / ``setup`` / ``basesystem-minimal``)
+    instead of manually pre-creating the FHS layout, UsrMove symlinks
+    or ``/etc/passwd`` entries.
+
+    Install order (see the sequence block below for the rationale):
+
+      1. ``filesystem`` alone, WITH scriptlets — its Lua %pretrans
+         must run to lay down /usr/{bin,sbin,lib,lib64} and the
+         /bin, /sbin, /lib, /lib64 UsrMove symlinks before anything
+         else extracts files under those paths.
+      2. ``makedev`` alone, with ``--noscripts`` — its shell
+         %posttrans needs a populated chroot; we skip it here.
+      3. ``setup`` with scriptlets — ships /etc/passwd/group/shadow.
+      4. ``basesystem-minimal`` with scriptlets — the solver pulls in
+         glibc, bash, coreutils, shadow-utils, kmod, timezone, ...
+      5. Everything else from the ``bootstrap`` profile, with scriptlets.
+      6. ``urpm-ng`` — from repos first, then local RPM fallback (not
+         yet in official Mageia repos).
+
+    Phase 2 will boot this image inside a container and replays any
+    remaining scriptlet work via ``urpm upgrade`` before adding profile
+    extras.
     """
     from ...core.database import PackageDatabase
     from .. import colors
@@ -554,14 +508,25 @@ def _phase1_bootstrap_chroot(
 
         os.environ['SYSTEMD_OFFLINE'] = '1'
 
-        def _noscripts_install(pkgs: list, label: str, nosig: bool = False) -> int:
-            print(_("  Installing {label}...").format(label=label))
+        def _install(pkgs: list, label: str, *,
+                     noscripts: bool = False, nosig: bool = False) -> int:
+            """Install *pkgs* into the chroot.
+
+            *noscripts=True* is only for packages whose scriptlets
+            cannot run in a barely-populated chroot (``filesystem``,
+            ``makedev``).  Every other install stage MUST leave
+            scriptlets active — that is what lets ``setup``'s
+            posttrans fix ownership on /etc/shadow, ``basesystem``
+            packages register system users via ``useradd -R``, etc.
+            """
+            mode = _("[no-scripts] ") if noscripts else ""
+            print(_("  Installing {mode}{label}...").format(mode=mode, label=label))
             ns = argparse.Namespace(
                 urpm_root=tmpdir, root=tmpdir,
                 packages=pkgs, auto=True,
                 without_recommends=True, with_suggests=False,
                 download_only=False, nodeps=False, nosignature=nosig,
-                noscripts=True, force=False, reinstall=False,
+                noscripts=noscripts, force=False, reinstall=False,
                 debug=None, watched=None, prefer=None,
                 all=False, test=False, sync=True,
                 allow_no_root=True, config_policy='replace', no_readme=True,
@@ -572,52 +537,78 @@ def _phase1_bootstrap_chroot(
             )
             return cmd_install(ns, chroot_db)
 
-        # Pre-seed system accounts that subsequent packages ship files owned by.
-        # With --noscripts, the %pre of `setup` and friends does not run, so rpm
-        # warns "user X does not exist - using root" and chowns to root. The
-        # entries below match Mageia conventions; they are idempotent (skipped
-        # if already present). Systemd-independent on purpose: no sysusers call.
-        # Must run BEFORE the setup install: files shipped by packages pulled in
-        # as deps of setup (e.g. shadow group references) also need these.
-        # UsrMove: pre-create /bin, /sbin, /lib, /lib64 as symlinks into /usr/*
-        # before the filesystem package runs. On distributions that still
-        # ship %pretrans to perform this move (e.g. mga9), --noscripts skips
-        # it and the chroot ends up with /bin and /usr/bin as separate dirs,
-        # breaking any tool that hardcodes /usr/bin/<foo>. By establishing the
-        # symlinks first, rpm extracts /bin/<foo> files straight into /usr/bin.
-        # On systems where the filesystem package already ships the symlinks
-        # (e.g. mga10), this is a no-op since the targets will match.
-        root_path = Path(tmpdir)
-        (root_path / 'usr/bin').mkdir(parents=True, exist_ok=True)
-        (root_path / 'usr/sbin').mkdir(parents=True, exist_ok=True)
-        (root_path / 'usr/lib').mkdir(parents=True, exist_ok=True)
-        (root_path / 'usr/lib64').mkdir(parents=True, exist_ok=True)
-        for name, target in [('bin', 'usr/bin'), ('sbin', 'usr/sbin'),
-                             ('lib', 'usr/lib'), ('lib64', 'usr/lib64')]:
-            link = root_path / name
-            if not link.exists() and not link.is_symlink():
-                link.symlink_to(target)
+        # Back-compat alias: retained so the urpm-ng install fallback below
+        # (which we install with --noscripts on purpose) reads clearly.
+        def _noscripts_install(pkgs: list, label: str, nosig: bool = False) -> int:
+            return _install(pkgs, label, noscripts=True, nosig=nosig)
 
-        _ensure_system_accounts(tmpdir)
-        if _noscripts_install(['setup'], 'setup') != 0:
-            print(colors.error(_("Failed to install setup")))
-            return 1
-        # The setup package ships /etc/passwd and overwrites ours on first
-        # install (config file, no previous version to diff against). Re-seed
-        # so subsequent package extractions resolve rpm/messagebus/polkitd.
-        _ensure_system_accounts(tmpdir)
-        if _noscripts_install(['filesystem'], 'filesystem') != 0:
+        # ── Bootstrap install sequence (aligned with docker-brew-mageia) ──
+        #
+        # The chroot is empty (only mount targets + /var/lib/rpm).  We
+        # let the Mageia packages themselves populate it, in an order
+        # that keeps each stage's scriptlets executable:
+        #
+        # 1. filesystem + makedev with ``--noscripts``:
+        #    - filesystem's %pretrans is pure Lua (no shell needed) and
+        #      creates the FHS + UsrMove symlinks (/bin → usr/bin, etc.)
+        #      before the %files extraction.  Running it with scripts
+        #      enabled *would* also work here, but staying with
+        #      ``--noscripts`` matches upstream (docker-brew-mageia's
+        #      mkimage-buildah.sh) and keeps behaviour deterministic
+        #      across mga9 (shell %pretrans) and mga10 (Lua %pretrans).
+        #    - makedev's %posttrans is a shell script that runs
+        #      ``useradd``, ``df``, ``mount``, ``mknod``.  None of those
+        #      exist in an empty chroot yet, so it MUST be --noscripts.
+        #
+        # 2. setup with scriptlets:
+        #    - Ships /etc/passwd, /etc/group, /etc/shadow via %files
+        #      (no scriptlet needed for those).  Its %posttrans (Lua)
+        #      fixes /etc/shadow's group ownership to ``shadow`` — which
+        #      is defined in /etc/group as part of the same %files.
+        #
+        # 3. basesystem-minimal with scriptlets:
+        #    - The solver pulls glibc, bash, coreutils, shadow-utils,
+        #      kmod, timezone, utempter and the rest of the minimal
+        #      base.  Their scriptlets all execute cleanly now that
+        #      /etc/passwd and /etc/group are in place.
+        #
+        # 4. Everything else listed in the ``bootstrap`` profile.
+        #    Most are already pulled transitively by basesystem-minimal;
+        #    naming them explicitly makes the chroot's package set
+        #    reproducible and gives the operator a clear failure line
+        #    when a specific one goes missing upstream.
+        # Order matters. ``filesystem`` is installed FIRST, and with
+        # scriptlets active: its %pretrans is pure Lua (embedded in rpm,
+        # needs no shell in the chroot) and creates /usr, /usr/{bin,sbin,
+        # lib,lib64} + the /bin, /sbin, /lib, /lib64 UsrMove symlinks
+        # BEFORE any other package extracts files under those paths.
+        # Skipping this %pretrans (via --noscripts) risks another package's
+        # cpio auto-mkdir turning /bin into a real directory in the same
+        # transaction, which then breaks filesystem's own symlink
+        # extraction and leaves the chroot with /bin empty.
+        #
+        # ``makedev`` keeps --noscripts: its %posttrans is shell
+        # (``useradd``, ``df``, ``mount``, ``mknod``) and would require a
+        # populated chroot to run.  Its %files (the /usr/sbin/makedev
+        # binary) extract fine on their own.
+        BOOTSTRAP_STAGES = ('filesystem', 'makedev', 'setup', 'basesystem-minimal')
+
+        if _install(['filesystem'], 'filesystem') != 0:
             print(colors.error(_("Failed to install filesystem")))
             return 1
-        if _noscripts_install(['coreutils'], 'coreutils') != 0:
-            print(colors.error(_("Failed to install coreutils")))
+        if _install(['makedev'], 'makedev', noscripts=True) != 0:
+            print(colors.error(_("Failed to install makedev")))
             return 1
+        for stage_pkg in ('setup', 'basesystem-minimal'):
+            if _install([stage_pkg], stage_pkg) != 0:
+                print(colors.error(_("Failed to install {pkg}").format(pkg=stage_pkg)))
+                return 1
 
         remaining = [p for p in bootstrap_packages
-                     if p not in ('setup', 'filesystem', 'coreutils')]
+                     if p not in BOOTSTRAP_STAGES]
         if remaining:
             label = _("bootstrap remainder ({n} pkgs)").format(n=len(remaining))
-            if _noscripts_install(remaining, label) != 0:
+            if _install(remaining, label) != 0:
                 print(colors.error(_("Failed to install bootstrap packages")))
                 return 1
 

@@ -431,6 +431,10 @@ class TransactionQueue:
         # it at -1; the callbacks' os.write will then raise OSError(EBADF),
         # which is already swallowed by the surrounding try/except.
         self._capture_fd = -1
+        # Populated by the rpm callback when a scriptlet fails.  Init here
+        # (not only in _child_process) so callbacks that fire on a path
+        # where the child hasn't overwritten it still find the attribute.
+        self._script_error_packages: set[str] = set()
 
     @staticmethod
     def _userns_available() -> bool:
