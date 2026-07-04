@@ -637,9 +637,19 @@ class TransactionQueue:
             os.close(read_fd)
 
             # Python code to run in the user namespace
+            # NOTE: the child is invoked with ``python3 -c`` below, which
+            # unconditionally puts ``""`` (CWD) at sys.path[0].  If the
+            # user is currently sitting in a dev checkout that has an
+            # ``urpm/`` subtree, the child would import THAT instead of
+            # the RPM-installed package -- and typically miss recent
+            # fixes.  The scrub below matches what Python 3.11+'s ``-P``
+            # flag would do; we do it in Python code so mga9 (3.10) is
+            # covered as well.
             child_code = f'''
 import os
 import sys
+if sys.path and sys.path[0] == "":
+    sys.path.pop(0)
 import pickle
 
 # Load queue state
