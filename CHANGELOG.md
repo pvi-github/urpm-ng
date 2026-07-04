@@ -15,29 +15,85 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
-## [0.8.0] — *unreleased*
+## [0.8.1] — 2026-07-04
 
-The first 0.8.x release brings the genmedia subsystem on board:
-a Python rewrite of `genhdlist3` integrated into urpm-ng as
-`urpm genmedia`, plus the AppStream extraction and filtering
-pipeline that goes with it.  Several review fixes ship alongside.
+First 0.8.x tag.  Ships the `genmedia` subsystem, a from-scratch
+rewrite of the media-creation pipeline unified behind a single
+primitive with four hard invariants, and a mkimage bootstrap that
+finally delegates chroot setup to the Mageia packages themselves
+(`filesystem`, `setup`, `basesystem-minimal`) instead of
+hand-rolling the FHS layout.  Six translation catalogues reach
+100%.
 
 ### Major Features
 
-- **`urpm genmedia`** — generates full media metadata (hdlist.cz,
+- **`urpm genmedia`** — regenerate full media metadata (hdlist.cz,
   synthesis.hdlist.cz, files.xml.lzma, info.xml.lzma,
   changelog.xml.lzma, MD5SUM) from a directory of RPMs. Packaged
   separately as `urpm-ng-genmedia` to keep the base client lean.
-- **AppStream extraction** — picks up embedded `metainfo.xml`
-  shipped by upstream applications, falls back to a minimal
-  component derived from RPM header fields when missing,
-  structurally filters out packages whose content is entirely
-  non-user-facing (devel headers, debug symbols, static libs,
-  pure runtime libraries) so they no longer pollute GNOME
-  Software / Discover under a generic `System` category.
+  Idempotent: a second run detects an unchanged tree and re-scans
+  only new / removed / touched RPMs.  Documented in the `urpm(1)`
+  man page for all seven locales.
+- **AppStream extraction** — picks up the `metainfo.xml` shipped
+  by upstream applications, falls back to a minimal component
+  derived from RPM header fields when missing, structurally
+  filters out packages whose content is entirely non-user-facing
+  (devel headers, debug symbols, static libs, pure runtime
+  libraries) so they no longer pollute GNOME Software / Discover
+  under a generic `System` category.
+- **Media pipeline refactor** — new `upsert_media_tree` primitive
+  in `urpm/core/media_pipeline.py` is the single canonical entry
+  point for every command that creates a media row (`init`,
+  `media add`, `media discover`, `media autoconfig`, `media
+  import`). Four invariants enforced: (a) no orphan media,
+  (b) no ugly `mga9-core-release`-style names, (c) no `unknown`
+  placeholders, (d) no legacy `add_media_legacy` fallback path.
+  45 `MIRRORLIST` entries from a typical `urpmi.cfg`
+  (Debug/Testing/Backports/32bit) used to be silently dropped on
+  `urpm media import`; they now import as pending media and get
+  server links from a subsequent `urpm server autoconfig`, which
+  HEAD-probes every media against every candidate mirror,
+  disabled ones included.
+- **`urpm mkimage` — chroot bootstrap delegated to RPM helpers**
+  — Phase 1 no longer pre-creates the FHS layout, UsrMove
+  symlinks or `/etc/passwd` system-account entries by hand.
+  `filesystem` is installed first with scriptlets active (its
+  pure-Lua `%pretrans` lays down `/usr/{bin,sbin,lib,lib64}` and
+  the UsrMove symlinks); `setup` ships `/etc/passwd/group/shadow`
+  via `%files`; only `makedev` keeps `--noscripts` because its
+  shell `%posttrans` needs a populated chroot.
 
-### Bug Fixes (review of papoteur's genmedia integration)
+### Improvements
 
+- `urpm download --show-all` and `urpm media remove --all`
+  (`ae89031`) — the download flag lifts the 20-row truncation
+  the parser already advertised but the code ignored;
+  `media remove --all` bulk-removes with a refuse-by-default
+  `[y/N]` confirmation (`-y`/`--auto` skips it), and cascades
+  orphan servers (no media left) in the same pass.
+- **Disabled-media availability probe** — after `urpm init` and
+  `urpm media import`, every disabled media is HEAD-probed
+  against every mirror it is linked to (one worker per server,
+  sequential intra-server to stay respectful with per-mirror
+  load).  Report is compact: `N/N covered by at least one
+  mirror`, with explicit lines for partial-coverage and orphan
+  media.
+- **Six translation catalogues (fr/de/es/it/nl/pt) hit 100%** —
+  message extraction now catches sources outside `POTFILES.in`
+  that had been silently skipping the `.pot` build.
+- `TransactionQueue._script_error_packages` is initialised in
+  `__init__`, so a scriptlet error callback firing via the
+  userns child path no longer crashes rpm's Python callback
+  with `FATAL ERROR: python callback ??? failed, aborting!`.
+
+### Bug Fixes
+
+- `urpm media import` no longer silently drops the 45
+  mirrorlist-based entries of a typical `urpmi.cfg` (`16378db`).
+- The child `podman unshare python3 -c ...` used by
+  `TransactionQueue` scrubs `sys.path[0]` before importing urpm
+  — a source checkout at CWD can no longer shadow the
+  RPM-installed package during `urpm image make` (`79d2c76`).
 - `extract_from_rpm` opens the real RPM file path (not the
   `cache_dir / basename` it formerly used), so RPMs that ship
   an embedded `metainfo.xml` actually have their content
@@ -49,27 +105,40 @@ pipeline that goes with it.  Several review fixes ship alongside.
 - `AppStreamManager` filters non-user-facing packages
   structurally instead of emitting a fallback `System`
   component (`1eb8c3b`).
+- `pytest -n auto` no longer races on `/var/lib/rpm`: tests set
+  up their own tmpdir-scoped rpmdb (`5194678`).
+
+### Packaging & Distribution
+
+- The RPM `%install` post-processes the auto-generated `urpm` /
+  `urpmd` / `urpm-dbus-service` wrappers to normalise the shebang
+  to `#! /usr/bin/python3 -s` and insert an explicit
+  `sys.path[0]` CWD scrub — equivalent to what Python 3.11+
+  `-P` does, but works on mga9's Python 3.10 too (`ea7bc3e`).
+- Test isolation: rpmdb writes moved to per-test tmpdirs — the
+  suite now runs in parallel without races (`5194678`,
+  `aca26ca`).
 - DNF references purged from the documentation, source comments,
   and translatable strings — the Mageia ecosystem stands on its
-  own vocabulary.
-
-### Tests
-
-- An `autouse` pytest fixture on `BaseUrpmiTest` guarantees the
-  per-test tmpdir is cleaned even when a test raises before its
-  explicit cleanup; the 12 deterministic leaks per full
-  `test_install.py` run are gone (`aca26ca`).
+  own vocabulary (`44810da`).
 
 ### Documentation
 
-- `README.md` adds a `Media generation (urpm genmedia)` section.
+- `CONTRIBUTING.md` added in seven languages (`dcd2870`).
+- Man pages document `urpm genmedia` in all seven locales
+  (`a9a7da3`).
+- `FEATURES.md` split off from `CHANGELOG.md` (`c25b3e1`) so
+  this file stays release-focused; the cumulative feature
+  catalogue lives in [`FEATURES.md`](FEATURES.md).
+- `README.md` adds a `Media generation (urpm genmedia)` section
+  and documents the new `--show-all` / `--all` flags.
 - `doc/ROADMAP.md` lists genmedia under the shipped features.
 - `doc/TESTING.md` aligns with the actual `urpm/tests/` layout
   and gives an honest assessment of remaining coverage gaps.
 - `doc/TODO_DASHBOARD.md` is now an index into the thematic
   TODO files instead of a duplicated tracker.
 
-**Full Changelog**: https://github.com/pvi-github/urpm-ng/compare/0.7.15...0.8.0
+**Full Changelog**: https://github.com/pvi-github/urpm-ng/compare/0.7.15...0.8.1
 
 ---
 
