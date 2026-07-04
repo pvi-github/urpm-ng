@@ -401,8 +401,20 @@ cauldron, ...).
 Modalità non interattiva.
 .RE
 .TP
-.B remove \fInome\fR
-Rimuove un media.
+.B remove \fInome\fR ...
+Rimuove uno o più media. Ogni server la cui lista di media resta
+vuota dopo la rimozione viene eliminato nella stessa passata.
+.RS
+.TP
+.B \-\-all
+Rimuove tutti i media configurati. Chiede conferma, a meno che non
+sia passato \fB\-y\fR / \fB\-\-auto\fR. Incompatibile con una lista
+esplicita di nomi.
+.TP
+.BR \-y ", " \-\-auto
+Salta la richiesta di conferma (vale sia per il modo con nomi che
+per \fB\-\-all\fR).
+.RE
 .TP
 .B enable \fInome\fR
 Abilita un media.

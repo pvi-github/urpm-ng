@@ -393,8 +393,21 @@ Version Mageia cible pour un média personnalisé (9, 10, cauldron ...).
 Mode non-interactif.
 .RE
 .TP
-.B remove \fInom\fR
-Supprime un média.
+.B remove \fInom\fR ...
+Supprime un ou plusieurs médias. Tout serveur dont la liste de
+médias devient vide suite à cette suppression est retiré dans la
+foulée.
+.RS
+.TP
+.B \-\-all
+Supprime tous les médias configurés. Demande confirmation, sauf si
+\fB\-y\fR / \fB\-\-auto\fR est passé. Incompatible avec une liste
+explicite de noms.
+.TP
+.BR \-y ", " \-\-auto
+Passe outre la confirmation (utilisable aussi bien en mode nommé
+qu'avec \fB\-\-all\fR).
+.RE
 .TP
 .B enable \fInom\fR
 Active un média.

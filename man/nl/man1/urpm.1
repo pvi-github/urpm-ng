@@ -237,8 +237,20 @@ Lijst geconfigureerde media.
 .B add \fInaam\fR \fIurl\fR
 Voeg een nieuw medium toe.
 .TP
-.B remove \fInaam\fR
-Verwijder een medium.
+.B remove \fInaam\fR ...
+Verwijder één of meerdere media. Elke server waarvan de medialijst
+na verwijdering leeg blijft wordt in dezelfde beweging weggehaald.
+.RS
+.TP
+.B \-\-all
+Verwijder alle geconfigureerde media. Vraagt om bevestiging, tenzij
+\fB\-y\fR / \fB\-\-auto\fR wordt meegegeven. Niet te combineren met
+een expliciete lijst namen.
+.TP
+.BR \-y ", " \-\-auto
+Slaat de bevestiging over (geldt zowel voor de benoemde modus als
+voor \fB\-\-all\fR).
+.RE
 .TP
 .B enable \fInaam\fR
 Schakel een medium in.

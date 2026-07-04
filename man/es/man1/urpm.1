@@ -236,8 +236,20 @@ Lista los medios configurados.
 .B add \fInombre\fR \fIurl\fR
 Añade un nuevo medio.
 .TP
-.B remove \fInombre\fR
-Elimina un medio.
+.B remove \fInombre\fR ...
+Elimina uno o varios medios. Todo servidor cuya lista de medios
+quede vacía tras la eliminación se retira en la misma pasada.
+.RS
+.TP
+.B \-\-all
+Elimina todos los medios configurados. Pide confirmación, salvo si
+se pasa \fB\-y\fR / \fB\-\-auto\fR. Incompatible con una lista
+explícita de nombres.
+.TP
+.BR \-y ", " \-\-auto
+Omite la confirmación (aplicable tanto al modo con nombres como a
+\fB\-\-all\fR).
+.RE
 .TP
 .B enable \fInombre\fR
 Activa un medio.

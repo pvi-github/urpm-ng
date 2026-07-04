@@ -237,8 +237,20 @@ Listet konfigurierte Medien auf.
 .B add \fIName\fR \fIURL\fR
 Fügt ein neues Medium hinzu.
 .TP
-.B remove \fIName\fR
-Entfernt ein Medium.
+.B remove \fIName\fR ...
+Entfernt eines oder mehrere Medien. Server, deren Medienliste nach
+dem Entfernen leer ist, werden im gleichen Durchgang mit entfernt.
+.RS
+.TP
+.B \-\-all
+Entfernt alle konfigurierten Medien. Verlangt eine Bestätigung, es
+sei denn, \fB\-y\fR / \fB\-\-auto\fR wird angegeben. Nicht mit einer
+expliziten Namensliste kombinierbar.
+.TP
+.BR \-y ", " \-\-auto
+Überspringt die Bestätigungsabfrage (gilt für den benannten Modus
+und für \fB\-\-all\fR).
+.RE
 .TP
 .B enable \fIName\fR
 Aktiviert ein Medium.

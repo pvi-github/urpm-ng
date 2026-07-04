@@ -1273,10 +1273,13 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
 
         if not_found:
             print(colors.error(_("Packages not found ({count}):").format(count=len(not_found))))
-            for p in not_found[:10]:
+            show_all = getattr(args, 'show_all', False)
+            preview = not_found if show_all else not_found[:10]
+            for p in preview:
                 print(f"  {p}")
-            if len(not_found) > 10:
-                print("  " + _("... and {count} more").format(count=len(not_found) - 10))
+            if not show_all and len(not_found) > 10:
+                print("  " + _("... and {count} more (use --show-all to list them)").format(
+                    count=len(not_found) - 10))
             return 1
 
         result = Resolution(success=True, actions=actions, problems=[])
@@ -1304,11 +1307,14 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
 
     # Show summary
     print(colors.info("\n" + _("Packages to download ({count}):").format(count=len(install_actions))))
-    for action in install_actions[:20]:
+    show_all = getattr(args, 'show_all', False)
+    preview = install_actions if show_all else install_actions[:20]
+    for action in preview:
         size_str = format_size(action.size) if action.size else "?"
         print(f"  {action.nevra} ({size_str})")
-    if len(install_actions) > 20:
-        print("  " + _("... and {count} more").format(count=len(install_actions) - 20))
+    if not show_all and len(install_actions) > 20:
+        print("  " + _("... and {count} more (use --show-all to list them)").format(
+            count=len(install_actions) - 20))
     print("\n" + _("Total download size: {size}").format(size=format_size(total_size)))
 
     # Confirm unless --auto

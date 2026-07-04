@@ -384,8 +384,20 @@ Target Mageia version for custom media (9, 10, cauldron, ...).
 Non-interactive mode.
 .RE
 .TP
-.B remove \fIname\fR
-Remove a media.
+.B remove \fIname\fR ...
+Remove one or more media sources. Any server whose media list is left
+empty by the removal is dropped in the same pass.
+.RS
+.TP
+.B \-\-all
+Remove every configured media source. Prompts for confirmation unless
+\fB\-y\fR / \fB\-\-auto\fR is passed. Conflicts with an explicit list
+of names.
+.TP
+.BR \-y ", " \-\-auto
+Skip the confirmation prompt (applies to both the named and the
+\fB\-\-all\fR forms).
+.RE
 .TP
 .B enable \fIname\fR
 Enable a media.

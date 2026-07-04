@@ -1556,7 +1556,20 @@ For legacy mode (non-Mageia URL with explicit name):
         'remove', aliases=['r'],
         help=_('Remove media source')
     )
-    media_remove.add_argument('name', nargs='+', help=_('Media name(s)'))
+    media_remove.add_argument(
+        'name', nargs='*',
+        help=_('Media name(s); optional when --all is passed'),
+    )
+    media_remove.add_argument(
+        '--all',
+        action='store_true',
+        help=_('Remove every configured media source (asks for confirmation)'),
+    )
+    media_remove.add_argument(
+        '--auto', '-y',
+        action='store_true',
+        help=_('Skip the confirmation prompt'),
+    )
 
     # media enable / e
     media_enable = media_subparsers.add_parser(

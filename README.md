@@ -310,6 +310,8 @@ urpm download --only-peers pkg  # Download only from LAN peers
 --no-peers / --only-peers     # Same as install (peer policy)
 --allow-arch <arch>           # Allow additional architectures
 --arch <arch>                 # Inherited: target architecture
+--show-all                    # Print the full list of resolved packages
+                              # (default truncates to 20 with "... and N more")
 ```
 
 ### Upgrade packages
@@ -521,7 +523,11 @@ urpm progress --watch         # Continuously watch until completion
 urpm media list               # List configured media
 urpm media add <url>          # Add official Mageia media (auto-parsed)
 urpm media add --custom "Name" shortname <url>  # Add custom/third-party media
-urpm media remove <name>      # Remove a media source
+urpm media remove <name>...   # Remove one or more media sources
+urpm media remove --all       # Remove EVERY configured media (asks for
+                              # confirmation; add -y/--auto to skip it).
+                              # Orphan servers (no media left) are
+                              # dropped in the same pass.
 urpm media enable <name>      # Enable a media
 urpm media disable <name>     # Disable a media
 urpm media update [name]      # Update media metadata

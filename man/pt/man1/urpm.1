@@ -236,8 +236,20 @@ Lista os media configurados.
 .B add \fInome\fR \fIurl\fR
 Adiciona um novo media.
 .TP
-.B remove \fInome\fR
-Remove um media.
+.B remove \fInome\fR ...
+Remove um ou vários medias. Todo servidor cuja lista de medias
+fique vazia após a remoção é retirado na mesma passagem.
+.RS
+.TP
+.B \-\-all
+Remove todos os medias configurados. Pede confirmação, salvo se
+\fB\-y\fR / \fB\-\-auto\fR for passado. Incompatível com uma lista
+explícita de nomes.
+.TP
+.BR \-y ", " \-\-auto
+Ignora a confirmação (aplica-se tanto ao modo com nomes como a
+\fB\-\-all\fR).
+.RE
 .TP
 .B enable \fInome\fR
 Activa um media.

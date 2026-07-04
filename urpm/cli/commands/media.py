@@ -860,19 +860,81 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
 
 
 def cmd_media_remove(args, db: 'PackageDatabase') -> int:
-    """Handle media remove command."""
+    """Handle media remove command.
+
+    Two modes:
+      - Named removal (``urpm media remove <name>...``): removes the
+        listed media.  This is the default and preserves the
+        legacy behaviour.
+      - Bulk removal (``urpm media remove --all``): removes every
+        configured media.  Requires an explicit confirmation unless
+        ``-y`` / ``--auto`` is passed.
+
+    After removals, any server that no longer hosts any media is
+    dropped as well, so the DB doesn't retain orphan server rows
+    that would just clutter ``urpm server list``.
+    """
+    from .. import colors
     from ...auth.privileges import require_privileges
 
     require_privileges(action_id="org.mageia.urpm.media-manage")
 
+    remove_all = getattr(args, 'all', False)
+    auto = getattr(args, 'auto', False)
+    names_arg = list(args.name or [])
+
+    if remove_all and names_arg:
+        print(colors.error(_("--all conflicts with an explicit list of names")))
+        return 1
+
+    if remove_all:
+        all_media = db.list_media()
+        if not all_media:
+            print(_("No media to remove"))
+            return 0
+        if not auto:
+            print(colors.warning(_(
+                "About to remove ALL {n} media sources").format(n=len(all_media))))
+            try:
+                resp = input(_("Proceed? [y/N] ")).strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print(_("\nAborted"))
+                return 1
+            if not confirm_yes(resp):
+                print(_("Aborted"))
+                return 1
+        targets = [m['name'] for m in all_media]
+    elif names_arg:
+        targets = names_arg
+    else:
+        print(colors.error(_(
+            "Missing media name; pass one or more names, or --all to "
+            "remove everything")))
+        return 1
+
     rc = 0
-    for name in args.name:
+    for name in targets:
         if not db.get_media(name):
             print(_("Media '{name}' not found").format(name=name))
             rc = 1
             continue
         db.remove_media(name)
         print(_("Removed media '{name}'").format(name=name))
+
+    # Cascade: any server whose media list is now empty is orphan
+    # (no media served → the server has no reason to remain in the
+    # pool).  This keeps the state tidy after a bulk removal or after
+    # a targeted removal that happened to drain a mirror.
+    orphan_servers = [
+        s for s in db.list_servers()
+        if not db.get_media_for_server(s['id'])
+    ]
+    for srv in orphan_servers:
+        db.remove_server(srv['name'])
+        print(colors.dim(_(
+            "Removed orphan server '{name}' (no media left)"
+        ).format(name=srv['name'])))
+
     return rc
 
 
@@ -1435,7 +1497,10 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
              replaced=replaced, errors=errors))
 
     if mirrorlist_added:
-        print(colors.dim(_("Run 'urpm server autoconfig' to attach servers to the mirrorlist media")))
+        print(colors.info(_(
+            "Next step: run 'urpm server autoconfig' to attach servers to "
+            "the {n} mirrorlist-based media"
+        ).format(n=mirrorlist_added)))
 
     # Probe all enabled servers that lack bandwidth data — covers servers
     # just imported from urpmi.cfg that were never probed.

@@ -7654,3 +7654,8 @@ msgstr "Experimente um dos seguintes:"
 #~ msgctxt "server"
 #~ msgid "Media"
 #~ msgstr "Repositórios"
+
+#: urpm/cli/commands/media.py:1499
+#, python-brace-format
+msgid "Next step: run 'urpm server autoconfig' to attach servers to the {n} mirrorlist-based media"
+msgstr "Passo seguinte: execute 'urpm server autoconfig' para ligar servidores aos {n} medias baseados em mirrorlist"
