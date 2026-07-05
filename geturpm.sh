@@ -210,8 +210,12 @@ mgabiz_install() {
     printf '  su -c "urpm m u"\n'
     printf '  su -c "urpm u --auto urpm-ng-all rpmdrake-ng"\n\n'
     confirm_or_die
-    su -c "urpm m u"
-    su -c "urpm u --auto urpm-ng-all rpmdrake-ng"
+    su -c "$(cat <<'EOF'
+set -e
+urpm m u
+urpm u --auto urpm-ng-all rpmdrake-ng
+EOF
+)"
     return 0
   fi
 
@@ -241,13 +245,22 @@ mgabiz_install() {
     printf '  6. su -c "urpm i --auto urpm-ng-all rpmdrake-ng"\n\n'
     confirm_or_die
 
-    su -c "rpm --import $pubkey_file"
     log "Downloading $core_rpm..."
     (cd "$WORKDIR" && curl -fsSL -O "$core_url")
-    su -c "urpmi --auto $WORKDIR/$core_rpm"
-    su -c "urpm media discover $media_url"
-    su -c "urpm m u"
-    su -c "urpm i --auto urpm-ng-all rpmdrake-ng"
+
+    # Single ``su -c'' invocation for steps 1, 3-6 so the root
+    # password is asked at most once (step 2 was the curl above,
+    # which is user-side and needs no privilege).  ``set -e''
+    # inside the heredoc mirrors the outer script's fail-fast.
+    su -c "$(cat <<EOF
+set -e
+rpm --import '$pubkey_file'
+urpmi --auto '$WORKDIR/$core_rpm'
+urpm media discover '$media_url'
+urpm m u
+urpm i --auto urpm-ng-all rpmdrake-ng
+EOF
+)"
     return 0
   fi
 
@@ -261,10 +274,14 @@ mgabiz_install() {
   printf '  4. su -c "urpm i --auto urpm-ng-all rpmdrake-ng"\n\n'
   confirm_or_die
 
-  su -c "rpm --import $pubkey_file"
-  su -c "urpm media discover $media_url"
-  su -c "urpm m u"
-  su -c "urpm i --auto urpm-ng-all rpmdrake-ng"
+  su -c "$(cat <<EOF
+set -e
+rpm --import '$pubkey_file'
+urpm media discover '$media_url'
+urpm m u
+urpm i --auto urpm-ng-all rpmdrake-ng
+EOF
+)"
 }
 
 # ── github channel ─────────────────────────────────────────────────────
