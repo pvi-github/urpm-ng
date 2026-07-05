@@ -12,59 +12,92 @@ Zurzeit brauchst du Mageia 9 oder Mageia 10.
 
 ### Firewall-Ports (für P2P-Sharing)
 
-Wenn du das P2P-Paket-Sharing zwischen LAN-Maschinen nutzen möchtest, öffne diese Ports:
+Das Paket `urpm-ng-daemon` liefert `/etc/shorewall/rules.urpm-ng` als
+Include-Datei mit, und sein `%post` hängt sie automatisch in
+`/etc/shorewall/rules` ein. Auf einer per Shorewall verwalteten Maschine
+(dem Mageia-Standard) sind die folgenden Ports also direkt nach der
+Installation offen, ohne weiteres Zutun:
+
 - **TCP 9876** (Produktion) oder **TCP 9877** (Dev-Modus) — urpmd HTTP-API
 - **UDP 9878** (Produktion) oder **UDP 9879** (Dev-Modus) — Peer-Discovery-Broadcasts
 
-Nutze das Mageia Control Center (MCC) > Sicherheit > Firewall, oder bearbeite direkt `/etc/shorewall/rules.drakx`.
+Falls Shorewall nicht im Einsatz ist (nacktes `iptables` / `nftables`),
+öffne die Ports von Hand — die Datei `/etc/shorewall/rules.urpm-ng` im
+Source-Tree taugt gut als Vorlage.
 
 ## Installation
 
 ### Pakete
 
-urpm-ng ist in mehrere Pakete aufgeteilt, um flexibel zu bleiben:
+urpm-ng ist zur besseren Flexibilität in mehrere Pakete aufgeteilt:
 
 | Paket | Beschreibung |
 |-------|--------------|
 | `urpm-ng-core` | Minimal: CLI, Resolver, Datenbank |
 | `urpm-ng-daemon` | Hintergrund-Daemon + P2P-Sharing |
-| `urpm-ng` | Standardinstallation (core + daemon) |
-| `urpm-ng-desktop` | Desktop-Integration (Discover, GNOME Software) |
-| `urpm-ng-build` | Container-Build-Werkzeuge (image, build) |
-| `urpm-ng-all` | Alles |
+| `urpm-ng` | Meta: zieht `-core` + `-daemon` (Standardinstallation) |
+| `urpm-ng-appstream` | AppStream-Metadaten-Konfiguration (Mageia-OS-Metainfo, Distro-Config) |
+| `urpm-ng-packagekit-backend` | PackageKit-Backend (Discover, GNOME Software) + D-Bus-Service |
+| `urpm-ng-desktop` | Meta: zieht `-core` + `-daemon` + `-appstream` + `-packagekit-backend` |
+| `urpm-ng-build` | Meta: zieht `-core` (für `urpm image` / `urpm build` — die Kommandos leben in `-core`) |
+| `urpm-ng-genmedia` | Server-seitige Erzeugung von Medien-Metadaten (`urpm genmedia`, für Mirror-Maintainer) |
+| `urpm-ng-all` | Meta: zieht alles oben Genannte |
 
 **Das passende Paket wählen:**
 - **Minimal-/Container-Install**: `urpm-ng-core`
 - **Standard-CLI-Nutzung**: `urpm-ng`
 - **Desktop mit GUI-Softwarezentren**: `urpm-ng-desktop`
-- **Paket-Builder**: `urpm-ng-build`
+- **Paket-Builder (bm-/mkimage-Nutzer)**: `urpm-ng-build`
+- **Mirror-Maintainer, die Repositories veröffentlichen**: `urpm-ng-genmedia`
 
-### RPM-Installation oder -Update… funktioniert in allen Fällen (Einzeiler)
+### Schnelle Installation / Update (`geturpm.sh`)
 
-In ein Terminal kopieren und ausführen:
+`geturpm.sh` ist der empfohlene Weg, urpm-ng auf einem frischen
+Mageia-System zu installieren, und er kann auch eine bestehende
+Installation aktualisieren. Er erkennt Release und Architektur automatisch,
+zieht das neueste urpm-ng aus dem gewählten Kanal, und macht das
+Richtige, egal ob urpm-ng schon installiert ist oder nicht (frische
+Maschinen bootstrapen mit `urpmi`, spätere Updates laufen über urpm-ng
+selbst).
+
+**Schnell — via Pipe, ohne lokale Inspektion**
 
 ```bash
-mkdir -p $HOME/tmp/urpm-ng && cd $HOME/tmp/urpm-ng && \
-MGAVER=$(rpm -q --qf '%{version}' mageia-release-Default 2>/dev/null | cut -d. -f1) && \
-ARCH=$(uname -m) && \
-VER=$(curl -s https://api.github.com/repos/pvi-github/urpm-ng/releases | grep -m1 '"tag_name"' | cut -d'"' -f4) && \
-echo "Downloading urpm-ng $VER for Mageia $MGAVER ($ARCH)..." && \
-curl -s "https://api.github.com/repos/pvi-github/urpm-ng/releases/tags/$VER" | \
-  grep browser_download_url | grep '\.rpm"' | cut -d'"' -f4 | \
-  grep -v '\.src\.rpm' | grep -v '\-debuginfo' | grep -v '\-debugsource' | \
-  grep "mga${MGAVER}" | grep "\.${ARCH}\.\|\.noarch\." | xargs -n1 curl -sLO && \
-if urpm --version 2>/dev/null | grep -qE 'urpm (0\.([3-9]|[0-9]{2,})|[1-9][0-9]*)\.'; then \
-  su -c "urpm i --reinstall $HOME/tmp/urpm-ng/urpm-ng-all-*.rpm"; \
-else \
-  su -c "urpmi $HOME/tmp/urpm-ng/*.rpm && urpm mark auto \$(rpm -qa 'urpm-ng-*' | grep -v urpm-ng-all | sed 's/-[0-9].*//')"; \
-fi
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | URPM_YES=1 bash
 ```
 
-Hinweis: Bei der ersten Installation importiert urpm-ng seine Konfiguration aus urpmi.
+`URPM_YES=1` ist hier zwingend — das Skript hat kein TTY, wenn es
+gepipet wird, und braucht das Flag, um Bestätigungen zu überspringen.
 
-## Konfiguration
+**Verifiziert — herunterladen, lesen, dann ausführen** (empfohlen,
+wenn du der Quelle nicht ohnehin schon vertraust):
 
-urpm läuft direkt aus dem Karton. Fortgeschrittene Optionen (Blacklist, Redlist, Kernel-Keep) sind weiter unten dokumentiert.
+```bash
+curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
+less geturpm.sh                  # vor dem Ausführen prüfen
+bash geturpm.sh
+```
+
+**Kanal wählen** (`URPM_CHANNEL`):
+
+- `mgabiz` — holt aus dem Mageia.biz-Projekt-Repo (Standard beim
+  Piped-Aufruf). Nutzt `urpm media discover` auf dem mgabiz-Mirror,
+  spätere Updates laufen also über den Standard-Flow von
+  `urpm media update`.
+- `github` — holt Release-RPMs direkt von der GitHub-Releases-Seite.
+  Nützlich, um ein bestimmtes Tag zu testen, oder wenn die
+  mgabiz-Veröffentlichung einem Release hinterherhängt.
+
+Die Kanäle `gitlab` und `codeberg` sind geplant, aber noch nicht
+verfügbar.
+
+Hinweis: Bei der ersten Installation importiert urpm-ng seine
+Konfiguration automatisch aus vorhandenen `urpmi.cfg`- und
+`urpmi/skip.list`-Dateien.
+
+## Erstlauf-Einrichtung
+
+urpm läuft direkt aus dem Karton. Fortgeschrittene Optionen (Blacklist, Redlist, Kernel-Keep) sind weiter unten unter **Konfiguration** dokumentiert.
 
 Bei einer systemweiten Installation (in `/usr/bin/`) nutzt urpm:
 - Datenbank: `/var/lib/urpm/packages.db`
@@ -73,28 +106,38 @@ Bei einer systemweiten Installation (in `/usr/bin/`) nutzt urpm:
 
 ### Medienquellen
 
-Wie man Paketquellen und Mirror-Server konfiguriert.
+Bei einer Installation über den RPM-Pfad (oder via `geturpm.sh`) werden
+die Standard-Mageia-Medien und die zugehörigen Server automatisch
+eingerichtet: `urpm-ng` importiert die vorhandene `urpmi.cfg` beim
+ersten Lauf, und `urpm server autoconfig` füllt den Mirror-Pool aus
+der Mageia-Mirror-API. Mehr ist zum Installieren von Paketen nicht
+nötig.
 
-Hinweis: Bei einer RPM-Installation sollten diese Schritte nicht nötig sein.
+Auf einer Maschine ohne vorherige `urpmi.cfg` (frisches Chroot,
+Image-Build oder ein System, das nie urpmi hatte) läuft derselbe
+Bootstrap in einem manuellen Durchgang:
 
 ```bash
-# Konfigurierte Medien auflisten
-urpm media list
-
-# Falls keine da sind, aus einer bestehenden urpmi.cfg importieren
-urpm media import /etc/urpmi/urpmi.cfg
-
-# Bei Bedarf eine bestimmte Medienquelle hinzufügen
-urpm media add http://mirror.example.com/distrib/10/x86_64/media/core/release
-urpm media add http://mirror.example.com/distrib/10/x86_64/media/core/updates
-urpm media add http://mirror.example.com/distrib/10/x86_64/media/core/update_testing
-
-# Zusätzliche Server konfigurieren
-urpm server autoconfig
-
-# Medien-Metadaten aktualisieren
-urpm media update
+urpm media list                       # Noch nichts da? Bootstrap:
+urpm media import                     # Liest per Default /etc/urpmi/urpmi.cfg; No-op falls fehlt
+urpm server autoconfig                # Mirrors aus der Mageia-API ziehen
+urpm media update                     # Erste Metadaten-Sync
 ```
+
+Zum Hinzufügen eines **Community-Repositorys** (MageiaLinux-Online,
+mageia.biz, blogdrake, ein interner Mirror, …) `urpm media discover`
+nutzen — es liest die `media.cfg` des Repos und fügt in einem Aufruf
+alle darin angekündigten Medien hinzu:
+
+```bash
+urpm media discover https://www.mageia.biz/repo/Mageia/mgabiz/10/x86_64/media/
+urpm media discover --dry-run https://download.mageialinux-online.org/...   # Vorschau
+```
+
+`urpm media add` ist einzelnen, nicht-discover-fähigen Custom-Medien
+vorbehalten — also solchen, von denen du weißt, dass sie nicht über
+eine `media.cfg` veröffentlicht werden. Die Syntax steht weiter unten
+im Abschnitt **Medienverwaltung**.
 
 ---
 
@@ -160,35 +203,6 @@ Skriptbarer Check für den Teilfall:
 
 ```bash
 urpm upgrade --auto || [ $? -eq 2 ] && echo "ok oder teilweise"
-```
-
-## Bootstrap und Chroot
-
-### Ein neues urpm-Setup initialisieren (`urpm init`)
-
-Bootstrap der urpm-Medien in einer frischen Root oder in einem Chroot zum Bau von Images. Die Mirrors werden aus der Mageia-Mirror-API geholt und durch die `[server]`-Sektion von `/etc/urpm/conf.d/10-server.cfg` gefiltert.
-
-```bash
-# Ein Chroot-Rootfs für Mageia 10 bootstrappen
-urpm --urpm-root /tmp/rootfs init --release 10 --arch x86_64
-
-# Eine eigene Mirrorliste nutzen
-urpm init --mirrorlist 'https://mirrors.mageia.org/api/mageia.10.x86_64.list'
-
-# Optionen
---release, -r <version>     # Ziel-Mageia-Version (10, cauldron, …)
---mirrorlist <url>          # Überschreibt die automatisch erzeugte Mirrorlisten-URL
---arch <arch>               # Zielarchitektur (Standard: Host)
---auto, -y                  # Nicht-interaktiver Modus
---no-sync                   # Medien konfigurieren, aber die initiale Metadaten-Sync auslassen
-```
-
-### Ein Chroot aushängen (`urpm cleanup`)
-
-Nachdem du in einem `--urpm-root`-Chroot gearbeitet hast, hänge `/dev` und `/proc` aus, die von `urpm init` gemountet wurden:
-
-```bash
-urpm --urpm-root /tmp/rootfs cleanup
 ```
 
 ## Paketverwaltung
@@ -277,8 +291,9 @@ urpm e <paket>                # Kurzalias
 ```bash
 urpm update                   # Alle Medien-Metadaten aktualisieren
 urpm update "Core Release"    # Bestimmtes Medium aktualisieren
-urpm update --files           # Auch files.xml synchronisieren
 ```
+
+Seit 0.7.x wird `files.xml.lzma` zusammen mit `synthesis.hdlist.cz` geholt, sobald das Medium sie veröffentlicht — kein Opt-in-Flag mehr nötig.
 
 ### Pakete herunterladen (ohne Installation)
 
@@ -428,16 +443,11 @@ urpm whatprovides <datei>     # Finden, welches Paket eine Datei bereitstellt
 urpm find <muster>            # Dateien in Paketen suchen (installiert + verfügbar)
 urpm find -i <muster>         # Nur in installierten Paketen suchen
 urpm find -a <muster>         # Nur in verfügbaren Paketen suchen
+urpm find <muster> --all-versions  # Alle EVR mit einbeziehen, die den Treffer liefern
+urpm find <muster> --limit 500     # Das Default-Limit von 100 Treffern anheben
 ```
 
-Um in verfügbaren Paketen zu suchen, muss die files.xml-Synchronisierung aktiviert sein:
-
-```bash
-urpm media set --all --sync-files  # files.xml-Sync auf allen Medien aktivieren
-urpm media update --files          # files.xml herunterladen (~500 MB, 10–15 min beim ersten Mal)
-```
-
-Nach der Aktivierung synchronisiert urpmd files.xml automatisch täglich, wenn das System im Leerlauf ist.
+`urpm find` sucht standardmäßig sowohl in installierten als auch in verfügbaren Paketen. `files.xml.lzma` wird automatisch als Teil jedes `urpm media update` geholt (sofern das Medium sie in `MD5SUM` ankündigt), es ist also kein Opt-in mehr nötig — der Toggle `--sync-files` wurde in 0.7.x entfernt.
 
 ## Paket-Markierung
 
@@ -532,6 +542,26 @@ Nützliche Flags für `urpm media add`:
 --version <ver>               # Ziel-Mageia-Version (nur eigene Medien: 9, 10, cauldron…)
 --update                      # Als Update-Medium markieren
 --disabled                    # Hinzufügen, aber deaktiviert lassen
+-y, --auto                    # Nicht-interaktiv: den auto-detektierten Namen/short_name akzeptieren
+```
+
+### Medien aus einer alten urpmi.cfg importieren
+
+Eine bestehende Mageia-Maschine von `urpmi` zu urpm-ng migrieren, ohne
+jede Medienquelle von Hand nachzutragen. Sowohl URL-basierte Einträge
+als auch `MIRRORLIST=`-Einträge werden importiert — Letztere als
+pending Medien, denen `urpm server autoconfig` beim nächsten Lauf die
+Server zuweist.
+
+```bash
+urpm media import /etc/urpmi/urpmi.cfg    # Standardpfad
+urpm media import                          # Dasselbe (Default ist /etc/urpmi/urpmi.cfg)
+
+# Optionen
+--replace                     # Bereits vorhandene Medien mit gleichem short_name überschreiben
+-r, --release <version>       # Ziel-Mageia-Release (Standard: Wert von /etc/mageia-release)
+--arch <arch>                 # Zielarchitektur (Standard: `uname -m`)
+-y, --auto                    # Nicht-interaktiv: Bestätigungs-Prompt überspringen
 ```
 
 ### Medien aus einem Repository entdecken
@@ -588,8 +618,6 @@ urpm media set "Core Release" --quota=5G             # Cache-Größe begrenzen
 urpm media set "Core Release" --retention=30         # Pakete 30 Tage behalten
 urpm media set "Core Release" --priority=10          # Höhere Priorität
 urpm media set "Core Release" --seeds=INSTALL,CAT_PLASMA5  # Seed-Sektionen
-urpm media set "Core Release" --sync-files           # files.xml-Sync für urpm find aktivieren
-urpm media set --all --sync-files                    # Auf allen Medien aktivieren
 ```
 
 Beispiele:
@@ -616,6 +644,9 @@ urpm server test [name]       # Konnektivität testen und IP-Modus erkennen
 urpm server ip-mode <name> <mode>  # IP-Modus setzen (auto/ipv4/ipv6/dual)
 urpm server autoconfig        # Server automatisch aus der Mageia-Mirror-API hinzufügen
 urpm server stats [name]      # Performance-Statistiken eines Servers anzeigen
+urpm server status            # Blacklistete / reputationsschwache Server anzeigen
+urpm server unblacklist <name>   # Blacklist eines Servers aufheben (nach Prüfung)
+urpm server ack-blacklist <name>  # Ein Blacklist quittieren (das Banner verstummt, ohne aufzuheben)
 ```
 
 ### Server-Liste
@@ -642,6 +673,33 @@ urpm verfolgt die Download-Performance jedes Servers automatisch. Nach jedem Dow
 Server werden in der Reihenfolge `priority DESC, bandwidth_kbps DESC` probiert: Scheitert ein Server während eines Downloads oder einer Metadaten-Sync, wird automatisch der nächstbeste versucht, ohne Benutzereingriff. Innerhalb einer Session werden Geschwindigkeitsschätzungen zusätzlich im Speicher gehalten, sodass die Reihenfolge in Echtzeit angepasst wird, ohne auf den nächsten Lauf zu warten.
 
 `urpm server autoconfig` misst die Latenz zu allen Mirror-Kandidaten und persistiert die Ergebnisse, sodass die Server-Reihenfolge schon beim allerersten Download aussagekräftig ist.
+
+### Blacklist und Reputation
+
+Ein Server, der ein korruptes oder unsigniertes RPM ausliefert, wird
+**automatisch geblacklistet**: er wird von weiteren Downloads
+ausgeschlossen, bis du ihn geprüft und freigegeben hast.
+Signatur-Fehlschläge werden als aktive Manipulationssignale gewertet —
+kein zeitgesteuerter Auto-Unblock.
+
+Neben der Blacklist pflegt urpm eine gleitende **24-h-Reputation**
+(Baseline 100), die bei korrupten Payloads, HTTP-4xx/5xx, Netzfehlern
+und langsamen Transfers abfällt. Der Score ordnet den Pool um, ohne
+Server ganz auszuschließen.
+
+```bash
+urpm server status               # Blacklistete / reputationsschwache Server auflisten
+urpm server unblacklist <name>   # Blacklist nach menschlicher Prüfung aufheben
+urpm server ack-blacklist <name> # Quittieren (Banner verstummt, ohne aufzuheben)
+```
+
+Bei `install` / `upgrade` / `media update` listet ein dauerhaftes
+rotes Banner jede nicht-quittierte Blacklist mit
+Reaktivierungsanweisungen — das Banner verschwindet nicht von selbst,
+nur `unblacklist` oder `ack-blacklist` bringen es zum Schweigen.
+
+`urpm server list` markiert geblacklistete Zeilen rot; ein Blick auf
+den Pool reicht, um zu sehen, wer draußen ist.
 
 ### Geographische Filterung
 
@@ -710,9 +768,20 @@ urpm cache stats              # Detaillierte Statistiken
 
 `urpm cache clean` akzeptiert `--dry-run/-n` (Vorschau), `--auto/-y` (keine Bestätigung) und `--verbose/-v` (jede verwaiste Datei auflisten).
 
-## Lokales Paket-Mirroring
+## Mirror / Replikation
 
-Über die per-Medium-`--replication`-Politik hinaus (unten beschrieben) legt der Top-Level-Befehl `urpm mirror` den Mirror-Zustand des Daemons offen (Quotas, bediente Versionen, Rate-Limit) und erlaubt, Wartungsaufgaben explizit anzustoßen.
+urpm-ng kann lokal einen Teilbestand an Paketen replizieren (ähnlich einem DVD-Installationsset) und diese den LAN-Peers zur Verfügung stellen. Nützlich für Install-Partys, Offline-Installationen und den Aufbau eines hausinternen Mirrors.
+
+Zwei bewegliche Teile:
+
+- **Politik pro Medium** — `urpm media set <name> --replication=…`
+  steuert, wie jedes Medium repliziert wird (nur Metadaten,
+  On-Demand-Cache oder vollständiger Seed).
+- **Top-Level `urpm mirror`** — daemon-seitiger globaler Zustand
+  (Quotas, ausgelieferte Versionen, ausgehende Bandbreitenbegrenzung)
+  und explizite Wartungs-Trigger.
+
+### Top-Level-Mirror-Steuerung
 
 ```bash
 urpm mirror status            # Mirror-Status, Quotas und bediente Versionen anzeigen
@@ -726,10 +795,6 @@ urpm mirror sync [media]      # Replikations-Sync für `seed`-Medien erzwingen
 urpm mirror sync --latest-only           # Kleinerer, DVD-artiger Sync
 urpm mirror rate-limit [on|off|N/min]    # Ausgehende Bandbreitenbegrenzung konfigurieren
 ```
-
-## Mirror / Replikation
-
-urpm-ng kann lokal einen Teilbestand an Paketen replizieren, ähnlich einem DVD-Installationsset. Nützlich für Install-Partys oder Offline-Installationen.
 
 ### Seed-basierte Replikation
 
@@ -907,6 +972,10 @@ urpm image make --release 10 --tag mga:10-foo --buildrequires SPECS/foo.spec
 --arch <arch>                 # Zielarchitektur (Standard: Host)
 -p, --packages <list>         # Zusätzliche Pakete (kommagetrennt)
 --buildrequires <spec|srpm>   # BuildRequires aus einer .spec oder .src.rpm installieren
+--addmedia <NAME> <URL>       # Ein zusätzliches Medium im Image hinzufügen (wiederholbar) --
+                              # z. B. ein Drittanbieter- oder hausinterner Mirror
+--import-key <URL>            # Einen öffentlichen GPG-Schlüssel im Image importieren (wiederholbar) --
+                              # kombiniert mit --addmedia für signierte Drittanbieter-Medien
 --runtime docker|podman       # Container-Runtime (Standard: Auto-Detect)
 --keep-chroot                 # Temporäres Chroot nach Image-Erstellung behalten
 -w, --workdir <path>          # Arbeitsverzeichnis für das Chroot (Standard: /tmp)
@@ -1009,7 +1078,53 @@ urpm image update mga:10-build
 ls ./build-output/
 ```
 
-## AppStream-Metadaten
+### Manueller Bootstrap (fortgeschritten)
+
+Unter der Haube ruft `urpm image make` in einem frischen Chroot
+`urpm init` auf, um den Medienkatalog zu befüllen. `urpm init` ist
+direkt exponiert für Aufrufer, die ein Rootfs außerhalb des
+containerisierten Pfads bootstrapen müssen — Installer-Skripte,
+VM-Disk-Builds oder vorpräparierte Testwurzeln. Die Mirrors werden
+aus der Mageia-Mirror-API geholt und durch die `[server]`-Sektion von
+`/etc/urpm/conf.d/10-server.cfg` gefiltert.
+
+```bash
+# Ein Chroot-Rootfs für Mageia 10 bootstrappen
+urpm --urpm-root /tmp/rootfs init --release 10 --arch x86_64
+
+# Eine eigene Mirrorliste nutzen
+urpm init --mirrorlist 'https://mirrors.mageia.org/api/mageia.10.x86_64.list'
+
+# Optionen
+--release, -r <version>     # Ziel-Mageia-Version (10, cauldron, …)
+--mirrorlist <url>          # Überschreibt die automatisch erzeugte Mirrorlisten-URL
+--arch <arch>               # Zielarchitektur (Standard: Host)
+--auto, -y                  # Nicht-interaktiver Modus
+--no-sync                   # Medien konfigurieren, aber die initiale Metadaten-Sync auslassen
+```
+
+Nachdem du in einem `--urpm-root`-Chroot gearbeitet hast, hänge `/dev` und `/proc` aus, die von `urpm init` gemountet wurden:
+
+```bash
+urpm --urpm-root /tmp/rootfs cleanup
+```
+
+## Werkzeuge für Repository-Maintainer
+
+Die beiden folgenden Kommandos richten sich an Leute, die ein
+Mageia-kompatibles Repository **veröffentlichen**, nicht an solche,
+die es konsumieren. Sie werden zusammen dokumentiert, damit klar
+bleibt, welches die Client-Metadaten liefert und welches sie erzeugt.
+
+- **`urpm appstream`** (Client-Seite) — frischt den AppStream-Katalog
+  auf der aktuellen Maschine auf, damit Software-Zentren aktuelle
+  Beschreibungen sehen. Wohnt in `urpm-ng-appstream`.
+- **`urpm genmedia`** (Server-Seite) — produziert den vollständigen
+  Satz Medien-Metadaten, den ein Mirror seinen Clients ausliefert.
+  Wohnt in `urpm-ng-genmedia` als separates Sub-Paket, damit die
+  Basis-Client-Installation schlank bleibt.
+
+### AppStream-Metadaten (`urpm appstream`)
 
 urpm kann die AppStream-Kataloge erzeugen und auffrischen, die KDE Discover und GNOME Software konsumieren:
 
@@ -1024,7 +1139,7 @@ urpm appstream init-distro           # OS-Metainfo-Datei erstellen (für Discove
 urpm appstream init-distro --force   # Bestehendes Metainfo überschreiben
 ```
 
-## Medien-Erzeugung (urpm genmedia)
+### Medien-Erzeugung (`urpm genmedia`)
 
 `urpm genmedia` ist das server-seitige Gegenstück zu `urpm appstream`: Wo `appstream` Kataloge konsumiert, um Client-Datenbanken zu füllen, **produziert** `genmedia` den vollständigen Satz von Medien-Metadaten, den ein Mageia-Mirror seinen Clients ausliefert. Es ist eine Python-Neuschreibung des historischen `genhdlist3`, in urpm-ng integriert und separat als `urpm-ng-genmedia` paketiert, damit der Abhängigkeits-Fußabdruck der Basis-Client-Installation nicht wächst.
 
@@ -1083,8 +1198,6 @@ urpmd ist ein Hintergrunddienst mit:
 - HTTP-API für Paketoperationen
 - Geplante Hintergrundaufgaben
 - P2P-Peer-Discovery fürs LAN-Paket-Sharing
-
-
 
 ## API-Endpunkte
 

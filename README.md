@@ -10,13 +10,20 @@ urpm-ng is a complete rewrite of the classic urpmi toolset, providing faster per
 
 At the moment you need Mageia 9 or Mageia 10.
 
-### Firewall ports to open (for P2P sharing)
+### Firewall ports (for P2P sharing)
 
-If you want to use P2P package sharing between LAN machines, open these ports:
+The `urpm-ng-daemon` package ships `/etc/shorewall/rules.urpm-ng` as
+an include file, and its `%post` hooks it into `/etc/shorewall/rules`
+automatically. On a Shorewall-managed box (the Mageia default) the
+following ports are therefore open right after install, no action
+needed:
+
 - **TCP 9876** (production) or **TCP 9877** (dev mode) -- urpmd HTTP API
 - **UDP 9878** (production) or **UDP 9879** (dev mode) -- Peer discovery broadcasts
 
-Use the Mageia Control Center (MCC) > Security > Firewall, or edit `/etc/shorewall/rules.drakx` directly.
+If Shorewall is not in use (bare `iptables` / `nftables`), open the
+ports by hand — the file `/etc/shorewall/rules.urpm-ng` in the source
+tree is a good template.
 
 ## Installation
 
@@ -43,12 +50,12 @@ urpm-ng is split into several packages for flexibility:
 - **Package builders (bm / mkimage users)**: `urpm-ng-build`
 - **Mirror maintainers publishing repositories**: `urpm-ng-genmedia`
 
-### Quisk install / upgrade (`geturpm.sh`)
+### Quick install / upgrade (`geturpm.sh`)
 
 `geturpm.sh` is the recommended way to install urpm-ng on a fresh Mageia
-system, it can also serve to upgrade an existing install. It auto-detects the Mageia
-release and architecture, pulls the latest urpm-ng from the channel you
-pick, and does the right thing whether urpm-ng is already installed or
+system, and it can also upgrade an existing install. It auto-detects the
+Mageia release and architecture, pulls the latest urpm-ng from the channel
+you pick, and does the right thing whether urpm-ng is already installed or
 not (fresh boxes bootstrap with `urpmi`; further upgrades use urpm-ng itself).
 
 **Quick — piped, no local inspection**
@@ -94,28 +101,36 @@ When installed system-wide (in `/usr/bin/`), urpm uses:
 
 ### Media sources
 
-How to configure package media sources & mirrors servers.
+On an install performed via the RPM path (or `geturpm.sh`), the standard
+Mageia media and the servers to fetch them from are set up automatically:
+`urpm-ng` imports the existing `urpmi.cfg` at first run and
+`urpm server autoconfig` fills the mirror pool from the Mageia mirror
+API. Nothing else is required to install packages.
 
-Nota : for RPM installation these steps should not be needed.
+On a machine with no prior `urpmi.cfg` (fresh chroot, image build, or a
+system that never had urpmi), the same bootstrap is one manual pass:
 
 ```bash
-# List configured media
-urpm media list
-
-# If there are none try to import from existing urpmi.cfg
-urpm media import /etc/urpmi/urpmi.cfg
-
-# Add a specific media source if needed
-urpm media add http://mirror.example.com/distrib/10/x86_64/media/core/release
-urpm media add http://mirror.example.com/distrib/10/x86_64/media/core/updates
-urpm media add http://mirror.example.com/distrib/10/x86_64/media/core/update_testing
-
-# Configure more servers
-urpm server autoconfig
-
-# Update media metadata
-urpm media update
+urpm media list                       # Nothing yet? bootstrap:
+urpm media import                     # Reads /etc/urpmi/urpmi.cfg by default; no-op if absent
+urpm server autoconfig                # Pull mirrors from the Mageia API
+urpm media update                     # First metadata sync
 ```
+
+To add a **community repository** (MageiaLinux-Online, mageia.biz,
+blogdrake, an in-house mirror, ...), use `urpm media discover` — it
+reads the repository's `media.cfg` and adds every media it advertises
+in one call:
+
+```bash
+urpm media discover https://www.mageia.biz/repo/Mageia/mgabiz/10/x86_64/media/
+urpm media discover --dry-run https://download.mageialinux-online.org/...   # Preview
+```
+
+`urpm media add` is reserved for a single, non-discover-compliant
+custom media — that is, one you know is not published through a
+`media.cfg`. See the **Media Management** section further down for
+the syntax.
 
 ---
 
