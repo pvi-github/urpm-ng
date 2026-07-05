@@ -92,8 +92,13 @@ detect_arch() { uname -m; }
 
 detect_installed_urpm_ng() {
   # Empty output when urpm-ng-core is not installed.
-  rpm -q --qf '%{version}-%{release}\n' urpm-ng-core 2>/dev/null \
-    | grep -v 'is not installed' || true
+  # NOTE: use rpm's exit code, not string matching -- the "package
+  # not installed" message is localised (fr: "le paquet ... n'est
+  # pas installé", de: "Paket ... ist nicht installiert", ...), so
+  # grepping an English fragment would misclassify every non-English
+  # box as "already installed".
+  rpm -q urpm-ng-core >/dev/null 2>&1 || return 0
+  rpm -q --qf '%{version}-%{release}' urpm-ng-core 2>/dev/null
 }
 
 # ``urpm q PKG`` searches configured media catalogues for available
