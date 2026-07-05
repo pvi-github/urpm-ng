@@ -1,6 +1,6 @@
 %define name urpm-ng
 %define version 0.8.1
-%define release 1
+%define release 4
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
@@ -200,6 +200,30 @@ Tools for building minimal container images for RPM packaging:
 Requires Docker or Podman to function.
 
 # ============================================================================
+# Subpackage: urpm-ng-genmedia (server-side media metadata generation)
+# ============================================================================
+%package genmedia
+Summary:        Server-side media metadata generation for urpm-ng
+Group:          System/Configuration/Packaging
+BuildArch:      noarch
+Obsoletes:      %{name}-genmedia < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
+Provides:       %{name}-genmedia = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
+
+Requires:       %{name}-core = %{version}-%{release}
+
+%description genmedia
+Server-side companion of urpm-ng: the ``urpm genmedia`` subcommand.
+Produces the full set of media metadata that a Mageia mirror serves
+to its clients (hdlist.cz, synthesis.hdlist.cz, files.xml.lzma,
+info.xml.lzma, changelog.xml.lzma, MD5SUM, and optional AppStream
+catalog).
+
+A Python rewrite of the historical ``genhdlist3``, packaged
+separately from the base client so mirror-owner tooling does not
+weigh on every plain-user install.  When this package is not
+installed, ``urpm genmedia`` exits with an installation hint.
+
+# ============================================================================
 # Subpackage: urpm-ng-all (everything)
 # ============================================================================
 %package all
@@ -211,6 +235,7 @@ Provides:       %{name}-all = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       %{name}-desktop = %{version}-%{release}
 Requires:       %{name}-build = %{version}-%{release}
+Requires:       %{name}-genmedia = %{version}-%{release}
 
 %description all
 Meta-package that installs all urpm-ng components:
@@ -218,6 +243,7 @@ Meta-package that installs all urpm-ng components:
 - Background daemon with P2P sharing
 - Desktop integration (PackageKit, AppStream)
 - Container image building tools
+- Server-side media metadata generation (genmedia)
 
 # ============================================================================
 # Prep
@@ -518,6 +544,13 @@ fi
 %{_datadir}/urpm/profiles/*.yaml
 # Locale files
 %{_datadir}/locale/*/LC_MESSAGES/urpm.mo
+# genmedia files belong to the urpm-ng-genmedia subpackage.
+# The pyproject_save_files macro sweeps every urpm/ file into
+# pyproject_files; the exclusions below claw the genmedia ones
+# back so they end up in the genmedia files list only.
+%exclude %{python3_sitelib}/urpm/genmedia
+%exclude %{python3_sitelib}/urpm/cli/commands/genmedia.py
+%exclude %{python3_sitelib}/urpm/cli/commands/__pycache__/genmedia.*.pyc
 
 # ============================================================================
 # Files for urpm-ng-daemon
@@ -560,6 +593,14 @@ fi
 %files build
 # Build commands (mkimage, build) are part of the CLI in urpm-ng-core
 # This package just pulls in urpm-ng-core for users who only need build tools
+
+# ============================================================================
+# Files for urpm-ng-genmedia
+# ============================================================================
+%files genmedia
+%{python3_sitelib}/urpm/genmedia
+%{python3_sitelib}/urpm/cli/commands/genmedia.py
+%{python3_sitelib}/urpm/cli/commands/__pycache__/genmedia.*.pyc
 
 # ============================================================================
 # Files for urpm-ng-all (meta-package - empty)

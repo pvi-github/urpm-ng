@@ -100,9 +100,16 @@ from .build import (
 from .appstream import (
     cmd_appstream,
 )
-from .genmedia import (
-    cmd_genmedia,
-)
+# ``cmd_genmedia`` lives in the ``urpm-ng-genmedia`` sub-package.
+# When that sub-package is not installed the module is physically
+# absent; importing it hard here would break ``urpm i`` and every
+# other command on a plain-user install.  We keep the import
+# optional and expose ``cmd_genmedia = None`` as the fallback so
+# the ``__all__`` export below stays a real attribute.
+try:
+    from .genmedia import cmd_genmedia
+except ImportError:
+    cmd_genmedia = None
 
 __all__ = [
     # Cache commands

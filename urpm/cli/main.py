@@ -123,9 +123,11 @@ from .commands.build import (
 from .commands.appstream import (
     cmd_appstream,
 )
-from .commands.genmedia import (
-    cmd_genmedia,
-)
+# NOTE: ``cmd_genmedia`` is imported lazily at dispatch time (see
+# ``args.command == 'genmedia'`` below) — it lives in the
+# ``urpm-ng-genmedia`` subpackage, which mirror-owners install
+# on top of ``urpm-ng-core``.  A plain-user install without the
+# genmedia sub-package must not fail to import ``urpm/cli/main``.
 
 
 # Debug flag for preferences matching - set to True to enable debug output
@@ -847,7 +849,12 @@ Examples:
     # =========================================================================
     genmedia_parser = subparsers.add_parser(
         'genmedia',
-        help=_('Generate media metadata from RPM directory'),
+        help=_('Generate media metadata (requires the urpm-ng-genmedia sub-package)'),
+        description=_(
+            'Generate media metadata (hdlist, synthesis, XML, AppStream) '
+            'from an RPM directory. Server-side tool: the code lives in '
+            'the urpm-ng-genmedia sub-package. If it is not installed, '
+            'the command prints an install hint.'),
     )
     genmedia_parser.add_argument(
         'rpms_dir',
@@ -2561,6 +2568,18 @@ def main(argv=None) -> int:
             return cmd_build(args, db)
 
         elif args.command == 'genmedia':
+            try:
+                from .commands.genmedia import cmd_genmedia
+            except ImportError:
+                from . import colors as _colors
+                print(_colors.error(_(
+                    "urpm genmedia is not installed on this system."
+                )), file=sys.stderr)
+                print(_(
+                    "Install the urpm-ng-genmedia subpackage:"
+                ), file=sys.stderr)
+                print("  su -c \"urpm i urpm-ng-genmedia\"", file=sys.stderr)
+                return 1
             return cmd_genmedia(args, db)
 
         elif args.command in ('erase', 'e'):
