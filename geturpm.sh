@@ -23,28 +23,31 @@ for arg; do
   esac
 done
 
-# When piped from curl, our stdin IS the pipe -- ``su -c'' cannot then
-# read its password prompt, ``read -p'' cannot prompt the user, and a
-# stray byte on the pipe would silently answer for us.  Reopen stdin
-# on the controlling terminal whenever one is available.  Bash has
-# already finished reading the script from the original stdin by this
-# point, so redirecting fd 0 here does not truncate the rest of the
-# script.
-[[ -r /dev/tty ]] && exec </dev/tty
+# Piped from curl: our own stdin IS the pipe.  ``su -c'' would then
+# read the root password from an empty pipe (auth error), and any
+# ``read -p'' would either block or eat a stray byte.  Fix by reading
+# every prompt from /dev/tty explicitly, and by redirecting su's
+# stdin to /dev/tty at the call site.  Fd 0 is left untouched so
+# ``bash -s'' can keep streaming the script from the curl pipe.
+if [[ -r /dev/tty && -w /dev/tty ]]; then
+  TTY_OK=1
+else
+  TTY_OK=0
+fi
 
-# Prompt for the channel whenever ``--channel'' was not given AND we
-# have a terminal.  ``-y'' skips the "Proceed?" confirmation later,
-# not this choice -- the user still gets to decide which repository
-# they trust.  If there is no terminal (headless pipe, cron), we fall
-# back to mgabiz (signed builds).
+# Prompt for the channel whenever ``--channel'' was not given AND a
+# terminal is available.  ``-y'' skips the "Proceed?" confirmation
+# later, not this choice -- the user still gets to decide which
+# repository they trust.  Without a terminal (headless pipe, cron)
+# fall back to mgabiz (signed builds).
 if [[ -z "$CHANNEL" ]]; then
-  if [[ -t 0 ]]; then
+  if [[ $TTY_OK -eq 1 ]]; then
     cat >&2 <<'EOF'
 Where do you want to fetch urpm-ng from?
   1) mgabiz  — signed builds hosted on www.mageia.biz (recommended)
   2) github  — release RPMs from github.com/pvi-github/urpm-ng
 EOF
-    read -r -p "Choice [1]: " reply
+    read -r -p "Choice [1]: " reply </dev/tty
     case "${reply:-1}" in
       1|mgabiz) CHANNEL=mgabiz ;;
       2|github) CHANNEL=github ;;
@@ -78,8 +81,8 @@ echo "==> Mageia $MGAVER, $ARCH, channel=$CHANNEL"
 # ── Confirmation helper ───────────────────────────────────────────────
 confirm() {
   [[ $YES -eq 1 ]] && return 0
-  [[ -t 0 ]] || { echo "no TTY; re-run with -y to skip prompts" >&2; exit 1; }
-  local r; read -r -p "Proceed? [Y/n] " r
+  [[ $TTY_OK -eq 1 ]] || { echo "no TTY; re-run with -y to skip prompts" >&2; exit 1; }
+  local r; read -r -p "Proceed? [Y/n] " r </dev/tty
   case "$r" in ''|y|Y|yes|Yes|o|O|oui|Oui) return 0 ;; *) exit 1 ;; esac
 }
 
@@ -96,7 +99,7 @@ if [[ "$CHANNEL" == "mgabiz" ]]; then
   if [[ -n "$INSTALLED" ]] && urpm q urpm-ng-all >/dev/null 2>&1; then
     echo "==> mgabiz media already configured -- just upgrading."
     confirm
-    su -c "urpm u --auto urpm-ng-all rpmdrake-ng"
+    su -c "urpm u --auto urpm-ng-all rpmdrake-ng" </dev/tty
     cat <<'HINT'
 
 ==================================================
@@ -129,12 +132,16 @@ HINT
     urpm i --auto urpm-ng-all rpmdrake-ng
 EOF
     confirm
+    # ``|| true'' on ``urpm m u'' tolerates partial refresh failures
+    # (a broken sibling media inherited from an old urpmi.cfg would
+    # otherwise abort the install via ``set -e'').
     su -c "set -e
 rpm --import '$WORKDIR/pubkey'
 urpmi --auto '$WORKDIR/$CORE'
 urpm media discover '$MEDIA/'
-urpm m u || true    # tolerate partial refresh failures (broken sibling media)
-urpm i --auto urpm-ng-all rpmdrake-ng"
+urpm m u || true
+urpm i --auto urpm-ng-all rpmdrake-ng
+" </dev/tty
   else
     echo "==> urpm-ng-core present but no capable media -- adding mgabiz."
     echo "==> About to run as root (single su prompt):"
@@ -145,11 +152,13 @@ urpm i --auto urpm-ng-all rpmdrake-ng"
     urpm i --auto urpm-ng-all rpmdrake-ng
 EOF
     confirm
+    # ``|| true'' on ``urpm m u'' tolerates partial refresh failures.
     su -c "set -e
 rpm --import '$WORKDIR/pubkey'
 urpm media discover '$MEDIA/'
-urpm m u || true    # tolerate partial refresh failures (broken sibling media)
-urpm i --auto urpm-ng-all rpmdrake-ng"
+urpm m u || true
+urpm i --auto urpm-ng-all rpmdrake-ng
+" </dev/tty
   fi
 
 # ── github channel ────────────────────────────────────────────────────
@@ -187,17 +196,21 @@ else
 
   if [[ -z "$INSTALLED" ]]; then
     echo "==> Bootstrapping via urpmi (single su prompt)..."
+    # ``|| true'' on ``urpm m u'' tolerates partial refresh failures.
     su -c "set -e
 urpmi --auto $WORKDIR/*.rpm
-urpm m u || true    # tolerate partial refresh failures"
+urpm m u || true
+" </dev/tty
   else
     METAS=$(find "$WORKDIR" -maxdepth 1 -type f \
               \( -name 'urpm-ng-all-*.rpm' -o -name 'rpmdrake-ng-*.rpm' \))
     [[ -n "$METAS" ]] || { echo "no meta RPMs in $WORKDIR" >&2; exit 1; }
     echo "==> Reinstalling meta packages (single su prompt)..."
+    # ``|| true'' on ``urpm m u'' tolerates partial refresh failures.
     su -c "set -e
 urpm i --auto --reinstall $METAS
-urpm m u || true    # tolerate partial refresh failures"
+urpm m u || true
+" </dev/tty
   fi
 fi
 
