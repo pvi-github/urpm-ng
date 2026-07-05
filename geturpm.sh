@@ -23,10 +23,22 @@ for arg; do
   esac
 done
 
-# If --channel was not passed and we have a TTY, ask.  Non-interactive
-# runs (piped from curl, or -y) default to mgabiz — the signed builds.
+# When piped from curl, our stdin IS the pipe -- ``su -c'' cannot then
+# read its password prompt, ``read -p'' cannot prompt the user, and a
+# stray byte on the pipe would silently answer for us.  Reopen stdin
+# on the controlling terminal whenever one is available.  Bash has
+# already finished reading the script from the original stdin by this
+# point, so redirecting fd 0 here does not truncate the rest of the
+# script.
+[[ -r /dev/tty ]] && exec </dev/tty
+
+# Prompt for the channel whenever ``--channel'' was not given AND we
+# have a terminal.  ``-y'' skips the "Proceed?" confirmation later,
+# not this choice -- the user still gets to decide which repository
+# they trust.  If there is no terminal (headless pipe, cron), we fall
+# back to mgabiz (signed builds).
 if [[ -z "$CHANNEL" ]]; then
-  if [[ -t 0 && $YES -eq 0 ]]; then
+  if [[ -t 0 ]]; then
     cat >&2 <<'EOF'
 Where do you want to fetch urpm-ng from?
   1) mgabiz  — signed builds hosted on www.mageia.biz (recommended)
