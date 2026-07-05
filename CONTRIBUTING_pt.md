@@ -1,6 +1,6 @@
 # Contribuir para urpm-ng
 
-O urpm-ng é um pequeno projeto voluntário. Um punhado de mantenedores, um grupo minúsculo de testadores regulares, e muito por fazer. Se usa Mageia e algo aqui lhe salta ao olho, agradecíamos a sua ajuda — mesmo um "experimentei, partiu no passo X" de cinco minutos vale mais do que pensa.
+O urpm-ng é um pequeno projeto voluntário (esperemos que cresça). Um punhado de mantenedores, um grupo minúsculo de testadores regulares, e muito por fazer. Se usa Mageia e algo aqui lhe salta ao olho, agradecíamos a sua ajuda — mesmo um "experimentei, partiu no passo X" de cinco minutos vale mais do que pensa.
 
 Este documento existe para tornar óbvio *como* pode ajudar, seja qual for o seu nível de compromisso. Nada aqui pressupõe que já tenha feito patches a uma ferramenta de distribuição antes.
 
@@ -8,9 +8,9 @@ Este documento existe para tornar óbvio *como* pode ajudar, seja qual for o seu
 
 Cinco caminhos, do mais leve ao mais pesado. Escolha o que se ajustar ao tempo que tem — nenhum é de segunda categoria.
 
-### 1. Experimente e diga-nos o que se passou
+### 1. Experimente e diga-nos o que se passou (o bom e o mau)
 
-O mais útil que um recém-chegado pode fazer. Instale o urpm-ng na sua máquina (siga a secção *Installation* do [`README.md`](README.md) para as instruções RPM atuais), use-o durante uns dias para o que costuma fazer com o ``urpmi``, e reporte tudo o que o surpreendeu — um crash, uma mensagem errada, uma tradução em falta, um fluxo que soou estranho.
+O mais útil que um recém-chegado pode fazer. Instale o urpm-ng na sua máquina (siga a secção *Installation* do [`README.md`](README.md) para as instruções RPM atuais), use-o durante uns dias para o que costuma fazer com o ``urpmi``, e reporte tudo o que o surpreendeu — um crash, uma mensagem errada, uma tradução em falta, um fluxo que soou estranho, repetitivo ou pouco natural.
 
 - Onde reportar: **issues do GitHub** em <https://github.com/pvi-github/urpm-ng/issues>.
 - Inclua, no mínimo:
@@ -42,9 +42,9 @@ O backlog vive em dois sítios:
 
 Continue a ler para o fluxo de build / teste / patch.
 
-### 5. Junte-se à canalização
+### 5. Junte-se à canalização (o mais exigente)
 
-Refactorizações, trabalho no resolvedor, jobs de fundo do ``urpmd``, trabalho em spec-files, endurecimento do mkimage / contentores de build. É aqui que vive o roadmap técnico do projeto. Diga olá primeiro — coordenar-se evita pisar os pés uns aos outros, ou que lhe pisem os seus.
+Refactorizações, trabalho no resolvedor, jobs de fundo do ``urpmd``, trabalho em spec-files, endurecimento do mkimage / contentores de build. É aqui que vive o roadmap técnico do projeto. Diga olá primeiro — coordenar-se evita pisar os pés uns aos outros, ou que lhe pisem os seus. Não mordemos, prometido.
 
 ## Obter as fontes e construir
 
@@ -92,10 +92,13 @@ su -c "urpm i \
 
 ### Caminho reprodutível — build em contentor
 
-Só utilizável a partir do momento em que o urpm-ng está instalado na máquina (ovo-e-galinha na primeira instalação).
+Só utilizável a partir do momento em que o urpm-ng está instalado na máquina (ovo-e-galinha na primeira instalação). Garante um build limpo e isolado e permite compilar para outras versões do Mageia ou outras arquiteturas a partir de uma única estação de trabalho, sem tocar no host.
 
 ```sh
-# Uma só vez: criar a imagem de build (exemplo mga10 em x86_64)
+# Uma só vez: criar a imagem de build (exemplo: mga10 em x86_64).
+# A ``tag`` é o nome com o qual invocará a imagem nos builds
+# seguintes — crie várias se quiser construir para várias versões
+# e/ou arquiteturas a partir de uma única estação.
 su -c "urpm image make --release 10 --tag mga10-64"
 
 # A cada build seguinte — ambos os specs (urpm-ng e rpmdrake-ng)
@@ -114,6 +117,7 @@ su -c "urpm i \
 ### Correr os testes
 
 ```sh
+# Atenção: o pytest completo demora bastante — 30 a 60 minutos.
 pytest urpm/tests/
 ```
 
@@ -127,10 +131,11 @@ Para iterar em modo dev sem reconstruir um RPM a cada vez, os ficheiros de códi
 2. **Altere.** Escreva o fix ou a funcionalidade. Se está a mexer no resolvedor, na fila de transações ou no ``urpmd``, adicionar um teste em ``urpm/tests/`` é quase obrigatório. Para trabalho de CLI ou documentação, um teste manual na sua máquina chega.
 3. **Teste localmente.** Corra ``pytest urpm/tests/`` (suite completa para tudo o que é user-visible, ficheiro dirigido caso contrário). Corrija qualquer regressão antes de prosseguir.
 4. **Atualize a superfície visível** se a sua alteração for user-facing (um fix num caminho interno raramente precisa disto):
-   - acrescente uma entrada em [`CHANGELOG.md`](CHANGELOG.md) sob o título da próxima versão;
    - atualize os catálogos ``.po`` (qualquer nova cadeia inglesa user-facing é um novo msgid);
    - atualize ``man/<lang>/man1/urpm.1`` se um flag foi acrescentado, renomeado ou retirado;
    - atualize o README / a folha MIGRATION se a alteração afeta os comandos do dia-a-dia.
+
+   A entrada em ``CHANGELOG.md`` propriamente dita é tarefa do mantenedor no momento do release, não faz parte de uma PR.
 5. **Commit.** Assunto curto (~50 caracteres), prefixo convencional (``fix(zona):``, ``feat(zona):``, ``docs:``, ``chore:``, ``test:``, ``refactor:``). O corpo explica o *porquê* — o diff já mostra o *o quê*.
 
 Antes de abrir uma pull request, passe por esta checklist:
@@ -150,7 +155,7 @@ Antes de abrir uma pull request, passe por esta checklist:
 
 6. **Push** para o seu fork ou o seu branch.
 7. **Abra uma pull request** no GitHub. Descreva a intenção, a cobertura de testes e qualquer limitação conhecida. Mencione a linha de release visada e confirme a checklist acima.
-8. **Iterar sobre a revisão.** Um revisor olhará para o seu diff e fará perguntas ou sugerirá ajustes. Visamos uma troca entre pares — nada pessoal, tudo sobre o código.
+8. **Iterar sobre a revisão.** Um revisor olhará para o seu diff e fará perguntas ou sugerirá ajustes. Visamos uma troca entre pares — nada pessoal, tudo sobre o código. Tentamos formular as revisões com amabilidade; se algum comentário sair fora do alvo, a intenção nunca é hostil — a bússola é o projeto e o Mageia.
 
 ## Onde nos encontrar
 

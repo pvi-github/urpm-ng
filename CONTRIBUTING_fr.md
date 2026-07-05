@@ -1,54 +1,56 @@
 # Contribuer à urpm-ng
 
-urpm-ng est un petit projet bénévole. Une poignée de mainteneurs, un petit groupe de testeurs réguliers, et beaucoup à faire. Si tu utilises Mageia et que quelque chose ici te tape dans l'œil, on serait content d'avoir ton coup de main — même un « j'ai essayé, ça a cassé à l'étape X » de cinq minutes vaut plus que tu ne le penses.
+urpm-ng est un petit (espérons qu'il grandira bien) projet bénévole. Une poignée de mainteneurs, un petit groupe de testeurs réguliers, et beaucoup à faire. Si tu utilises Mageia et que quelque chose ici t'attire, on serait content d'avoir un petit peu d'aide — même un « j'ai essayé, ça n'a pas marché en faisant ça » de cinq minutes vaut bien plus que tu ne l'imagines.
 
-Ce document est là pour rendre évident *comment* tu peux aider, quel que soit ton niveau d'engagement. Aucune supposition ici que tu aies déjà patché un outil de distribution.
+Ce document est là pour montrer *comment* tu peux aider (et rendre ça plus facile), quel que soit ton niveau d'engagement. Aucune nécessité ici que tu aies déjà patché un outil de distribution.
 
 ## Comment tu peux aider
 
 Cinq voies, du plus léger au plus lourd. Choisis celle qui correspond au temps que tu as — aucune n'est de seconde zone.
 
-### 1. Teste et dis-nous ce qui se passe
+### 1. Tester et nous dire ce qui se passe (bien et mal)
 
-La chose la plus utile qu'un nouveau venu puisse faire. Installe urpm-ng sur ta machine (suis la section *Installation* du [`README.md`](README.md) pour les instructions RPM actuelles), utilise-le quelques jours pour ce que tu fais d'habitude avec ``urpmi``, et signale tout ce qui t'a surpris — un plantage, un message erroné, une traduction manquante, un enchaînement pénible.
+La chose la plus utile qu'un nouveau venu puisse faire c'est tester : installe urpm-ng sur ta machine (suis la section *Installation* du [`README.md`](README.md) pour les instructions RPM actuelles), utilise-le quelques jours pour ce que tu fais d'habitude avec ``urpmi``, et signale tout ce qui t'a surpris — un plantage, un message erroné, une traduction manquante, quelque chose de pénible, de répétitif, ou de pas naturel.
 
 - Où signaler : **issues GitHub** sur <https://github.com/pvi-github/urpm-ng/issues>.
 - Merci d'inclure, au minimum :
   - La version Mageia (``cat /etc/mageia-release``).
   - L'architecture (``uname -m``).
   - La version d'urpm-ng (``urpm --version`` — et ``rpm -q urpm-ng-core`` pour confirmer quel RPM est installé et s'il s'agit de celui du système).
-  - La ligne de commande exacte qui a mal tourné, ce que tu as obtenu et ce que tu attendais.
+  - La ligne de commande exacte qui a entrainé le souci, ce que tu as obtenu et ce que tu attendais.
 - Pas besoin d'attacher des logs sauf demande de notre part.
 
-### 2. Traduis — ou polis les traductions existantes
+### 2. Traduire — ou nettoyer les traductions existantes
 
-Six langues sont déjà traduites (fr / de / es / it / nl / pt). La couverture est large mais pas complète : des chaînes passent en anglais, certaines msgstr sonnent maladroites, et une oreille native attrape les faux amis qu'une première passe ne peut pas voir. Si l'une de ces langues est ta langue maternelle, un passage sur les traductions existantes pour affiner la formulation et adopter les tournures idiomatiques locales est très bienvenu.
+Six langues sont déjà traduites (fr / de / es / it / nl / pt). La couverture est large mais pas complète : des chaînes passent en anglais, et certaines msgstr sonnent maladroites (voir mal traduites), et une oreille native pourra nous aider à traquer les faux amis ou les erreurs "idiomatiques" qu'on a forcément commises (et elles sont peut être nombreuses). Si l'une de ces langues est ta langue maternelle, une passe sur les traductions existantes pour affiner la formulation et adopter les tournures idiomatiques locales serait plsu que bienvenue.
 
-- Les chaînes vivent dans les fichiers ``.po`` sous [`po/`](po/) ; ouvre-les avec l'éditeur de ton choix (poedit convient).
-- Les entrées vides ou ``fuzzy`` sont des chaînes nouvelles ou possiblement dépassées — le plus facile pour commencer.
+- Les chaînes se trouvent dans les fichiers ``.po`` sous [`po/`](po/) ; ouvre-les avec l'éditeur de ton choix (poedit convient).
+- Les entrées vides ou ``fuzzy`` sont des chaînes nouvelles ou possiblement approximatives — le plus facile pour commencer.
 - Lance ``msgfmt --check-format po/<lang>.po -o /dev/null`` — si ça passe, le build passera aussi.
-- Idem pour la doc : les canoniques ``README.md`` / ``MIGRATION.md`` / ``CHANGELOG.md`` ont des versions par langue (``README_fr.md`` etc.) qui bénéficieraient aussi d'une relecture native.
+- Idem pour la doc : les canoniques ``README.md`` / ``MIGRATION.md`` / ``CHANGELOG.md`` ont des versions par langue (``README_fr.md`` etc.) qui auraient aussi besoin de relectures natives.
 
-### 3. Améliore la documentation
+### 3. Améliorer la documentation
 
-Pages de manuel, README, aide-mémoire de migration, changelog — tout ce qui est en prose. Même la correction d'une coquille est utile. Les pages man vivent dans ``man/<lang>/man1/urpm.1`` ; valide avec ``groff -man -Tutf8 -ww man/<lang>/man1/urpm.1``.
+Pages de manuel, README, aide-mémoire de migration, changelog — tout ce qui est rédigé. 
+Même la correction d'une coquille est utile. Les pages man se trouvent dans ``man/<lang>/man1/urpm.1`` ; valide les avec ``groff -man -Tutf8 -ww man/<lang>/man1/urpm.1``.
 
-### 4. Corrige un bug ou ajoute une petite fonctionnalité
+### 4. Corriger un bug ou ajouter une petite fonctionnalité
 
-Le backlog vit à deux endroits :
+Le backlog se trouve à deux endroits :
 
 - [`TODO.md`](TODO.md) à la racine du repo — la liste visible.
-- Les divers fichiers ``doc/TODO_*.md`` — backlogs thématiques et notes par sujet. Certains sont prêts à coder, d'autres demandent d'abord une discussion. Demande avant d'investir un week-end complet.
+- Les divers fichiers ``doc/TODO_*.md`` — backlogs thématiques et notes par sujet. Certains sont prêts à coder, d'autres demandent d'abord réflexion et discussion. Demande avant d'investir un week-end complet (c'est plus prudent).
 
 Lis la suite pour le workflow build / test / patch.
 
-### 5. Rejoins la plomberie
+### 5. Travailler sur la machinerie (le plus costaud)
 
-Refactors, travail sur le résolveur, jobs en arrière-plan d'``urpmd``, spec-file, durcissement mkimage / conteneurs de build. C'est là que vit la feuille de route technique du projet. Fais coucou d'abord — se coordonner évite de se marcher sur les pieds, ou de se faire marcher dessus.
+Refactoring, travail sur le résolveur, jobs en arrière-plan d'``urpmd``, build de spec-file, durcissement mkimage / conteneurs de build. C'est là qu'on travaille la feuille de route technique du projet.
+Fais nous un coucou d'abord — se coordonner évite de se marcher sur les pieds, ou de se faire marcher dessus. Et on ne mord pas promis.
 
 ## Récupérer les sources et builder
 
-Deux chemins de build. Le **simple** utilise ``bm`` (le wrapper ``build-mageia``) sur ta machine et ne demande que ``urpmi``. Le **reproductible** utilise ``urpm build`` dans un conteneur et demande qu'urpm-ng soit déjà installé.
+Deux chemins de build. Le **simple** utilise ``bm`` (le wrapper ``build-mageia``) sur ta machine et ne demande au départ que ``urpmi``. Le **reproductible** utilise ``urpm build`` dans un conteneur et demande qu'urpm-ng soit déjà installé.
 
 ### Dépendances de bootstrap (une seule fois)
 
@@ -66,15 +68,15 @@ cd urpm-ng
 su -c "urpmi bm && urpmi --buildrequires rpmbuild/SPECS/urpm-ng.spec"
 ```
 
-### Chemin simple — ``bm`` sur l'hôte
+### Chemin simple — Avec ``bm`` sur l'hôte
 
 ```sh
 make rpm-all
 ```
 
-Puis installe les RPM tout juste construits.
+Puis installe les RPM tout juste construits:
 
-**Première fois — pas encore d'urpm-ng sur le système** — passe tous les RPM à ``urpmi`` d'un coup (le filtre version-release évite de ramasser un ancien build encore dans ``RPMS/``) :
+**Première fois — pas encore d'urpm-ng sur le système** — passe tous les RPM en tas à ``urpmi`` (le filtre version-release évite de ramasser un ancien build encore dans ``RPMS/``) :
 
 ```sh
 RPMS=$(find rpmbuild/RPMS rpmdrake/rpmbuild/RPMS \
@@ -82,7 +84,7 @@ RPMS=$(find rpmbuild/RPMS rpmdrake/rpmbuild/RPMS \
 su -c "urpmi $RPMS"
 ```
 
-**Itérations suivantes** — le résolveur d'urpm-ng scanne automatiquement le répertoire voisin pour les RPM locaux (il affiche « Found N sibling RPMs (available for dependencies) »), il suffit donc de pointer sur les deux méta-paquets :
+**Itérations suivantes** — on peut utiliser urpm-ng... le résolveur d'urpm-ng scanne automatiquement le(s) répertoire(s) indiqué(s) pour trouver les RPM locaux associés (il affiche « Found N sibling RPMs (available for dependencies) »), il suffit donc d'indiquer les deux méta-paquets urpm-ng-all et pmdrake-ng:
 
 ```sh
 su -c "urpm i \
@@ -92,17 +94,20 @@ su -c "urpm i \
 
 ### Chemin reproductible — build en conteneur
 
-Utilisable seulement une fois urpm-ng installé sur l'hôte (poule-et-œuf à la toute première install).
+Cette méthode n'est utilisable seulement une fois urpm-ng installé sur l'hôte (poule-et-œuf à la toute première install). Elle garantit un build "sain" (et permet aussi de faire très facilement des builds pour d'autres versions de mageia ou d'autres architectures).
 
 ```sh
-# Une seule fois : créer l'image de build (exemple mga10 sur x86_64)
+# A faire une seule fois : créer l'image de build (exemple mga10 sur x86_64)
+# le tag est le nom par lequel on "appellera" l'image pour les builds.
+# on peut fabriquer plusieurs images si on veut builder pour plusieurs releases 
+#     de mageia et/ou plusieurs architectures avec un seul environnement de travail.
 su -c "urpm image make --release 10 --tag mga10-64"
 
-# Ensuite, à chaque build — les deux specs (urpm-ng et rpmdrake-ng)
+# Ensuite, à chaque build — on buiold 'un coup les deux specs (urpm-ng et rpmdrake-ng)
 urpm build --image mga10-64 rpmbuild/SPECS/urpm-ng.spec \
                             rpmdrake/rpmbuild/SPECS/rpmdrake-ng.spec
 
-# Install — urpm-ng est déjà présent sur l'hôte (prérequis de ce chemin),
+# Install — quand urpm-ng est déjà présent sur l'hôte (prérequis pour cette voie),
 # donc ``urpm i`` sur les deux méta suffit : le résolveur récupère
 # automatiquement les RPM voisins dans le même répertoire.
 su -c "urpm i \
@@ -113,20 +118,20 @@ su -c "urpm i \
 ### Lancer les tests
 
 ```sh
+# Attention le pytest complet prend longtemps, entre une demi-heure et une heure.
 pytest urpm/tests/
 ```
 
-Voir [`doc/TESTING.md`](doc/TESTING.md) pour un aide-mémoire pytest et les trous de couverture connus.
+Voir [`doc/TESTING.md`](doc/TESTING.md) pour un aide-mémoire pytest et un topo sur les trous de couverture connus.
 
-Pour itérer en mode dev sans rebuilder un RPM à chaque fois, les fichiers sources s'exécutent directement depuis le checkout — ``python -m urpm.cli.main <sous-commande>`` fonctionne à condition que ton ``$PYTHONPATH`` contienne la racine du checkout.
+Pour itérer en mode dev sans rebuilder un RPM à chaque fois, les fichiers sources s'exécutent directement depuis le checkout — ``python -m urpm.cli.main <sous-commande>`` fonctionne à condition que le ``$PYTHONPATH`` contienne la racine du checkout.
 
-## Ta première contribution — le circuit complet
+## Première contribution — le circuit complet
 
-1. **Branche.** Depuis la branche version active (actuellement ``0.8.x`` — vérifie le fichier ``VERSION`` à la racine du repo en cas de doute). ``main`` porte uniquement l'historique publié ; aucun nouveau travail n'y atterrit directement, il y arrive par fast-forward-merge depuis la branche version au moment de la release.
-2. **Change.** Écris le fix ou la fonctionnalité. Si tu touches au résolveur, à la file de transactions ou à ``urpmd``, ajouter un test dans ``urpm/tests/`` est quasi obligatoire. Pour du CLI ou de la doc, un test manuel sur ta machine suffit.
+1. **Crée ta branche.** Depuis la branche version active (actuellement ``0.8.x`` — vérifie le fichier ``VERSION`` à la racine du repo en cas de doute). ``main`` porte uniquement l'historique publié ; aucun nouveau travail n'y atterrit directement, il y arrive par fast-forward-merge depuis la branche version au moment de la release.
+2. **Modifie.** Écris le fix ou la fonctionnalité. Si tu touches au résolveur, à la file de transactions ou à ``urpmd``, ajouter un test dans ``urpm/tests/`` est quasi obligatoire. Pour de la doc, un test manuel sur ta machine peut suffire.
 3. **Teste en local.** Lance ``pytest urpm/tests/`` (suite complète pour tout ce qui est user-visible, fichier ciblé sinon). Corrige toute régression avant de continuer.
-4. **Mets à jour la surface visible** si ton changement est user-facing (un fix sur un chemin de code interne n'en a rarement besoin) :
-   - ajoute une entrée dans [`CHANGELOG.md`](CHANGELOG.md) sous le titre de la prochaine version ;
+4. **Mets à jour la partie visible** si ton changement est user-facing (un fix sur un chemin de code interne n'en a rarement besoin) :
    - mets à jour les catalogues ``.po`` (toute nouvelle chaîne anglaise user-facing est un nouveau msgid) ;
    - mets à jour ``man/<lang>/man1/urpm.1`` si un flag a été ajouté, renommé ou retiré ;
    - mets à jour le README / l'aide-mémoire MIGRATION si le changement affecte les commandes du quotidien.
@@ -148,15 +153,15 @@ Avant d'ouvrir une pull request, passe cette checklist :
 - [ ] Doc / pages man / traductions mises à jour comme au point 4.
 
 6. **Push** sur ton fork ou ta branche.
-7. **Ouvre une pull request** sur GitHub. Décris l'intention, la couverture de tests, et toute limitation connue. Mentionne la ligne de release visée et confirme la checklist ci-dessus.
-8. **Itère sur la review.** Un reviewer va regarder ton diff et poser des questions ou suggérer des ajustements. On vise un échange entre pairs — rien de personnel, tout sur le code.
+7. **Ouvre une pull request** sur GitHub. Décris l'intention, la couverture de tests, et toute limitation connue. Confirme bien la checklist ci-dessus.
+8. **Itère sur la review.** Un reviewer va regarder ton diff et poser des questions, identifier des problèmes ou demander des ajustements. On essaye de faire des retours bienveillants, mais il peut arriver qu'on se rate. Sache qu'il n'y a aucune mauvaise intention et que nos retours se font avec l'intérêt du projet et de Mageia comme boussole.
 
 ## Où nous joindre
 
 - **Issues & PR** : <https://github.com/pvi-github/urpm-ng>
 - **Contact direct — Matrix** : [@maat_:matrix.org](https://matrix.to/#/@maat_:matrix.org)
 
-## Où vit le code
+## Comment est organisé le code
 
 ```
 urpm/                  # Source Python
@@ -174,17 +179,17 @@ rpmbuild/SPECS/        # Empaquetage Mageia (.spec)
 data/                  # Units systemd, règles polkit, modèles de config
 ```
 
-Pour une carte plus profonde, voir [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md). Pour le catalogue cumulé des fonctionnalités, [`FEATURES.md`](FEATURES.md).
+Pour une cartographie plus profonde, voir [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md). Pour le catalogue cumulé des fonctionnalités, [`README.fr.md`](README.fr.md) ou [`FEATURES.md`](FEATURES.md).
 
-## Attentes de style (court)
+## Règles de style (court)
 
-- **Anglais** dans le code, les commentaires, et les messages de commit. Un historique multilingue est déroutant.
+- **Anglais** dans le code, les commentaires, et les messages de commit. Un historique multilingue est déroutant. Donc une seule langue et pour tous se comprendre on a choisi l'anglais?
 - **Docstrings** sur toute fonction ou classe publique. Une ligne suffit ; explique le *pourquoi* uniquement quand ce n'est pas évident depuis le nom.
-- **Tests** quand c'est pratique — la suite est un filet anti-régression, pas une preuve formelle. Les changements user-visible devraient au minimum embarquer une note de test manuel.
-- **Commentaires** là où le code cache une surprise (contournement, race, invariant). Jamais un commentaire qui duplique le code.
+- **Tests** quand c'est possible — la suite est un filet anti-régression, pas une preuve formelle. Les changements visibles des utilisateurs devraient au minimum embarquer une note de test manuel.
+- **Commentaires** là où le code cache une subtilité (contournement même s'il faut éviter, race, invariant). On s'interdit aussi les commentaire qui dupliquent le code.
 
 ## Cycle de release
 
-Le travail se fait sur une branche version (``0.8.x``, ``0.9.x``, …). Quand une version est prête, la branche est fast-forward-mergée dans ``main`` ; ``main`` porte donc l'historique publié. Les tags sont posés depuis ``main`` à ce moment-là et les RPM sont publiés sur le canal binaire du projet.
+Le travail se fait sur une branche version (``0.8.x``, ``0.9.x``, …). Quand une version est prête, la branche est fast-forward-mergée dans ``main`` ; ``main`` porte donc l'historique publié. Les tags sont posés depuis ``main`` ou depuis la branche de release à un moment où les deux s'alignent. A ce moment-là et les RPM sont publiés avec la release.
 
-Les bumps de version dans ``VERSION`` / ``pyproject.toml`` / ``rpmbuild/SPECS/urpm-ng.spec`` sont l'affaire du mainteneur — ne commite pas un bump dans ta contribution. Ceci dit, sens-toi libre d'augmenter **localement** la ligne ``release`` du spec pour que ton RPM buildé s'installe par-dessus celui du système ; simplement, ne stage pas cette ligne.
+Les bumps de version dans ``VERSION`` / ``pyproject.toml`` / ``rpmbuild/SPECS/urpm-ng.spec`` sont l'affaire du mainteneur — ne commite pas un bump de VERSION ou de RELEASE dans ta contribution. Ceci dit, sens-toi libre d'augmenter **localement** la ligne ``release`` du spec pour que ton RPM buildé s'installe par-dessus celui du système ; simplement, ne stage pas cette ligne.

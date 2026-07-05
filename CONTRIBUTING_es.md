@@ -1,6 +1,6 @@
 # Contribuir a urpm-ng
 
-urpm-ng es un pequeño proyecto voluntario. Un puñado de mantenedores, un grupo muy pequeño de testeadores regulares, y mucho por hacer. Si usas Mageia y algo aquí te llama la atención, agradeceríamos tu ayuda — incluso un "lo probé, se rompió en el paso X" de cinco minutos vale más de lo que crees.
+urpm-ng es un pequeño proyecto voluntario (esperamos que crezca). Un puñado de mantenedores, un grupo muy pequeño de testeadores regulares, y mucho por hacer. Si usas Mageia y algo aquí te llama la atención, agradeceríamos tu ayuda — incluso un "lo probé, se rompió en el paso X" de cinco minutos vale más de lo que crees.
 
 Este documento está para dejar claro *cómo* puedes ayudar, sea cual sea tu nivel de compromiso. Nada aquí supone que hayas parcheado antes una herramienta de distribución.
 
@@ -8,9 +8,9 @@ Este documento está para dejar claro *cómo* puedes ayudar, sea cual sea tu niv
 
 Cinco vías, de la más ligera a la más pesada. Elige la que se ajuste al tiempo que tengas — ninguna es de segunda categoría.
 
-### 1. Pruébalo y cuéntanos qué pasa
+### 1. Pruébalo y cuéntanos qué pasa (lo bueno y lo malo)
 
-Lo más útil que un recién llegado puede hacer. Instala urpm-ng en tu máquina (sigue la sección *Installation* del [`README.md`](README.md) para las instrucciones RPM actuales), úsalo un par de días para lo que sueles hacer con ``urpmi``, e informa de todo lo que te haya sorprendido — un cuelgue, un mensaje erróneo, una traducción ausente, un flujo que resultara torpe.
+Lo más útil que un recién llegado puede hacer. Instala urpm-ng en tu máquina (sigue la sección *Installation* del [`README.md`](README.md) para las instrucciones RPM actuales), úsalo un par de días para lo que sueles hacer con ``urpmi``, e informa de todo lo que te haya sorprendido — un cuelgue, un mensaje erróneo, una traducción ausente, un flujo que resultara torpe, repetitivo o poco natural.
 
 - Dónde reportar: **issues de GitHub** en <https://github.com/pvi-github/urpm-ng/issues>.
 - Por favor incluye, como mínimo:
@@ -42,9 +42,9 @@ El backlog vive en dos sitios:
 
 Sigue leyendo para el flujo build / test / patch.
 
-### 5. Únete a la fontanería
+### 5. Únete a la fontanería (lo más pesado)
 
-Refactorizaciones, trabajo en el resolvedor, trabajos de fondo de ``urpmd``, trabajo en spec-files, endurecimiento de mkimage / contenedores de build. Aquí vive la hoja de ruta técnica del proyecto. Saluda primero — coordinarse evita pisarse los pies, o que te pisen.
+Refactorizaciones, trabajo en el resolvedor, trabajos de fondo de ``urpmd``, trabajo en spec-files, endurecimiento de mkimage / contenedores de build. Aquí vive la hoja de ruta técnica del proyecto. Saluda primero — coordinarse evita pisarse los pies, o que te pisen. No mordemos, prometido.
 
 ## Obtener las fuentes y construir
 
@@ -92,10 +92,13 @@ su -c "urpm i \
 
 ### Camino reproducible — build en contenedor
 
-Solo utilizable una vez que urpm-ng está instalado en el host (huevo-y-gallina en la primerísima instalación).
+Solo utilizable una vez que urpm-ng está instalado en el host (huevo-y-gallina en la primerísima instalación). Garantiza un build limpio y aislado, y permite compilar para otras versiones de Mageia u otras arquitecturas desde una sola estación de trabajo sin tocar el host.
 
 ```sh
-# Una sola vez: crear la imagen de build (ejemplo mga10 sobre x86_64)
+# Una sola vez: crear la imagen de build (ejemplo: mga10 sobre x86_64).
+# El ``tag`` es el nombre con el que invocarás la imagen en los
+# builds posteriores — crea varios si quieres construir para
+# varias versiones y/o arquitecturas desde una sola estación.
 su -c "urpm image make --release 10 --tag mga10-64"
 
 # Luego, en cada build — ambos specs (urpm-ng y rpmdrake-ng)
@@ -113,6 +116,7 @@ su -c "urpm i \
 ### Ejecutar los tests
 
 ```sh
+# Aviso: el pytest completo tarda un rato — 30 a 60 minutos.
 pytest urpm/tests/
 ```
 
@@ -126,10 +130,11 @@ Para iterar en modo dev sin reconstruir un RPM cada vez, los ficheros fuente se 
 2. **Cambia.** Escribe el fix o la funcionalidad. Si tocas el resolvedor, la cola de transacciones o ``urpmd``, añadir un test en ``urpm/tests/`` es casi obligatorio. Para trabajo de CLI o doc, un test manual en tu máquina basta.
 3. **Prueba en local.** Ejecuta ``pytest urpm/tests/`` (suite completa para lo user-visible, fichero específico si no). Arregla cualquier regresión antes de continuar.
 4. **Actualiza la superficie visible** si tu cambio es user-facing (un fix en un camino de código interno raramente lo necesita):
-   - añade una entrada en [`CHANGELOG.md`](CHANGELOG.md) bajo el título de la siguiente versión;
    - actualiza los catálogos ``.po`` (cualquier cadena nueva user-facing en inglés es un nuevo msgid);
    - actualiza ``man/<lang>/man1/urpm.1`` si se añadió, renombró o quitó un flag;
    - actualiza el README / la chuleta MIGRATION si el cambio afecta los comandos del día a día.
+
+   La entrada en ``CHANGELOG.md`` en sí es cosa del mantenedor en el momento del release, no forma parte de una PR.
 5. **Commit.** Sujeto corto (~50 caracteres), prefijo convencional (``fix(zona):``, ``feat(zona):``, ``docs:``, ``chore:``, ``test:``, ``refactor:``). El cuerpo explica el *por qué* — el diff ya muestra el *qué*.
 
 Antes de abrir una pull request, repasa esta checklist:
@@ -149,7 +154,7 @@ Antes de abrir una pull request, repasa esta checklist:
 
 6. **Push** a tu fork o a tu rama.
 7. **Abre una pull request** en GitHub. Describe la intención, la cobertura de tests y cualquier limitación conocida. Menciona la línea de release apuntada y confirma la checklist de arriba.
-8. **Itera sobre la review.** Un revisor mirará tu diff y hará preguntas o sugerirá ajustes. Buscamos un intercambio entre pares — nada personal, todo sobre el código.
+8. **Itera sobre la review.** Un revisor mirará tu diff y hará preguntas o sugerirá ajustes. Buscamos un intercambio entre pares — nada personal, todo sobre el código. Intentamos formular las reviews con amabilidad; si un comentario da mal la puntada, la intención nunca es hostil — la brújula es el proyecto y Mageia.
 
 ## Dónde encontrarnos
 

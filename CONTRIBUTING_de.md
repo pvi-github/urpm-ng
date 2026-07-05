@@ -1,6 +1,6 @@
 # Zu urpm-ng beitragen
 
-urpm-ng ist ein kleines freiwilliges Projekt. Eine Handvoll Betreuer, eine winzige Gruppe regelmäßiger Tester, und viel zu tun. Wenn du Mageia benutzt und dir hier etwas ins Auge fällt, würden wir uns über deine Hilfe freuen — selbst ein fünfminütiges „ausprobiert, bei Schritt X gescheitert" ist mehr wert, als du denkst.
+urpm-ng ist ein kleines freiwilliges Projekt (hoffentlich wachsend). Eine Handvoll Betreuer, eine winzige Gruppe regelmäßiger Tester, und viel zu tun. Wenn du Mageia benutzt und dir hier etwas ins Auge fällt, würden wir uns über deine Hilfe freuen — selbst ein fünfminütiges „ausprobiert, bei Schritt X gescheitert" ist mehr wert, als du denkst.
 
 Dieses Dokument soll klar machen, *wie* du helfen kannst, egal wie stark du dich einbringen willst. Nichts hier setzt voraus, dass du schon einmal ein Distributionstool gepatcht hast.
 
@@ -8,9 +8,9 @@ Dieses Dokument soll klar machen, *wie* du helfen kannst, egal wie stark du dich
 
 Fünf Wege, vom leichtesten zum schwersten. Wähle den, der zu deiner Zeit passt — keiner ist zweitklassig.
 
-### 1. Probier es aus und sag uns, was passiert
+### 1. Probier es aus und sag uns, was passiert (das Gute und das Schlechte)
 
-Das Nützlichste, was jemand von außen tun kann. Installiere urpm-ng auf deinem Rechner (folge dem Abschnitt *Installation* der [`README.md`](README.md) für die aktuellen RPM-Anweisungen), benutze es ein paar Tage lang für das, was du sonst mit ``urpmi`` machst, und melde alles, was dich überrascht hat — einen Absturz, eine falsche Meldung, eine fehlende Übersetzung, einen Ablauf, der sich holprig anfühlte.
+Das Nützlichste, was jemand von außen tun kann. Installiere urpm-ng auf deinem Rechner (folge dem Abschnitt *Installation* der [`README.md`](README.md) für die aktuellen RPM-Anweisungen), benutze es ein paar Tage lang für das, was du sonst mit ``urpmi`` machst, und melde alles, was dich überrascht hat — einen Absturz, eine falsche Meldung, eine fehlende Übersetzung, einen Ablauf, der sich holprig, repetitiv oder unnatürlich anfühlte.
 
 - Wohin melden: **GitHub Issues** unter <https://github.com/pvi-github/urpm-ng/issues>.
 - Bitte mindestens einschließen:
@@ -42,9 +42,9 @@ Der Backlog lebt an zwei Orten:
 
 Lies weiter für den Build- / Test- / Patch-Ablauf.
 
-### 5. Steig in die Klempnerei ein
+### 5. Steig in die Klempnerei ein (das schwerste Kaliber)
 
-Refactorings, Arbeit am Resolver, ``urpmd``-Hintergrundjobs, Arbeit an Spec-Dateien, mkimage- / Build-Container-Härtung. Hier lebt die technische Roadmap des Projekts. Sag zuerst Hallo — Koordination vermeidet, sich gegenseitig auf die Füße zu treten, oder auf die Füße getreten zu werden.
+Refactorings, Arbeit am Resolver, ``urpmd``-Hintergrundjobs, Arbeit an Spec-Dateien, mkimage- / Build-Container-Härtung. Hier lebt die technische Roadmap des Projekts. Sag zuerst Hallo — Koordination vermeidet, sich gegenseitig auf die Füße zu treten, oder auf die Füße getreten zu werden. Wir beißen nicht, versprochen.
 
 ## Sourcen holen und bauen
 
@@ -92,10 +92,14 @@ su -c "urpm i \
 
 ### Reproduzierbarer Weg — Container-Build
 
-Nur nutzbar, wenn urpm-ng bereits auf dem Host installiert ist (Henne-und-Ei bei der allerersten Installation).
+Nur nutzbar, wenn urpm-ng bereits auf dem Host installiert ist (Henne-und-Ei bei der allerersten Installation). Er garantiert einen sauberen, isolierten Build und erlaubt, andere Mageia-Versionen oder Architekturen von derselben Arbeitsstation aus zu bauen, ohne den Host anzufassen.
 
 ```sh
-# Einmalig: das Build-Image erstellen (Beispiel mga10 auf x86_64)
+# Einmalig: das Build-Image erstellen (Beispiel: mga10 auf x86_64).
+# Der ``tag`` ist der Name, mit dem du das Image bei späteren
+# Builds aufrufst — erstelle mehrere, wenn du von einer
+# Arbeitsstation aus mehrere Versionen und/oder Architekturen
+# ansteuern willst.
 su -c "urpm image make --release 10 --tag mga10-64"
 
 # Danach bei jedem Build — beide Specs (urpm-ng und rpmdrake-ng)
@@ -114,6 +118,7 @@ su -c "urpm i \
 ### Die Tests laufen lassen
 
 ```sh
+# Achtung: das volle pytest dauert eine Weile — 30 bis 60 Minuten.
 pytest urpm/tests/
 ```
 
@@ -127,10 +132,12 @@ Für schnelle Dev-Iteration ohne bei jedem Mal ein RPM zu bauen, laufen die Quel
 2. **Ändere.** Schreib den Fix oder das Feature. Wenn du den Resolver, die Transaktionsqueue oder ``urpmd`` anfasst, ist ein Test in ``urpm/tests/`` fast Pflicht. Für CLI- oder Doku-Arbeit reicht manuelles Testen auf deiner Kiste.
 3. **Lokal testen.** ``pytest urpm/tests/`` (die volle Suite für alles User-Sichtbare, ansonsten die gezielte Datei). Behebe jede Regression, bevor du weitermachst.
 4. **Sichtbare Oberfläche aktualisieren**, wenn deine Änderung user-facing ist (ein Fix an einem internen Codepfad braucht das selten):
-   - füge einen Eintrag in [`CHANGELOG.md`](CHANGELOG.md) unter der nächsten Versions-Überschrift hinzu;
    - aktualisiere die ``.po``-Kataloge (jeder neue englische user-facing String ist ein neuer msgid);
    - aktualisiere ``man/<lang>/man1/urpm.1``, wenn ein Flag hinzugefügt, umbenannt oder entfernt wurde;
    - aktualisiere README / MIGRATION-Merkblatt, wenn die Änderung tägliche Befehle betrifft.
+
+   Der Eintrag in ``CHANGELOG.md`` selbst ist Sache des Maintainers zum Release, kein Teil einer PR.
+
 5. **Commit.** Kurze Betreffzeile (~50 Zeichen), Conventional-Prefix (``fix(bereich):``, ``feat(bereich):``, ``docs:``, ``chore:``, ``test:``, ``refactor:``). Der Body erklärt das *Warum* — das *Was* zeigt schon der Diff.
 
 Bevor du einen Pull Request öffnest, geh diese Checkliste durch:
@@ -150,7 +157,7 @@ Bevor du einen Pull Request öffnest, geh diese Checkliste durch:
 
 6. **Push** in dein Fork oder deine Branch.
 7. **Öffne einen Pull Request** auf GitHub. Beschreibe die Absicht, die Testabdeckung und jede bekannte Einschränkung. Nenn die Release-Linie, die du anvisierst, und bestätige die obige Checkliste.
-8. **Auf Review iterieren.** Ein Reviewer schaut deinen Diff durch und stellt Fragen oder schlägt Anpassungen vor. Wir streben einen kollegialen Austausch an — nichts Persönliches, alles am Code.
+8. **Auf Review iterieren.** Ein Reviewer schaut deinen Diff durch und stellt Fragen oder schlägt Anpassungen vor. Wir streben einen kollegialen Austausch an — nichts Persönliches, alles am Code. Wir bemühen uns um freundliche Formulierungen; sollte ein Kommentar mal danebenliegen, ist die Absicht nie feindselig — Kompass sind das Projekt und Mageia.
 
 ## Wo du uns erreichst
 

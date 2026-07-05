@@ -1,6 +1,6 @@
 # Bijdragen aan urpm-ng
 
-urpm-ng is een klein vrijwilligersproject. Een handvol onderhouders, een klein groepje vaste testers, en veel te doen. Als je Mageia gebruikt en iets hier je oog vangt, zouden we je hulp waarderen — zelfs een vijf-minuten "geprobeerd, brak op stap X" is meer waard dan je denkt.
+urpm-ng is een klein vrijwilligersproject (hopelijk in groei). Een handvol onderhouders, een klein groepje vaste testers, en veel te doen. Als je Mageia gebruikt en iets hier je oog vangt, zouden we je hulp waarderen — zelfs een vijf-minuten "geprobeerd, brak op stap X" is meer waard dan je denkt.
 
 Dit document is er om duidelijk te maken *hoe* je kunt helpen, welk niveau van betrokkenheid je ook hebt. Niets hier veronderstelt dat je al eerder een distributietool hebt gepatcht.
 
@@ -8,9 +8,9 @@ Dit document is er om duidelijk te maken *hoe* je kunt helpen, welk niveau van b
 
 Vijf paden, van het lichtste tot het zwaarste. Kies dat wat bij je beschikbare tijd past — geen enkel is tweederangs.
 
-### 1. Probeer het en vertel ons wat er gebeurt
+### 1. Probeer het en vertel ons wat er gebeurt (het goede en het slechte)
 
-Het meest nuttige dat een nieuwkomer kan doen. Installeer urpm-ng op je machine (volg het onderdeel *Installation* van [`README.md`](README.md) voor de huidige RPM-instructies), gebruik het een paar dagen voor wat je normaal met ``urpmi`` doet, en meld alles dat je verrast heeft — een crash, een verkeerde melding, een ontbrekende vertaling, een workflow die stroef aanvoelde.
+Het meest nuttige dat een nieuwkomer kan doen. Installeer urpm-ng op je machine (volg het onderdeel *Installation* van [`README.md`](README.md) voor de huidige RPM-instructies), gebruik het een paar dagen voor wat je normaal met ``urpmi`` doet, en meld alles dat je verrast heeft — een crash, een verkeerde melding, een ontbrekende vertaling, een workflow die stroef, repetitief of onnatuurlijk aanvoelde.
 
 - Waar melden: **GitHub issues** op <https://github.com/pvi-github/urpm-ng/issues>.
 - Vermeld ten minste:
@@ -42,9 +42,9 @@ De backlog leeft op twee plekken:
 
 Lees verder voor de build- / test- / patch-flow.
 
-### 5. Duik in het loodgieterswerk
+### 5. Duik in het loodgieterswerk (het zwaarste werk)
 
-Refactors, resolver-werk, ``urpmd``-achtergrondjobs, spec-file werk, mkimage- / build-container-hardening. Hier leeft de technische roadmap van het project. Zeg eerst hallo — coördineren voorkomt dat je op elkaars tenen trapt, of dat er op de jouwe wordt getrapt.
+Refactors, resolver-werk, ``urpmd``-achtergrondjobs, spec-file werk, mkimage- / build-container-hardening. Hier leeft de technische roadmap van het project. Zeg eerst hallo — coördineren voorkomt dat je op elkaars tenen trapt, of dat er op de jouwe wordt getrapt. We bijten niet, beloofd.
 
 ## De bronnen ophalen en bouwen
 
@@ -92,10 +92,13 @@ su -c "urpm i \
 
 ### Reproduceerbaar pad — container-build
 
-Alleen bruikbaar zodra urpm-ng op de host is geïnstalleerd (kip-en-ei bij een allereerste installatie).
+Alleen bruikbaar zodra urpm-ng op de host is geïnstalleerd (kip-en-ei bij een allereerste installatie). Het garandeert een schone, geïsoleerde build en laat je vanuit één werkstation voor andere Mageia-releases of architecturen bouwen zonder de host aan te raken.
 
 ```sh
-# Eenmalig: het build-image aanmaken (voorbeeld mga10 op x86_64)
+# Eenmalig: het build-image aanmaken (voorbeeld: mga10 op x86_64).
+# De ``tag`` is de naam waarmee je het image bij latere builds
+# aanroept — maak er meerdere aan als je vanuit één werkstation
+# voor meerdere releases en/of architecturen wil bouwen.
 su -c "urpm image make --release 10 --tag mga10-64"
 
 # Bij elke volgende build — beide specs (urpm-ng en rpmdrake-ng)
@@ -113,6 +116,7 @@ su -c "urpm i \
 ### De tests draaien
 
 ```sh
+# Let op: de volledige pytest duurt lang — 30 tot 60 minuten.
 pytest urpm/tests/
 ```
 
@@ -126,10 +130,11 @@ Om in dev-modus te itereren zonder telkens een RPM te herbouwen, draaien de bron
 2. **Wijzig.** Schrijf de fix of het feature. Als je aan de resolver, de transactie-queue of ``urpmd`` komt, is een test in ``urpm/tests/`` toevoegen bijna verplicht. Voor CLI- of doc-werk is handmatig testen op je eigen machine genoeg.
 3. **Test lokaal.** Draai ``pytest urpm/tests/`` (volledige suite voor alles user-visible, gerichte file anders). Repareer elke regressie voor je doorgaat.
 4. **Werk het zichtbare oppervlak bij** als je wijziging user-facing is (een fix op een interne codepad heeft dit zelden nodig):
-   - voeg een regel toe in [`CHANGELOG.md`](CHANGELOG.md) onder het kopje van de volgende versie;
    - werk de ``.po``-catalogi bij (elke nieuwe user-facing Engelse string is een nieuwe msgid);
    - werk ``man/<lang>/man1/urpm.1`` bij als een flag is toegevoegd, hernoemd of verwijderd;
    - werk README / MIGRATION-spiekbrief bij als de wijziging alledaagse commando's raakt.
+
+   De regel in ``CHANGELOG.md`` zelf is werk voor de onderhouder bij de release, geen onderdeel van een PR.
 5. **Commit.** Kort onderwerp (~50 tekens), conventional-prefix (``fix(gebied):``, ``feat(gebied):``, ``docs:``, ``chore:``, ``test:``, ``refactor:``). Het body legt het *waarom* uit — het *wat* toont de diff al.
 
 Loop deze checklist door voor je een pull request opent:
@@ -149,7 +154,7 @@ Loop deze checklist door voor je een pull request opent:
 
 6. **Push** naar je fork of je branch.
 7. **Open een pull request** op GitHub. Beschrijf de bedoeling, de testdekking en elke bekende beperking. Vermeld de release-lijn die je richt en bevestig de checklist hierboven.
-8. **Itereer op review.** Een reviewer bekijkt je diff en stelt vragen of doet suggesties. We mikken op peer-uitwisseling — niets persoonlijks, alles op de code.
+8. **Itereer op review.** Een reviewer bekijkt je diff en stelt vragen of doet suggesties. We mikken op peer-uitwisseling — niets persoonlijks, alles op de code. We proberen reviews vriendelijk te formuleren; mocht een opmerking het doel missen, dan is de intentie nooit vijandig — het project en Mageia zijn het kompas.
 
 ## Waar ons te bereiken
 

@@ -1,6 +1,6 @@
 # Contributing to urpm-ng
 
-urpm-ng is a small volunteer project. A handful of maintainers, a tiny group of regular testers, and a lot to do. If you use Mageia and something here catches your eye, we would appreciate your help — even a five-minute "tried it, it broke at step X" is worth more than you might think.
+urpm-ng is a small volunteer project (hopefully growing). A handful of maintainers, a tiny group of regular testers, and a lot to do. If you use Mageia and something here catches your eye, we would appreciate your help — even a five-minute "tried it, it broke at step X" is worth more than you might think.
 
 This document is here to make it obvious *how* you can help, no matter your level of commitment. Nothing here assumes you have patched a distribution tool before.
 
@@ -8,9 +8,9 @@ This document is here to make it obvious *how* you can help, no matter your leve
 
 Five paths, from the lightest to the heaviest. Pick whichever matches the time you have — none is second-class.
 
-### 1. Try it and tell us what happens
+### 1. Try it and tell us what happens (the good and the bad)
 
-The single most useful thing a newcomer can do. Install urpm-ng on your box (follow the [`README.md`](README.md) *Installation* section for the current RPM instructions), use it for a couple of days for whatever you normally use ``urpmi`` for, and report anything that surprised you — a crash, a wrong message, a missing translation, a workflow that felt clumsy.
+The single most useful thing a newcomer can do. Install urpm-ng on your box (follow the [`README.md`](README.md) *Installation* section for the current RPM instructions), use it for a couple of days for whatever you normally use ``urpmi`` for, and report anything that surprised you — a crash, a wrong message, a missing translation, a workflow that felt clumsy, repetitive, or unnatural.
 
 - Where to report: **GitHub issues** at <https://github.com/pvi-github/urpm-ng/issues>.
 - Please include, at minimum:
@@ -42,9 +42,9 @@ The backlog lives in two places:
 
 Read on for the build / test / patch workflow.
 
-### 5. Join the plumbing
+### 5. Join the plumbing (the heaviest lifting)
 
-Refactors, resolver work, ``urpmd`` background jobs, spec-file work, mkimage / build container hardening. This is where the project's technical roadmap lives. Say hi first — coordinating avoids stepping on toes, or being stepped on.
+Refactors, resolver work, ``urpmd`` background jobs, spec-file work, mkimage / build container hardening. This is where the project's technical roadmap lives. Say hi first — coordinating avoids stepping on toes, or being stepped on. We don't bite, promise.
 
 ## Get the sources and build
 
@@ -92,10 +92,13 @@ su -c "urpm i \
 
 ### Reproducible path — container build
 
-Only usable once urpm-ng is installed on the host (chicken-and-egg on a very first install).
+Only usable once urpm-ng is installed on the host (chicken-and-egg on a very first install). It guarantees a clean, isolated build and lets you target other Mageia releases or architectures from a single workstation without touching the host.
 
 ```sh
-# One-time: create the build image for example mga10 on a x86_64 machine
+# One-time: create the build image (example: mga10 on x86_64).
+# The ``tag`` is the name you use to invoke this image in later
+# builds — create several if you want to target multiple
+# releases and/or architectures from one workstation.
 su -c "urpm image make --release 10 --tag mga10-64"
 
 # Every build after that — both urpm-ng and rpmdrake-ng specs
@@ -113,6 +116,7 @@ su -c "urpm i \
 ### Run the tests
 
 ```sh
+# Heads up: the full pytest takes a while — 30 to 60 minutes.
 pytest urpm/tests/
 ```
 
@@ -126,10 +130,11 @@ For dev-mode iteration without rebuilding a RPM every time, source files run dir
 2. **Change.** Write the fix or feature. If you are touching the resolver, the transaction queue, or ``urpmd``, adding a test in ``urpm/tests/`` is close to mandatory. For CLI or docs work, manual testing on your box is enough.
 3. **Test locally.** Run ``pytest urpm/tests/`` (full suite for anything user-visible, targeted file otherwise). Fix any regression before continuing.
 4. **Update the visible surface** if your change is user-facing (a bug fix on a code path rarely needs this):
-   - add an entry to [`CHANGELOG.md`](CHANGELOG.md) under the next-version heading;
    - update the ``.po`` catalogues (any new user-facing English string is a new msgid);
    - update ``man/<lang>/man1/urpm.1`` if a flag was added, renamed, or removed;
    - update the README / MIGRATION cheat sheet if the change affects everyday commands.
+
+   The ``CHANGELOG.md`` entry itself is the maintainer's job at release time, not part of a PR.
 5. **Commit.** Short subject (~50 chars), conventional prefix (``fix(area):``, ``feat(area):``, ``docs:``, ``chore:``, ``test:``, ``refactor:``). Body explains the *why* — the diff already shows the *what*.
 
 Before you open a pull request, walk through this checklist:
@@ -149,7 +154,7 @@ Before you open a pull request, walk through this checklist:
 
 6. **Push** to your fork or your branch.
 7. **Open a pull request** on GitHub. Describe the intent, the test coverage, and any known limitation. Mention the release line you targeted and confirm the checklist above.
-8. **Iterate on review.** A reviewer will look at your diff and ask questions or suggest tweaks. We aim for peer-level exchange — nothing personal, everything on the code.
+8. **Iterate on review.** A reviewer will look at your diff and ask questions or suggest tweaks. We aim for peer-level exchange — nothing personal, everything on the code. We try to phrase reviews kindly; if a comment ever misses the mark, the intent is never hostile — the project and Mageia are the compass.
 
 ## Where to reach us
 
