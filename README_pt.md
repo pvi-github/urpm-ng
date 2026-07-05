@@ -63,11 +63,13 @@ urpm-ng).
 **Rápido — por pipe, sem inspecção local**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | URPM_YES=1 bash
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
 ```
 
-`URPM_YES=1` é obrigatório aqui — o script não tem TTY quando é
+`-y` (ou `--yes`) é obrigatório aqui — o script não tem TTY quando é
 recebido por pipe e precisa do flag para saltar as confirmações.
+`bash -s --` diz ao bash para ler o script a partir de stdin e passar
+o que se segue como argumentos do script.
 
 **Verificado — descarregar, ler, depois executar** (recomendado se
 ainda não confias na fonte):
@@ -75,20 +77,22 @@ ainda não confias na fonte):
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # inspeccionar antes de executar
-bash geturpm.sh
+bash geturpm.sh                  # interactivo: pede canal e confirmação
+bash geturpm.sh -y               # ou não-interactivo
 ```
 
-**Escolha do canal** (`URPM_CHANNEL`):
+**Escolha do canal** (`--channel=CHAN`):
 
 - `mgabiz` — vai buscar ao repositório Mageia.biz (padrão em modo
-  piped). Usa `urpm media discover` no espelho mgabiz, portanto as
-  actualizações futuras passam pelo fluxo padrão `urpm media update`.
+  não-interactivo). Usa `urpm media discover` no espelho mgabiz,
+  portanto as actualizações futuras passam pelo fluxo padrão
+  `urpm media update`.
 - `github` — vai buscar os RPMs directamente à página de releases do
   GitHub. Útil para testar uma tag específica, ou quando a publicação
   mgabiz está atrasada em relação a uma release.
 
-Os canais `gitlab` e `codeberg` estão previstos mas ainda não estão
-disponíveis.
+Em modo interactivo (sem `--channel`, com TTY, sem `-y`) o script
+pergunta ao utilizador qual canal utilizar.
 
 Nota: na primeira instalação, o urpm-ng importa a sua configuração
 automaticamente a partir dos ficheiros `urpmi.cfg` e `urpmi/skip.list`

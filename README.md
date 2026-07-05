@@ -61,11 +61,12 @@ not (fresh boxes bootstrap with `urpmi`; further upgrades use urpm-ng itself).
 **Quick — piped, no local inspection**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | URPM_YES=1 bash
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
 ```
 
-`URPM_YES=1` is required here — the script has no TTY when piped and
-needs the flag to skip confirmations.
+`-y` (or `--yes`) is required here — the script has no TTY when piped
+and needs the flag to skip confirmations. `bash -s --` tells bash to
+read the script from stdin and pass what follows as script arguments.
 
 **Verified — download, read, then run** (recommended if you don't
 already trust the source):
@@ -73,19 +74,21 @@ already trust the source):
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # inspect before running
-bash geturpm.sh
+bash geturpm.sh                  # interactive; asks channel and confirmation
+bash geturpm.sh -y               # or non-interactive
 ```
 
-**Channel selection** (`URPM_CHANNEL`):
+**Channel selection** (`--channel=CHAN`):
 
 - `mgabiz` — fetches from the Mageia.biz project repo (default when
-  piped). Uses `urpm media discover` on the mgabiz mirror, so future
-  updates go through the standard `urpm media update` flow.
+  non-interactive). Uses `urpm media discover` on the mgabiz mirror,
+  so future updates go through the standard `urpm media update` flow.
 - `github` — fetches release RPMs straight from the GitHub releases
   page. Useful for testing a specific tag, or when the mgabiz
   publication lags a release.
 
-`gitlab` and `codeberg` channels are planned but not yet available.
+Interactive runs (no `--channel`, TTY attached, no `-y`) get a prompt
+asking which channel to use.
 
 Note: on the first install, urpm-ng imports its configuration from
 existing `urpmi.cfg` and `urpmi/skip.list` files automatically.

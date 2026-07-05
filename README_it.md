@@ -62,11 +62,13 @@ già installato oppure no (le macchine fresche fanno bootstrap con
 **Rapido — tramite pipe, senza ispezione locale**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | URPM_YES=1 bash
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
 ```
 
-`URPM_YES=1` è obbligatorio qui — lo script non ha TTY quando passa
-per pipe, e gli serve questo flag per saltare le conferme.
+`-y` (o `--yes`) è obbligatorio qui — lo script non ha TTY quando
+passa per pipe, e gli serve questo flag per saltare le conferme.
+`bash -s --` dice a bash di leggere lo script da stdin e passare
+il resto come argomenti dello script.
 
 **Verificato — scarica, leggi, poi esegui** (consigliato se non ti
 fidi già della sorgente):
@@ -74,21 +76,22 @@ fidi già della sorgente):
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # ispeziona prima di eseguire
-bash geturpm.sh
+bash geturpm.sh                  # interattivo: chiede canale e conferma
+bash geturpm.sh -y               # oppure non interattivo
 ```
 
-**Selezione del canale** (`URPM_CHANNEL`):
+**Selezione del canale** (`--channel=CHAN`):
 
 - `mgabiz` — recupera dal repository del progetto Mageia.biz (default
-  in modalità piped). Usa `urpm media discover` sul mirror mgabiz,
-  quindi gli aggiornamenti futuri passano per il flusso standard
-  `urpm media update`.
+  in modalità non interattiva). Usa `urpm media discover` sul mirror
+  mgabiz, quindi gli aggiornamenti futuri passano per il flusso
+  standard `urpm media update`.
 - `github` — recupera gli RPM di release direttamente dalla pagina
   releases di GitHub. Utile per testare un tag specifico, o quando la
   pubblicazione mgabiz è in ritardo su una release.
 
-I canali `gitlab` e `codeberg` sono previsti ma non ancora
-disponibili.
+In modalità interattiva (nessun `--channel`, TTY attivo, nessun `-y`)
+lo script chiede all'utente quale canale utilizzare.
 
 Nota: alla prima installazione, urpm-ng importa automaticamente la
 propria configurazione dai file `urpmi.cfg` e `urpmi/skip.list`

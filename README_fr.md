@@ -62,11 +62,13 @@ avec `urpmi` ; les mises à jour ultérieures passent par urpm-ng lui-même).
 **Rapide — via pipe, sans inspection locale**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | URPM_YES=1 bash
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
 ```
 
-`URPM_YES=1` est obligatoire ici — le script n'a pas de TTY quand il est
-passé par pipe, il lui faut ce flag pour sauter les confirmations.
+`-y` (ou `--yes`) est obligatoire ici — le script n'a pas de TTY quand
+il est passé par pipe, il lui faut ce flag pour sauter les confirmations.
+`bash -s --` dit à bash de lire le script depuis stdin et de passer le
+reste comme arguments du script.
 
 **Vérifié — télécharger, relire, puis exécuter** (recommandé si on ne
 fait pas déjà confiance à la source) :
@@ -74,20 +76,22 @@ fait pas déjà confiance à la source) :
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # relire avant d'exécuter
-bash geturpm.sh
+bash geturpm.sh                  # interactif : demande le canal et confirmation
+bash geturpm.sh -y               # ou non-interactif
 ```
 
-**Choix du canal** (`URPM_CHANNEL`) :
+**Choix du canal** (`--channel=CHAN`) :
 
-- `mgabiz` — récupère depuis le dépôt Mageia.biz (défaut en mode piped).
-  Utilise `urpm media discover` sur le miroir mgabiz, donc les mises à
-  jour ultérieures passent par le flux standard `urpm media update`.
+- `mgabiz` — récupère depuis le dépôt Mageia.biz (défaut en
+  non-interactif). Utilise `urpm media discover` sur le miroir mgabiz,
+  donc les mises à jour ultérieures passent par le flux standard
+  `urpm media update`.
 - `github` — récupère les RPM directement depuis la page des releases
   GitHub. Utile pour tester un tag précis, ou quand la publication
   mgabiz est en retard sur une release.
 
-Les canaux `gitlab` et `codeberg` sont prévus mais pas encore
-disponibles.
+En mode interactif (pas de `--channel`, TTY attaché, pas de `-y`) le
+script demande à l'utilisateur quel canal utiliser.
 
 Note : à la première install, urpm-ng importe sa configuration depuis
 les fichiers `urpmi.cfg` et `urpmi/skip.list` existants automatiquement.

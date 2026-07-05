@@ -62,11 +62,13 @@ urpm-ng al geïnstalleerd is of niet (verse machines bootstrappen met
 **Snel — via pipe, geen lokale inspectie**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | URPM_YES=1 bash
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
 ```
 
-`URPM_YES=1` is hier verplicht — het script heeft geen TTY wanneer het
-gepipet wordt, en heeft die vlag nodig om bevestigingen over te slaan.
+`-y` (of `--yes`) is hier verplicht — het script heeft geen TTY
+wanneer het gepipet wordt, en heeft die vlag nodig om bevestigingen
+over te slaan. `bash -s --` zegt bash dat het het script van stdin
+moet lezen en de rest als script-argumenten moet doorgeven.
 
 **Geverifieerd — downloaden, lezen, dan uitvoeren** (aanbevolen als je
 de bron nog niet vertrouwt):
@@ -74,20 +76,22 @@ de bron nog niet vertrouwt):
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # inspecteer voor je uitvoert
-bash geturpm.sh
+bash geturpm.sh                  # interactief: vraagt kanaal en bevestiging
+bash geturpm.sh -y               # of niet-interactief
 ```
 
-**Kanaalkeuze** (`URPM_CHANNEL`):
+**Kanaalkeuze** (`--channel=CHAN`):
 
-- `mgabiz` — haalt uit de Mageia.biz-projectrepo (standaard bij
-  piped-aanroep). Gebruikt `urpm media discover` op de mgabiz-mirror,
-  latere updates lopen dus via de standaardflow van `urpm media update`.
-- `github` — haalt release-RPMs rechtstreeks van de GitHub-releasepagina.
-  Handig om een specifieke tag te testen, of wanneer de
-  mgabiz-publicatie achterloopt op een release.
+- `mgabiz` — haalt uit de Mageia.biz-projectrepo (standaard in
+  niet-interactieve modus). Gebruikt `urpm media discover` op de
+  mgabiz-mirror, latere updates lopen dus via de standaardflow van
+  `urpm media update`.
+- `github` — haalt release-RPMs rechtstreeks van de
+  GitHub-releasepagina. Handig om een specifieke tag te testen, of
+  wanneer de mgabiz-publicatie achterloopt op een release.
 
-De kanalen `gitlab` en `codeberg` zijn gepland maar nog niet
-beschikbaar.
+In interactieve modus (geen `--channel`, TTY aanwezig, geen `-y`)
+vraagt het script welk kanaal je wilt gebruiken.
 
 Noot: bij de eerste installatie importeert urpm-ng zijn configuratie
 automatisch uit bestaande `urpmi.cfg`- en `urpmi/skip.list`-bestanden.

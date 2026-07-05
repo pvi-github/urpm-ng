@@ -63,11 +63,13 @@ pasan por urpm-ng mismo).
 **Rápido — por pipe, sin inspección local**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | URPM_YES=1 bash
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
 ```
 
-`URPM_YES=1` es obligatorio aquí — el script no tiene TTY cuando se
-pasa por pipe y necesita el flag para saltarse las confirmaciones.
+`-y` (o `--yes`) es obligatorio aquí — el script no tiene TTY cuando
+se pasa por pipe y necesita el flag para saltarse las confirmaciones.
+`bash -s --` indica a bash que lea el script desde stdin y pase lo
+que sigue como argumentos del script.
 
 **Verificado — descargar, leer, después ejecutar** (recomendado si
 todavía no confías en la fuente):
@@ -75,13 +77,14 @@ todavía no confías en la fuente):
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # inspeccionar antes de ejecutar
-bash geturpm.sh
+bash geturpm.sh                  # interactivo: pide canal y confirmación
+bash geturpm.sh -y               # o no-interactivo
 ```
 
-**Selección de canal** (`URPM_CHANNEL`):
+**Selección de canal** (`--channel=CHAN`):
 
 - `mgabiz` — descarga desde el repo del proyecto Mageia.biz (por
-  defecto cuando se usa pipe). Usa `urpm media discover` sobre el
+  defecto en modo no-interactivo). Usa `urpm media discover` sobre el
   mirror mgabiz, por lo que las actualizaciones futuras pasan por el
   flujo estándar `urpm media update`.
 - `github` — descarga los RPM directamente desde la página de
@@ -89,8 +92,8 @@ bash geturpm.sh
   cuando la publicación en mgabiz va con retraso respecto a una
   release.
 
-Los canales `gitlab` y `codeberg` están previstos pero aún no
-disponibles.
+En modo interactivo (sin `--channel`, con TTY, sin `-y`) el script
+pregunta al usuario qué canal utilizar.
 
 Nota: en la primera instalación, urpm-ng importa automáticamente su
 configuración desde los ficheros `urpmi.cfg` y `urpmi/skip.list`

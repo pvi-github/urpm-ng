@@ -63,11 +63,13 @@ selbst).
 **Schnell — via Pipe, ohne lokale Inspektion**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | URPM_YES=1 bash
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
 ```
 
-`URPM_YES=1` ist hier zwingend — das Skript hat kein TTY, wenn es
-gepipet wird, und braucht das Flag, um Bestätigungen zu überspringen.
+`-y` (bzw. `--yes`) ist hier zwingend — das Skript hat kein TTY, wenn
+es gepipet wird, und braucht das Flag, um Bestätigungen zu überspringen.
+`bash -s --` weist bash an, das Skript von stdin zu lesen und den Rest
+als Skript-Argumente zu übergeben.
 
 **Verifiziert — herunterladen, lesen, dann ausführen** (empfohlen,
 wenn du der Quelle nicht ohnehin schon vertraust):
@@ -75,21 +77,22 @@ wenn du der Quelle nicht ohnehin schon vertraust):
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # vor dem Ausführen prüfen
-bash geturpm.sh
+bash geturpm.sh                  # interaktiv: fragt Kanal und Bestätigung
+bash geturpm.sh -y               # oder nicht-interaktiv
 ```
 
-**Kanal wählen** (`URPM_CHANNEL`):
+**Kanal wählen** (`--channel=CHAN`):
 
-- `mgabiz` — holt aus dem Mageia.biz-Projekt-Repo (Standard beim
-  Piped-Aufruf). Nutzt `urpm media discover` auf dem mgabiz-Mirror,
+- `mgabiz` — holt aus dem Mageia.biz-Projekt-Repo (Standard, wenn
+  nicht-interaktiv). Nutzt `urpm media discover` auf dem mgabiz-Mirror,
   spätere Updates laufen also über den Standard-Flow von
   `urpm media update`.
 - `github` — holt Release-RPMs direkt von der GitHub-Releases-Seite.
   Nützlich, um ein bestimmtes Tag zu testen, oder wenn die
   mgabiz-Veröffentlichung einem Release hinterherhängt.
 
-Die Kanäle `gitlab` und `codeberg` sind geplant, aber noch nicht
-verfügbar.
+Im interaktiven Modus (kein `--channel`, TTY vorhanden, kein `-y`)
+fragt das Skript, welchen Kanal es verwenden soll.
 
 Hinweis: Bei der ersten Installation importiert urpm-ng seine
 Konfiguration automatisch aus vorhandenen `urpmi.cfg`- und
