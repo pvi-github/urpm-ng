@@ -11,6 +11,22 @@
 
 set -euo pipefail
 
+# ── Colours ───────────────────────────────────────────────────────────
+# Only wire ANSI escapes when stdout is a real terminal; piping to a
+# file, less, or a CI log stays plain-text.
+if [[ -t 1 ]]; then
+  _blue=$'\033[0;34m'; _green=$'\033[0;32m'
+  _yellow=$'\033[0;33m'; _red=$'\033[0;31m'
+  _bold=$'\033[1m';    _reset=$'\033[0m'
+else
+  _blue='' _green='' _yellow='' _red='' _bold='' _reset=''
+fi
+
+log()  { printf '%s==>%s %s\n' "$_blue"   "$_reset" "$*"; }
+ok()   { printf '%s==>%s %s\n' "$_green"  "$_reset" "$*"; }
+warn() { printf '%s==>%s %s\n' "$_yellow" "$_reset" "$*" >&2; }
+die()  { printf '%sxx%s %s\n'  "$_red"    "$_reset" "$*" >&2; exit 1; }
+
 # ── Args ──────────────────────────────────────────────────────────────
 YES=0
 CHANNEL=""
@@ -19,7 +35,7 @@ for arg; do
     -y|--yes)       YES=1 ;;
     --channel=*)    CHANNEL="${arg#*=}" ;;
     -h|--help)      sed -n '2,/^set -eu/p' "$0" | sed 's/^# \{0,1\}//;/^set -eu/d'; exit 0 ;;
-    *)              echo "unknown option: $arg" >&2; exit 1 ;;
+    *)              die "unknown option: $arg" ;;
   esac
 done
 
@@ -51,7 +67,7 @@ EOF
     case "${reply:-1}" in
       1|mgabiz) CHANNEL=mgabiz ;;
       2|github) CHANNEL=github ;;
-      *) echo "unknown choice: $reply" >&2; exit 1 ;;
+      *) die "unknown choice: $reply" ;;
     esac
   else
     CHANNEL=mgabiz
@@ -60,12 +76,12 @@ fi
 
 case "$CHANNEL" in
   mgabiz|github) ;;
-  *) echo "--channel must be mgabiz or github (got: $CHANNEL)" >&2; exit 1 ;;
+  *) die "--channel must be mgabiz or github (got: $CHANNEL)" ;;
 esac
 
 # ── Detection ─────────────────────────────────────────────────────────
 MGAVER=$(sed -n 's/^Mageia release \([0-9]*\).*/\1/p' /etc/mageia-release 2>/dev/null)
-[[ -n "$MGAVER" ]] || { echo "not on Mageia (no /etc/mageia-release)" >&2; exit 1; }
+[[ -n "$MGAVER" ]] || die "not on Mageia (no /etc/mageia-release)"
 ARCH=$(uname -m)
 # ``rpm -q`` returns non-zero if the package is absent — locale-safe,
 # unlike parsing the "not installed" message which is translated.
@@ -74,14 +90,14 @@ if rpm -q urpm-ng-core >/dev/null 2>&1; then
   INSTALLED=$(rpm -q --qf '%{version}-%{release}' urpm-ng-core)
 fi
 
-echo "==> Mageia $MGAVER, $ARCH, channel=$CHANNEL"
-[[ -n "$INSTALLED" ]] && echo "==> urpm-ng-core installed: $INSTALLED" \
-                      || echo "==> urpm-ng not installed"
+log "Mageia $MGAVER, $ARCH, channel=$CHANNEL"
+[[ -n "$INSTALLED" ]] && log "urpm-ng-core installed: $INSTALLED" \
+                      || log "urpm-ng not installed"
 
 # ── Confirmation helper ───────────────────────────────────────────────
 confirm() {
   [[ $YES -eq 1 ]] && return 0
-  [[ $TTY_OK -eq 1 ]] || { echo "no TTY; re-run with -y to skip prompts" >&2; exit 1; }
+  [[ $TTY_OK -eq 1 ]] || die "no TTY; re-run with -y to skip prompts"
   local r; read -r -p "Proceed? [Y/n] " r </dev/tty
   case "$r" in ''|y|Y|yes|Yes|o|O|oui|Oui) return 0 ;; *) exit 1 ;; esac
 }
@@ -97,7 +113,7 @@ if [[ "$CHANNEL" == "mgabiz" ]]; then
   # is already configured -- just upgrade, then remind the user they
   # don't need this script next time.
   if [[ -n "$INSTALLED" ]] && urpm q urpm-ng-all >/dev/null 2>&1; then
-    echo "==> mgabiz media already configured -- just upgrading."
+    log "mgabiz media already configured -- just upgrading."
     confirm
     su -c "urpm u --auto urpm-ng-all rpmdrake-ng" </dev/tty
     cat <<'HINT'
@@ -112,7 +128,7 @@ HINT
     exit 0
   fi
 
-  echo "==> Fetching pubkey..."
+  log "Fetching pubkey..."
   curl -fsSL -o "$WORKDIR/pubkey" "$MEDIA/media_info/pubkey"
 
   if [[ -z "$INSTALLED" ]]; then
@@ -120,10 +136,10 @@ HINT
            | grep -oE 'href="urpm-ng-core-[0-9][^"]*\.rpm"' \
            | sed -E 's/^href="([^"]+)"$/\1/' \
            | sort -V -u | tail -1)
-    [[ -n "$CORE" ]] || { echo "no urpm-ng-core RPM at $MEDIA/urpm/release/" >&2; exit 1; }
-    echo "==> Downloading $CORE..."
+    [[ -n "$CORE" ]] || die "no urpm-ng-core RPM at $MEDIA/urpm/release/"
+    log "Downloading $CORE..."
     (cd "$WORKDIR" && curl -fsSL -O "$MEDIA/urpm/release/$CORE")
-    echo "==> About to run as root (single su prompt):"
+    log "About to run as root (single su prompt):"
     cat <<EOF
     rpm --import $WORKDIR/pubkey
     urpmi --auto $WORKDIR/$CORE
@@ -143,8 +159,8 @@ urpm m u || true
 urpm i --auto urpm-ng-all rpmdrake-ng
 " </dev/tty
   else
-    echo "==> urpm-ng-core present but no capable media -- adding mgabiz."
-    echo "==> About to run as root (single su prompt):"
+    log "urpm-ng-core present but no capable media -- adding mgabiz."
+    log "About to run as root (single su prompt):"
     cat <<EOF
     rpm --import $WORKDIR/pubkey
     urpm media discover $MEDIA/
@@ -174,8 +190,8 @@ else
           | sed -n 's/^    "tag_name": *"\([^"]*\)".*/\1/p' \
           | head -1)
   fi
-  [[ -n "$TAG" ]] || { echo "could not resolve latest tag on GitHub" >&2; exit 1; }
-  echo "==> Latest github release: $TAG"
+  [[ -n "$TAG" ]] || die "could not resolve latest tag on GitHub"
+  log "Latest github release: $TAG"
 
   URLS=$(curl -fsSL "$API/releases/tags/$TAG" \
          | sed -n 's/^ *"browser_download_url": *"\([^"]*\)".*/\1/p' \
@@ -185,8 +201,8 @@ else
          | grep "\.mga${MGAVER}\." \
          | grep -E "\.(${ARCH}|noarch)\.rpm$")
   N=$(printf '%s\n' "$URLS" | grep -c .)
-  [[ $N -gt 0 ]] || { echo "no matching RPMs at $TAG for mga${MGAVER}/${ARCH}" >&2; exit 1; }
-  echo "==> $N RPM(s) will be downloaded:"
+  [[ $N -gt 0 ]] || die "no matching RPMs at $TAG for mga${MGAVER}/${ARCH}"
+  log "$N RPM(s) will be downloaded:"
   printf '%s\n' "$URLS" | sed 's|^.*/|    |'
   confirm
 
@@ -195,7 +211,7 @@ else
    done)
 
   if [[ -z "$INSTALLED" ]]; then
-    echo "==> Bootstrapping via urpmi (single su prompt)..."
+    log "Bootstrapping via urpmi (single su prompt)..."
     # ``|| true'' on ``urpm m u'' tolerates partial refresh failures.
     su -c "set -e
 urpmi --auto $WORKDIR/*.rpm
@@ -204,8 +220,8 @@ urpm m u || true
   else
     METAS=$(find "$WORKDIR" -maxdepth 1 -type f \
               \( -name 'urpm-ng-all-*.rpm' -o -name 'rpmdrake-ng-*.rpm' \))
-    [[ -n "$METAS" ]] || { echo "no meta RPMs in $WORKDIR" >&2; exit 1; }
-    echo "==> Reinstalling meta packages (single su prompt)..."
+    [[ -n "$METAS" ]] || die "no meta RPMs in $WORKDIR"
+    log "Reinstalling meta packages (single su prompt)..."
     # ``|| true'' on ``urpm m u'' tolerates partial refresh failures.
     su -c "set -e
 urpm i --auto --reinstall $METAS
@@ -214,4 +230,4 @@ urpm m u || true
   fi
 fi
 
-echo "==> urpm-ng $(rpm -q --qf '%{version}-%{release}' urpm-ng-core) is installed."
+ok "urpm-ng $(rpm -q --qf '%{version}-%{release}' urpm-ng-core) is installed."
