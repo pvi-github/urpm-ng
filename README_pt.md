@@ -63,13 +63,13 @@ urpm-ng).
 **Rápido — por pipe, sem inspecção local**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash
 ```
 
-`-y` (ou `--yes`) é obrigatório aqui — o script não tem TTY quando é
-recebido por pipe e precisa do flag para saltar as confirmações.
-`bash -s --` diz ao bash para ler o script a partir de stdin e passar
-o que se segue como argumentos do script.
+Os prompts (escolha do canal, «Proceed?», palavra-passe root para o
+`su`) são lidos de `/dev/tty`, portanto a versão por pipe é
+totalmente interactiva — mesma experiência que executar o script a
+partir de um ficheiro.
 
 **Verificado — descarregar, ler, depois executar** (recomendado se
 ainda não confias na fonte):
@@ -78,21 +78,25 @@ ainda não confias na fonte):
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # inspeccionar antes de executar
 bash geturpm.sh                  # interactivo: pede canal e confirmação
-bash geturpm.sh -y               # ou não-interactivo
 ```
 
 **Escolha do canal** (`--channel=CHAN`):
 
-- `mgabiz` — vai buscar ao repositório Mageia.biz (padrão em modo
-  não-interactivo). Usa `urpm media discover` no espelho mgabiz,
-  portanto as actualizações futuras passam pelo fluxo padrão
+- `mgabiz` — vai buscar ao repositório Mageia.biz (padrão quando não
+  há terminal disponível). Usa `urpm media discover` no espelho
+  mgabiz, portanto as actualizações futuras passam pelo fluxo padrão
   `urpm media update`.
 - `github` — vai buscar os RPMs directamente à página de releases do
   GitHub. Útil para testar uma tag específica, ou quando a publicação
   mgabiz está atrasada em relação a uma release.
 
-Em modo interactivo (sem `--channel`, com TTY, sem `-y`) o script
-pergunta ao utilizador qual canal utilizar.
+**Execuções sem supervisão** — acrescenta `-y` (salta a confirmação
+«Proceed?») e `--channel=CHAN` (salta o prompt do canal) através de
+`bash -s --`:
+
+```bash
+curl -fsSL <url>/geturpm.sh | bash -s -- -y --channel=mgabiz
+```
 
 Nota: na primeira instalação, o urpm-ng importa a sua configuração
 automaticamente a partir dos ficheiros `urpmi.cfg` e `urpmi/skip.list`

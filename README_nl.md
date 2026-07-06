@@ -62,13 +62,12 @@ urpm-ng al geïnstalleerd is of niet (verse machines bootstrappen met
 **Snel — via pipe, geen lokale inspectie**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash
 ```
 
-`-y` (of `--yes`) is hier verplicht — het script heeft geen TTY
-wanneer het gepipet wordt, en heeft die vlag nodig om bevestigingen
-over te slaan. `bash -s --` zegt bash dat het het script van stdin
-moet lezen en de rest als script-argumenten moet doorgeven.
+Prompts (kanaalkeuze, "Proceed?", root-wachtwoord voor `su`) worden
+uit `/dev/tty` gelezen, dus de pipe-vorm is volledig interactief —
+zelfde ervaring als het script uit een bestand uitvoeren.
 
 **Geverifieerd — downloaden, lezen, dan uitvoeren** (aanbevolen als je
 de bron nog niet vertrouwt):
@@ -76,22 +75,25 @@ de bron nog niet vertrouwt):
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # inspecteer voor je uitvoert
-bash geturpm.sh                  # interactief: vraagt kanaal en bevestiging
-bash geturpm.sh -y               # of niet-interactief
+bash geturpm.sh                  # interactief: kanaal + bevestiging
 ```
 
 **Kanaalkeuze** (`--channel=CHAN`):
 
-- `mgabiz` — haalt uit de Mageia.biz-projectrepo (standaard in
-  niet-interactieve modus). Gebruikt `urpm media discover` op de
-  mgabiz-mirror, latere updates lopen dus via de standaardflow van
-  `urpm media update`.
+- `mgabiz` — haalt uit de Mageia.biz-projectrepo (standaard als er
+  geen terminal beschikbaar is). Gebruikt `urpm media discover` op
+  de mgabiz-mirror, latere updates lopen dus via de standaardflow
+  van `urpm media update`.
 - `github` — haalt release-RPMs rechtstreeks van de
   GitHub-releasepagina. Handig om een specifieke tag te testen, of
   wanneer de mgabiz-publicatie achterloopt op een release.
 
-In interactieve modus (geen `--channel`, TTY aanwezig, geen `-y`)
-vraagt het script welk kanaal je wilt gebruiken.
+**Onbewaakte runs** — voeg `-y` toe (slaat "Proceed?" over) en
+`--channel=CHAN` (slaat de kanaalprompt over) via `bash -s --`:
+
+```bash
+curl -fsSL <url>/geturpm.sh | bash -s -- -y --channel=mgabiz
+```
 
 Noot: bij de eerste installatie importeert urpm-ng zijn configuratie
 automatisch uit bestaande `urpmi.cfg`- en `urpmi/skip.list`-bestanden.

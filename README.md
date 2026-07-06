@@ -61,12 +61,12 @@ not (fresh boxes bootstrap with `urpmi`; further upgrades use urpm-ng itself).
 **Quick — piped, no local inspection**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash -s -- -y
+curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash
 ```
 
-`-y` (or `--yes`) is required here — the script has no TTY when piped
-and needs the flag to skip confirmations. `bash -s --` tells bash to
-read the script from stdin and pass what follows as script arguments.
+Prompts (channel choice, "Proceed?", the root password for `su`) are
+read from `/dev/tty`, so the piped form is fully interactive — same
+experience as running the script from a file.
 
 **Verified — download, read, then run** (recommended if you don't
 already trust the source):
@@ -74,21 +74,25 @@ already trust the source):
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
 less geturpm.sh                  # inspect before running
-bash geturpm.sh                  # interactive; asks channel and confirmation
-bash geturpm.sh -y               # or non-interactive
+bash geturpm.sh                  # interactive: asks channel + confirmation
 ```
 
 **Channel selection** (`--channel=CHAN`):
 
 - `mgabiz` — fetches from the Mageia.biz project repo (default when
-  non-interactive). Uses `urpm media discover` on the mgabiz mirror,
-  so future updates go through the standard `urpm media update` flow.
+  no terminal is available). Uses `urpm media discover` on the mgabiz
+  mirror, so future updates go through the standard `urpm media
+  update` flow.
 - `github` — fetches release RPMs straight from the GitHub releases
   page. Useful for testing a specific tag, or when the mgabiz
   publication lags a release.
 
-Interactive runs (no `--channel`, TTY attached, no `-y`) get a prompt
-asking which channel to use.
+**Unattended runs** — add `-y` (skip the "Proceed?" confirmation) and
+`--channel=CHAN` (skip the channel prompt) via `bash -s --`:
+
+```bash
+curl -fsSL <url>/geturpm.sh | bash -s -- -y --channel=mgabiz
+```
 
 Note: on the first install, urpm-ng imports its configuration from
 existing `urpmi.cfg` and `urpmi/skip.list` files automatically.
