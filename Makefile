@@ -56,6 +56,68 @@ rpm-rpmdrake:
 
 rpm-all: rpm rpm-rpmdrake
 
+# ============================================================================
+# Install targets — install the RPMs freshly built by ``make rpm''/``rpm-all''
+# to match the current VERSION and RELEASE.  Same fallback logic as
+# geturpm.sh: use ``urpm i --reinstall'' when urpm-ng-core is already
+# on the box, ``urpmi'' otherwise (bootstrap path).  All privileged
+# commands are wrapped in a single ``su -c'' so the root password is
+# asked once at most.
+#
+# install-core → urpm-ng-core only
+# install      → urpm-ng-core + urpm-ng-daemon + urpm-ng meta
+# install-all  → every urpm-ng sub-package (including -all) + rpmdrake-ng
+# ============================================================================
+
+INSTALL_VR = $(VERSION)-$(RELEASE)
+
+# Shared body — expects $$META (the top-level RPMs to hand to
+# ``urpm i'', which then sibling-scans for subpackages).  On a
+# box that has no urpm-ng yet we bootstrap by ``urpmi''-ing just
+# urpm-ng-core, then hand the remaining META RPMs off to the now-
+# installed ``urpm i''.  If META already IS urpm-ng-core (the
+# install-core case), we skip the redundant second step.  One su
+# prompt whichever path we take.
+INSTALL_CMD = \
+	if [ -z "$$META" ]; then \
+		echo "no RPMs matching $(INSTALL_VR) -- run 'make rpm' or 'make rpm-all' first" >&2; \
+		exit 1; \
+	fi; \
+	CORE=$$(find rpmbuild/RPMS -name "urpm-ng-core-$(INSTALL_VR).*.rpm" \
+	              ! -name "*-debuginfo-*" ! -name "*-debugsource-*" | head -1); \
+	if rpm -q urpm-ng-core >/dev/null 2>&1; then \
+		echo "==> urpm-ng-core present; urpm i --auto --reinstall (sibling scan picks the rest)"; \
+		echo "$$META" | tr ' ' '\n' | sed '/^$$/d; s|^|  |'; \
+		su -c "urpm i --auto --reinstall $$META"; \
+	elif [ "$$(echo $$META | tr -s ' ' | sed 's/^ //; s/ $$//')" = "$$CORE" ]; then \
+		echo "==> urpm-ng not installed; urpmi bootstraps urpm-ng-core"; \
+		echo "  $$CORE"; \
+		su -c "urpmi --auto $$CORE"; \
+	else \
+		echo "==> urpm-ng not installed; urpmi urpm-ng-core, then urpm i for the rest"; \
+		echo "  step 1: $$CORE"; \
+		echo "$$META" | tr ' ' '\n' | sed '/^$$/d; s|^|  step 2: |'; \
+		su -c "urpmi --auto $$CORE && urpm i --auto --reinstall $$META"; \
+	fi
+
+install-core:
+	@META=$$(find rpmbuild/RPMS \
+	              -name "urpm-ng-core-$(INSTALL_VR).*.rpm" \
+	              ! -name "*-debuginfo-*" ! -name "*-debugsource-*" \
+	              | tr '\n' ' '); \
+	$(INSTALL_CMD)
+
+install:
+	@META=$$(find rpmbuild/RPMS \
+	              -name "urpm-ng-$(INSTALL_VR).*.rpm" \
+	              ! -name "*-debuginfo-*" ! -name "*-debugsource-*" \
+	              | tr '\n' ' '); \
+	$(INSTALL_CMD)
+
+install-all:
+	@META="$$(find rpmbuild/RPMS -name "urpm-ng-all-$(INSTALL_VR).*.rpm" | tr '\n' ' ')$$(find rpmdrake/rpmbuild/RPMS -name "rpmdrake-ng-$(INSTALL_VR).*.rpm" | tr '\n' ' ')"; \
+	$(INSTALL_CMD)
+
 clean:
 	$(RM) -f rpmbuild/SOURCES/$(NAME)-*.tar.gz
 	$(RM) -f rpmbuild/SOURCES/pk-backend-urpm-*.tar.gz
@@ -110,4 +172,6 @@ po-stats:
 clean-i18n:
 	$(RM) -rf $(PO_DIR)/locale
 
-.PHONY: version tarball install-completion rpm rpm-rpmdrake rpm-all clean pot po-update mo po-stats clean-i18n
+.PHONY: version tarball install-completion rpm rpm-rpmdrake rpm-all \
+        install-core install install-all \
+        clean pot po-update mo po-stats clean-i18n
