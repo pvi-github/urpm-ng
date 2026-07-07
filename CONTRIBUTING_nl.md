@@ -70,25 +70,23 @@ su -c "urpmi bm && urpmi --buildrequires rpmbuild/SPECS/urpm-ng.spec"
 
 ```sh
 make rpm-all
+make install-all
 ```
 
-Installeer daarna de zojuist gebouwde RPMs.
+``make install-all'' kiest het juiste install-commando voor je:
 
-**Eerste keer — nog geen urpm-ng op het systeem** — geef alle RPMs in één keer aan ``urpmi`` (het versie-release-filter voorkomt dat een oudere build die nog in ``RPMS/`` staat wordt meegepakt):
+- Op een verse machine (nog geen urpm-ng) doet het eerst ``urpmi
+  urpm-ng-core'', dan ``urpm i'' op de meta-pakketten zodat de
+  resolver van urpm-ng de broer/zus-subpakketten oppikt.
+- Op een bestaande installatie gaat het direct naar ``urpm i
+  --auto --reinstall'' op de meta-pakketten.
 
-```sh
-RPMS=$(find rpmbuild/RPMS rpmdrake/rpmbuild/RPMS \
-            -name "*-$(cat VERSION)-$(cat RELEASE).*.rpm")
-su -c "urpmi $RPMS"
-```
+In beide gevallen vraagt één ``su -c'' het root-wachtwoord één
+keer.  Smallere varianten wanneer je niet de hele stack wilt:
 
-**Volgende iteraties** — de resolver van urpm-ng scant automatisch de broer/zus-map naar lokale RPMs (rapporteert "Found N sibling RPMs (available for dependencies)"), dus is het genoeg om naar de twee meta-pakketten te wijzen:
-
-```sh
-su -c "urpm i \
-    rpmbuild/RPMS/noarch/urpm-ng-all-$(cat VERSION)-$(cat RELEASE).*.rpm \
-    rpmdrake/rpmbuild/RPMS/noarch/rpmdrake-ng-$(cat VERSION)-$(cat RELEASE).*.rpm"
-```
+- ``make install-core'' — alleen ``urpm-ng-core''
+- ``make install''      — het meta ``urpm-ng'' (core + daemon),
+  zonder GUI-backend, zonder rpmdrake-ng
 
 ### Reproduceerbaar pad — container-build
 
@@ -105,12 +103,8 @@ su -c "urpm image make --release 10 --tag mga10-64"
 urpm build --image mga10-64 rpmbuild/SPECS/urpm-ng.spec \
                             rpmdrake/rpmbuild/SPECS/rpmdrake-ng.spec
 
-# Installeren — urpm-ng staat al op de host (voorwaarde van dit pad),
-# dus is ``urpm i`` op de twee meta genoeg: de resolver haalt de
-# broer/zus-RPMs uit dezelfde map automatisch op.
-su -c "urpm i \
-    rpmbuild/RPMS/noarch/urpm-ng-all-$(cat VERSION)-$(cat RELEASE).*.rpm \
-    rpmdrake/rpmbuild/RPMS/noarch/rpmdrake-ng-$(cat VERSION)-$(cat RELEASE).*.rpm"
+# De zojuist gebouwde RPMs installeren — dezelfde helper als het eenvoudige pad.
+make install-all
 ```
 
 ### De tests draaien

@@ -70,25 +70,25 @@ su -c "urpmi bm && urpmi --buildrequires rpmbuild/SPECS/urpm-ng.spec"
 
 ```sh
 make rpm-all
+make install-all
 ```
 
-Dann installiere die frisch gebauten RPMs.
+``make install-all'' wählt den passenden Install-Befehl für dich:
 
-**Erste Male — noch kein urpm-ng auf dem System** — gib alle RPMs auf einen Schlag an ``urpmi`` (der Version-Release-Filter verhindert, dass ein älterer Build im ``RPMS/``-Ordner mitgenommen wird):
+- Auf einer frischen Kiste (noch kein urpm-ng) macht es zuerst
+  ``urpmi urpm-ng-core'', dann ``urpm i'' auf die Meta-Pakete,
+  damit der Resolver von urpm-ng die Geschwister-Subpakete
+  auflest.
+- Auf einer bestehenden Installation geht es direkt zu ``urpm i
+  --auto --reinstall'' auf die Meta-Pakete.
 
-```sh
-RPMS=$(find rpmbuild/RPMS rpmdrake/rpmbuild/RPMS \
-            -name "*-$(cat VERSION)-$(cat RELEASE).*.rpm")
-su -c "urpmi $RPMS"
-```
+So oder so: ein ``su -c'', das Root-Passwort wird höchstens einmal
+abgefragt.  Schmalere Varianten, wenn du nicht die volle Stack
+willst:
 
-**Weitere Iterationen** — der Resolver von urpm-ng scannt das Nachbarverzeichnis automatisch nach lokalen RPMs (er meldet „Found N sibling RPMs (available for dependencies)"), es reicht also, auf die beiden Meta-Pakete zu zeigen:
-
-```sh
-su -c "urpm i \
-    rpmbuild/RPMS/noarch/urpm-ng-all-$(cat VERSION)-$(cat RELEASE).*.rpm \
-    rpmdrake/rpmbuild/RPMS/noarch/rpmdrake-ng-$(cat VERSION)-$(cat RELEASE).*.rpm"
-```
+- ``make install-core'' — nur ``urpm-ng-core''
+- ``make install''      — das ``urpm-ng''-Meta (core + daemon),
+  ohne GUI-Backend, ohne rpmdrake-ng
 
 ### Reproduzierbarer Weg — Container-Build
 
@@ -106,13 +106,8 @@ su -c "urpm image make --release 10 --tag mga10-64"
 urpm build --image mga10-64 rpmbuild/SPECS/urpm-ng.spec \
                             rpmdrake/rpmbuild/SPECS/rpmdrake-ng.spec
 
-# Install — urpm-ng ist auf dem Host bereits vorhanden (Voraussetzung
-# dieses Wegs), also reicht ``urpm i`` auf die zwei Meta-Pakete: der
-# Resolver holt sich die geschwisterlichen RPMs aus dem gleichen
-# Verzeichnis von selbst.
-su -c "urpm i \
-    rpmbuild/RPMS/noarch/urpm-ng-all-$(cat VERSION)-$(cat RELEASE).*.rpm \
-    rpmdrake/rpmbuild/RPMS/noarch/rpmdrake-ng-$(cat VERSION)-$(cat RELEASE).*.rpm"
+# Die frisch gebauten RPMs installieren — gleicher Helper wie im einfachen Weg.
+make install-all
 ```
 
 ### Die Tests laufen lassen

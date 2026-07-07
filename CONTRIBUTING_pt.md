@@ -70,25 +70,23 @@ su -c "urpmi bm && urpmi --buildrequires rpmbuild/SPECS/urpm-ng.spec"
 
 ```sh
 make rpm-all
+make install-all
 ```
 
-Depois instale os RPMs acabados de construir.
+``make install-all'' escolhe o comando de instalação por ti:
 
-**Primeira vez — ainda sem urpm-ng no sistema** — passe todos os RPMs ao ``urpmi`` de uma vez (o filtro versão-release evita apanhar uma build antiga que continue em ``RPMS/``):
+- Numa máquina sem urpm-ng, faz primeiro ``urpmi urpm-ng-core'',
+  depois ``urpm i'' sobre os meta-pacotes para que o resolvedor
+  do urpm-ng apanhe os sub-pacotes irmãos.
+- Numa instalação existente vai directo a ``urpm i --auto
+  --reinstall'' sobre os meta-pacotes.
 
-```sh
-RPMS=$(find rpmbuild/RPMS rpmdrake/rpmbuild/RPMS \
-            -name "*-$(cat VERSION)-$(cat RELEASE).*.rpm")
-su -c "urpmi $RPMS"
-```
+Em qualquer caso um só ``su -c'' pede a palavra-passe root uma
+vez.  Variantes mais estreitas quando não queres toda a pilha:
 
-**Iterações seguintes** — o resolvedor do urpm-ng varre automaticamente o diretório irmão à procura de RPMs locais (reporta "Found N sibling RPMs (available for dependencies)"), pelo que basta apontar para os dois meta-pacotes:
-
-```sh
-su -c "urpm i \
-    rpmbuild/RPMS/noarch/urpm-ng-all-$(cat VERSION)-$(cat RELEASE).*.rpm \
-    rpmdrake/rpmbuild/RPMS/noarch/rpmdrake-ng-$(cat VERSION)-$(cat RELEASE).*.rpm"
-```
+- ``make install-core'' — só ``urpm-ng-core''
+- ``make install''      — o meta ``urpm-ng'' (core + daemon),
+  sem backend GUI, sem rpmdrake-ng
 
 ### Caminho reprodutível — build em contentor
 
@@ -105,13 +103,8 @@ su -c "urpm image make --release 10 --tag mga10-64"
 urpm build --image mga10-64 rpmbuild/SPECS/urpm-ng.spec \
                             rpmdrake/rpmbuild/SPECS/rpmdrake-ng.spec
 
-# Instalar — o urpm-ng já está na máquina (pré-requisito deste
-# caminho), pelo que ``urpm i`` sobre os dois meta chega: o
-# resolvedor apanha automaticamente os RPMs irmãos do mesmo
-# diretório.
-su -c "urpm i \
-    rpmbuild/RPMS/noarch/urpm-ng-all-$(cat VERSION)-$(cat RELEASE).*.rpm \
-    rpmdrake/rpmbuild/RPMS/noarch/rpmdrake-ng-$(cat VERSION)-$(cat RELEASE).*.rpm"
+# Instalar os RPMs acabados de construir — mesmo helper que o caminho simples.
+make install-all
 ```
 
 ### Correr os testes
