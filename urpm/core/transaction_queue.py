@@ -636,42 +636,25 @@ class TransactionQueue:
             os.close(write_fd)
             os.close(read_fd)
 
-            # Python code to run in the user namespace
-            # NOTE: the child is invoked with ``python3 -c`` below, which
-            # unconditionally puts ``""`` (CWD) at sys.path[0].  If the
-            # user is currently sitting in a dev checkout that has an
-            # ``urpm/`` subtree, the child would import THAT instead of
-            # the RPM-installed package -- and typically miss recent
-            # fixes.  The scrub below matches what Python 3.11+'s ``-P``
-            # flag would do; we do it in Python code so mga9 (3.10) is
-            # covered as well.
-            child_code = f'''
-import os
-import sys
-if sys.path and sys.path[0] == "":
-    sys.path.pop(0)
-import pickle
+            # Bootstrap the child under ``podman unshare``.  We keep this
+            # ``-c`` snippet tiny -- 3 lines -- because the ``sys.path``
+            # scrub MUST happen before the first ``urpm`` import (``python3
+            # -c`` implicitly puts ``""`` at sys.path[0], which would let a
+            # dev checkout in CWD shadow the RPM-installed package).  All
+            # the real logic lives in ``urpm.core._userns_child`` -- a
+            # normal module we can lint, type-check, and unit-test.
+            child_bootstrap = (
+                'import sys\n'
+                'if sys.path and sys.path[0] == "": sys.path.pop(0)\n'
+                'from urpm.core._userns_child import run_child\n'
+                f'run_child({state_file!r})\n'
+            )
 
-# Load queue state
-with open("{state_file}", "rb") as f:
-    state = pickle.load(f)
-
-# Import after loading (avoid import issues)
-from urpm.core.transaction_queue import TransactionQueue
-
-# Recreate queue
-queue = TransactionQueue(root=state["root"])
-queue.operations = state["operations"]
-
-# Run child process logic (writes to stdout)
-queue._child_process_standalone()
-'''
-
-            # Run under podman unshare for proper UID/GID mapping
-            # podman unshare uses /etc/subuid and /etc/subgid to map
-            # a range of UIDs/GIDs, allowing chown operations to work
+            # podman unshare uses /etc/subuid and /etc/subgid to map a
+            # range of UIDs/GIDs, allowing chown operations to work
+            # inside the child.
             proc = subprocess.Popen(
-                ['podman', 'unshare', 'python3', '-c', child_code],
+                ['podman', 'unshare', 'python3', '-c', child_bootstrap],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 pass_fds=()
@@ -776,88 +759,146 @@ queue._child_process_standalone()
             except OSError:
                 pass
 
+    # ── Shared helpers used by both child branches ────────────────────
+    #
+    # ``_child_process`` (root) and ``_child_process_standalone``
+    # (userns) both need to write JSON messages to the parent and to
+    # walk the operation list.  The helpers below own the shared
+    # semantics; each ``_child_process_*`` keeps the pieces that are
+    # legitimately different (stdout capture, SIGTERM, async progress
+    # file for smart-sync, README storage in the DB).
+
+    @staticmethod
+    def _send_msg(pipe_state: dict, msg: 'QueueProgressMessage') -> None:
+        """Write a QueueProgressMessage over pipe_state, safely.
+
+        Marks the pipe as closed on BrokenPipeError/OSError so the
+        caller can switch to an async progress file (smart-sync mode)
+        without every send-site having to catch the exception itself.
+        """
+        if pipe_state.get('closed'):
+            return
+        try:
+            pipe_state['file'].write(msg.to_json() + "\n")
+            pipe_state['file'].flush()
+        except (BrokenPipeError, OSError):
+            pipe_state['closed'] = True
+
+    def _run_op_loop(
+        self,
+        pipe_state: dict,
+        *,
+        async_progress: Optional[dict] = None,
+        store_readmes: bool = False,
+    ) -> Tuple[bool, str]:
+        """Execute every operation in ``self.operations``.
+
+        Sends ``op_start`` / ``op_done`` / ``op_error`` via ``pipe_state``,
+        stops at the first failing op.  Returns ``(all_success,
+        error_message)`` so the caller can decide what to log or persist
+        after the loop.  Never sends ``queue_done`` / ``queue_error`` --
+        those are the caller's job because they gate on caller-specific
+        finalisation (script-output collection, async-progress cleanup).
+
+        Args:
+            pipe_state: Progress channel; must have ``'closed'`` bool
+                and ``'file'`` writable object.
+            async_progress: Async progress file state, forwarded to the
+                execute helpers so they can persist progress when the
+                parent releases the pipe (smart sync).  ``None`` in
+                userns mode.
+            store_readmes: When True, call
+                ``_store_readmes_in_db(op)`` after each successful
+                INSTALL.  Root branch only; userns child skips this
+                because it does not talk to the local DB.
+        """
+        for op in self.operations:
+            self._send_msg(pipe_state, QueueProgressMessage(
+                msg_type='op_start',
+                operation_id=op.operation_id,
+                op_type=op.op_type.value,
+            ))
+
+            if op.op_type == OperationType.INSTALL:
+                success, count, errors, rpmnew_files = self._execute_install(
+                    op, pipe_state,
+                    async_progress=async_progress,
+                )
+            else:
+                success, count, errors = self._execute_erase(
+                    op, pipe_state,
+                    async_progress=async_progress,
+                )
+                rpmnew_files = []
+
+            if success:
+                self._send_msg(pipe_state, QueueProgressMessage(
+                    msg_type='op_done',
+                    operation_id=op.operation_id,
+                    count=count,
+                    rpmnew_files=rpmnew_files,
+                ))
+                if store_readmes and op.op_type == OperationType.INSTALL:
+                    self._store_readmes_in_db(op)
+            else:
+                error_msg = errors[0] if errors else "Unknown error"
+                self._send_msg(pipe_state, QueueProgressMessage(
+                    msg_type='op_error',
+                    operation_id=op.operation_id,
+                    error=error_msg,
+                    errors=errors,
+                ))
+                return False, error_msg
+
+        return True, ""
+
     def _child_process_standalone(self):
-        """Child process logic for userns mode - writes to stdout."""
+        """Child process logic for userns mode - writes to stdout.
+
+        Runs unprivileged inside ``podman unshare``.  Stdout is a pipe
+        to the parent (``_execute_with_userns``); we don't do stdout
+        capture, SIGTERM handling, or async progress files here --
+        those belong to the root-mode ``_child_process`` where the
+        subprocess long-runs post-install triggers.
+        """
         import sys
-        import rpm
 
         write_file = sys.stdout
+        pipe_state = {'closed': False, 'file': write_file}
 
-        # Debug: show what we're about to do
         if DEBUG_USERNS:
-            print(f"[userns child] root={self.root}, ops={len(self.operations)}", file=sys.stderr)
+            print(f"[userns child] root={self.root}, ops={len(self.operations)}",
+                  file=sys.stderr)
             for op in self.operations:
-                print(f"[userns child]   op: {op.op_type.value} targets={len(op.targets)}", file=sys.stderr)
+                print(f"[userns child]   op: {op.op_type.value} "
+                      f"targets={len(op.targets)}", file=sys.stderr)
                 if op.targets:
-                    print(f"[userns child]     first: {op.targets[0]}", file=sys.stderr)
+                    print(f"[userns child]     first: {op.targets[0]}",
+                          file=sys.stderr)
             sys.stderr.flush()
 
-        # Acquire install lock
         lock = InstallLock(root=self.root if self.root != "/" else None)
         try:
             lock.acquire(blocking=True)
         except Exception as e:
-            write_file.write(QueueProgressMessage(
+            self._send_msg(pipe_state, QueueProgressMessage(
                 msg_type='queue_error',
-                error=f"Failed to acquire lock: {e}"
-            ).to_json() + "\n")
-            write_file.flush()
+                error=f"Failed to acquire lock: {e}",
+            ))
             sys.exit(1)
 
         try:
-            pipe_state = {'closed': False, 'file': write_file}
-
-            for i, op in enumerate(self.operations):
-                # Signal operation start
-                write_file.write(QueueProgressMessage(
-                    msg_type='op_start',
-                    operation_id=op.operation_id,
-                    op_type=op.op_type.value
-                ).to_json() + "\n")
-                write_file.flush()
-
-                if op.op_type == OperationType.INSTALL:
-                    if DEBUG_USERNS:
-                        print(f"[userns child] executing install...", file=sys.stderr)
-                        sys.stderr.flush()
-                    success, count, errors, rpmnew_files = self._execute_install(op, pipe_state)
-                    if DEBUG_USERNS:
-                        print(f"[userns child] install result: success={success} count={count} errors={errors} rpmnew={len(rpmnew_files)}", file=sys.stderr)
-                        sys.stderr.flush()
-                else:
-                    success, count, errors = self._execute_erase(op, pipe_state)
-                    rpmnew_files = []
-
-                if success:
-                    write_file.write(QueueProgressMessage(
-                        msg_type='op_done',
-                        operation_id=op.operation_id,
-                        count=count,
-                        rpmnew_files=rpmnew_files
-                    ).to_json() + "\n")
-                else:
-                    write_file.write(QueueProgressMessage(
-                        msg_type='op_error',
-                        operation_id=op.operation_id,
-                        error=errors[0] if errors else "Unknown error"
-                    ).to_json() + "\n")
-                    break
-
-                write_file.flush()
-
-            # Signal queue complete
-            write_file.write(QueueProgressMessage(msg_type='queue_done').to_json() + "\n")
-            write_file.flush()
-            lock.release()
-
+            self._run_op_loop(pipe_state)
+            self._send_msg(pipe_state, QueueProgressMessage(msg_type='queue_done'))
         except Exception as e:
-            write_file.write(QueueProgressMessage(
+            self._send_msg(pipe_state, QueueProgressMessage(
                 msg_type='queue_error',
-                error=str(e)
-            ).to_json() + "\n")
-            write_file.flush()
+                error=str(e),
+            ))
             lock.release()
             sys.exit(1)
+
+        lock.release()
 
     def _parent_process(
         self,
@@ -1047,12 +1088,14 @@ queue._child_process_standalone()
         try:
             lock.acquire(blocking=True)
         except Exception as e:
-            if not pipe_state['closed']:
-                write_file.write(QueueProgressMessage(
-                    msg_type='queue_error',
-                    error=f"Failed to acquire lock: {e}"
-                ).to_json() + "\n")
+            self._send_msg(pipe_state, QueueProgressMessage(
+                msg_type='queue_error',
+                error=f"Failed to acquire lock: {e}",
+            ))
+            try:
                 write_file.close()
+            except (BrokenPipeError, OSError):
+                pass
             os._exit(1)
 
         # Async progress file state — initialized lazily when pipe breaks
@@ -1070,62 +1113,22 @@ queue._child_process_standalone()
             os._exit(1)
         signal.signal(signal.SIGTERM, _sigterm_handler)
 
-        def _pipe_write(msg_json: str):
-            """Write to pipe, catching BrokenPipeError (parent released)."""
-            if pipe_state['closed']:
-                return
-            try:
-                pipe_state['file'].write(msg_json + "\n")
-            except (BrokenPipeError, OSError):
-                pipe_state['closed'] = True
-
         try:
-            for i, op in enumerate(self.operations):
-                # Signal operation start
-                _pipe_write(QueueProgressMessage(
-                    msg_type='op_start',
-                    operation_id=op.operation_id,
-                    op_type=op.op_type.value
-                ).to_json())
-
-                if op.op_type == OperationType.INSTALL:
-                    success, count, errors, rpmnew_files = self._execute_install(
-                        op, pipe_state,
-                        async_progress=progress_file_state,
-                    )
-                else:
-                    success, count, errors = self._execute_erase(
-                        op, pipe_state,
-                        async_progress=progress_file_state,
-                    )
-                    rpmnew_files = []
-
-                if success:
-                    _pipe_write(QueueProgressMessage(
-                        msg_type='op_done',
-                        operation_id=op.operation_id,
-                        count=count,
-                        rpmnew_files=rpmnew_files
-                    ).to_json())
-                else:
-                    error_msg = errors[0] if errors else "Unknown error"
-                    _pipe_write(QueueProgressMessage(
-                        msg_type='op_error',
-                        operation_id=op.operation_id,
-                        error=error_msg,
-                        errors=errors
-                    ).to_json())
-                    # If pipe is closed (smart sync), store error for next run
-                    if pipe_state['closed']:
-                        if progress_file_state:
-                            _update_async_progress(progress_file_state,
-                                                   error=error_msg)
-                        _set_background_error(error_msg)
-                    break
-
-                # Store README in DB after each successful install operation
-                if success and op.op_type == OperationType.INSTALL:
-                    self._store_readmes_in_db(op)
+            all_success, error_msg = self._run_op_loop(
+                pipe_state,
+                async_progress=progress_file_state,
+                store_readmes=True,
+            )
+            # Smart sync corner case: parent released the pipe (pipe now
+            # closed) and later an op failed.  The op_error we tried to
+            # send was silently dropped in ``_send_msg``; persist the
+            # error to the async progress file and the background log so
+            # the next ``urpm progress`` run surfaces it.
+            if not all_success and pipe_state['closed']:
+                if progress_file_state:
+                    _update_async_progress(progress_file_state,
+                                           error=error_msg)
+                _set_background_error(error_msg)
 
             # Send captured scriptlet output to parent, grouped by package.
             # Markers injected during SCRIPT_START delimit each section.
@@ -1161,11 +1164,11 @@ queue._child_process_standalone()
                                 _script_outputs[_pkg] = _body
                     _script_errs = list(self._script_error_packages)
                     if _script_outputs or _script_errs:
-                        _pipe_write(QueueProgressMessage(
+                        self._send_msg(pipe_state, QueueProgressMessage(
                             msg_type='scriptlet_output',
                             scriptlet_output=_json.dumps(_script_outputs) if _script_outputs else '',
                             script_errors=_script_errs,
-                        ).to_json())
+                        ))
                     else:
                         # Markers only, no actual output — skip
                         pass
@@ -1178,7 +1181,7 @@ queue._child_process_standalone()
                     pass
 
             # Signal queue complete
-            _pipe_write(QueueProgressMessage(msg_type='queue_done').to_json())
+            self._send_msg(pipe_state, QueueProgressMessage(msg_type='queue_done'))
             if not pipe_state['closed']:
                 try:
                     write_file.flush()
@@ -1209,10 +1212,10 @@ queue._child_process_standalone()
             if progress_file_state:
                 _update_async_progress(progress_file_state,
                                        error=str(e))
-            _pipe_write(QueueProgressMessage(
+            self._send_msg(pipe_state, QueueProgressMessage(
                 msg_type='queue_error',
-                error=str(e)
-            ).to_json())
+                error=str(e),
+            ))
             try:
                 if not pipe_state['closed']:
                     write_file.close()
@@ -1426,7 +1429,12 @@ queue._child_process_standalone()
         total = len(rpm_paths)
         packages_done = [0]       # Unique packages with extraction complete
         seen_paths = set()        # Paths already counted (dedup multi-installed)
-        extraction_error = [False]
+        # CPIO extraction failures do NOT show up in the ``problems`` list
+        # returned by ts.run() — they only surface here via callback.  The
+        # list tracks *which* packages failed so the returned error is
+        # actionable.  Checked right after ts.run(); an empty list still
+        # means "no extraction problems".
+        extraction_errors: list = []
         current_pkg_name = ['']
         in_verify = [True]        # True until VERIFY_STOP fires
 
@@ -1568,7 +1576,7 @@ queue._child_process_standalone()
 
             # ── CPIO extraction error ──
             if reason == rpm.RPMCALLBACK_CPIO_ERROR:
-                extraction_error[0] = True
+                extraction_errors.append(str(key))
                 _log_background(f"CPIO extraction error: {key}")
                 return
 
@@ -1656,6 +1664,25 @@ queue._child_process_standalone()
                 os.close(fd)
             except Exception:
                 pass
+
+        # CPIO extraction failures don't surface in ``problems`` -- they
+        # only fire through the callback.  If we recorded any, the chroot
+        # is corrupt (files missing, rpmdb out of sync) even when rpm
+        # itself thinks the transaction succeeded.  Fail loudly rather
+        # than let a broken image ship declaring success -- that was the
+        # exact silent-lie bug this branch was written to prevent.
+        if extraction_errors:
+            _log_background(
+                f"Transaction failed: CPIO extraction error on "
+                f"{len(extraction_errors)} package(s): "
+                f"{', '.join(extraction_errors)}"
+            )
+            errors = [
+                f"CPIO extraction failed for {pkg} "
+                f"(chroot files missing, install did not complete)"
+                for pkg in extraction_errors
+            ]
+            return False, packages_done[0], errors, new_rpmnew_files
 
         if problems:
             # For upgrade operations, "already installed" errors are benign

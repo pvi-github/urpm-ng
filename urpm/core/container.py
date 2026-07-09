@@ -418,14 +418,16 @@ class Container:
             logger.error(f"Import failed: {result.stderr}")
         return result.returncode == 0
 
-    def import_from_dir(self, directory: str, tag: str, tmpdir: str = None, use_unshare: bool = False) -> bool:
+    def import_from_dir(self, directory: str, tag: str, tmpdir: str = None, use_userns: bool = False) -> bool:
         """Create image from directory (tar + import).
 
         Args:
             directory: Directory to import
             tag: Tag for the new image
             tmpdir: Temporary directory for podman (avoids /tmp space issues)
-            use_unshare: Run under 'podman unshare' for UID/GID mapping
+            use_userns: Run under 'podman unshare' (user namespace) for
+                proper UID/GID mapping.  Required when the chroot was
+                built under a user namespace so file ownership matches.
 
         Returns:
             True if successful
@@ -440,7 +442,7 @@ class Container:
         else:
             env['TMPDIR'] = str(Path(directory).parent)
 
-        if use_unshare and self.runtime.name == 'podman':
+        if use_userns and self.runtime.name == 'podman':
             # Run tar + import under podman unshare for proper UID/GID mapping
             # This is needed when the chroot was built under podman unshare
             cmd = f'tar -C {directory} -c . | {self.cmd} import - {tag}'

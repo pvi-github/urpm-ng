@@ -677,7 +677,7 @@ def _phase1_bootstrap_chroot(
 
         print(_("  Importing as {tag}...").format(tag=minimal_tag), end='', flush=True)
         if not container.import_from_dir(tmpdir, minimal_tag,
-                                          use_unshare=(os.geteuid() != 0)):
+                                          use_userns=(os.geteuid() != 0)):
             print()
             print(colors.error(_("Failed to import minimal image")))
             return 1
