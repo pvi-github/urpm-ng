@@ -486,20 +486,27 @@ class Container:
 
         return True
 
-    def commit(self, container_id: str, tag: str) -> bool:
+    def commit(self, container_id: str, tag: str, squash: bool = False) -> bool:
         """Commit a container's changes as a new image.
 
         Args:
             container_id: Running or stopped container ID/name
             tag: Image tag for the committed image
+            squash: On podman, flatten ALL layers into a single one
+                (``--squash-all``).  Prevents ``image update`` from
+                snowballing every prior transaction into new copy-on-write
+                layers -- typically shaves 500 MB-1 GB off a repeatedly
+                updated image.  Ignored on docker (docker's ``commit``
+                doesn't support squashing; would require export/import).
 
         Returns:
             True if successful
         """
-        result = subprocess.run(
-            [self.cmd, 'commit', container_id, tag],
-            capture_output=True, text=True,
-        )
+        cmd = [self.cmd, 'commit']
+        if squash and self.runtime.name == 'podman':
+            cmd.append('--squash-all')
+        cmd += [container_id, tag]
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             logger.error(f"Commit failed: {result.stderr.strip()}")
         return result.returncode == 0

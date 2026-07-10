@@ -330,7 +330,8 @@ def _phase2_container_promote(
         if extra_packages:
             print(_("  Installing {n} extra packages...").format(n=len(extra_packages)))
             ret = container.exec_stream(
-                cid, ['urpm', 'install', '--auto', '--without-recommends', *extra_packages])
+                cid, ['urpm', 'install', '--auto', '--without-recommends',
+                      '--no-readme', *extra_packages])
             if ret != 0:
                 print(colors.error(_("Failed to install extra packages")))
                 return 1
@@ -351,7 +352,8 @@ def _phase2_container_promote(
                 return 1
             print(_("  Installing BuildRequires..."))
             ret = container.exec_stream(
-                cid, ['urpm', 'install', '--auto', '--without-recommends', '--buildrequires', dst_in_container])
+                cid, ['urpm', 'install', '--auto', '--without-recommends',
+                      '--no-readme', '--buildrequires', dst_in_container])
             if ret != 0:
                 print(colors.error(_("Failed to install BuildRequires")))
                 return 1
@@ -374,42 +376,6 @@ def _phase2_container_promote(
     finally:
         if cid:
             container.rm(cid, force=True)
-
-
-def _find_local_urpm_rpm(arch: str | None = None) -> Path | None:
-    """Search standard locations for a local urpm-ng RPM (fallback when
-    urpm-ng isn't yet in official repos).
-
-    When ``arch`` is given, only RPMs whose filename ends with
-    ``.<arch>.rpm`` or ``.noarch.rpm`` are returned — installing an
-    x86_64 RPM into an i686 chroot fails late and unhelpfully, so we
-    rather report "no candidate" and let the caller surface a clearer
-    error.
-    """
-    search_dirs = [
-        Path.home() / 'Downloads',
-        Path('./rpmbuild/RPMS'),
-        Path.home() / 'rpmbuild/RPMS',
-        Path('.'),
-    ]
-
-    def _arch_matches(p: Path) -> bool:
-        if arch is None:
-            return True
-        n = p.name
-        return n.endswith(f'.{arch}.rpm') or n.endswith('.noarch.rpm')
-
-    for search_dir in search_dirs:
-        if not search_dir.exists():
-            continue
-        candidates = [p for p in search_dir.glob('**/urpm-ng-core-*.rpm')
-                      if _arch_matches(p)]
-        if not candidates:
-            candidates = [p for p in search_dir.glob('**/urpm-ng-*.rpm')
-                          if _arch_matches(p)]
-        if candidates:
-            return max(candidates, key=lambda p: p.stat().st_mtime)
-    return None
 
 
 def _phase1_bootstrap_chroot(
@@ -507,17 +473,30 @@ def _phase1_bootstrap_chroot(
             subprocess.run(['mount', '-t', 'sysfs', 'sysfs', sys_path], check=True)
 
         os.environ['SYSTEMD_OFFLINE'] = '1'
+        # Silence the two known-benign rpm warnings that ``setup``
+        # emits when extracted early into a nearly-empty chroot
+        # (``failed to open /etc/group for id/name lookup`` +
+        # ``group shadow does not exist``).  See the matching filter
+        # block in ``transaction_queue._execute_in_userns``.  Scoped
+        # to phase 1 only -- unset before returning so a normal
+        # ``urpm install`` never hides these lines.
+        os.environ['URPM_MKIMAGE_SILENCE'] = '1'
 
         def _install(pkgs: list, label: str, *,
-                     noscripts: bool = False, nosig: bool = False) -> int:
+                     noscripts: bool = False, nodeps: bool = False,
+                     nosig: bool = False) -> int:
             """Install *pkgs* into the chroot.
 
             *noscripts=True* is only for packages whose scriptlets
             cannot run in a barely-populated chroot (``filesystem``,
-            ``makedev``).  Every other install stage MUST leave
-            scriptlets active — that is what lets ``setup``'s
-            posttrans fix ownership on /etc/shadow, ``basesystem``
-            packages register system users via ``useradd -R``, etc.
+            ``makedev``, and the very first ``setup`` seed).  Every
+            other install stage MUST leave scriptlets active — that
+            is what lets ``basesystem`` packages register system users
+            via ``useradd -R``, etc.
+
+            *nodeps=True* skips dependency checking.  Only used for the
+            initial ``setup`` seed at stage 0, which needs to run before
+            its own runtime dep (``glibc``) is available.
             """
             mode = _("[no-scripts] ") if noscripts else ""
             print(_("  Installing {mode}{label}...").format(mode=mode, label=label))
@@ -525,7 +504,7 @@ def _phase1_bootstrap_chroot(
                 urpm_root=tmpdir, root=tmpdir,
                 packages=pkgs, auto=True,
                 without_recommends=True, with_suggests=False,
-                download_only=False, nodeps=False, nosignature=nosig,
+                download_only=False, nodeps=nodeps, nosignature=nosig,
                 noscripts=noscripts, force=False, reinstall=False,
                 debug=None, watched=None, prefer=None,
                 all=False, test=False, sync=True,
@@ -536,11 +515,6 @@ def _phase1_bootstrap_chroot(
                 arch=arch,
             )
             return cmd_install(ns, chroot_db)
-
-        # Back-compat alias: retained so the urpm-ng install fallback below
-        # (which we install with --noscripts on purpose) reads clearly.
-        def _noscripts_install(pkgs: list, label: str, nosig: bool = False) -> int:
-            return _install(pkgs, label, noscripts=True, nosig=nosig)
 
         # ── Bootstrap install sequence (aligned with docker-brew-mageia) ──
         #
@@ -591,7 +565,29 @@ def _phase1_bootstrap_chroot(
         # (``useradd``, ``df``, ``mount``, ``mknod``) and would require a
         # populated chroot to run.  Its %files (the /usr/sbin/makedev
         # binary) extract fine on their own.
-        BOOTSTRAP_STAGES = ('filesystem', 'makedev', 'setup', 'basesystem-minimal')
+        BOOTSTRAP_STAGES = ('setup', 'filesystem', 'makedev', 'basesystem-minimal-core')
+
+        # Stage 0: seed /etc via setup, --noscripts --nodeps.
+        #
+        # RPM extracts every ``%files`` AFTER running every ``%pre`` of
+        # the whole transaction.  ``glibc`` (pulled as a dependency of
+        # ``filesystem`` at stage 1) has a Lua ``%preinstall`` that does
+        # a group lookup, which fails loudly in an empty chroot :
+        #    error: failed to open /etc/group for id/name lookup
+        #    warning: group shadow does not exist - using root
+        # We can't reorder ``setup`` to run before ``glibc`` in a single
+        # transaction (RPM extracts ``%files`` per-package but ``%pre``
+        # per-transaction).  So we install ``setup`` on its own in a
+        # zero-th transaction, with ``--noscripts`` to avoid running its
+        # own ``%posttrans`` in a chroot that still has no shell, and
+        # ``--nodeps`` so RPM doesn't reject it for missing ``glibc``.
+        # Only its ``%files`` extraction runs -- exactly what we want:
+        # /etc/passwd, /etc/group, /etc/shadow show up on disk before
+        # any other ``%pre`` scriptlet gets a chance to look at them.
+        if _install(['setup'], 'setup (seed /etc)',
+                    noscripts=True, nodeps=True) != 0:
+            print(colors.error(_("Failed to seed /etc via setup")))
+            return 1
 
         if _install(['filesystem'], 'filesystem') != 0:
             print(colors.error(_("Failed to install filesystem")))
@@ -599,10 +595,11 @@ def _phase1_bootstrap_chroot(
         if _install(['makedev'], 'makedev', noscripts=True) != 0:
             print(colors.error(_("Failed to install makedev")))
             return 1
-        for stage_pkg in ('setup', 'basesystem-minimal'):
-            if _install([stage_pkg], stage_pkg) != 0:
-                print(colors.error(_("Failed to install {pkg}").format(pkg=stage_pkg)))
-                return 1
+        # ``setup`` already installed at stage 0 (seed) -- ``cmd_install``
+        # would print "Nothing to do" for it, so skip it here.
+        if _install(['basesystem-minimal-core'], 'basesystem-minimal-core') != 0:
+            print(colors.error(_("Failed to install basesystem-minimal-core")))
+            return 1
 
         remaining = [p for p in bootstrap_packages
                      if p not in BOOTSTRAP_STAGES]
@@ -612,42 +609,28 @@ def _phase1_bootstrap_chroot(
                 print(colors.error(_("Failed to install bootstrap packages")))
                 return 1
 
-        # urpm-ng: try repos, fallback to local RPM
-        print(_("  Installing urpm-ng..."))
-        if _noscripts_install(['urpm-ng'], 'urpm-ng from repos') != 0:
-            print(_("    repos failed, looking for local urpm-ng RPM "
-                    "({arch})...").format(arch=arch))
-            local_rpm = _find_local_urpm_rpm(arch)
-            if local_rpm is not None:
-                prompt = _("  Found: {path}\n  Press Enter to use, or provide another path: "
-                           ).format(path=local_rpm)
-                default_path = str(local_rpm)
-            else:
-                # Foreign-arch builds (e.g. i686 from an x86_64 host)
-                # rarely have a local matching RPM lying around — make
-                # that clear in the prompt so the user understands why
-                # the auto-detection turned up empty.
-                print(colors.warning(_(
-                    "    No local urpm-ng RPM found matching arch "
-                    "'{arch}'.  Build one on a matching host (or in a "
-                    "{arch} container) and drop it into ~/Downloads "
-                    "or ./rpmbuild/RPMS/{arch}/."
-                ).format(arch=arch)))
-                prompt = _("  Path to urpm-ng RPM file ({arch}): "
-                           ).format(arch=arch)
-                default_path = ""
-            user_input = input(prompt).strip()
-            rpm_path = Path(user_input) if user_input else (Path(default_path) if default_path else None)
-            if not rpm_path or not rpm_path.exists():
-                print(colors.error(_("No urpm-ng RPM provided or file not found")))
-                print(_("  Build it with: make rpm"))
-                return 1
-            if _noscripts_install([str(rpm_path.resolve())],
-                                  _("urpm-ng from {name}").format(name=rpm_path.name),
-                                  nosig=True) != 0:
-                print(colors.error(_("Failed to install urpm-ng")))
-                return 1
-            print(colors.success(_("  Installed {name}").format(name=rpm_path.name)))
+        # urpm-ng-core: cadré in SPEC_IMAGE_URPM_NG_INCLUSION.
+        # Three modes tried in order (dev-local > repo-backed > github
+        # fallback); the code lives in ``urpm.core.image_urpm_ng`` so
+        # this branch stays a one-liner and ``urpm image make`` remains
+        # agnostic to which media urpm-ng lives in today.
+        print(_("  Installing urpm-ng-core..."))
+        from ...core.image_urpm_ng import install_urpm_ng_core
+        if install_urpm_ng_core(
+            chroot_dir=tmpdir,
+            chroot_db=chroot_db,
+            arch=arch,
+            mageia_release=release,
+            host_db=db,
+            source=getattr(args, 'urpm_ng_source', 'auto'),
+            explicit_rpm=getattr(args, 'urpm_ng_core', None),
+            log=print,
+        ) != 0:
+            print(colors.error(_("Failed to install urpm-ng-core")))
+            print(_("  Build it locally with 'make rpm' and retry, "
+                    "or ensure a media providing urpm-ng-core is "
+                    "configured on the host."))
+            return 1
 
         # Bootstrap the TLS trust store inside the chroot so the committed
         # `<release>-minimal` image can do HTTPS out of the box (Phase 2's
@@ -689,6 +672,9 @@ def _phase1_bootstrap_chroot(
         return 1
 
     finally:
+        # Undo the phase-1 stderr silencing so a subsequent ``urpm
+        # install`` in the same session behaves normally.
+        os.environ.pop('URPM_MKIMAGE_SILENCE', None)
         if not keep_chroot:
             cmd_cleanup(argparse.Namespace(urpm_root=tmpdir), None)
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -708,8 +694,6 @@ def _cleanup_chroot_for_image(root: str):
     cleanup_patterns = [
         'var/cache/urpmi/*',
         'var/cache/dnf/*',
-        'var/lib/urpm/medias/**/*.rpm',     # Downloaded RPM packages (recursive)
-        'var/lib/urpm/medias/**/*.cache',   # Cache files (recursive)
         'var/log/*',
         'tmp/*',
         'var/tmp/*',
@@ -734,6 +718,87 @@ def _cleanup_chroot_for_image(root: str):
                     removed += 1
             except (IOError, OSError):
                 pass
+
+    # Flush every file under ``/var/lib/urpm/medias/`` while keeping the
+    # directory tree (~150 MB freed on a fresh mga10-64 image).  Both the
+    # cached ``.rpm`` payloads AND the synthesis/files.xml metadata are
+    # redundant with ``packages.db``, which alone drives resolution --
+    # verified empirically: with ``medias/`` emptied, ``urpm search`` and
+    # ``urpm install`` still work and re-download only what they need.
+    medias_root = os.path.join(root, 'var', 'lib', 'urpm', 'medias')
+    if os.path.isdir(medias_root):
+        for dirpath, _dirs, files in os.walk(medias_root):
+            for fname in files:
+                try:
+                    os.remove(os.path.join(dirpath, fname))
+                    removed += 1
+                except (IOError, OSError):
+                    pass
+
+    # Compact the SQLite databases before commit.  Left unattended, the
+    # write-ahead log (``packages.db-wal``) balloons to ~90 MB on a
+    # fresh bootstrap -- more than the ``packages.db`` itself, and pure
+    # dead weight in the image (the log is meaningful only during an
+    # active session).  Split into three independent steps so a lock
+    # held by an rpm-helper subprocess on VACUUM doesn't lose us the
+    # WAL flush too:
+    #   1. ``wal_checkpoint(TRUNCATE)`` + ``journal_mode=DELETE``:
+    #      flush the WAL into the main file and leave WAL mode.  This
+    #      alone gets rid of the 90 MB WAL file, which is the bulk of
+    #      the win.
+    #   2. ``VACUUM`` on a fresh connection: reclaims ~15 MB of free
+    #      pages accumulated as bootstrap transactions expanded then
+    #      contracted the tables.  Best-effort -- if a scriptlet
+    #      subprocess still holds an fcntl lock (which sqlite's own
+    #      timeout can't wait through), skip it, we already got the
+    #      big win from step 1.
+    #   3. Unconditionally unlink ``-wal`` / ``-shm`` / ``-journal``
+    #      side-files: journal_mode=DELETE should have done it but
+    #      some SQLite builds defer the unlink to the next writer.
+    import sqlite3
+    for db_name in ('packages.db', 'files.db'):
+        db_path = os.path.join(root, 'var', 'lib', 'urpm', db_name)
+        if not os.path.isfile(db_path):
+            continue
+        print(_("  Compacting {db}...").format(db=db_name),
+              end='', flush=True)
+
+        wal_flushed = False
+        try:
+            conn = sqlite3.connect(db_path, timeout=10.0)
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("PRAGMA journal_mode=DELETE")
+            conn.close()
+            wal_flushed = True
+        except sqlite3.Error as e:
+            print()
+            print(colors.warning(
+                _("  Warning: WAL flush failed on {db}: {err}").format(
+                    db=db_name, err=e)))
+
+        vacuumed = False
+        try:
+            conn = sqlite3.connect(db_path, timeout=10.0)
+            conn.execute("VACUUM")
+            conn.close()
+            vacuumed = True
+        except sqlite3.Error:
+            # VACUUM lock is best-effort. WAL already flushed above,
+            # which recovers ~85 of the ~90 MB win.  Stay quiet -- a
+            # warning here scares users for a 5 MB miss.
+            pass
+
+        for suffix in ('-wal', '-shm', '-journal'):
+            side = db_path + suffix
+            if os.path.isfile(side):
+                try:
+                    os.remove(side)
+                    removed += 1
+                except OSError:
+                    pass
+
+        if wal_flushed:
+            print(_(" done"), "(VACUUM)" if vacuumed else "(WAL only)")
 
     print(ngettext(
         "  Removed {count} cache/log entry",
@@ -1556,6 +1621,20 @@ def cmd_image_update(args, db: 'PackageDatabase') -> int:
             print(colors.warning(
                 _("  Warning: media update failed")))
 
+        # Ensure urpm-ng-core has coverage: images built before the
+        # media-inclusion fix (SPEC_IMAGE_URPM_NG_INCLUSION) have no
+        # media providing urpm-ng-core, so ``urpm upgrade`` below
+        # silently skips it.  Patch it in place: dev-local RPM wins,
+        # else replicate the host repo, else warn.
+        from ...core.image_urpm_ng import ensure_urpm_ng_in_container
+        ensure_urpm_ng_in_container(
+            container, cid,
+            host_db=db,
+            source=getattr(args, 'urpm_ng_source', 'auto'),
+            explicit_rpm=getattr(args, 'urpm_ng_core', None),
+            log=print,
+        )
+
         # Upgrade packages
         print(_("  Upgrading packages..."))
         ret = container.exec_stream(cid, ['urpm', 'upgrade', '--auto'])
@@ -1564,12 +1643,50 @@ def cmd_image_update(args, db: 'PackageDatabase') -> int:
                 _("  Warning: package update returned {code}").format(
                     code=ret)))
 
+        # Purge caches inside the container so they don't bloat the new
+        # layer.  ``.rpm`` payloads freshly downloaded by ``urpm upgrade``
+        # and synthesis/files.xml metadata are redundant with
+        # ``packages.db`` and add ~150 MB per update if left in.
+        print(_("  Cleaning caches..."))
+        container.exec(cid, ['sh', '-c',
+            'find /var/lib/urpm/medias -type f -delete 2>/dev/null; '
+            'rm -rf /var/cache/urpmi/* /tmp/* /var/tmp/* /var/log/* '
+            '/root/.bash_history 2>/dev/null; '
+            'true'])
+
+        # Compact the SQLite databases inside the container (same rationale
+        # as ``_cleanup_chroot_for_image``: an untended WAL grows to ~90 MB
+        # per update cycle).  Run via ``python3`` since urpm-ng-core is
+        # already installed and pulls in ``lib64python3.13-stdlib`` which
+        # ships ``sqlite3``.
+        print(_("  Compacting SQLite databases..."))
+        container.exec(cid, ['python3', '-c', (
+            'import os, sqlite3\n'
+            'for db in ("packages.db", "files.db"):\n'
+            '    p = "/var/lib/urpm/" + db\n'
+            '    if not os.path.isfile(p): continue\n'
+            '    try:\n'
+            '        c = sqlite3.connect(p)\n'
+            '        c.execute("PRAGMA wal_checkpoint(TRUNCATE)")\n'
+            '        c.execute("PRAGMA journal_mode=DELETE")\n'
+            '        c.execute("VACUUM")\n'
+            '        c.close()\n'
+            '        for s in ("-wal", "-shm", "-journal"):\n'
+            '            side = p + s\n'
+            '            if os.path.isfile(side): os.remove(side)\n'
+            '    except sqlite3.Error as e:\n'
+            '        print("compact", db, "failed:", e)\n'
+        )])
+
         # Stop the container before committing
         container.exec(cid, ['sh', '-c', 'kill 1 2>/dev/null || true'])
 
-        # Commit as same tag (overwrites)
-        print(_("  Committing..."), end='', flush=True)
-        if not container.commit(cid, tag):
+        # Commit as same tag (overwrites).  ``squash=True`` collapses all
+        # prior copy-on-write layers so successive updates don't snowball
+        # the on-disk footprint (was: 4 layers -> 1.6 GB on a 550 MB
+        # rootfs; now: 1 layer, same as ``du -sh /`` inside).
+        print(_("  Committing (squashed)..."), end='', flush=True)
+        if not container.commit(cid, tag, squash=True):
             print()
             print(colors.error(_("Failed to commit image")))
             return 1
