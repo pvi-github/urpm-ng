@@ -9,8 +9,13 @@
 #      %posttrans needs a populated chroot; skipped here.
 #   3. ``setup``                 with scriptlets — /etc/passwd/group/shadow
 #      via %files.
-#   4. ``basesystem-minimal``    with scriptlets — the solver pulls in
-#      glibc, bash, coreutils, shadow-utils, kmod, timezone, utempter, ...
+#   4. ``basesystem-minimal-core`` with scriptlets — the solver pulls in
+#      glibc, bash, coreutils, shadow-utils, rpm, mageia-release, ... The
+#      ``basesystem-minimal`` meta would also drag in cron, logrotate,
+#      initscripts, kbd, kmod, iproute2, binutils (via file), ... that
+#      have no purpose in a container image (~57 MB saved).  Missing
+#      utilities (less, timezone, iproute2) can be installed on demand
+#      via urpm once the container is running.
 #   5. Any remaining names below with scriptlets — mostly already pulled
 #      transitively, listed explicitly for reproducibility.
 #
@@ -24,7 +29,7 @@ packages:
   - filesystem
   - makedev
   - setup
-  - basesystem-minimal
+  - basesystem-minimal-core
   - glibc
   - bash
   - coreutils

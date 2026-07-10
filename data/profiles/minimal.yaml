@@ -5,7 +5,7 @@ description: Minimal usable system with urpm
 
 packages:
   - filesystem
-  - basesystem-minimal
+  - basesystem-minimal-core
   - coreutils
   - grep
   - sed
