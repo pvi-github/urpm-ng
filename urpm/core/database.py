@@ -909,6 +909,19 @@ class PackageDatabase(
         # Thread-local storage for per-thread connections
         self._local = threading.local()
 
+        # Track EVERY connection ever produced by ``_create_connection``
+        # so ``close()`` can shut down worker-thread connections in
+        # addition to the main-thread one.  ``threading.local`` scopes
+        # the *lookup* per-thread but does not expose the storage of
+        # other threads, so the main thread has no other way to reach
+        # a worker's connection.  Without this list, ThreadPoolExecutor
+        # workers (download / resolver / import) leak their sqlite3 fd
+        # until process exit -- which in mkimage means ~13 fd still open
+        # on ``packages.db{,-wal,-shm}`` at commit time, blocking the
+        # WAL checkpoint and leaving ~90 MB of dead weight in the image.
+        self._all_conns: list = []
+        self._all_conns_lock = threading.Lock()
+
         # Main thread connection (also stored in _local for consistency)
         self._main_thread_id = threading.get_ident()
         self.conn = self._create_connection()
@@ -946,6 +959,8 @@ class PackageDatabase(
         # Install the RPM-semantic collation so ORDER BY on version/release
         # columns orders by RPM semantics, not lexicographic ASCII.
         _register_rpm_collation(conn)
+        with self._all_conns_lock:
+            self._all_conns.append(conn)
         return conn
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -1488,19 +1503,31 @@ class PackageDatabase(
     def close(self):
         """Close database connection.
 
+        Closes every connection tracked in ``_all_conns`` -- that
+        includes the main-thread connection AND every per-thread
+        connection handed out by ``_get_connection`` to a worker
+        thread.  ``sqlite3.Connection.close()`` is safe to call from
+        another thread when the connection was created with
+        ``check_same_thread=False`` (which we do in
+        ``_create_connection``), and calling ``close()`` twice on the
+        same connection is a documented no-op, so this is safe for
+        re-entrant ``close()`` calls too.
+
         When running as root, ensures -wal/-shm files persist with
         world-readable permissions so non-root users can open the DB
         in read-only mode.
-
-        Note: Thread-local connections are automatically cleaned up when
-        threads end (e.g., when ThreadPoolExecutor workers terminate).
         """
         if not self.read_only:
             self.ensure_wal_readable()
-        # Close main thread connection
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        # Close every tracked connection (main thread + worker threads).
+        with self._all_conns_lock:
+            for conn in self._all_conns:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+            self._all_conns.clear()
+        self.conn = None
         # Clear thread-local reference if in main thread
         if hasattr(self._local, 'conn'):
             self._local.conn = None
