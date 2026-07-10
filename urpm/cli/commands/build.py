@@ -327,11 +327,22 @@ def _phase2_container_promote(
         if ret != 0:
             print(colors.warning(_("  Warning: upgrade returned {code}").format(code=ret)))
 
+        # Detect whether the urpm inside the container supports
+        # ``--no-readme`` -- mgabiz mga9 still serves urpm-ng-core-0.8.1-1
+        # which predates the flag, and passing it there triggers
+        # ``unrecognized arguments`` and aborts the whole install.
+        _help = container.exec(cid, ['urpm', 'install', '--help'])
+        no_readme_flag = (
+            ['--no-readme']
+            if _help.returncode == 0 and '--no-readme' in (_help.stdout or '')
+            else []
+        )
+
         if extra_packages:
             print(_("  Installing {n} extra packages...").format(n=len(extra_packages)))
             ret = container.exec_stream(
                 cid, ['urpm', 'install', '--auto', '--without-recommends',
-                      '--no-readme', *extra_packages])
+                      *no_readme_flag, *extra_packages])
             if ret != 0:
                 print(colors.error(_("Failed to install extra packages")))
                 return 1
@@ -353,7 +364,7 @@ def _phase2_container_promote(
             print(_("  Installing BuildRequires..."))
             ret = container.exec_stream(
                 cid, ['urpm', 'install', '--auto', '--without-recommends',
-                      '--no-readme', '--buildrequires', dst_in_container])
+                      *no_readme_flag, '--buildrequires', dst_in_container])
             if ret != 0:
                 print(colors.error(_("Failed to install BuildRequires")))
                 return 1
