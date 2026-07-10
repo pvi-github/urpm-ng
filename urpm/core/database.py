@@ -1858,6 +1858,14 @@ class PackageDatabase(
         """
         from .config import get_accepted_versions, get_system_version
 
+        # Explicit per-DB target set by ``cmd_init`` for cross-version
+        # chroots (mga9 chroot on a mga10 host).  Wins over both the
+        # get_accepted_versions() heuristic and the host os-release
+        # fallback -- the DB owner told us what it's for.
+        pinned = self.get_config('mageia-version')
+        if pinned:
+            return {pinned}
+
         accepted, needs_choice, info = get_accepted_versions(self)
 
         if accepted:

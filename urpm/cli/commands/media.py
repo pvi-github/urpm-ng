@@ -153,6 +153,14 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         print(colors.dim(_("Use --release to specify (e.g., --release 10 or --release cauldron)")))
         return 1
 
+    # Persist the target Mageia version in the DB config.  Without this
+    # marker, every ``get_package`` query falls back to reading the
+    # host's ``/etc/os-release`` (via ``get_system_version()``) to
+    # decide which media to include -- which breaks cross-version
+    # chroots (mga9 init on a mga10 host).  ``_get_accepted_versions``
+    # reads this key before the host fallback.
+    db.set_config('mageia-version', version)
+
     urpm_root = getattr(args, 'urpm_root', None)
     if urpm_root:
         print(_("Initializing urpm in {path}").format(path=f"{urpm_root}/var/lib/urpm/"))
@@ -986,10 +994,23 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
     # synthesis from the bad server before the user has acted.
     emit_blacklist_alert_if_any(db)
 
-    # Check root privileges (media update writes to database)
-    require_privileges(action_id="org.mageia.urpm.refresh")
+    # Check root privileges (media update writes to database).
+    # ``allow_no_root`` skips the check for callers that operate on a
+    # foreign root (mkimage bootstrap syncing the freshly-added mgabiz
+    # media in a chroot the caller already owns).
+    require_privileges(
+        action_id="org.mageia.urpm.refresh",
+        allow_skip=getattr(args, 'allow_no_root', False),
+    )
 
-    # Prevent concurrent media syncs (CLI or daemon)
+    # Prevent concurrent media syncs (CLI or daemon).  Skip when running
+    # in a foreign chroot: the sync_lock lives at ``/run/urpm/`` on the
+    # host, which is unwritable from rootless podman-unshare, and the
+    # mkimage pipeline is single-threaded within its own chroot -- there
+    # is no CLI or daemon to race against.
+    if getattr(args, 'allow_no_root', False):
+        return _do_media_update(args, db, sync_lock=None)
+
     sync_lock = SyncLock()
     acquired, holder_pid = sync_lock.try_acquire()
     if not acquired:
@@ -1104,6 +1125,7 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
         sync_start = time.time()
         results = sync_all_media(db, parallel_progress,
                                  force=getattr(args, 'force', False),
+                                 urpm_root=getattr(args, 'urpm_root', None),
                                  skip_appstream=skip_appstream)
         sync_elapsed = time.time() - sync_start
 
@@ -2107,9 +2129,14 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
 
     # Privilege check is gated on actually mutating the DB; ``--dry-run``
     # only fetches and parses media.cfg to print a preview, so it stays
-    # usable unprivileged.
+    # usable unprivileged.  ``allow_no_root`` skips the check for callers
+    # that operate on a foreign root (mkimage bootstrap replicating the
+    # host's mgabiz media into a fresh chroot).
     if not dry_run:
-        require_privileges(action_id="org.mageia.urpm.media-manage")
+        require_privileges(
+            action_id="org.mageia.urpm.media-manage",
+            allow_skip=getattr(args, 'allow_no_root', False),
+        )
 
     # Parse --with / --without into per-category overrides
     with_cats = set()
