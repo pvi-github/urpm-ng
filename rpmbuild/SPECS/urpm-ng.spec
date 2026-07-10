@@ -1,6 +1,6 @@
 %define name urpm-ng
 %define version 0.8.1
-%define release 4
+%define release 24
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
@@ -106,6 +106,13 @@ Obsoletes:      %{name}-daemon < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-daemon = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       %{name}-core = %{version}-%{release}
+# D-Bus service + PolicyKit backend live here now (was pulled into -core
+# through the pyproject_files sweep, which forced ``typelib(Polkit)`` on
+# every -core install -- including headless containers that never touch
+# the daemon).  The gi bindings and polkit itself are strict runtime
+# deps of ``urpm/dbus/service.py`` and ``urpm/auth/polkit.py``.
+Requires:       python3-gobject
+Requires:       polkit
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
@@ -551,6 +558,13 @@ fi
 %exclude %{python3_sitelib}/urpm/genmedia
 %exclude %{python3_sitelib}/urpm/cli/commands/genmedia.py
 %exclude %{python3_sitelib}/urpm/cli/commands/__pycache__/genmedia.*.pyc
+# D-Bus service module and PolicyKit backend belong to urpm-ng-daemon.
+# Leaving them here would forward-declare ``typelib(Polkit) = 1.0`` as a
+# strict Requires on every -core install (headless containers pay ~10 MB
+# of polkit + libpolkit-gir + typelib deps for code they never load).
+%exclude %{python3_sitelib}/urpm/dbus
+%exclude %{python3_sitelib}/urpm/auth/polkit.py
+%exclude %{python3_sitelib}/urpm/auth/__pycache__/polkit.*.pyc
 
 # ============================================================================
 # Files for urpm-ng-daemon
@@ -561,6 +575,10 @@ fi
 %config(noreplace) %{_sysconfdir}/shorewall/rules.urpm-ng
 %{_mandir}/man8/urpmd.8*
 %{_mandir}/*/man8/urpmd.8*
+# Moved out of urpm-ng-core (see the matching %exclude block above).
+%{python3_sitelib}/urpm/dbus
+%{python3_sitelib}/urpm/auth/polkit.py
+%{python3_sitelib}/urpm/auth/__pycache__/polkit.*.pyc
 
 # ============================================================================
 # Files for urpm-ng-appstream
