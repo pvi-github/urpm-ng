@@ -278,6 +278,7 @@ class QueuedOperation:
     background: bool = False  # If True, parent doesn't wait for this operation
     reinstall: bool = False  # If True, allow reinstalling same version
     noscripts: bool = False  # If True, skip pre/post install scripts
+    nodeps: bool = False  # If True, skip rpm-level dep verification (rpm -i --nodeps semantic)
     actions: list = field(default_factory=list)  # PackageAction list from resolver (for README collection)
 
 
@@ -465,6 +466,7 @@ class TransactionQueue:
         erase_names: List[str] = None,
         reinstall: bool = False,
         noscripts: bool = False,
+        nodeps: bool = False,
         actions: list = None
     ) -> 'TransactionQueue':
         """Add an install operation to the queue.
@@ -479,6 +481,7 @@ class TransactionQueue:
                         (for obsoleted packages that must be removed atomically)
             reinstall: Allow reinstalling same version without --force
             noscripts: Skip pre/post install scripts
+            nodeps: Skip rpm-level dependency verification (rpm -i --nodeps)
             actions: PackageAction list from resolver (used for README.urpmi
                      collection in the child process after transaction completes)
 
@@ -495,6 +498,7 @@ class TransactionQueue:
                 test=test,
                 reinstall=reinstall,
                 noscripts=noscripts,
+                nodeps=nodeps,
                 actions=actions or [],
             )
             # Store erase_names as extra attribute
@@ -726,13 +730,47 @@ class TransactionQueue:
             proc.wait()
 
             # Collect stderr (RPM warnings, systemd inhibition messages, etc.)
-            # Filter out benign chroot/userns warnings that clutter the output
+            # Filter out benign chroot/userns warnings that clutter the output.
             stderr_output = proc.stderr.read().decode('utf-8').strip() if proc.stderr else ""
             if stderr_output:
-                _benign = (
+                _benign = [
                     'Unable to get systemd shutdown inhibition lock',
                     'Failed to connect to bus',
-                )
+                ]
+                # Extra filters activated by mkimage's phase 1 bootstrap:
+                # ``rpm`` legitimately emits these when extracting ``setup``
+                # in a nearly-empty chroot -- ``/etc/gshadow`` carries
+                # ``%attr(root:shadow)`` and ``shadow`` is only declared
+                # inside the same ``/etc/group`` being written.  The
+                # messages appear identically on ``dnf install setup`` in
+                # a plain ``--installroot`` but are drowned in the noise
+                # of a full-distro install.  In mkimage they stand out,
+                # so build.py sets ``URPM_MKIMAGE_SILENCE=1`` around its
+                # bootstrap stages to suppress the two known-benign lines
+                # (either English or French rpm locale).
+                if os.environ.get('URPM_MKIMAGE_SILENCE') == '1':
+                    _benign.extend([
+                        # setup extraction in a nearly-empty chroot
+                        'failed to open /etc/group for id/name lookup',
+                        'group shadow does not exist',
+                        "le groupe shadow n'existe pas",
+                        # systemd-sysusers running under podman unshare
+                        # without a real /proc mount -- expected in a
+                        # userns bootstrap, not actionable in mkimage
+                        '/proc/ is not mounted',
+                        'This is not a supported mode of operation',
+                        'invocation environment to mount',
+                        'Your mileage may vary',
+                        'Proceeding anyway',
+                        # Successful sysusers/useradd output.  Positive
+                        # info but noise in a scripted context; the
+                        # rpmdb records who was created anyway.
+                        "Creating group '",
+                        "Creating user '",
+                        # journalctl --update-catalog scriptlet with no
+                        # catalog source files to index yet
+                        '/usr/lib/systemd/catalog/systemd.catalog',
+                    ])
                 filtered = '\n'.join(
                     line for line in stderr_output.splitlines()
                     if not any(pat in line for pat in _benign)
@@ -1518,8 +1556,12 @@ class TransactionQueue:
         if DEBUG_EXECINSTALL:
             _debug_write(f"[install] built ts with {len(rpm_paths)} packages")
 
-        # Dep check (skipped in --force mode).
-        if not op.force:
+        # Dep check (skipped in --force or --nodeps modes).  ``--nodeps``
+        # is the ``rpm -i --nodeps`` semantic: the caller has stated
+        # explicitly that dependency satisfaction is their problem, so
+        # bailing out here would be surprising after a successful
+        # extraction.
+        if not op.force and not op.nodeps:
             dep_errors = self._check_deps(ts, rpm_paths)
             if dep_errors:
                 return False, 0, dep_errors, []

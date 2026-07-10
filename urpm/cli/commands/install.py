@@ -146,12 +146,17 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         print(colors.dim(_("  (This message will not appear again)")))
         clear_background_error()
 
-    # Check --nodeps flag
+    # Check --nodeps flag.  Legitimate use case for both install and
+    # download paths -- ``rpm -i --nodeps`` has always been supported;
+    # the install path below (search for ``if nodeps:``) builds the
+    # action list without a solver pass, mirroring that semantic.
+    # Print a warning so the operator can't miss what they asked for.
     nodeps = getattr(args, 'nodeps', False)
     download_only = getattr(args, 'download_only', False)
-    if nodeps and not download_only:
-        print(colors.error(_("Error: --nodeps requires --download-only")))
-        return 1
+    if nodeps:
+        print(colors.warning(_(
+            "  --nodeps: dependency resolution skipped"
+            " (installing exactly the requested packages)")))
 
     # Check root privileges early (unless allowed to skip for mkimage)
     from ...auth.privileges import require_privileges
@@ -1031,6 +1036,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         test=getattr(args, 'test', False),
         reinstall=getattr(args, 'reinstall', False),
         noscripts=getattr(args, 'noscripts', False),
+        nodeps=nodeps,
         root=rpm_root or "/",
         use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
         config_policy=getattr(args, 'config_policy', 'keep'),

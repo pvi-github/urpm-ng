@@ -510,6 +510,12 @@ Examples:
         help=_('Wait for full completion including post-install triggers')
     )
     install_parser.add_argument(
+        '--no-readme', action='store_true', default=False,
+        dest='no_readme',
+        help=_('Do not print post-install README notes '
+               '(used inside mkimage / image update)')
+    )
+    install_parser.add_argument(
         '--config-policy',
         choices=['keep', 'replace', 'ask'],
         default='keep',
@@ -665,6 +671,21 @@ Examples:
         action='store_true',
         help=_('Automatically import GPG keys for --addmedia repositories')
     )
+    image_make.add_argument(
+        '--urpm-ng-source',
+        choices=['auto', 'local', 'media', 'github'],
+        default='auto',
+        help=_('Where urpm-ng-core comes from: auto (waterfall: local '
+               'match > host media > github), local (force local RPM), '
+               'media (force host media, fall back to github with '
+               'confirmation), github (force GitHub release).  Default: auto.'),
+    )
+    image_make.add_argument(
+        '--urpm-ng-core',
+        metavar='RPM_PATH',
+        help=_('Install urpm-ng-core from this specific RPM file, '
+               'overriding --urpm-ng-source and every waterfall rule.'),
+    )
 
     # image update / u
     image_update = image_subparsers.add_parser(
@@ -688,6 +709,21 @@ Examples:
         '--runtime',
         choices=['docker', 'podman'],
         help=_('Container runtime (default: auto-detect, prefers podman)')
+    )
+    image_update.add_argument(
+        '--urpm-ng-source',
+        choices=['auto', 'local', 'media', 'github'],
+        default='auto',
+        help=_('Where to source urpm-ng-core upgrades: auto (waterfall), '
+               'local (force local RPM), media (force host media, fall '
+               'back to github with confirmation), github (force '
+               'GitHub release).  Default: auto.'),
+    )
+    image_update.add_argument(
+        '--urpm-ng-core',
+        metavar='RPM_PATH',
+        help=_('Install urpm-ng-core from this specific RPM file, '
+               'overriding --urpm-ng-source and every waterfall rule.'),
     )
 
     # image list / l / ls

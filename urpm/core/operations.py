@@ -49,6 +49,7 @@ class InstallOptions:
     test: bool = False
     reinstall: bool = False
     noscripts: bool = False
+    nodeps: bool = False  # skip rpm-level dep verification (rpm -i --nodeps)
     use_peers: bool = True
     only_peers: bool = False
     root: str = "/"
@@ -319,6 +320,7 @@ class PackageOperations:
             test=options.test,
             reinstall=options.reinstall,
             noscripts=options.noscripts,
+            nodeps=options.nodeps,
             actions=actions,
             erase_names=erase_names or [],
         )
