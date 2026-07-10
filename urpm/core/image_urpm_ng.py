@@ -411,64 +411,49 @@ def _detect_host_source(
     if not host:
         return None
 
-    # Rebuild the target URL by substituting the leading ``<release>/<arch>``
-    # segments of the host media's own ``relative_path`` while keeping the
-    # suffix intact.  Mageia layouts pack a sub-repo tail after the arch
-    # (e.g. ``10/x86_64/media/urpm/release``); a naive
-    # ``{base_path}/{release}/{arch}/media/`` reconstruction drops that
-    # tail and points at a 404.
-    rel = (media.get("relative_path") or "").strip("/")
-    parts = rel.split("/", 2)
-    if len(parts) >= 2:
-        tail = parts[2] if len(parts) == 3 else ""
-        new_rel = f"{target_release}/{target_arch}"
-        if tail:
-            new_rel = f"{new_rel}/{tail}"
-    else:
-        new_rel = f"{target_release}/{target_arch}/media"
-
+    # The URL that ``cmd_media_discover`` needs is the *discovery
+    # point* (``<mirror>/<release>/<arch>/media/media_info/media.cfg``),
+    # not the sub-repo the host happens to have configured.  Mageia
+    # layouts pack the sub-repo tail after ``media/`` (e.g.
+    # ``10/x86_64/media/urpm/release``); a naive reconstruction that
+    # preserved that tail sent ``cmd_media_discover`` looking for
+    # ``.../media/urpm/release/media_info/media.cfg`` -- a 404, because
+    # the real manifest lives one level up at
+    # ``.../media/media_info/media.cfg``.  Rebuild from scratch using
+    # the target release + arch; the host's own ``relative_path``
+    # sub-repo suffix is irrelevant here.
     media = dict(media)
-    media["discover_url"] = f"{protocol}://{host}{base_path}/{new_rel}/"
+    media["discover_url"] = (
+        f"{protocol}://{host}{base_path}/{target_release}/{target_arch}/media/"
+    )
     return media
 
 
-# Files that any live Mageia media *must* serve under ``media_info/``.
-# Any 2xx on any of them proves the media is reachable for the target;
-# we try the cheapest/most common first.  ``media.cfg`` is missing on
-# most third-party repos (mgabiz included) so we don't rely on it.
-_MEDIA_PROBE_FILES = (
-    "media_info/synthesis.hdlist.cz",
-    "media_info/synthesis.hdlist.zst",
-    "media_info/MD5SUM",
-)
-
-
 def _target_media_reachable(host_media: dict, log) -> bool:
-    """Return True when the target-arch/release media URL actually serves
-    content (HEAD probe on one of the standard ``media_info/`` files).
+    """Return True when the target-arch/release media URL actually
+    serves a ``media.cfg`` (HEAD probe on the discovery point).
 
     ``_detect_host_source`` rebuilds the URL for the target arch and
     release from the host server row -- but a third-party repo (say
     mgabiz) can perfectly publish mga10/x86_64 while having nothing
-    at all for mga9/aarch64.  Without this probe, the caller would
-    happily push a doomed media into the container.  Any 2xx on any
-    of the probe files wins; anything else falls through to github.
+    at all for mga9/aarch64.  Probing ``media.cfg`` is the honest
+    test: it's exactly the file ``cmd_media_discover`` will fetch
+    next, so a 200 here guarantees the discover step won't 404.
     """
     base = host_media.get("discover_url", "").rstrip("/")
     if not base.startswith(("http://", "https://")):
         return False
-    for name in _MEDIA_PROBE_FILES:
-        url = f"{base}/{name}"
-        req = urllib.request.Request(url, method="HEAD")
-        try:
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                if 200 <= resp.status < 400:
-                    return True
-        except urllib.error.HTTPError as e:
-            log(f"  media probe: {url} → HTTP {e.code}")
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            log(f"  media probe: {url} → {e}")
-    return False
+    url = f"{base}/media_info/media.cfg"
+    req = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            return 200 <= resp.status < 400
+    except urllib.error.HTTPError as e:
+        log(f"  media probe: {url} → HTTP {e.code}")
+        return False
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        log(f"  media probe: {url} → {e}")
+        return False
 
 
 def _rpm_file_version(rpm: Path) -> str:
@@ -630,11 +615,34 @@ def _install_from_host_media_in_chroot(
         sources=False,
         debug=False,
         dry_run=False,
+        # Skip the host-root privilege check: we are operating on a
+        # chroot the caller already owns.
+        allow_no_root=True,
     )
     rc = cmd_media_discover(ns, chroot_db)
     if rc != 0:
         log(f"  ERROR: 'urpm media discover' returned {rc}")
         return rc
+
+    # Discover only creates the media rows; their synthesis is not on
+    # disk yet, so the chroot DB doesn't know about the packages they
+    # provide.  Sync the freshly-added media before letting the solver
+    # look for urpm-ng-core.
+    log("  Syncing freshly-added media metadata...")
+    from ..cli.commands.media import cmd_media_update
+    upd_ns = argparse.Namespace(
+        urpm_root=chroot_dir,
+        root=None,
+        name=None,                # sync every enabled media
+        force=False,
+        no_appstream=True,        # skip appstream sync in chroot
+        allow_no_root=True,
+    )
+    rc = cmd_media_update(upd_ns, chroot_db)
+    if rc != 0:
+        log(f"  ERROR: 'urpm media update' returned {rc}")
+        return rc
+
     return _install_from_chroot_media(chroot_dir, chroot_db)
 
 
