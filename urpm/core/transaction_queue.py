@@ -1288,6 +1288,198 @@ class TransactionQueue:
             _log_background(f"README collection error: {e}")
             return []
 
+    # ── Install helpers (used by _execute_install) ────────────────────
+    #
+    # The four helpers below split the ~470-line ``_execute_install`` into
+    # its natural phases: build the rpm ts, check deps, filter benign
+    # problems, and send the pipe op_done.  The callback closure stays
+    # inline in ``_execute_install`` because it needs closure over per-op
+    # counters (packages_done, extraction_errors, current_pkg_name, ...)
+    # that would be awkward to pass around explicitly.
+
+    def _build_rpm_ts(
+        self,
+        op: 'QueuedOperation',
+        rpm_paths: list,
+        erase_names: list,
+        open_fds: dict,
+    ) -> Tuple[Optional['rpm.TransactionSet'], List[str]]:
+        """Build the RPM ``TransactionSet`` for an install op.
+
+        Adds each RPM path as an install, adds each ``erase_names``
+        entry as an erase in the SAME transaction (needed to handle
+        obsoletes atomically).  Populates ``open_fds`` so the caller
+        can close any leftover FD after ``ts.run()``.
+
+        Returns ``(ts, [])`` on success or ``(None, errors)`` if a
+        header could not be read from one of the RPMs.
+        """
+        import rpm
+        import sys
+
+        ts = rpm.TransactionSet(self.root or '/')
+        if op.verify_signatures:
+            ts.setVSFlags(0)
+        else:
+            ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
+
+        errors: List[str] = []
+        for path in rpm_paths:
+            try:
+                fd = os.open(str(path), os.O_RDONLY)
+                try:
+                    hdr = ts.hdrFromFdno(fd)
+                    ts.addInstall(hdr, str(path), 'u')
+                    if DEBUG_EXECINSTALL:
+                        _debug_write(f"[install] added: {Path(path).name}")
+                finally:
+                    os.close(fd)
+            except rpm.error as e:
+                print(f"[_execute_install] ERROR adding {path}: {e}",
+                      file=sys.stderr)
+                sys.stderr.flush()
+                errors.append(f"{Path(path).name}: {e}")
+                return None, errors
+
+        # Erase entries for obsoleted packages (single-transaction guarantee).
+        for name in erase_names:
+            mi = ts.dbMatch('name', name)
+            for hdr in mi:
+                ts.addErase(hdr)
+                _log_background(f"Adding erase to transaction: {name}")
+                break  # Only the first match — same behaviour as before.
+
+        return ts, []
+
+    def _check_deps(
+        self,
+        ts: 'rpm.TransactionSet',
+        rpm_paths: list,
+    ) -> List[str]:
+        """Run ``ts.check()`` and return a list of fatal dependency error strings.
+
+        Distinguishes between missing deps of the NEW packages we are
+        installing (fatal, aborts the install) and missing deps of OLD
+        packages being replaced (safe: rpm will skip the scriptlet if
+        the interpreter is missing).  Empty return = all clear.
+        """
+        import sys
+
+        if DEBUG_EXECINSTALL:
+            _debug_write("[install] checking dependencies...")
+
+        unresolved = ts.check()
+        if not unresolved:
+            if DEBUG_EXECINSTALL:
+                _debug_write("[install] dependencies OK")
+            return []
+
+        # ts.check() returns tuples of ((N, V, R), (depN, depV), flags, ...).
+        new_names = {Path(p).name.rsplit('-', 2)[0] for p in rpm_paths}
+        fatal, warned = [], []
+        for prob in unresolved:
+            pkg_name = prob[0][0] if isinstance(prob[0], tuple) else str(prob[0])
+            if pkg_name in new_names:
+                fatal.append(prob)
+            else:
+                warned.append(prob)
+
+        if warned:
+            print(f"[_execute_install] scriptlet deps (ignored): {warned}",
+                  file=sys.stderr)
+            sys.stderr.flush()
+
+        if not fatal:
+            if DEBUG_EXECINSTALL:
+                _debug_write("[install] dependencies OK")
+            return []
+
+        from urpm.core.resolution.diagnose import (
+            format_dependency_issue,
+            from_rpmlib_tuple,
+        )
+        print(f"[_execute_install] unresolved deps: {fatal}", file=sys.stderr)
+        sys.stderr.flush()
+        return [
+            format_dependency_issue(from_rpmlib_tuple(prob))
+            for prob in fatal
+        ]
+
+    @staticmethod
+    def _filter_problems(
+        problems: list,
+        op: 'QueuedOperation',
+    ) -> list:
+        """Filter benign RPM problems into an empty list.
+
+        Two rules:
+
+        - For **upgrade** ops, ``"is already installed"`` problems are
+          benign -- rpm reports it when a package we asked to upgrade
+          was already at the target version.
+        - ``"is needed by (installed)"`` is benign when we split a
+          transaction: the erase half runs later in the queue.
+
+        Returns the residual problem list (empty if everything was
+        filtered out).
+        """
+        # Upgrade-specific benign filter.
+        if op.operation_id == "upgrade":
+            filtered = []
+            for p in problems:
+                msg = str(p) if isinstance(p, str) else (
+                    p[0] if isinstance(p, tuple) else str(p))
+                if "is already installed" not in msg:
+                    filtered.append(p)
+                else:
+                    _log_background(f"NOTE: {msg} (ignored for upgrade)")
+            problems = filtered
+            if not problems:
+                return []
+
+        # Shared filter: "is needed by (installed)" is a split-transaction
+        # artefact, not a real failure.
+        remaining = []
+        for p in problems:
+            msg = str(p) if isinstance(p, str) else (
+                p[0] if isinstance(p, tuple) else str(p))
+            if "is needed by (installed)" in msg:
+                _log_background(f"NOTE: {msg} (ignored — installed dep)")
+            else:
+                remaining.append(p)
+        return remaining
+
+    def _finalize_success_pipe(
+        self,
+        op: 'QueuedOperation',
+        pipe_state: dict,
+        total: int,
+        new_rpmnew_files: list,
+    ) -> None:
+        """Send ``op_done`` for a successful install over the pipe.
+
+        Collects README messages, wraps the ``QueueProgressMessage``
+        write in the same BrokenPipeError guard the pipe-safe sends
+        already do elsewhere.  Called from every install success path
+        (upgrade-only-already-installed, needed-by-installed only,
+        clean success) so those three branches no longer duplicate
+        the ``pipe_state['file'].write(...); flush()`` dance.
+        """
+        readme_data = self._collect_readme_messages(op)
+        if pipe_state['closed']:
+            return
+        try:
+            pipe_state['file'].write(QueueProgressMessage(
+                msg_type='op_done',
+                operation_id=op.operation_id,
+                count=total,
+                rpmnew_files=new_rpmnew_files,
+                readme_messages=readme_data,
+            ).to_json() + "\n")
+            pipe_state['file'].flush()
+        except (BrokenPipeError, OSError):
+            pipe_state['closed'] = True
+
     def _execute_install(
         self,
         op: QueuedOperation,
@@ -1313,90 +1505,25 @@ class TransactionQueue:
 
         rpm_paths = op.targets
         erase_names = getattr(op, 'erase_names', [])
-        errors = []
 
         if DEBUG_EXECINSTALL:
             _debug_write(f"[install] root={self.root} paths={len(rpm_paths)} noscripts={op.noscripts}")
 
-        ts = rpm.TransactionSet(self.root or '/')
-
-        if op.verify_signatures:
-            ts.setVSFlags(0)
-        else:
-            ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
-
-        # Add packages to install
-        open_fds = {}
-        added_count = 0
-        for path in rpm_paths:
-            try:
-                fd = os.open(str(path), os.O_RDONLY)
-                try:
-                    hdr = ts.hdrFromFdno(fd)
-                    ts.addInstall(hdr, str(path), 'u')
-                    added_count += 1
-                    if DEBUG_EXECINSTALL:
-                        _debug_write(f"[install] added: {Path(path).name}")
-                finally:
-                    os.close(fd)
-            except rpm.error as e:
-                print(f"[_execute_install] ERROR adding {path}: {e}", file=sys.stderr)
-                sys.stderr.flush()
-                errors.append(f"{Path(path).name}: {e}")
-                return False, 0, errors, []
+        # Build the rpm ts (adds installs + erases in one shot).
+        open_fds: dict = {}
+        ts, build_errors = self._build_rpm_ts(op, rpm_paths, erase_names, open_fds)
+        if ts is None:
+            return False, 0, build_errors, []
 
         if DEBUG_EXECINSTALL:
-            _debug_write(f"[install] added {added_count} packages to transaction")
+            _debug_write(f"[install] built ts with {len(rpm_paths)} packages")
 
-        # Add packages to erase in the SAME transaction (for obsoleted packages)
-        erased_count = 0
-        for name in erase_names:
-            mi = ts.dbMatch('name', name)
-            for hdr in mi:
-                ts.addErase(hdr)
-                erased_count += 1
-                _log_background(f"Adding erase to transaction: {name}")
-                break  # Only first match
-
-        # Check dependencies
+        # Dep check (skipped in --force mode).
         if not op.force:
-            if DEBUG_EXECINSTALL:
-                _debug_write("[install] checking dependencies...")
-            unresolved = ts.check()
-            if unresolved:
-                # Separate deps from OLD packages being replaced (scriptlet
-                # deps — safe to ignore, RPM skips the scriptlet if the
-                # interpreter is missing) from deps of NEW packages (fatal).
-                # ts.check() returns: ((N, V, R), (depN, depV), flags, suggest, sense)
-                new_names = {Path(p).name.rsplit('-', 2)[0] for p in rpm_paths}
-                fatal = []
-                warned = []
-                for prob in unresolved:
-                    pkg_name = prob[0][0] if isinstance(prob[0], tuple) else str(prob[0])
-                    if pkg_name in new_names:
-                        fatal.append(prob)
-                    else:
-                        warned.append(prob)
-                if warned:
-                    print(f"[_execute_install] scriptlet deps (ignored): {warned}",
-                          file=sys.stderr)
-                    sys.stderr.flush()
-                if fatal:
-                    from urpm.core.resolution.diagnose import (
-                        format_dependency_issue,
-                        from_rpmlib_tuple,
-                    )
-                    print(f"[_execute_install] unresolved deps: {fatal}", file=sys.stderr)
-                    sys.stderr.flush()
-                    errors = [
-                        format_dependency_issue(from_rpmlib_tuple(prob))
-                        for prob in fatal
-                    ]
-                    return False, 0, errors, []
-            if DEBUG_EXECINSTALL:
-                _debug_write("[install] dependencies OK")
+            dep_errors = self._check_deps(ts, rpm_paths)
+            if dep_errors:
+                return False, 0, dep_errors, []
 
-        # Order transaction
         ts.order()
         if DEBUG_EXECINSTALL:
             _debug_write("[install] transaction ordered")
@@ -1685,82 +1812,21 @@ class TransactionQueue:
             return False, packages_done[0], errors, new_rpmnew_files
 
         if problems:
-            # For upgrade operations, "already installed" errors are benign
-            if op.operation_id == "upgrade":
-                real_problems = []
-                for p in problems:
-                    msg = str(p) if isinstance(p, str) else (p[0] if isinstance(p, tuple) else str(p))
-                    if "is already installed" not in msg:
-                        real_problems.append(p)
-                    else:
-                        _log_background(f"NOTE: {msg} (ignored for upgrade)")
-                if not real_problems:
-                    _log_background(f"Upgrade completed: {total} packages (some already at target version)")
-                    readme_data = self._collect_readme_messages(op)
-                    try:
-                        if not pipe_state['closed']:
-                            pipe_state['file'].write(QueueProgressMessage(
-                                msg_type='op_done',
-                                operation_id=op.operation_id,
-                                count=total,
-                                rpmnew_files=new_rpmnew_files,
-                                readme_messages=readme_data
-                            ).to_json() + "\n")
-                            pipe_state['file'].flush()
-                    except (BrokenPipeError, OSError):
-                        pipe_state['closed'] = True
-                    return True, total, [], new_rpmnew_files
-                problems = real_problems
-
-            # Filter "needed by (installed)" — safe for split transactions
-            remaining = []
-            for p in problems:
-                msg = str(p) if isinstance(p, str) else (
-                    p[0] if isinstance(p, tuple) else str(p))
-                if "is needed by (installed)" in msg:
-                    _log_background(f"NOTE: {msg} (ignored — installed dep)")
-                else:
-                    remaining.append(p)
-            if not remaining:
-                _log_background("All ts.run() problems were installed-dep warnings")
-                readme_data = self._collect_readme_messages(op)
-                try:
-                    if not pipe_state['closed']:
-                        pipe_state['file'].write(QueueProgressMessage(
-                            msg_type='op_done',
-                            operation_id=op.operation_id,
-                            count=total,
-                            rpmnew_files=new_rpmnew_files,
-                            readme_messages=readme_data
-                        ).to_json() + "\n")
-                        pipe_state['file'].flush()
-                except (BrokenPipeError, OSError):
-                    pipe_state['closed'] = True
+            residual = self._filter_problems(problems, op)
+            if not residual:
+                _log_background(
+                    f"Install completed: {total} packages "
+                    f"(all ts.run() problems were benign)"
+                )
+                self._finalize_success_pipe(
+                    op, pipe_state, total, new_rpmnew_files,
+                )
                 return True, total, [], new_rpmnew_files
-            problems = remaining
-
-            _log_background(f"Transaction failed: {problems}")
-            errors = [str(p) for p in problems]
-            return False, packages_done[0], errors, new_rpmnew_files
+            _log_background(f"Transaction failed: {residual}")
+            return False, packages_done[0], [str(p) for p in residual], new_rpmnew_files
 
         _log_background(f"Transaction completed: {total} packages")
-
-        readme_data = self._collect_readme_messages(op)
-
-        # Send results via pipe — may be closed in smart sync mode
-        try:
-            if not pipe_state['closed']:
-                pipe_state['file'].write(QueueProgressMessage(
-                    msg_type='op_done',
-                    operation_id=op.operation_id,
-                    count=total,
-                    rpmnew_files=new_rpmnew_files,
-                    readme_messages=readme_data
-                ).to_json() + "\n")
-                pipe_state['file'].flush()
-        except (BrokenPipeError, OSError):
-            pipe_state['closed'] = True
-
+        self._finalize_success_pipe(op, pipe_state, total, new_rpmnew_files)
         return True, total, [], new_rpmnew_files
 
     def _execute_erase(
