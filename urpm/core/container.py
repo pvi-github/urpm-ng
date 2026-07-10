@@ -492,19 +492,21 @@ class Container:
         Args:
             container_id: Running or stopped container ID/name
             tag: Image tag for the committed image
-            squash: On podman, flatten ALL layers into a single one
-                (``--squash-all``).  Prevents ``image update`` from
-                snowballing every prior transaction into new copy-on-write
-                layers -- typically shaves 500 MB-1 GB off a repeatedly
-                updated image.  Ignored on docker (docker's ``commit``
-                doesn't support squashing; would require export/import).
+            squash: On podman, ask ``commit`` to fold the new diff into a
+                single layer via ``--squash``.  This keeps the number of
+                layers from growing on every ``image update`` cycle.  To
+                truly flatten the whole history (base + N updates) into
+                one layer, use ``export | import`` -- but that loses
+                image metadata (entrypoint, labels), so we stay with
+                ``--squash`` here.  Ignored on docker (``docker commit``
+                has no equivalent).
 
         Returns:
             True if successful
         """
         cmd = [self.cmd, 'commit']
         if squash and self.runtime.name == 'podman':
-            cmd.append('--squash-all')
+            cmd.append('--squash')
         cmd += [container_id, tag]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
