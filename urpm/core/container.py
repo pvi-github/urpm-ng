@@ -258,9 +258,30 @@ class Container:
         # truncated progress bars.  Skip ``-t`` when stdout is piped or
         # redirected -- ``podman exec -t`` errors out with "cannot
         # enable tty mode" if no real tty is attached.
-        import sys
+        import sys, os as _os
         if sys.stdout.isatty():
             args.append('-t')
+
+        # Propagate locale so the urpm inside the container prints
+        # translated messages when a matching langpack is present.
+        # ``podman exec`` scrubs environment by default; only variables
+        # passed via ``-e`` reach the child.
+        #
+        # ``cmd_mkimage`` intentionally forces the mkimage process into
+        # ``LC_ALL=C`` / ``LANGUAGE=C`` so the stderr silencer can match
+        # rpm warnings by their English wording; it stashes the caller's
+        # real ``LANG`` in ``URPM_HOST_LANG`` so we can still hand it
+        # to the container here.  When that var is set, it wins over
+        # the process's now-C ``LANG``; otherwise (normal ``urpm i``
+        # in a running container) we forward the process env as-is.
+        _host_lang = _os.environ.get('URPM_HOST_LANG')
+        if _host_lang:
+            args.extend(['-e', f'LANG={_host_lang}'])
+        else:
+            for _var in ('LANG', 'LC_ALL', 'LC_MESSAGES'):
+                _val = _os.environ.get(_var)
+                if _val:
+                    args.extend(['-e', f'{_var}={_val}'])
 
         args.append(container_id)
         args.extend(self._personality_wrap(container_id))

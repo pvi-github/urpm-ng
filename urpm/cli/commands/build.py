@@ -163,7 +163,17 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     from ...core.container import detect_runtime, Container
     from .. import colors
 
-    # Locale + systemd hint for scriptlets inside phase 1 chroot
+    # Locale + systemd hint for scriptlets inside phase 1 chroot.
+    # We force the mkimage process itself into ``C`` so the stderr
+    # silencer in transaction_queue can match rpm / systemd-sysusers
+    # warnings by their English wording ("Creating group '...'",
+    # "/proc/ is not mounted", ...).  BUT that scrub would also
+    # sterilise the language ``container.exec_stream`` propagates
+    # into phase-2 containers, leaving ``urpm install`` output in
+    # English even for a French user.  Save the caller's real
+    # ``LANG`` in a dedicated env var so ``exec_stream`` can hand
+    # it to the container without disturbing our own C locale.
+    os.environ['URPM_HOST_LANG'] = os.environ.get('LANG', '') or ''
     os.environ['LC_ALL'] = 'C'
     os.environ['LANGUAGE'] = 'C'
     os.environ['SYSTEMD_OFFLINE'] = '1'
