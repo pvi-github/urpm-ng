@@ -2219,15 +2219,23 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
                 'nonfree': False, 'tainted': False, 'has_32bit': False})()
 
     # ── Warn if repo version differs from local system ────────────────
-    local_version = ''
-    try:
-        with open('/etc/os-release') as f:
-            for line in f:
-                if line.startswith('VERSION_ID='):
-                    local_version = line.strip().split('=')[1].strip('"')
-                    break
-    except OSError:
-        pass
+    # A DB pinned to a target release (mkimage cross-version chroot,
+    # ``cmd_init`` writes ``mageia-version`` for that) knows exactly
+    # which release its owner intends to serve; honour that first so
+    # ``mkimage --release 10`` from a mga9 host doesn't emit a false
+    # "these media are for Mageia 10, this system runs Mageia 9"
+    # alarm when the mga10 media are exactly what the caller asked
+    # for.  Fall back to the host's os-release only when no pin exists.
+    local_version = db.get_config('mageia-version') or ''
+    if not local_version:
+        try:
+            with open('/etc/os-release') as f:
+                for line in f:
+                    if line.startswith('VERSION_ID='):
+                        local_version = line.strip().split('=')[1].strip('"')
+                        break
+        except OSError:
+            pass
     if local_version and info.version and info.version != local_version:
         print(colors.warning(
             _("Warning: these media are for Mageia {repo_ver}, "
