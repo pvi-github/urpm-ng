@@ -267,21 +267,32 @@ class Container:
         # ``podman exec`` scrubs environment by default; only variables
         # passed via ``-e`` reach the child.
         #
-        # ``cmd_mkimage`` intentionally forces the mkimage process into
-        # ``LC_ALL=C`` / ``LANGUAGE=C`` so the stderr silencer can match
-        # rpm warnings by their English wording; it stashes the caller's
-        # real ``LANG`` in ``URPM_HOST_LANG`` so we can still hand it
-        # to the container here.  When that var is set, it wins over
-        # the process's now-C ``LANG``; otherwise (normal ``urpm i``
-        # in a running container) we forward the process env as-is.
-        _host_lang = _os.environ.get('URPM_HOST_LANG')
+        # Locale propagation.  We can't hand the container the caller's
+        # raw ``LANG=fr_FR.UTF-8``: glibc-based Mageia containers ship
+        # ``C.UTF-8`` only (langpacks stay out of the -minimal image to
+        # keep it small), so ``setlocale()`` would fail and every perl
+        # spec-helper called by rpm-build would fill the log with
+        # "Setting locale failed" pages.
+        #
+        # Convert instead to ``LC_ALL=C.UTF-8`` (always defined, keeps
+        # perl and friends happy) + ``LANGUAGE=<lang>`` (consulted by
+        # gettext to pick the .mo catalogue), so urpm output still
+        # comes out translated.
+        #
+        # ``cmd_mkimage`` intentionally forces its own process into
+        # ``LC_ALL=C`` / ``LANGUAGE=C`` for the stderr silencer to
+        # match rpm warnings by their English wording; it stashes the
+        # caller's real ``LANG`` in ``URPM_HOST_LANG`` so we still
+        # know what language to hand the container.  Any other CLI
+        # path (``urpm build``, ``urpm image update``, ...) reads
+        # ``LANG`` from the process environment directly.
+        _host_lang = (_os.environ.get('URPM_HOST_LANG')
+                      or _os.environ.get('LANG', ''))
         if _host_lang:
-            args.extend(['-e', f'LANG={_host_lang}'])
-        else:
-            for _var in ('LANG', 'LC_ALL', 'LC_MESSAGES'):
-                _val = _os.environ.get(_var)
-                if _val:
-                    args.extend(['-e', f'{_var}={_val}'])
+            _code = _host_lang.split('.')[0].split('_')[0]
+            if _code and _code not in ('C', 'POSIX'):
+                args.extend(['-e', 'LC_ALL=C.UTF-8'])
+                args.extend(['-e', f'LANGUAGE={_code}'])
 
         args.append(container_id)
         args.extend(self._personality_wrap(container_id))
