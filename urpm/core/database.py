@@ -2476,11 +2476,18 @@ class PackageDatabase(
         return [row[0] for row in cursor]
 
     def whatprovides(self, capability: str) -> List[Dict]:
-        """Find packages that provide a capability."""
+        """Find packages that provide a capability.
+
+        Result rows include ``media_name`` so callers (e.g. ``cmd_
+        whatprovides``) can annotate their output with which media
+        each match comes from without a separate round-trip.
+        """
         cursor = self.conn.execute("""
-            SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
+            SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra,
+                   m.name AS media_name
             FROM packages p
             JOIN provides pr ON pr.pkg_id = p.id
+            LEFT JOIN media m ON p.media_id = m.id
             WHERE pr.capability = ?
             ORDER BY p.name_lower
         """, (capability,))

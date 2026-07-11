@@ -228,6 +228,14 @@ def cmd_show(args, db: 'PackageDatabase') -> int:
     print(f"{colors.bold(_('Architecture:'))} {pkg['arch']}")
     print(f"{colors.bold(_('Size:'))}         {pkg['size'] / 1024 / 1024:.1f} MB")
 
+    # Media that carries this package.  Kept optional so packages that
+    # somehow have no ``media_id`` (rare, e.g. legacy imports) still
+    # print without a blank line.
+    if pkg.get('media_id'):
+        media = db.get_media_by_id(pkg['media_id'])
+        if media and media.get('name'):
+            print(f"{colors.bold(_('Media:'))}        {media['name']}")
+
     if pkg.get('group_name'):
         print(f"{colors.bold(_('Group:'))}        {pkg['group_name']}")
     if pkg.get('summary'):
@@ -548,11 +556,20 @@ def cmd_whatprovides(args, db: 'PackageDatabase') -> int:
         print(_("No package provides '{capability}'").format(capability=capability))
         return 1
 
-    # Show installed matches first
+    from .. import colors
+
+    # Show installed matches first.  rpmdb doesn't know which media
+    # the package came from, so we cross-look-up the ``media_name`` in
+    # the urpm DB by name -- best effort, falls back silently to no
+    # ``[media]`` suffix when the package isn't (or is no longer) in
+    # any enabled media.
     if installed_matches:
-        print(_("Installed:"))
+        print(colors.bold(_("Installed:")))
+        _avail_by_name = {r['name']: r.get('media_name', '') for r in results}
         for pkg in installed_matches:
-            print(f"  {pkg['nevra']}")
+            media = _avail_by_name.get(pkg['name'], '')
+            media_str = f" {colors.dim('[' + media + ']')}" if media else ""
+            print(f"  {colors.success(pkg['nevra'])}{media_str}")
 
     # Show available (not installed)
     installed_nevras = {m['nevra'] for m in installed_matches}
@@ -560,11 +577,11 @@ def cmd_whatprovides(args, db: 'PackageDatabase') -> int:
 
     if available:
         if installed_matches:
-            print(_("\nAvailable:"))
+            print("\n" + colors.bold(_("Available:")))
         for pkg in available:
             media = pkg.get('media_name', '')
-            media_str = f" [{media}]" if media else ""
-            print(f"  {pkg['nevra']}{media_str}")
+            media_str = f" {colors.dim('[' + media + ']')}" if media else ""
+            print(f"  {colors.info(pkg['nevra'])}{media_str}")
 
     return 0
 
