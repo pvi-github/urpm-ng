@@ -38,6 +38,20 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
     legacy = getattr(args, 'legacy', False)
     show_all = getattr(args, 'all', False)
     prefer_str = getattr(args, 'prefer', None)
+    hide_uninstalled = getattr(args, 'hide_uninstalled', False)
+
+    # Lazily build the installed-name set only when the caller asked
+    # to filter on it -- cheap enough (one rpmdb pass) but skipping
+    # it in the default case keeps the fast path fast.
+    installed_pkgs = set()
+    if hide_uninstalled:
+        try:
+            import rpm as _rpm
+            _ts = _rpm.TransactionSet()
+            for _hdr in _ts.dbMatch():
+                installed_pkgs.add(_hdr[_rpm.RPMTAG_NAME])
+        except ImportError:
+            pass
 
     preferences = PreferencesMatcher(prefer_str)
 
@@ -103,6 +117,8 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
                            and a.name != pkg_name})
 
         if show_all:
+            if hide_uninstalled:
+                dep_names = [n for n in dep_names if n in installed_pkgs]
             print(ngettext(
                 "All dependencies of {package}: {count} package",
                 "All dependencies of {package}: {count} packages",
@@ -138,6 +154,8 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
             graph = resolver.build_dependency_graph(result, [pkg_name])
             direct_deps = sorted(graph.get(pkg_name, []))
 
+        if hide_uninstalled:
+            direct_deps = [d for d in direct_deps if d in installed_pkgs]
         if direct_deps:
             print(ngettext(
                 "Dependencies of {package}: {count} package",
@@ -503,6 +521,9 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
     pkg_name = _extract_pkg_name(package)
     show_tree = getattr(args, 'tree', False)
     show_all = getattr(args, 'all', False)
+    # Read ``--hide-uninstalled`` once at the top so it applies to
+    # every rendering mode (was previously only honoured in --tree).
+    hide_uninstalled = getattr(args, 'hide_uninstalled', False)
 
     # Create resolver with @System for installed package awareness
     resolver = Resolver(db)
@@ -545,7 +566,6 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
     if show_tree:
         # Recursive tree with reverse arrows
         max_depth = getattr(args, 'depth', 3)
-        hide_uninstalled = getattr(args, 'hide_uninstalled', False)
 
         # Pre-compute reachable set for --hide-uninstalled optimization
         reachable_cache = None
@@ -578,15 +598,19 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
                     all_rdeps.add(rdep)
                     to_process.append(rdep)
 
+        if hide_uninstalled:
+            all_rdeps = {r for r in all_rdeps if r in installed_pkgs}
         print(_("All packages that depend on {package}: {count}").format(
             package=package, count=len(all_rdeps)) + "\n")
         for rdep in sorted(all_rdeps):
             print(f"  {format_pkg(rdep)}")
     else:
         # Flat list of direct reverse dependencies
+        rdeps_shown = ([r for r in direct_rdeps if r in installed_pkgs]
+                       if hide_uninstalled else direct_rdeps)
         print(_("Packages that depend on {package}: {count}").format(
-            package=package, count=len(direct_rdeps)) + "\n")
-        for rdep in direct_rdeps:
+            package=package, count=len(rdeps_shown)) + "\n")
+        for rdep in rdeps_shown:
             print(f"  {format_pkg(rdep)}")
 
     return 0

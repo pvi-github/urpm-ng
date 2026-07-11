@@ -1190,6 +1190,11 @@ Examples:
         action='store_true',
         help=_('Show symbol legend after tree display')
     )
+    depends_parser.add_argument(
+        '--hide-uninstalled',
+        action='store_true',
+        help=_('Only show dependencies that are already installed')
+    )
 
     # =========================================================================
     # rdepends / rd / whatrequires
