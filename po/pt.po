@@ -4462,7 +4462,7 @@ msgstr "Requer:"
 
 #: urpm/cli/commands/cache.py:25
 msgid "Media:"
-msgstr "Meios:"
+msgstr "Meio:"
 
 #: urpm/cli/commands/cache.py:39
 msgid "No RPM cache found"
