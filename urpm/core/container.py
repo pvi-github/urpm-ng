@@ -251,6 +251,17 @@ class Container:
         if workdir:
             args.extend(['-w', workdir])
 
+        # Allocate a pseudo-TTY inside the container when our own stdout
+        # is a terminal, so programs like ``urpm install`` inherit the
+        # host terminal's width via TIOCGWINSZ instead of falling back
+        # to the runtime's default (typically 80 columns) and drawing
+        # truncated progress bars.  Skip ``-t`` when stdout is piped or
+        # redirected -- ``podman exec -t`` errors out with "cannot
+        # enable tty mode" if no real tty is attached.
+        import sys
+        if sys.stdout.isatty():
+            args.append('-t')
+
         args.append(container_id)
         args.extend(self._personality_wrap(container_id))
         args.extend(command)
