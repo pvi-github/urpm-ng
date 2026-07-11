@@ -967,15 +967,22 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 print(f"  {colors.error(r.item.name)}: {r.error}")
             return 1
 
-        # Download summary with P2P stats and timing
+        # Download summary with P2P stats and timing.  Always show the
+        # peer / mirror split even when no peer served anything -- the
+        # short-form fallback used to be surprising in mkimage logs
+        # ("39 downloaded" without saying where from), and a zero peer
+        # count is itself useful info (peer discovery reached out).
         cache_str = colors.warning(str(cached)) if cached > 0 else colors.dim(str(cached))
         from_peers = peer_stats.get('from_peers', 0)
         from_upstream = peer_stats.get('from_upstream', 0)
         time_str = display.format_duration(download_elapsed)
-        if from_peers > 0:
-            print("  " + colors.success(_("{count} downloaded").format(count=downloaded)) + " " + _("({peers} from peers, {upstream} from mirrors), {cached} from cache in {time}").format(peers=from_peers, upstream=from_upstream, cached=cache_str, time=time_str))
+        if downloaded > 0:
+            print("  " + colors.success(_("{count} downloaded").format(count=downloaded))
+                  + " " + _("({peers} from peers, {upstream} from mirrors), {cached} from cache in {time}").format(
+                      peers=from_peers, upstream=from_upstream, cached=cache_str, time=time_str))
         else:
-            print("  " + colors.success(_("{count} downloaded").format(count=downloaded)) + ", " + _("{cached} from cache in {time}").format(cached=cache_str, time=time_str))
+            print("  " + colors.success(_("{count} downloaded").format(count=downloaded))
+                  + ", " + _("{cached} from cache in {time}").format(cached=cache_str, time=time_str))
 
         # Notify urpmd to invalidate cache index (so new downloads are visible to peers)
         if downloaded > 0:
