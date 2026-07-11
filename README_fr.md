@@ -52,11 +52,7 @@ urpm-ng est découpé en plusieurs paquets pour plus de souplesse :
 
 ### Install / mise à jour rapide (`geturpm.sh`)
 
-`geturpm.sh` est la voie recommandée pour installer urpm-ng sur une
-Mageia fraîche, et il peut aussi mettre à jour une install existante.
-Il auto-détecte la release Mageia et l'architecture, tire la dernière
-urpm-ng depuis le canal choisi, et fait ce qu'il faut selon que
-urpm-ng est déjà installé ou pas (les machines fraîches se bootstrapent
+`geturpm.sh` est la voie recommandée pour installer urpm-ng sur une Mageia fraîche, et il peut aussi mettre à jour une install existante.  Il auto-détecte la release Mageia et l'architecture, tire la dernière urpm-ng depuis le canal choisi, et fait ce qu'il faut selon que urpm-ng est déjà installé ou pas (les machines fraîches se bootstrapent
 avec `urpmi` ; les mises à jour ultérieures passent par urpm-ng lui-même).
 
 **Rapide — via pipe, sans inspection locale**
@@ -65,13 +61,10 @@ avec `urpmi` ; les mises à jour ultérieures passent par urpm-ng lui-même).
 curl -fsSL https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh | bash
 ```
 
-Les prompts (choix du canal, « Proceed ? », mot de passe root pour
-`su`) sont lus depuis `/dev/tty`, donc la version pipée reste
-totalement interactive — même expérience qu'en lançant le script
-depuis un fichier.
+Les prompts (choix du canal, « Proceed ? », mot de passe root pour `su`) sont lus depuis `/dev/tty`, donc la version "pipée" reste totalement interactive — même expérience qu'en lançant le script localement.
 
 **Vérifié — télécharger, relire, puis exécuter** (recommandé si on ne
-fait pas déjà confiance à la source) :
+fait pas encore confiance à la source) :
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/pvi-github/urpm-ng/main/geturpm.sh
@@ -81,24 +74,16 @@ bash geturpm.sh                  # interactif : demande canal + confirmation
 
 **Choix du canal** (`--channel=CHAN`) :
 
-- `mgabiz` — récupère depuis le dépôt Mageia.biz (défaut quand aucun
-  terminal n'est disponible). Utilise `urpm media discover` sur le
-  miroir mgabiz, donc les mises à jour ultérieures passent par le
-  flux standard `urpm media update`.
-- `github` — récupère les RPM directement depuis la page des releases
-  GitHub. Utile pour tester un tag précis, ou quand la publication
-  mgabiz est en retard sur une release.
+- `mgabiz` — récupère depuis le dépôt Mageia.biz (défaut quand aucun terminal n'est disponible). Utilise `urpm media discover` sur le miroir mgabiz, donc les mises à jour ultérieures passent par le flux standard `urpm update`.
+- `github` — récupère les RPM directement depuis la page des releases GitHub. Utile pour tester un tag précis, ou quand la publication mgabiz est en retard sur une release.
 
-**Exécution non-attendue** — ajouter `-y` (saute la confirmation
-« Proceed ? ») et `--channel=CHAN` (saute le prompt du canal) via
-`bash -s --` :
+**Exécution non-interactive** — ajouter `-y` (saute la confirmation « Proceed ? ») et `--channel=CHAN` (saute le prompt du canal en choisissant par défaut mgabiz) via `bash -s --` :
 
 ```bash
 curl -fsSL <url>/geturpm.sh | bash -s -- -y --channel=mgabiz
 ```
 
-Note : à la première install, urpm-ng importe sa configuration depuis
-les fichiers `urpmi.cfg` et `urpmi/skip.list` existants automatiquement.
+Note : à la première install, urpm-ng importe sa configuration depuis les fichiers `urpmi.cfg` et `urpmi/skip.list` existants automatiquement.
 
 ## Premier lancement
 
