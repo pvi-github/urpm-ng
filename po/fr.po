@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.4.1\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-06-22 07:43+0200\n"
+"POT-Creation-Date: 2026-07-11 15:06+0200\n"
 "PO-Revision-Date: 2026-02-28 16:49+0100\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -21,132 +21,132 @@ msgstr ""
 msgid "y"
 msgstr "o"
 
-#: urpm/i18n.py:122 urpm/cli/commands/server.py:838
+#: urpm/i18n.py:122 urpm/cli/commands/server.py:865
 msgid "yes"
 msgstr "oui"
 
-#: urpm/cli/main.py:163
+#: urpm/cli/main.py:165
 msgid "ERROR: Missing required Python modules:"
 msgstr "ERREUR : Modules Python requis manquants :"
 
-#: urpm/cli/main.py:165
+#: urpm/cli/main.py:167
 #, python-brace-format
 msgid "  - {pkg} ({purpose})"
 msgstr "  - {pkg} ({purpose})"
 
-#: urpm/cli/main.py:166
+#: urpm/cli/main.py:168
 msgid "Install with:"
 msgstr "Installer avec :"
 
-#: urpm/cli/main.py:201
+#: urpm/cli/main.py:203
 msgid "urpm - Modern package manager for Mageia Linux"
 msgstr "urpm - Gestionnaire de paquets moderne pour Mageia Linux"
 
-#: urpm/cli/main.py:202
+#: urpm/cli/main.py:204
 msgid "No media configured yet!"
 msgstr "Aucun média configuré pour l'instant !"
 
-#: urpm/cli/main.py:203
+#: urpm/cli/main.py:205
 msgid "Quick Start:"
 msgstr "Démarrage rapide :"
 
-#: urpm/cli/main.py:204
+#: urpm/cli/main.py:206
 msgid "Import media from existing urpmi configuration:"
 msgstr "Importer les médias depuis une configuration urpmi existante :"
 
-#: urpm/cli/main.py:206
+#: urpm/cli/main.py:208
 msgid "Or add media manually:"
 msgstr "Ou ajouter des médias manuellement :"
 
-#: urpm/cli/main.py:208
+#: urpm/cli/main.py:210
 msgid "Start the daemon for P2P sharing and background sync:"
 msgstr ""
 "Démarrer le démon pour le partage P2P et la synchronisation en arrière-plan :"
 
-#: urpm/cli/main.py:210
+#: urpm/cli/main.py:212
 msgid "Install packages:"
 msgstr "Installer des paquets :"
 
-#: urpm/cli/main.py:212
+#: urpm/cli/main.py:214
 msgid "Documentation:"
 msgstr "Documentation :"
 
-#: urpm/cli/main.py:213
+#: urpm/cli/main.py:215
 msgid "More help:"
 msgstr "Plus d'aide :"
 
-#: urpm/cli/main.py:244
+#: urpm/cli/main.py:246
 msgid "Modern package manager for Mageia Linux"
 msgstr "Gestionnaire de paquets moderne pour Mageia Linux"
 
-#: urpm/cli/main.py:245
+#: urpm/cli/main.py:247
 msgid "Use \"urpm <command> --help\" for command-specific help."
 msgstr ""
 "Utilisez \"urpm <commande> --help\" pour l'aide spécifique à une commande."
 
-#: urpm/cli/main.py:253
+#: urpm/cli/main.py:255
 msgid "Show this help message and exit"
 msgstr "Afficher ce message d'aide et quitter"
 
-#: urpm/cli/main.py:260
+#: urpm/cli/main.py:262
 msgid "Show program's version number and exit"
 msgstr "Afficher le numéro de version du programme et quitter"
 
-#: urpm/cli/main.py:266 urpm/cli/main.py:914
+#: urpm/cli/main.py:268 urpm/cli/main.py:957
 msgid "Verbose output"
 msgstr "Affichage détaillé"
 
-#: urpm/cli/main.py:272
+#: urpm/cli/main.py:274
 msgid "Quiet output"
 msgstr "Affichage minimal"
 
-#: urpm/cli/main.py:278
+#: urpm/cli/main.py:280
 msgid "Disable colored output"
 msgstr "Désactiver la sortie colorée"
 
-#: urpm/cli/main.py:285
+#: urpm/cli/main.py:287
 msgid "Use DIR as root for RPM install (chroot). urpm config from host system."
 msgstr ""
 "Utiliser DIR comme racine pour l'installation RPM (chroot). Configuration "
 "urpm depuis le système hôte."
 
-#: urpm/cli/main.py:293
+#: urpm/cli/main.py:295
 msgid "Use DIR as root for both urpm config and RPM install."
 msgstr ""
 "Utiliser DIR comme racine pour la configuration urpm et l'installation RPM."
 
-#: urpm/cli/main.py:301
+#: urpm/cli/main.py:303
 msgid "JSON output for scripting"
 msgstr "Sortie JSON pour les scripts"
 
-#: urpm/cli/main.py:306
+#: urpm/cli/main.py:308
 msgid "Flat output (one item per line, parsable)"
 msgstr "Sortie à plat (un élément par ligne, analysable)"
 
-#: urpm/cli/main.py:311
+#: urpm/cli/main.py:313
 msgid "Show all items without truncation"
 msgstr "Afficher tous les éléments sans troncature"
 
-#: urpm/cli/main.py:320
+#: urpm/cli/main.py:322
 msgid "Enable debug output (solver, tsrun, orphans, download, timing, all)"
 msgstr ""
 "Activer la sortie de débogage (solver, tsrun, orphans, download, timing, all)"
 
-#: urpm/cli/main.py:326
+#: urpm/cli/main.py:328
 msgid "Watch specific packages during resolution (comma-separated)"
 msgstr ""
 "Surveiller des paquets spécifiques lors de la résolution (séparés par des "
 "virgules)"
 
-#: urpm/cli/main.py:333
+#: urpm/cli/main.py:335
 msgid "Target architecture (default: current system)"
 msgstr "Architecture cible (par défaut : système actuel)"
 
-#: urpm/cli/main.py:354
+#: urpm/cli/main.py:356
 msgid "Initialize urpm setup (for bootstrap/chroot)"
 msgstr "Initialiser la configuration urpm (pour bootstrap/chroot)"
 
-#: urpm/cli/main.py:357
+#: urpm/cli/main.py:359
 msgid ""
 "Initialize a new urpm setup with standard Mageia media.\n"
 "\n"
@@ -176,33 +176,33 @@ msgstr ""
 "  urpm init --mirrorlist 'https://mirrors.mageia.org/api/"
 "mageia.10.x86_64.list'\n"
 
-#: urpm/cli/main.py:373
+#: urpm/cli/main.py:375
 msgid ""
 "URL to fetch mirror list (auto-generated from --release if not provided)"
 msgstr ""
 "URL pour récupérer la liste des miroirs (générée automatiquement depuis --"
 "release si non fournie)"
 
-#: urpm/cli/main.py:378
+#: urpm/cli/main.py:380
 msgid "Target Mageia version (default: detect from mirrorlist URL or system)"
 msgstr ""
 "Version cible de Mageia (par défaut : détectée depuis l'URL mirrorlist ou le "
 "système)"
 
-#: urpm/cli/main.py:383
+#: urpm/cli/main.py:385
 msgid "Non-interactive mode"
 msgstr "Mode non interactif"
 
-#: urpm/cli/main.py:388
+#: urpm/cli/main.py:390
 msgid "Do not sync media after adding (just configure)"
 msgstr ""
 "Ne pas synchroniser les médias après l'ajout (configuration uniquement)"
 
-#: urpm/cli/main.py:396
+#: urpm/cli/main.py:398
 msgid "Unmount chroot filesystems (/dev, /proc)"
 msgstr "Démonter les systèmes de fichiers chroot (/dev, /proc)"
 
-#: urpm/cli/main.py:398
+#: urpm/cli/main.py:400
 msgid ""
 "Unmount filesystems mounted by 'urpm init' in a chroot.\n"
 "\n"
@@ -214,91 +214,91 @@ msgstr ""
 "Exemples :\n"
 "  urpm --urpm-root /tmp/rootfs cleanup\n"
 
-#: urpm/cli/main.py:410
+#: urpm/cli/main.py:412
 msgid "Install packages"
 msgstr "Installer des paquets"
 
-#: urpm/cli/main.py:415
+#: urpm/cli/main.py:417
 msgid "Package names to install (optional with --buildrequires)"
 msgstr "Noms des paquets à installer (optionnel avec --buildrequires)"
 
-#: urpm/cli/main.py:420 urpm/cli/main.py:552 urpm/cli/main.py:932
-#: urpm/cli/main.py:1288 urpm/cli/main.py:1398 urpm/cli/main.py:1613
-#: urpm/cli/main.py:2096 urpm/cli/main.py:2113 urpm/cli/main.py:2126
+#: urpm/cli/main.py:422 urpm/cli/main.py:560 urpm/cli/main.py:975
+#: urpm/cli/main.py:1331 urpm/cli/main.py:1441 urpm/cli/main.py:1677
+#: urpm/cli/main.py:2160 urpm/cli/main.py:2177 urpm/cli/main.py:2190
 msgid "No confirmation"
 msgstr "Sans confirmation"
 
-#: urpm/cli/main.py:425 urpm/cli/main.py:937
+#: urpm/cli/main.py:427 urpm/cli/main.py:980
 msgid "Dry run (simulation)"
 msgstr "Simulation (sans effectuer de modifications)"
 
-#: urpm/cli/main.py:430 urpm/cli/main.py:557
+#: urpm/cli/main.py:432 urpm/cli/main.py:565
 msgid "Skip recommended packages"
 msgstr "Ignorer les paquets recommandés"
 
-#: urpm/cli/main.py:435 urpm/cli/main.py:1318
+#: urpm/cli/main.py:437 urpm/cli/main.py:1361
 msgid "Also install suggested packages"
 msgstr "Installer aussi les paquets suggérés"
 
-#: urpm/cli/main.py:440
+#: urpm/cli/main.py:442
 msgid "Install for all matching families (e.g., both php8.4 and php8.5)"
 msgstr ""
 "Installer pour toutes les familles correspondantes (ex. : php8.4 et php8.5)"
 
-#: urpm/cli/main.py:445
+#: urpm/cli/main.py:447
 msgid "Comma-separated preferences for alternatives (e.g., 8.5,fpm,nginx)"
 msgstr ""
 "Préférences pour les alternatives, séparées par des virgules (ex. : "
 "8.5,fpm,nginx)"
 
-#: urpm/cli/main.py:450 urpm/cli/main.py:1308
+#: urpm/cli/main.py:452 urpm/cli/main.py:1351
 msgid "Skip GPG signature verification (not recommended)"
 msgstr "Ignorer la vérification des signatures GPG (déconseillé)"
 
-#: urpm/cli/main.py:455
+#: urpm/cli/main.py:457
 msgid "Skip pre/post install scripts (for chroot/container builds)"
 msgstr ""
 "Ignorer les scripts pre/post installation (pour les environnements chroot/"
 "conteneur)"
 
-#: urpm/cli/main.py:460 urpm/cli/main.py:1323
+#: urpm/cli/main.py:462 urpm/cli/main.py:1366
 msgid "Disable P2P download from LAN peers"
 msgstr "Désactiver le téléchargement P2P depuis les pairs du réseau local"
 
-#: urpm/cli/main.py:465 urpm/cli/main.py:567 urpm/cli/main.py:1328
+#: urpm/cli/main.py:467 urpm/cli/main.py:575 urpm/cli/main.py:1371
 msgid "Only download from LAN peers, no upstream mirrors"
 msgstr ""
 "Télécharger uniquement depuis les pairs du réseau local, sans miroirs "
 "distants"
 
-#: urpm/cli/main.py:470
+#: urpm/cli/main.py:472
 msgid "Force install despite dependency problems or conflicts"
 msgstr ""
 "Forcer l'installation malgré les problèmes de dépendances ou les conflits"
 
-#: urpm/cli/main.py:475
+#: urpm/cli/main.py:477
 msgid "Reinstall already installed packages (repair)"
 msgstr "Réinstaller les paquets déjà installés (réparation)"
 
-#: urpm/cli/main.py:480 urpm/cli/main.py:1293
+#: urpm/cli/main.py:482 urpm/cli/main.py:1336
 msgid "Download packages to cache but do not install them"
 msgstr "Télécharger les paquets dans le cache sans les installer"
 
-#: urpm/cli/main.py:485
+#: urpm/cli/main.py:487
 msgid "Skip dependency resolution (use with --download-only)"
 msgstr ""
 "Ignorer la résolution des dépendances (à utiliser avec --download-only)"
 
-#: urpm/cli/main.py:492
+#: urpm/cli/main.py:494
 msgid "Install build dependencies from spec file or SRPM"
 msgstr ""
 "Installer les dépendances de compilation depuis un fichier spec ou un SRPM"
 
-#: urpm/cli/main.py:497
+#: urpm/cli/main.py:499
 msgid "Install source RPM: extract .spec and sources to ~/rpmbuild/"
 msgstr "Installer un RPM source : extraire .spec et sources vers ~/rpmbuild/"
 
-#: urpm/cli/main.py:504
+#: urpm/cli/main.py:506
 msgid ""
 "Allow additional architectures (e.g., --allow-arch i686 for wine/steam). Can "
 "be repeated."
@@ -306,11 +306,18 @@ msgstr ""
 "Autoriser des architectures supplémentaires (ex. : --allow-arch i686 pour "
 "wine/steam). Peut être répété."
 
-#: urpm/cli/main.py:508 urpm/cli/main.py:971 urpm/cli/main.py:1350
+#: urpm/cli/main.py:510 urpm/cli/main.py:1014 urpm/cli/main.py:1393
 msgid "Wait for full completion including post-install triggers"
 msgstr "Attendre la fin complète, triggers post-installation inclus"
 
-#: urpm/cli/main.py:514 urpm/cli/main.py:1346
+#: urpm/cli/main.py:515
+msgid ""
+"Do not print post-install README notes (used inside mkimage / image update)"
+msgstr ""
+"Ne pas afficher les notes README post-installation (utilisé par mkimage / "
+"image update)"
+
+#: urpm/cli/main.py:522 urpm/cli/main.py:1389
 msgid ""
 "Config file conflict policy: keep existing (default), replace with package "
 "version, or ask"
@@ -318,7 +325,7 @@ msgstr ""
 "Politique de conflit de fichiers de configuration : conserver l'existant "
 "(défaut), remplacer par la version du paquet, ou demander"
 
-#: urpm/cli/main.py:520
+#: urpm/cli/main.py:528
 msgid ""
 "Mode best-effort : installer ce qui est possible et lister les paquets "
 "écartés avec leur raison (sortie 2 si écarts). Par défaut, install est "
@@ -328,47 +335,47 @@ msgstr ""
 "écartés avec leur raison (sortie 2 si écarts). Par défaut, install est "
 "atomique : tout ou rien."
 
-#: urpm/cli/main.py:530
+#: urpm/cli/main.py:538
 msgid "Download packages to cache without installing"
 msgstr "Télécharger les paquets dans le cache sans les installer"
 
-#: urpm/cli/main.py:535
+#: urpm/cli/main.py:543
 msgid "Package names to download (optional with --buildrequires)"
 msgstr "Noms des paquets à télécharger (optionnel avec --buildrequires)"
 
-#: urpm/cli/main.py:540
+#: urpm/cli/main.py:548
 msgid "Target release (e.g., 10, cauldron). Downloads for this release."
 msgstr "Version cible (ex. : 10, cauldron). Télécharge pour cette version."
 
-#: urpm/cli/main.py:547
+#: urpm/cli/main.py:555
 msgid "Download build dependencies. Auto-detect .spec or specify path."
 msgstr ""
 "Télécharger les dépendances de compilation. Détection automatique du .spec "
 "ou spécification du chemin."
 
-#: urpm/cli/main.py:562
+#: urpm/cli/main.py:570
 msgid "Do not use P2P downloads from peers"
 msgstr "Ne pas utiliser les téléchargements P2P depuis les pairs"
 
-#: urpm/cli/main.py:572
+#: urpm/cli/main.py:580
 msgid "Download only specified packages, no dependencies"
 msgstr "Télécharger uniquement les paquets spécifiés, sans leurs dépendances"
 
-#: urpm/cli/main.py:579 urpm/cli/main.py:1340
+#: urpm/cli/main.py:587 urpm/cli/main.py:1383
 msgid "Allow additional architectures (e.g., --allow-arch i686 for wine/steam)"
 msgstr ""
 "Autoriser des architectures supplémentaires (ex. : --allow-arch i686 pour "
 "wine/steam)"
 
-#: urpm/cli/main.py:587
+#: urpm/cli/main.py:595
 msgid "Manage container images (make, update, list, delete)"
 msgstr "Gérer les images de conteneur (make, update, list, delete)"
 
-#: urpm/cli/main.py:597
+#: urpm/cli/main.py:605
 msgid "Create a minimal Docker/Podman image for RPM builds"
 msgstr "Créer une image Docker/Podman minimale pour les compilations RPM"
 
-#: urpm/cli/main.py:600
+#: urpm/cli/main.py:608
 msgid ""
 "Create a minimal Mageia Docker/Podman image for RPM builds.\n"
 "\n"
@@ -399,56 +406,75 @@ msgstr ""
 "  urpm image make -r 10 -t mga10-build --buildrequires SPECS/foo.spec\n"
 "  urpm image make -r cauldron -t mga-cauldron --profile ci\n"
 
-#: urpm/cli/main.py:618 urpm/cli/main.py:1715
+#: urpm/cli/main.py:626 urpm/cli/main.py:1779
 msgid "Mageia release (e.g., 10, cauldron)"
 msgstr "Version de Mageia (ex. : 10, cauldron)"
 
-#: urpm/cli/main.py:623
+#: urpm/cli/main.py:631
 msgid "Docker/Podman image tag (e.g., mageia:10-build)"
 msgstr "Tag de l'image Docker/Podman (ex. : mageia:10-build)"
 
-#: urpm/cli/main.py:628
+#: urpm/cli/main.py:636
 msgid "Package profile (default: build). See /usr/share/urpm/profiles/"
 msgstr "Profil de paquets (par défaut : build). Voir /usr/share/urpm/profiles/"
 
-#: urpm/cli/main.py:632
+#: urpm/cli/main.py:640
 msgid "Additional packages to install (comma-separated)"
 msgstr "Paquets supplémentaires à installer (séparés par des virgules)"
 
-#: urpm/cli/main.py:637
+#: urpm/cli/main.py:645
 msgid "Pre-install BuildRequires from a .spec or .src.rpm file"
 msgstr "Pré-installer les BuildRequires depuis un fichier .spec ou .src.rpm"
 
-#: urpm/cli/main.py:642 urpm/cli/main.py:688 urpm/cli/main.py:699
-#: urpm/cli/main.py:719 urpm/cli/main.py:812
+#: urpm/cli/main.py:650 urpm/cli/main.py:711 urpm/cli/main.py:737
+#: urpm/cli/main.py:757 urpm/cli/main.py:850
 msgid "Container runtime (default: auto-detect, prefers podman)"
 msgstr ""
 "Moteur de conteneur (par défaut : détection automatique, préfère podman)"
 
-#: urpm/cli/main.py:647
+#: urpm/cli/main.py:655
 msgid "Keep temporary chroot directory after image creation"
 msgstr "Conserver le répertoire chroot temporaire après la création de l'image"
 
-#: urpm/cli/main.py:651
+#: urpm/cli/main.py:659
 msgid "Working directory for chroot (default: ~/.cache/urpm/mkimage)"
 msgstr ""
 "Répertoire de travail pour le chroot (par défaut : ~/.cache/urpm/mkimage)"
 
-#: urpm/cli/main.py:659
+#: urpm/cli/main.py:667
 msgid "Add a custom media in phase 2 (repeatable): --addmedia NAME URL"
 msgstr ""
 "Ajouter un média personnalisé en phase 2 (répétable) : --addmedia NOM URL"
 
-#: urpm/cli/main.py:664
+#: urpm/cli/main.py:672
 msgid "Automatically import GPG keys for --addmedia repositories"
 msgstr "Importer automatiquement les clés GPG pour les dépôts --addmedia"
 
-#: urpm/cli/main.py:670
+#: urpm/cli/main.py:678
+msgid ""
+"Where urpm-ng-core comes from: auto (waterfall: local match > host media > "
+"github), local (force local RPM), media (force host media, fall back to "
+"github with confirmation), github (force GitHub release).  Default: auto."
+msgstr ""
+"D'où provient urpm-ng-core : auto (cascade : correspondance locale > média "
+"hôte > github), local (forcer le RPM local), media (forcer le média hôte, "
+"retomber sur github avec confirmation), github (forcer une release GitHub). "
+"Par défaut : auto."
+
+#: urpm/cli/main.py:686 urpm/cli/main.py:725
+msgid ""
+"Install urpm-ng-core from this specific RPM file, overriding --urpm-ng-"
+"source and every waterfall rule."
+msgstr ""
+"Installer urpm-ng-core depuis ce fichier RPM spécifique, en outrepassant --"
+"urpm-ng-source et toutes les règles de la cascade."
+
+#: urpm/cli/main.py:693
 msgid "Update an existing image (sync media + upgrade packages)"
 msgstr ""
 "Mettre à jour une image existante (synchroniser les médias et les paquets)"
 
-#: urpm/cli/main.py:672
+#: urpm/cli/main.py:695
 msgid ""
 "Update a container image in-place.\n"
 "\n"
@@ -467,31 +493,41 @@ msgstr ""
 "Exemples :\n"
 "  urpm image update mga10-build\n"
 
-#: urpm/cli/main.py:683
+#: urpm/cli/main.py:706
 msgid "Image tag to update"
 msgstr "Tag de l'image à mettre à jour"
 
-#: urpm/cli/main.py:694
+#: urpm/cli/main.py:717
+msgid ""
+"Where to source urpm-ng-core upgrades: auto (waterfall), local (force local "
+"RPM), media (force host media, fall back to github with confirmation), "
+"github (force GitHub release).  Default: auto."
+msgstr ""
+"D'où provient la mise à jour d'urpm-ng-core : auto (cascade), local (forcer "
+"le RPM local), media (forcer le média hôte, retomber sur github avec "
+"confirmation), github (forcer une release GitHub). Par défaut : auto."
+
+#: urpm/cli/main.py:732
 msgid "List container images"
 msgstr "Lister les images de conteneur"
 
-#: urpm/cli/main.py:705
+#: urpm/cli/main.py:743
 msgid "Delete container image(s)"
 msgstr "Supprimer une ou plusieurs images de conteneur"
 
-#: urpm/cli/main.py:709
+#: urpm/cli/main.py:747
 msgid "Image tag(s) to delete"
 msgstr "Tag(s) d'image à supprimer"
 
-#: urpm/cli/main.py:714
+#: urpm/cli/main.py:752
 msgid "Force removal"
 msgstr "Forcer la suppression"
 
-#: urpm/cli/main.py:725
+#: urpm/cli/main.py:763
 msgid "Alias for \"image make\" (deprecated)"
 msgstr "Alias pour « image make » (obsolète)"
 
-#: urpm/cli/main.py:728
+#: urpm/cli/main.py:766
 msgid ""
 "Deprecated: use \"urpm image make\" instead.\n"
 "\n"
@@ -501,51 +537,51 @@ msgstr ""
 "\n"
 "Voir : urpm image make --help"
 
-#: urpm/cli/main.py:731
+#: urpm/cli/main.py:769
 msgid "Mageia release"
 msgstr "Version de Mageia"
 
-#: urpm/cli/main.py:733
+#: urpm/cli/main.py:771
 msgid "Image tag"
 msgstr "Tag de l'image"
 
-#: urpm/cli/main.py:735
+#: urpm/cli/main.py:773
 msgid "Package profile"
 msgstr "Profil de paquets"
 
-#: urpm/cli/main.py:737
+#: urpm/cli/main.py:775
 msgid "Additional packages (comma-separated)"
 msgstr "Paquets supplémentaires (séparés par des virgules)"
 
-#: urpm/cli/main.py:739
+#: urpm/cli/main.py:777
 msgid "Pre-install BuildRequires from .spec/.src.rpm"
 msgstr "Pré-installer les BuildRequires depuis .spec/.src.rpm"
 
-#: urpm/cli/main.py:741
+#: urpm/cli/main.py:779
 msgid "Container runtime"
 msgstr "Moteur de conteneur"
 
-#: urpm/cli/main.py:743
+#: urpm/cli/main.py:781
 msgid "Keep chroot"
 msgstr "Conserver le chroot"
 
-#: urpm/cli/main.py:745
+#: urpm/cli/main.py:783
 msgid "Working directory"
 msgstr "Répertoire de travail"
 
-#: urpm/cli/main.py:748
+#: urpm/cli/main.py:786
 msgid "Add a custom media in phase 2 (repeatable)"
 msgstr "Ajouter un média personnalisé en phase 2 (répétable)"
 
-#: urpm/cli/main.py:750
+#: urpm/cli/main.py:788
 msgid "Auto-import GPG keys for --addmedia"
 msgstr "Importer automatiquement les clés GPG pour --addmedia"
 
-#: urpm/cli/main.py:757
+#: urpm/cli/main.py:795
 msgid "Build RPM package(s) in isolated container"
 msgstr "Compiler des paquets RPM dans un conteneur isolé"
 
-#: urpm/cli/main.py:759
+#: urpm/cli/main.py:797
 msgid ""
 "Build RPM packages in isolated containers.\n"
 "\n"
@@ -598,41 +634,41 @@ msgstr ""
 "  # Ignorer la mise à jour automatique (l'image est déjà à jour)\n"
 "  urpm build -i mageia:10-build --no-update SPECS/foo.spec\n"
 
-#: urpm/cli/main.py:785
+#: urpm/cli/main.py:823
 msgid "Source RPM files (.src.rpm) or spec files (.spec) to build"
 msgstr "Fichiers RPM source (.src.rpm) ou fichiers spec (.spec) à compiler"
 
-#: urpm/cli/main.py:790
+#: urpm/cli/main.py:828
 msgid "Docker/Podman image to use for builds"
 msgstr "Image Docker/Podman à utiliser pour les compilations"
 
-#: urpm/cli/main.py:795
+#: urpm/cli/main.py:833
 msgid "Output directory for SRPM builds (default: ./build-output)"
 msgstr ""
 "Répertoire de sortie pour les compilations SRPM (par défaut : ./build-output)"
 
-#: urpm/cli/main.py:802
+#: urpm/cli/main.py:840
 msgid ""
 "Pre-install local RPMs in container before build (glob pattern, repeatable)"
 msgstr ""
 "Pré-installer des RPM locaux dans le conteneur avant la compilation (motif "
 "glob, répétable)"
 
-#: urpm/cli/main.py:807
+#: urpm/cli/main.py:845
 msgid "Skip media sync and package update before building"
 msgstr ""
 "Ne pas synchroniser les médias ni mettre à jour les paquets avant la "
 "compilation"
 
-#: urpm/cli/main.py:818
+#: urpm/cli/main.py:856
 msgid "Number of parallel builds (default: 1)"
 msgstr "Nombre de compilations en parallèle (par défaut : 1)"
 
-#: urpm/cli/main.py:823
+#: urpm/cli/main.py:861
 msgid "Keep container after build (for debugging)"
 msgstr "Conserver le conteneur après la compilation (pour le débogage)"
 
-#: urpm/cli/main.py:828
+#: urpm/cli/main.py:866
 #, python-format
 msgid ""
 "Tag this build with a sub-release marker so output RPMs become NAME-VERSION-"
@@ -648,7 +684,7 @@ msgstr ""
 "build du conteneur, repris automatiquement par les specs Mageia qui "
 "utilisent %%mkrel."
 
-#: urpm/cli/main.py:838
+#: urpm/cli/main.py:876
 #, python-format
 msgid ""
 "Inject FILE as /root/.rpmmacros inside the build container. Useful to "
@@ -661,179 +697,192 @@ msgstr ""
 "sans toucher au spec. Combiné avec --subrel, la ligne %%subrel est ajoutée "
 "en dernier de sorte qu'elle prévale."
 
-#: urpm/cli/main.py:850
-msgid "Generate media metadata from RPM directory"
-msgstr "Générer les métadonnées du média depuis un répertoire de RPM"
+#: urpm/cli/main.py:888
+msgid "Generate media metadata (requires the urpm-ng-genmedia sub-package)"
+msgstr ""
+"Générer les métadonnées des médias (nécessite le sous-paquet urpm-ng-"
+"genmedia)"
 
-#: urpm/cli/main.py:854
+#: urpm/cli/main.py:890
+msgid ""
+"Generate media metadata (hdlist, synthesis, XML, AppStream) from an RPM "
+"directory. Server-side tool: the code lives in the urpm-ng-genmedia sub-"
+"package. If it is not installed, the command prints an install hint."
+msgstr ""
+"Générer les métadonnées des médias (hdlist, synthesis, XML, AppStream) "
+"depuis un répertoire de RPM. Outil côté serveur : le code vit dans le sous-"
+"paquet urpm-ng-genmedia. S'il n'est pas installé, la commande affiche une "
+"indication pour l'installer."
+
+#: urpm/cli/main.py:897
 msgid "Directory containing *.rpm files"
 msgstr "Répertoire contenant les fichiers *.rpm"
 
-#: urpm/cli/main.py:858
+#: urpm/cli/main.py:901
 msgid "Output directory (default: rpms_dir/media_info)"
 msgstr "Répertoire de sortie (par défaut : rpms_dir/media_info)"
 
-#: urpm/cli/main.py:862
+#: urpm/cli/main.py:905
 msgid "Compression filter for hdlist (default: .cz:gzip -9)"
 msgstr "Filtre de compression pour hdlist (par défaut : .cz:gzip -9)"
 
-#: urpm/cli/main.py:866
+#: urpm/cli/main.py:909
 msgid "Compression filter for synthesis (default: .cz:xz -7)"
 msgstr "Filtre de compression pour synthesis (par défaut : .cz:xz -7)"
 
-#: urpm/cli/main.py:870
+#: urpm/cli/main.py:913
 msgid "Compression filter for XML info (default: .lzma:xz -7)"
 msgstr "Filtre de compression pour XML info (par défaut : .lzma:xz -7)"
 
-#: urpm/cli/main.py:874
+#: urpm/cli/main.py:917
 msgid "Do not generate hdlist.cz"
 msgstr "Ne pas générer hdlist.cz"
 
-#: urpm/cli/main.py:878
+#: urpm/cli/main.py:921
 msgid "Do not generate MD5SUM"
 msgstr "Ne pas générer MD5SUM"
 
-#: urpm/cli/main.py:882
+#: urpm/cli/main.py:925
 msgid "Force generation of XML info files"
 msgstr "Forcer la génération des fichiers XML info"
 
-#: urpm/cli/main.py:886
+#: urpm/cli/main.py:929
 msgid "Generate AppStream metadata"
 msgstr "Générer les métadonnées AppStream"
 
-#: urpm/cli/main.py:890
+#: urpm/cli/main.py:933
 msgid "Full rebuild (do not use incremental mode)"
 msgstr "Reconstruction complète (ne pas utiliser le mode incrémental)"
 
-#: urpm/cli/main.py:894
+#: urpm/cli/main.py:937
 msgid "Prefix output files with timestamp"
 msgstr "Préfixer les fichiers de sortie avec un horodatage"
 
-#: urpm/cli/main.py:898
+#: urpm/cli/main.py:941
 msgid "Allow empty media (no RPMs)"
 msgstr "Autoriser les médias vides (aucun RPM)"
 
-#: urpm/cli/main.py:902
+#: urpm/cli/main.py:945
 msgid "Do not lock media_info/ directory"
 msgstr "Ne pas verrouiller le répertoire media_info/"
 
-#: urpm/cli/main.py:906
+#: urpm/cli/main.py:949
 msgid "Skip bad RPMs instead of failing"
 msgstr "Ignorer les RPM défectueux au lieu d'échouer"
 
-#: urpm/cli/main.py:910
+#: urpm/cli/main.py:953
 msgid "Walk Mageia tree (sections/type)"
 msgstr "Parcourir l'arborescence Mageia (sections/type)"
 
-#: urpm/cli/main.py:922
+#: urpm/cli/main.py:965
 msgid "Erase (remove) packages"
 msgstr "Supprimer des paquets"
 
-#: urpm/cli/main.py:927
+#: urpm/cli/main.py:970
 msgid "Package names to erase (optional with --auto-orphans)"
 msgstr "Noms des paquets à supprimer (optionnel avec --auto-orphans)"
 
-#: urpm/cli/main.py:942
+#: urpm/cli/main.py:985
 msgid "Also remove orphan dependencies (implied by -y unless --keep-orphans)"
 msgstr ""
 "Supprimer aussi les dépendances orphelines (impliqué par -y sauf si --keep-"
 "orphans)"
 
-#: urpm/cli/main.py:947
+#: urpm/cli/main.py:990
 msgid "Do not remove orphan dependencies"
 msgstr "Ne pas supprimer les dépendances orphelines"
 
-#: urpm/cli/main.py:952
+#: urpm/cli/main.py:995
 msgid "Force erase despite dependency problems"
 msgstr "Forcer la suppression malgré les problèmes de dépendances"
 
-#: urpm/cli/main.py:957
+#: urpm/cli/main.py:1000
 msgid "Also erase packages recommended by remaining packages"
 msgstr "Supprimer aussi les paquets recommandés par les paquets restants"
 
-#: urpm/cli/main.py:962
+#: urpm/cli/main.py:1005
 msgid "Keep packages suggested by remaining packages"
 msgstr "Conserver les paquets suggérés par les paquets restants"
 
-#: urpm/cli/main.py:967
+#: urpm/cli/main.py:1010
 msgid "Enable debug output (solver, tsrun, all)"
 msgstr "Activer la sortie de débogage (solver, tsrun, all)"
 
-#: urpm/cli/main.py:979
+#: urpm/cli/main.py:1022
 msgid "Search packages"
 msgstr "Rechercher des paquets"
 
-#: urpm/cli/main.py:984
+#: urpm/cli/main.py:1027
 msgid "Search pattern (optional with --unavailable)"
 msgstr "Motif de recherche (optionnel avec --unavailable)"
 
-#: urpm/cli/main.py:989
+#: urpm/cli/main.py:1032
 msgid "Search only installed packages"
 msgstr "Rechercher uniquement dans les paquets installés"
 
-#: urpm/cli/main.py:994
+#: urpm/cli/main.py:1037
 msgid "List installed packages not available in any media"
 msgstr "Lister les paquets installés absents de tous les médias"
 
-#: urpm/cli/main.py:1002
+#: urpm/cli/main.py:1045
 msgid "Show package details"
 msgstr "Afficher les détails d'un paquet"
 
-#: urpm/cli/main.py:1007 urpm/cli/main.py:1046 urpm/cli/main.py:1107
-#: urpm/cli/main.py:1161 urpm/cli/main.py:1200 urpm/cli/main.py:1213
-#: urpm/cli/main.py:1226 urpm/cli/main.py:1239 urpm/cli/main.py:1252
+#: urpm/cli/main.py:1050 urpm/cli/main.py:1089 urpm/cli/main.py:1150
+#: urpm/cli/main.py:1204 urpm/cli/main.py:1243 urpm/cli/main.py:1256
+#: urpm/cli/main.py:1269 urpm/cli/main.py:1282 urpm/cli/main.py:1295
 msgid "Package name"
 msgstr "Nom du paquet"
 
-#: urpm/cli/main.py:1012
+#: urpm/cli/main.py:1055
 msgid "Show file list"
 msgstr "Afficher la liste des fichiers"
 
-#: urpm/cli/main.py:1017
+#: urpm/cli/main.py:1060
 msgid "Show changelog"
 msgstr "Afficher le journal des modifications"
 
-#: urpm/cli/main.py:1025
+#: urpm/cli/main.py:1068
 msgid "List packages"
 msgstr "Lister les paquets"
 
-#: urpm/cli/main.py:1033
+#: urpm/cli/main.py:1076
 msgid "Filter type (default: installed)"
 msgstr "Type de filtre (par défaut : installés)"
 
-#: urpm/cli/main.py:1041
+#: urpm/cli/main.py:1084
 msgid "Show what a package provides"
 msgstr "Afficher ce que fournit un paquet"
 
-#: urpm/cli/main.py:1054
+#: urpm/cli/main.py:1097
 msgid "Find packages providing a capability"
 msgstr "Trouver les paquets fournissant une capacité"
 
-#: urpm/cli/main.py:1059
+#: urpm/cli/main.py:1102
 msgid "Capability or file path to search"
 msgstr "Capacité ou chemin de fichier à rechercher"
 
-#: urpm/cli/main.py:1067
+#: urpm/cli/main.py:1110
 msgid "Find which package contains a file"
 msgstr "Trouver quel paquet contient un fichier"
 
-#: urpm/cli/main.py:1072
+#: urpm/cli/main.py:1115
 msgid "File pattern"
 msgstr "Motif de fichier"
 
-#: urpm/cli/main.py:1077
+#: urpm/cli/main.py:1120
 msgid "Search only in available packages (default: search both)"
 msgstr ""
 "Rechercher uniquement dans les paquets disponibles (par défaut : recherche "
 "dans les deux)"
 
-#: urpm/cli/main.py:1082
+#: urpm/cli/main.py:1125
 msgid "Search only in installed packages (default: search both)"
 msgstr ""
 "Rechercher uniquement dans les paquets installés (par défaut : recherche "
 "dans les deux)"
 
-#: urpm/cli/main.py:1087
+#: urpm/cli/main.py:1130
 msgid ""
 "Show every version of every match (default: only the highest version per "
 "package, mimicking what would be installed)"
@@ -841,128 +890,128 @@ msgstr ""
 "Afficher toutes les versions de chaque correspondance (par défaut : "
 "uniquement la version la plus haute par paquet, comme ce qui serait installé)"
 
-#: urpm/cli/main.py:1094
+#: urpm/cli/main.py:1137
 msgid "Maximum number of results (default: 100)"
 msgstr "Nombre maximum de résultats (par défaut : 100)"
 
-#: urpm/cli/main.py:1102
+#: urpm/cli/main.py:1145
 msgid "Show package dependencies"
 msgstr "Afficher les dépendances d'un paquet"
 
-#: urpm/cli/main.py:1112 urpm/cli/main.py:1166
+#: urpm/cli/main.py:1155 urpm/cli/main.py:1209
 msgid "Show as recursive tree"
 msgstr "Afficher sous forme d'arbre récursif"
 
-#: urpm/cli/main.py:1117
+#: urpm/cli/main.py:1160
 msgid "Show all dependencies recursively (flat list)"
 msgstr "Afficher toutes les dépendances récursivement (liste à plat)"
 
-#: urpm/cli/main.py:1122
+#: urpm/cli/main.py:1165
 msgid "Show raw capabilities (like urpmq)"
 msgstr "Afficher les capacités brutes (comme urpmq)"
 
-#: urpm/cli/main.py:1127
+#: urpm/cli/main.py:1170
 msgid ""
 "Comma-separated list of preferences for alternatives (e.g., php8.5,nginx,fpm)"
 msgstr ""
 "Liste de préférences pour les alternatives, séparées par des virgules (ex. : "
 "php8.5,nginx,fpm)"
 
-#: urpm/cli/main.py:1132
+#: urpm/cli/main.py:1175
 msgid "Use pager for long output (less)"
 msgstr "Utiliser un pagineur pour les sorties longues (less)"
 
-#: urpm/cli/main.py:1137
+#: urpm/cli/main.py:1180
 msgid "Hide library packages (lib*, glibc) in tree view"
 msgstr ""
 "Masquer les paquets de bibliothèques (lib*, glibc) dans la vue arborescente"
 
-#: urpm/cli/main.py:1143
+#: urpm/cli/main.py:1186
 msgid "Maximum tree depth (default: 5)"
 msgstr "Profondeur maximale de l'arbre (par défaut : 5)"
 
-#: urpm/cli/main.py:1148 urpm/cli/main.py:1187
+#: urpm/cli/main.py:1191 urpm/cli/main.py:1230
 msgid "Show symbol legend after tree display"
 msgstr "Afficher la légende des symboles après l'arbre"
 
-#: urpm/cli/main.py:1156
+#: urpm/cli/main.py:1199
 msgid "Show reverse dependencies"
 msgstr "Afficher les dépendances inverses"
 
-#: urpm/cli/main.py:1171
+#: urpm/cli/main.py:1214
 msgid "Show all reverse dependencies recursively (flat list)"
 msgstr "Afficher toutes les dépendances inverses récursivement (liste à plat)"
 
-#: urpm/cli/main.py:1177
+#: urpm/cli/main.py:1220
 msgid "Maximum depth for tree display (default: 3)"
 msgstr "Profondeur maximale pour l'affichage en arbre (par défaut : 3)"
 
-#: urpm/cli/main.py:1182
+#: urpm/cli/main.py:1225
 msgid "Only show installed packages in tree"
 msgstr "Afficher uniquement les paquets installés dans l'arbre"
 
-#: urpm/cli/main.py:1195
+#: urpm/cli/main.py:1238
 msgid "Show packages recommended by a package"
 msgstr "Afficher les paquets recommandés par un paquet"
 
-#: urpm/cli/main.py:1208
+#: urpm/cli/main.py:1251
 msgid "Show packages that recommend a package"
 msgstr "Afficher les paquets qui recommandent un paquet"
 
-#: urpm/cli/main.py:1221
+#: urpm/cli/main.py:1264
 msgid "Show packages suggested by a package"
 msgstr "Afficher les paquets suggérés par un paquet"
 
-#: urpm/cli/main.py:1234
+#: urpm/cli/main.py:1277
 msgid "Show packages that suggest a package"
 msgstr "Afficher les paquets qui suggèrent un paquet"
 
-#: urpm/cli/main.py:1247
+#: urpm/cli/main.py:1290
 msgid "Explain why a package is installed"
 msgstr "Expliquer pourquoi un paquet est installé"
 
-#: urpm/cli/main.py:1260
+#: urpm/cli/main.py:1303
 msgid "Update media metadata (apt-style: use \"upgrade\" for packages)"
 msgstr ""
 "Mettre à jour les métadonnées des médias (style apt : utiliser \"upgrade\" "
 "pour les paquets)"
 
-#: urpm/cli/main.py:1265
+#: urpm/cli/main.py:1308
 msgid "Media name to update (default: all)"
 msgstr "Nom du média à mettre à jour (par défaut : tous)"
 
-#: urpm/cli/main.py:1270 urpm/cli/main.py:1587
+#: urpm/cli/main.py:1313 urpm/cli/main.py:1643
 msgid "Re-download and re-parse even if metadata is unchanged"
 msgstr "Re-télécharger et ré-analyser même si les métadonnées sont inchangées"
 
-#: urpm/cli/main.py:1278
+#: urpm/cli/main.py:1321
 msgid "Upgrade packages (all if none specified)"
 msgstr "Mettre à jour les paquets (tous si aucun spécifié)"
 
-#: urpm/cli/main.py:1283
+#: urpm/cli/main.py:1326
 msgid "Packages to upgrade (empty = all)"
 msgstr "Paquets à mettre à jour (vide = tous)"
 
-#: urpm/cli/main.py:1298
+#: urpm/cli/main.py:1341
 msgid "Keep orphaned dependencies (do not remove them)"
 msgstr "Conserver les dépendances orphelines (ne pas les supprimer)"
 
-#: urpm/cli/main.py:1303
+#: urpm/cli/main.py:1346
 msgid "Dry run - show what would be done"
 msgstr "Simulation - afficher ce qui serait fait"
 
-#: urpm/cli/main.py:1313
+#: urpm/cli/main.py:1356
 msgid "Install recommended packages (not installed by default for upgrades)"
 msgstr ""
 "Installer les paquets recommandés (non installés par défaut lors des mises à "
 "jour)"
 
-#: urpm/cli/main.py:1333
+#: urpm/cli/main.py:1376
 msgid "Force upgrade despite dependency problems or conflicts"
 msgstr ""
 "Forcer la mise à jour malgré les problèmes de dépendances ou les conflits"
 
-#: urpm/cli/main.py:1356
+#: urpm/cli/main.py:1399
 msgid ""
 "Mode strict : annuler toute la transaction si un paquet ne peut pas être mis "
 "à jour. Par défaut, upgrade est best-effort : les paquets non mis à jour "
@@ -972,108 +1021,108 @@ msgstr ""
 "à jour. Par défaut, upgrade est best-effort : les paquets non mis à jour "
 "sont listés avec leur raison (sortie 2 si écarts). Recommandé sur serveurs."
 
-#: urpm/cli/main.py:1367
+#: urpm/cli/main.py:1410
 msgid "Remove orphaned packages, old kernels, or failed deps"
 msgstr ""
 "Supprimer les paquets orphelins, les anciens noyaux ou les dépendances en "
 "échec"
 
-#: urpm/cli/main.py:1373
+#: urpm/cli/main.py:1416
 msgid "Remove orphaned packages (default if no selector)"
 msgstr "Supprimer les paquets orphelins (par défaut si aucun sélecteur)"
 
-#: urpm/cli/main.py:1378
+#: urpm/cli/main.py:1421
 msgid "Remove old kernels (keeps running + N recent)"
 msgstr "Supprimer les anciens noyaux (conserve le noyau actif + N récents)"
 
-#: urpm/cli/main.py:1383
+#: urpm/cli/main.py:1426
 msgid "Remove orphan deps from interrupted transactions"
 msgstr ""
 "Supprimer les dépendances orphelines issues de transactions interrompues"
 
-#: urpm/cli/main.py:1388
+#: urpm/cli/main.py:1431
 msgid "All of the above"
 msgstr "Tout ce qui précède"
 
-#: urpm/cli/main.py:1393
+#: urpm/cli/main.py:1436
 msgid "Remove packages installed as build dependencies"
 msgstr "Supprimer les paquets installés comme dépendances de compilation"
 
-#: urpm/cli/main.py:1406
+#: urpm/cli/main.py:1449
 msgid "Mark packages as manual or auto-installed"
 msgstr "Marquer les paquets comme installés manuellement ou automatiquement"
 
-#: urpm/cli/main.py:1416
+#: urpm/cli/main.py:1459
 msgid "Mark package as manually installed (protects from autoremove)"
 msgstr ""
 "Marquer un paquet comme installé manuellement (protège de la suppression "
 "automatique)"
 
-#: urpm/cli/main.py:1420
+#: urpm/cli/main.py:1463
 msgid "Package names to mark as manual"
 msgstr "Noms des paquets à marquer comme manuels"
 
-#: urpm/cli/main.py:1425
+#: urpm/cli/main.py:1468
 msgid "Mark package as auto-installed (can be autoremoved)"
 msgstr ""
 "Marquer un paquet comme installé automatiquement (peut être supprimé "
 "automatiquement)"
 
-#: urpm/cli/main.py:1429
+#: urpm/cli/main.py:1472
 msgid "Package names to mark as auto"
 msgstr "Noms des paquets à marquer comme automatiques"
 
-#: urpm/cli/main.py:1434
+#: urpm/cli/main.py:1477
 msgid "Show install reason for packages"
 msgstr "Afficher la raison d'installation des paquets"
 
-#: urpm/cli/main.py:1438
+#: urpm/cli/main.py:1481
 msgid "Package names to check (or all if empty)"
 msgstr "Noms des paquets à vérifier (ou tous si vide)"
 
-#: urpm/cli/main.py:1446
+#: urpm/cli/main.py:1489
 msgid "Hold packages (prevent upgrades and obsoletes replacement)"
 msgstr ""
 "Bloquer des paquets (empêcher les mises à jour et le remplacement par des "
 "obsolètes)"
 
-#: urpm/cli/main.py:1451
+#: urpm/cli/main.py:1494
 msgid "Package names to hold (or list holds if empty)"
 msgstr "Noms des paquets à bloquer (ou lister les blocages si vide)"
 
-#: urpm/cli/main.py:1455
+#: urpm/cli/main.py:1498
 msgid "Reason for holding the package"
 msgstr "Raison du blocage du paquet"
 
-#: urpm/cli/main.py:1459
+#: urpm/cli/main.py:1502
 msgid "List held packages"
 msgstr "Lister les paquets bloqués"
 
-#: urpm/cli/main.py:1464
+#: urpm/cli/main.py:1507
 msgid "Remove hold from packages"
 msgstr "Débloquer des paquets"
 
-#: urpm/cli/main.py:1469
+#: urpm/cli/main.py:1512
 msgid "Package names to unhold"
 msgstr "Noms des paquets à débloquer"
 
-#: urpm/cli/main.py:1477
+#: urpm/cli/main.py:1520
 msgid "Manage media sources"
 msgstr "Gérer les sources de médias"
 
-#: urpm/cli/main.py:1488
+#: urpm/cli/main.py:1531
 msgid "List media sources"
 msgstr "Lister les sources de médias"
 
-#: urpm/cli/main.py:1493
+#: urpm/cli/main.py:1536
 msgid "Show all media (including disabled)"
 msgstr "Afficher tous les médias (y compris les désactivés)"
 
-#: urpm/cli/main.py:1499
+#: urpm/cli/main.py:1542
 msgid "Add media source"
 msgstr "Ajouter une source de médias"
 
-#: urpm/cli/main.py:1501
+#: urpm/cli/main.py:1544
 msgid ""
 "Add a media source.\n"
 "\n"
@@ -1102,102 +1151,121 @@ msgstr ""
 "Pour le mode hérité (URL non-Mageia avec nom explicite) :\n"
 "  urpm media add --name \"My Media\" https://example.com/repo/\n"
 
-#: urpm/cli/main.py:1513
+#: urpm/cli/main.py:1556
 msgid "Media URL"
 msgstr "URL du média"
 
-#: urpm/cli/main.py:1516
+#: urpm/cli/main.py:1559
 msgid "Media name (legacy mode, for non-Mageia URLs without --custom)"
 msgstr "Nom du média (mode hérité, pour les URL non-Mageia sans --custom)"
 
-#: urpm/cli/main.py:1522
+#: urpm/cli/main.py:1565
 msgid "Add as custom media with display name and short identifier"
 msgstr ""
 "Ajouter comme média personnalisé avec un nom d'affichage et un identifiant "
 "court"
 
-#: urpm/cli/main.py:1527
+#: urpm/cli/main.py:1570
 msgid "Mark as update media"
 msgstr "Marquer comme média de mises à jour"
 
-#: urpm/cli/main.py:1532 urpm/cli/main.py:1829
+#: urpm/cli/main.py:1575 urpm/cli/main.py:1893
 msgid "Add as disabled"
 msgstr "Ajouter comme désactivé"
 
-#: urpm/cli/main.py:1537
+#: urpm/cli/main.py:1580
 msgid "Non-interactive mode (auto-confirm prompts)"
 msgstr "Mode non interactif (confirmation automatique des invites)"
 
-#: urpm/cli/main.py:1542
+#: urpm/cli/main.py:1585
 msgid "Import GPG key from media"
 msgstr "Importer la clé GPG depuis le média"
 
-#: urpm/cli/main.py:1547
+#: urpm/cli/main.py:1590
 msgid "Allow unsigned packages (custom media only)"
 msgstr "Autoriser les paquets non signés (médias personnalisés uniquement)"
 
-#: urpm/cli/main.py:1551
+#: urpm/cli/main.py:1594
 msgid "Target Mageia version (custom media only, e.g. 9, 10, cauldron)"
 msgstr "Version de Mageia (ex. : 10, cauldron)"
 
-#: urpm/cli/main.py:1557
+#: urpm/cli/main.py:1600
 msgid "Remove media source"
 msgstr "Supprimer une source de médias"
 
-#: urpm/cli/main.py:1559
-msgid "Media name(s)"
-msgstr "Nom(s) de média"
+#: urpm/cli/main.py:1604
+msgid "Media name(s); optional when --all is passed"
+msgstr "Nom(s) de média ; optionnel quand --all est passé"
 
-#: urpm/cli/main.py:1564
+#: urpm/cli/main.py:1609
+msgid "Remove every configured media source (asks for confirmation)"
+msgstr "Retirer chaque source de média configurée (demande confirmation)"
+
+#: urpm/cli/main.py:1614
+msgid "Skip the confirmation prompt"
+msgstr "Sauter l'invite de confirmation"
+
+#: urpm/cli/main.py:1620
 msgid "Enable media source"
 msgstr "Activer une source de médias"
 
-#: urpm/cli/main.py:1566 urpm/cli/main.py:1573 urpm/cli/main.py:1621
-#: urpm/cli/main.py:1663 urpm/cli/main.py:1684
+#: urpm/cli/main.py:1622 urpm/cli/main.py:1629 urpm/cli/main.py:1685
+#: urpm/cli/main.py:1727 urpm/cli/main.py:1748
 msgid "Media name"
 msgstr "Nom du média"
 
-#: urpm/cli/main.py:1571
+#: urpm/cli/main.py:1627
 msgid "Disable media source"
 msgstr "Désactiver une source de médias"
 
-#: urpm/cli/main.py:1578
+#: urpm/cli/main.py:1634
 msgid "Update media metadata"
 msgstr "Mettre à jour les métadonnées des médias"
 
-#: urpm/cli/main.py:1582
+#: urpm/cli/main.py:1638
 msgid "Media name (empty = all)"
 msgstr "Nom du média (vide = tous)"
 
-#: urpm/cli/main.py:1592
+#: urpm/cli/main.py:1648
 msgid "Skip AppStream metadata sync"
 msgstr "Ignorer la synchronisation des métadonnées AppStream"
 
-#: urpm/cli/main.py:1598
+#: urpm/cli/main.py:1654
 msgid "Import media from urpmi.cfg"
 msgstr "Importer les médias depuis urpmi.cfg"
 
-#: urpm/cli/main.py:1603
+#: urpm/cli/main.py:1659
 msgid "Path to urpmi.cfg (default: /etc/urpmi/urpmi.cfg)"
 msgstr "Chemin vers urpmi.cfg (par défaut : /etc/urpmi/urpmi.cfg)"
 
-#: urpm/cli/main.py:1608
+#: urpm/cli/main.py:1664
 msgid "Replace existing media with same name"
 msgstr "Remplacer les médias existants portant le même nom"
 
-#: urpm/cli/main.py:1619
+#: urpm/cli/main.py:1668
+msgid ""
+"Mageia version for mirrorlist-based entries (default: /etc/mageia-release)"
+msgstr ""
+"Version Mageia pour les entrées basées sur mirrorlist (par défaut : /etc/"
+"mageia-release)"
+
+#: urpm/cli/main.py:1672
+msgid "Target architecture for mirrorlist-based entries (default: system arch)"
+msgstr "Architecture cible pour les entrées basées sur mirrorlist (par défaut : architecture système)"
+
+#: urpm/cli/main.py:1683
 msgid "Modify media settings"
 msgstr "Modifier les paramètres d'un média"
 
-#: urpm/cli/main.py:1625
+#: urpm/cli/main.py:1689
 msgid "Enable/disable sharing this media with peers"
 msgstr "Activer/désactiver le partage de ce média avec les pairs"
 
-#: urpm/cli/main.py:1630
+#: urpm/cli/main.py:1694
 msgid "Replication policy: none, on_demand, seed"
 msgstr "Politique de réplication : none, on_demand, seed"
 
-#: urpm/cli/main.py:1635
+#: urpm/cli/main.py:1699
 msgid ""
 "rpmsrate sections for seed replication (comma-separated), e.g., "
 "INSTALL,CAT_PLASMA5,CAT_GNOME"
@@ -1205,27 +1273,27 @@ msgstr ""
 "Sections rpmsrate pour la réplication seed (séparées par des virgules), "
 "ex. : INSTALL,CAT_PLASMA5,CAT_GNOME"
 
-#: urpm/cli/main.py:1640
+#: urpm/cli/main.py:1704
 msgid "Per-media quota (e.g., 5G, 500M)"
 msgstr "Quota par média (ex. : 5G, 500M)"
 
-#: urpm/cli/main.py:1645
+#: urpm/cli/main.py:1709
 msgid "Days to keep cached packages"
 msgstr "Nombre de jours de conservation des paquets en cache"
 
-#: urpm/cli/main.py:1650
+#: urpm/cli/main.py:1714
 msgid "Media priority (higher = preferred)"
 msgstr "Priorité du média (plus élevée = préférée)"
 
-#: urpm/cli/main.py:1659
+#: urpm/cli/main.py:1723
 msgid "Show seed set info for a media"
 msgstr "Afficher les informations du jeu seed pour un média"
 
-#: urpm/cli/main.py:1669
+#: urpm/cli/main.py:1733
 msgid "Link/unlink servers to a media"
 msgstr "Associer/dissocier des serveurs à un média"
 
-#: urpm/cli/main.py:1671
+#: urpm/cli/main.py:1735
 msgid ""
 "Link or unlink servers to a media source.\n"
 "\n"
@@ -1251,18 +1319,18 @@ msgstr ""
 "  urpm media link \"Core Release\" +all\n"
 "  urpm media link \"Core Release\" -all +preferred_mirror\n"
 
-#: urpm/cli/main.py:1687
+#: urpm/cli/main.py:1751
 msgid "Server changes: +name to add, -name to remove, +all/-all for all"
 msgstr ""
 "Modifications de serveurs : +nom pour ajouter, -nom pour retirer, +all/-all "
 "pour tous"
 
-#: urpm/cli/main.py:1693
+#: urpm/cli/main.py:1757
 msgid "Auto-add official Mageia media for a release"
 msgstr ""
 "Ajouter automatiquement les médias officiels de Mageia pour une version"
 
-#: urpm/cli/main.py:1696
+#: urpm/cli/main.py:1760
 msgid ""
 "Auto-configure all official Mageia media for a release.\n"
 "\n"
@@ -1297,23 +1365,23 @@ msgstr ""
 "  urpm media autoconfig -r cauldron\n"
 "  urpm media ac -r 10   # Forme courte\n"
 
-#: urpm/cli/main.py:1720 urpm/cli/main.py:1781 urpm/cli/main.py:1929
+#: urpm/cli/main.py:1784 urpm/cli/main.py:1845 urpm/cli/main.py:1993
 msgid "Show what would be added without making changes"
 msgstr "Afficher ce qui serait ajouté sans effectuer de modifications"
 
-#: urpm/cli/main.py:1725
+#: urpm/cli/main.py:1789
 msgid "Skip nonfree media"
 msgstr "Ignorer les médias non libres"
 
-#: urpm/cli/main.py:1730
+#: urpm/cli/main.py:1794
 msgid "Skip tainted media"
 msgstr "Ignorer les médias tainted"
 
-#: urpm/cli/main.py:1735
+#: urpm/cli/main.py:1799
 msgid "Discover media from a repository via media.cfg"
 msgstr "Découvrir les médias d'un dépôt via media.cfg"
 
-#: urpm/cli/main.py:1737
+#: urpm/cli/main.py:1801
 msgid ""
 "Discover and add all media from a repository's media.cfg.\n"
 "\n"
@@ -1358,47 +1426,47 @@ msgstr ""
 "  urpm media discover --with all https://mirror.example.org/.../media/\n"
 "  urpm media disc -n https://mirror.example.org/.../media/\n"
 
-#: urpm/cli/main.py:1758
+#: urpm/cli/main.py:1822
 msgid "Media root URL (must contain media_info/media.cfg)"
 msgstr "URL racine du média (doit contenir media_info/media.cfg)"
 
-#: urpm/cli/main.py:1762
+#: urpm/cli/main.py:1826
 msgid "Force-enable categories (comma-separated: nonfree,tainted,32bit,all)"
 msgstr ""
 "Forcer l'activation de catégories (séparées par virgules : "
 "nonfree,tainted,32bit,all)"
 
-#: urpm/cli/main.py:1766
+#: urpm/cli/main.py:1830
 msgid "Force-disable categories (comma-separated: nonfree,tainted,32bit)"
 msgstr ""
 "Forcer la désactivation de catégories (séparées par virgules : "
 "nonfree,tainted,32bit)"
 
-#: urpm/cli/main.py:1771
+#: urpm/cli/main.py:1835
 msgid "Include source (SRPMS) media"
 msgstr "Inclure les médias sources (SRPMS)"
 
-#: urpm/cli/main.py:1776
+#: urpm/cli/main.py:1840
 msgid "Include debug media"
 msgstr "Inclure les médias debug"
 
-#: urpm/cli/main.py:1789
+#: urpm/cli/main.py:1853
 msgid "Manage servers"
 msgstr "Gérer les serveurs"
 
-#: urpm/cli/main.py:1800
+#: urpm/cli/main.py:1864
 msgid "List servers"
 msgstr "Lister les serveurs"
 
-#: urpm/cli/main.py:1805
+#: urpm/cli/main.py:1869
 msgid "Show all servers (including disabled)"
 msgstr "Afficher tous les serveurs (y compris les désactivés)"
 
-#: urpm/cli/main.py:1811
+#: urpm/cli/main.py:1875
 msgid "Add a server"
 msgstr "Ajouter un serveur"
 
-#: urpm/cli/main.py:1813
+#: urpm/cli/main.py:1877
 msgid ""
 "Add a mirror server.\n"
 "\n"
@@ -1412,73 +1480,73 @@ msgstr ""
 "  urpm server add \"Belnet\" https://ftp.belnet.be/mageia/distrib/\n"
 "  urpm server add \"Local\" file:///mnt/repo/\n"
 
-#: urpm/cli/main.py:1820
+#: urpm/cli/main.py:1884
 msgid "Server display name"
 msgstr "Nom d'affichage du serveur"
 
-#: urpm/cli/main.py:1821
+#: urpm/cli/main.py:1885
 msgid "Server base URL (https://host/path/ or file:///path/)"
 msgstr "URL de base du serveur (https://hôte/chemin/ ou file:///chemin/)"
 
-#: urpm/cli/main.py:1824
+#: urpm/cli/main.py:1888
 msgid "Server priority (higher = preferred, default: 50)"
 msgstr "Priorité du serveur (plus élevée = préféré, par défaut : 50)"
 
-#: urpm/cli/main.py:1834
+#: urpm/cli/main.py:1898
 msgid "Mark as non-official server"
 msgstr "Marquer comme serveur non officiel"
 
-#: urpm/cli/main.py:1840
+#: urpm/cli/main.py:1904
 msgid "Remove a server"
 msgstr "Supprimer un serveur"
 
-#: urpm/cli/main.py:1842
+#: urpm/cli/main.py:1906
 msgid "Server name(s)"
 msgstr "Nom(s) de serveur"
 
-#: urpm/cli/main.py:1847
+#: urpm/cli/main.py:1911
 msgid "Enable a server"
 msgstr "Activer un serveur"
 
-#: urpm/cli/main.py:1849 urpm/cli/main.py:1856 urpm/cli/main.py:1863
-#: urpm/cli/main.py:1881 urpm/cli/main.py:1892 urpm/cli/main.py:1899
-#: urpm/cli/main.py:1906 urpm/cli/main.py:1913
+#: urpm/cli/main.py:1913 urpm/cli/main.py:1920 urpm/cli/main.py:1927
+#: urpm/cli/main.py:1945 urpm/cli/main.py:1956 urpm/cli/main.py:1963
+#: urpm/cli/main.py:1970 urpm/cli/main.py:1977
 msgid "Server name"
 msgstr "Nom du serveur"
 
-#: urpm/cli/main.py:1854
+#: urpm/cli/main.py:1918
 msgid "Disable a server"
 msgstr "Désactiver un serveur"
 
-#: urpm/cli/main.py:1861
+#: urpm/cli/main.py:1925
 msgid "Set server priority"
 msgstr "Définir la priorité d'un serveur"
 
-#: urpm/cli/main.py:1864
+#: urpm/cli/main.py:1928
 msgid "Priority (higher = preferred)"
 msgstr "Priorité (plus élevée = préférée)"
 
-#: urpm/cli/main.py:1869
+#: urpm/cli/main.py:1933
 msgid "Test server connectivity and detect IP mode"
 msgstr "Tester la connectivité du serveur et détecter le mode IP"
 
-#: urpm/cli/main.py:1873
+#: urpm/cli/main.py:1937
 msgid "Server name (empty = test all enabled servers)"
 msgstr "Nom du serveur (vide = tester tous les serveurs activés)"
 
-#: urpm/cli/main.py:1879
+#: urpm/cli/main.py:1943
 msgid "Set server IP mode manually"
 msgstr "Définir manuellement le mode IP du serveur"
 
-#: urpm/cli/main.py:1884
+#: urpm/cli/main.py:1948
 msgid "IP mode: auto, ipv4, ipv6, or dual (dual = prefer ipv4)"
 msgstr "Mode IP : auto, ipv4, ipv6, ou dual (dual = préférer ipv4)"
 
-#: urpm/cli/main.py:1890
+#: urpm/cli/main.py:1954
 msgid "Show measured performance statistics for a server"
 msgstr "Afficher les statistiques de performance mesurées d'un serveur"
 
-#: urpm/cli/main.py:1896
+#: urpm/cli/main.py:1960
 msgid ""
 "Show full status of a server including security blacklist and reputation "
 "history"
@@ -1486,14 +1554,14 @@ msgstr ""
 "Afficher l'état complet d'un serveur, y compris la liste noire de sécurité "
 "et l'historique de réputation"
 
-#: urpm/cli/main.py:1903
+#: urpm/cli/main.py:1967
 msgid ""
 "Clear the security blacklist on a server (root, requires manual confirmation)"
 msgstr ""
 "Effacer la liste noire de sécurité d'un serveur (root, nécessite une "
 "confirmation manuelle)"
 
-#: urpm/cli/main.py:1910
+#: urpm/cli/main.py:1974
 msgid ""
 "Acknowledge a blacklist alert so the persistent reminder stops nagging at "
 "every CLI invocation"
@@ -1501,13 +1569,13 @@ msgstr ""
 "Acquitter une alerte de liste noire pour que le rappel persistant cesse "
 "d'apparaître à chaque invocation du CLI"
 
-#: urpm/cli/main.py:1917
+#: urpm/cli/main.py:1981
 msgid "Auto-discover and add servers from Mageia mirrorlist"
 msgstr ""
 "Découvrir et ajouter automatiquement des serveurs depuis la liste des "
 "miroirs Mageia"
 
-#: urpm/cli/main.py:1919
+#: urpm/cli/main.py:1983
 msgid ""
 "Auto-discover and add servers from the Mageia mirror API.\n"
 "\n"
@@ -1523,139 +1591,139 @@ msgstr ""
 "Définissez auto_add = false pour désactiver tout ajout automatique de "
 "serveur.\n"
 
-#: urpm/cli/main.py:1933
+#: urpm/cli/main.py:1997
 msgid "Override detected Mageia version (e.g., 9)"
 msgstr "Remplacer la version de Mageia détectée (ex. : 9)"
 
-#: urpm/cli/main.py:1941
+#: urpm/cli/main.py:2005
 msgid "Manage local package mirroring"
 msgstr "Gérer la mise en miroir locale des paquets"
 
-#: urpm/cli/main.py:1951
+#: urpm/cli/main.py:2015
 msgid "Show mirror status and quotas"
 msgstr "Afficher l'état du miroir et les quotas"
 
-#: urpm/cli/main.py:1954
+#: urpm/cli/main.py:2018
 msgid "Enable mirroring (serve packages to peers)"
 msgstr "Activer la mise en miroir (servir des paquets aux pairs)"
 
-#: urpm/cli/main.py:1957
+#: urpm/cli/main.py:2021
 msgid "Disable mirroring"
 msgstr "Désactiver la mise en miroir"
 
-#: urpm/cli/main.py:1960
+#: urpm/cli/main.py:2024
 msgid "Set global cache quota"
 msgstr "Définir le quota global du cache"
 
-#: urpm/cli/main.py:1963
+#: urpm/cli/main.py:2027
 msgid "Quota size (e.g., 10G, 500M) or empty to show current"
 msgstr ""
 "Taille du quota (ex. : 10G, 500M) ou vide pour afficher la valeur actuelle"
 
-#: urpm/cli/main.py:1969
+#: urpm/cli/main.py:2033
 msgid "Stop serving a Mageia version to peers"
 msgstr "Cesser de servir une version de Mageia aux pairs"
 
-#: urpm/cli/main.py:1973
+#: urpm/cli/main.py:2037
 msgid "Comma-separated version numbers (e.g., 8,9)"
 msgstr "Numéros de version séparés par des virgules (ex. : 8,9)"
 
-#: urpm/cli/main.py:1979
+#: urpm/cli/main.py:2043
 msgid "Resume serving a Mageia version to peers"
 msgstr "Reprendre le service d'une version de Mageia aux pairs"
 
-#: urpm/cli/main.py:1983
+#: urpm/cli/main.py:2047
 msgid "Comma-separated version numbers (e.g., 9)"
 msgstr "Numéros de version séparés par des virgules (ex. : 9)"
 
-#: urpm/cli/main.py:1989
+#: urpm/cli/main.py:2053
 msgid "Enforce quotas and retention policies"
 msgstr "Appliquer les quotas et les politiques de rétention"
 
-#: urpm/cli/main.py:1993
+#: urpm/cli/main.py:2057
 msgid "Show what would be deleted without deleting"
 msgstr "Afficher ce qui serait supprimé sans effectuer de suppression"
 
-#: urpm/cli/main.py:1999
+#: urpm/cli/main.py:2063
 msgid "Force sync according to replication policies"
 msgstr "Forcer la synchronisation selon les politiques de réplication"
 
-#: urpm/cli/main.py:2003
+#: urpm/cli/main.py:2067
 msgid "Specific media to sync (default: all with seed policy)"
 msgstr ""
 "Médias spécifiques à synchroniser (par défaut : tous avec la politique seed)"
 
-#: urpm/cli/main.py:2007
+#: urpm/cli/main.py:2071
 msgid "Only download latest version of each package (smaller, DVD-like)"
 msgstr ""
 "Télécharger uniquement la dernière version de chaque paquet (plus compact, "
 "façon DVD)"
 
-#: urpm/cli/main.py:2013
+#: urpm/cli/main.py:2077
 msgid "Configure rate limiting"
 msgstr "Configurer la limitation de débit"
 
-#: urpm/cli/main.py:2018
+#: urpm/cli/main.py:2082
 msgid "on, off, or N/min (e.g., 60/min)"
 msgstr "on, off, ou N/min (ex. : 60/min)"
 
-#: urpm/cli/main.py:2026
+#: urpm/cli/main.py:2090
 msgid "Manage cache"
 msgstr "Gérer le cache"
 
-#: urpm/cli/main.py:2034
+#: urpm/cli/main.py:2098
 msgid "Cache information"
 msgstr "Informations sur le cache"
 
-#: urpm/cli/main.py:2036
+#: urpm/cli/main.py:2100
 msgid "Clean orphan RPMs from cache"
 msgstr "Nettoyer les RPM orphelins du cache"
 
-#: urpm/cli/main.py:2039
+#: urpm/cli/main.py:2103
 msgid "Show what would be removed without removing"
 msgstr "Afficher ce qui serait supprimé sans effectuer de suppression"
 
-#: urpm/cli/main.py:2043
+#: urpm/cli/main.py:2107
 msgid "Do not ask for confirmation"
 msgstr "Ne pas demander de confirmation"
 
-#: urpm/cli/main.py:2047
+#: urpm/cli/main.py:2111
 msgid "List all orphan files"
 msgstr "Lister tous les fichiers orphelins"
 
-#: urpm/cli/main.py:2050
+#: urpm/cli/main.py:2114
 msgid "Rebuild database from synthesis files"
 msgstr "Reconstruire la base de données depuis les fichiers de synthèse"
 
-#: urpm/cli/main.py:2051
+#: urpm/cli/main.py:2115
 msgid "Detailed cache statistics"
 msgstr "Statistiques détaillées du cache"
 
-#: urpm/cli/main.py:2058
+#: urpm/cli/main.py:2122
 msgid "Show transaction history"
 msgstr "Afficher l'historique des transactions"
 
-#: urpm/cli/main.py:2063
+#: urpm/cli/main.py:2127
 msgid "Number of transactions to show (default: 20)"
 msgstr "Nombre de transactions à afficher (par défaut : 20)"
 
-#: urpm/cli/main.py:2067
+#: urpm/cli/main.py:2131
 msgid "Show only install transactions"
 msgstr "Afficher uniquement les transactions d'installation"
 
-#: urpm/cli/main.py:2071
+#: urpm/cli/main.py:2135
 msgid "Show only remove transactions"
 msgstr "Afficher uniquement les transactions de suppression"
 
-#: urpm/cli/main.py:2075
+#: urpm/cli/main.py:2139
 msgid "Show details of transaction ID"
 msgstr "Afficher les détails d'un identifiant de transaction"
 
-#: urpm/cli/main.py:2079
+#: urpm/cli/main.py:2143
 msgid "Delete transaction(s) from history"
 msgstr "Supprimer des transactions de l'historique"
 
-#: urpm/cli/main.py:2087
+#: urpm/cli/main.py:2151
 msgid ""
 "Rollback transactions: \"rollback 5\" (last 5), \"rollback to 42\" (to #42), "
 "\"rollback to 26/11/2025\""
@@ -1663,22 +1731,22 @@ msgstr ""
 "Annuler des transactions : \"rollback 5\" (les 5 dernières), \"rollback to "
 "42\" (jusqu'à la #42), \"rollback to 26/11/2025\""
 
-#: urpm/cli/main.py:2092
+#: urpm/cli/main.py:2156
 msgid ""
 "N (last N transactions), or \"to N\" (to transaction #N), or \"to DATE\""
 msgstr ""
 "N (les N dernières transactions), ou \"to N\" (jusqu'à la transaction #N), "
 "ou \"to DATE\""
 
-#: urpm/cli/main.py:2104
+#: urpm/cli/main.py:2168
 msgid "Undo last transaction, or a specific one"
 msgstr "Annuler la dernière transaction ou une transaction spécifique"
 
-#: urpm/cli/main.py:2109
+#: urpm/cli/main.py:2173
 msgid "Transaction ID to undo (default: last)"
 msgstr "Identifiant de la transaction à annuler (par défaut : la dernière)"
 
-#: urpm/cli/main.py:2121
+#: urpm/cli/main.py:2185
 msgid ""
 "Remove orphan deps from interrupted transactions (alias: autoremove --"
 "faildeps)"
@@ -1686,64 +1754,64 @@ msgstr ""
 "Supprimer les dépendances orphelines des transactions interrompues (alias : "
 "autoremove --faildeps)"
 
-#: urpm/cli/main.py:2134
+#: urpm/cli/main.py:2198
 msgid "Manage urpm configuration"
 msgstr "Gérer la configuration d'urpm"
 
-#: urpm/cli/main.py:2142
+#: urpm/cli/main.py:2206
 msgid "Manage blacklist (critical packages never removed)"
 msgstr "Gérer la liste noire (paquets critiques jamais supprimés)"
 
-#: urpm/cli/main.py:2146
+#: urpm/cli/main.py:2210
 msgid "Show blacklist"
 msgstr "Afficher la liste noire"
 
-#: urpm/cli/main.py:2147
+#: urpm/cli/main.py:2211
 msgid "Add package to blacklist"
 msgstr "Ajouter un paquet à la liste noire"
 
-#: urpm/cli/main.py:2148 urpm/cli/main.py:2161
+#: urpm/cli/main.py:2212 urpm/cli/main.py:2225
 msgid "Package name to add"
 msgstr "Nom du paquet à ajouter"
 
-#: urpm/cli/main.py:2149
+#: urpm/cli/main.py:2213
 msgid "Remove package from blacklist"
 msgstr "Retirer un paquet de la liste noire"
 
-#: urpm/cli/main.py:2150 urpm/cli/main.py:2163
+#: urpm/cli/main.py:2214 urpm/cli/main.py:2227
 msgid "Package name to remove"
 msgstr "Nom du paquet à retirer"
 
-#: urpm/cli/main.py:2155
+#: urpm/cli/main.py:2219
 msgid "Manage redlist (packages requiring confirmation)"
 msgstr "Gérer la liste rouge (paquets nécessitant une confirmation)"
 
-#: urpm/cli/main.py:2159
+#: urpm/cli/main.py:2223
 msgid "Show redlist"
 msgstr "Afficher la liste rouge"
 
-#: urpm/cli/main.py:2160
+#: urpm/cli/main.py:2224
 msgid "Add package to redlist"
 msgstr "Ajouter un paquet à la liste rouge"
 
-#: urpm/cli/main.py:2162
+#: urpm/cli/main.py:2226
 msgid "Remove package from redlist"
 msgstr "Retirer un paquet de la liste rouge"
 
-#: urpm/cli/main.py:2168
+#: urpm/cli/main.py:2232
 msgid "Number of old kernels to keep (in addition to running)"
 msgstr "Nombre d'anciens noyaux à conserver (en plus du noyau actif)"
 
-#: urpm/cli/main.py:2170
+#: urpm/cli/main.py:2234
 msgid "Number of kernels to keep (show current if omitted)"
 msgstr "Nombre de noyaux à conserver (affiche la valeur actuelle si omis)"
 
-#: urpm/cli/main.py:2175
+#: urpm/cli/main.py:2239
 msgid "Choose between system version and cauldron when both are enabled"
 msgstr ""
 "Choisir entre la version système et cauldron lorsque les deux sont activés"
 
-#: urpm/cli/main.py:2179
+#: urpm/cli/main.py:2243
 msgid ""
 "system=use system version, cauldron=use cauldron, auto=remove preference "
 "(show current if omitted)"
@@ -1751,213 +1819,221 @@ msgstr ""
 "system=utiliser la version système, cauldron=utiliser cauldron, "
 "auto=supprimer la préférence (affiche la valeur actuelle si omis)"
 
-#: urpm/cli/main.py:2183
+#: urpm/cli/main.py:2247
 msgid "Show effective configuration from config files"
 msgstr ""
 "Afficher la configuration effective depuis les fichiers de configuration"
 
-#: urpm/cli/main.py:2189
+#: urpm/cli/main.py:2253
 msgid "Control GNOME Software automatic updates"
 msgstr "Contrôler les mises à jour automatiques de GNOME Software"
 
-#: urpm/cli/main.py:2194 urpm/cli/main.py:2205 urpm/cli/main.py:2216
+#: urpm/cli/main.py:2258 urpm/cli/main.py:2269 urpm/cli/main.py:2280
 msgid "yes/no (show current if omitted)"
 msgstr "yes/no (affiche la valeur actuelle si omis)"
 
-#: urpm/cli/main.py:2200
+#: urpm/cli/main.py:2264
 msgid "Control KDE Discover automatic updates"
 msgstr "Contrôler les mises à jour automatiques de KDE Discover"
 
-#: urpm/cli/main.py:2211
+#: urpm/cli/main.py:2275
 msgid "Control PackageKit offline automatic updates"
 msgstr "Contrôler les mises à jour automatiques hors-ligne de PackageKit"
 
-#: urpm/cli/main.py:2220
+#: urpm/cli/main.py:2284
 msgid "Edit config file with $EDITOR"
 msgstr "Éditer le fichier de configuration avec $EDITOR"
 
-#: urpm/cli/main.py:2224
+#: urpm/cli/main.py:2288
 msgid "Drop-in file to edit (e.g. 00-urpmi-compat); edits urpm.cfg if omitted"
 msgstr ""
 "Fichier drop-in à éditer (ex. 00-urpmi-compat) ; édite urpm.cfg si omis"
 
-#: urpm/cli/main.py:2232
+#: urpm/cli/main.py:2296
 msgid "Manage GPG keys for package verification"
 msgstr "Gérer les clés GPG pour la vérification des paquets"
 
-#: urpm/cli/main.py:2237
+#: urpm/cli/main.py:2301
 msgid "List installed GPG keys"
 msgstr "Lister les clés GPG installées"
 
-#: urpm/cli/main.py:2239
+#: urpm/cli/main.py:2303
 msgid "Import GPG key"
 msgstr "Importer une clé GPG"
 
-#: urpm/cli/main.py:2240
+#: urpm/cli/main.py:2304
 msgid "Path to key file or HTTPS URL"
 msgstr "Chemin vers le fichier de clé ou URL HTTPS"
 
-#: urpm/cli/main.py:2242
+#: urpm/cli/main.py:2306
 msgid "Remove GPG key"
 msgstr "Supprimer une clé GPG"
 
-#: urpm/cli/main.py:2243
+#: urpm/cli/main.py:2307
 msgid "Key ID to remove (e.g., 80420f66)"
 msgstr "Identifiant de la clé à supprimer (ex. : 80420f66)"
 
-#: urpm/cli/main.py:2250
+#: urpm/cli/main.py:2314
 msgid "Manage P2P peers (provenance, blacklist)"
 msgstr "Gérer les pairs P2P (provenance, liste noire)"
 
-#: urpm/cli/main.py:2261
+#: urpm/cli/main.py:2325
 msgid "List peers and download statistics"
 msgstr "Lister les pairs et les statistiques de téléchargement"
 
-#: urpm/cli/main.py:2267
+#: urpm/cli/main.py:2331
 msgid "List packages downloaded from peers"
 msgstr "Lister les paquets téléchargés depuis les pairs"
 
-#: urpm/cli/main.py:2271
+#: urpm/cli/main.py:2335
 msgid "Filter by peer host (optional)"
 msgstr "Filtrer par hôte pair (optionnel)"
 
-#: urpm/cli/main.py:2275
+#: urpm/cli/main.py:2339
 msgid "Max entries to show (default: 50)"
 msgstr "Nombre maximum d'entrées à afficher (par défaut : 50)"
 
-#: urpm/cli/main.py:2281
+#: urpm/cli/main.py:2345
 msgid "Blacklist a peer"
 msgstr "Mettre un pair sur liste noire"
 
-#: urpm/cli/main.py:2283
+#: urpm/cli/main.py:2347
 msgid "Peer host to blacklist"
 msgstr "Hôte pair à mettre sur liste noire"
 
-#: urpm/cli/main.py:2286 urpm/cli/main.py:2301
+#: urpm/cli/main.py:2350 urpm/cli/main.py:2365
 msgid "Specific port (default: all ports)"
 msgstr "Port spécifique (par défaut : tous les ports)"
 
-#: urpm/cli/main.py:2290
+#: urpm/cli/main.py:2354
 msgid "Reason for blacklisting"
 msgstr "Raison de la mise sur liste noire"
 
-#: urpm/cli/main.py:2296
+#: urpm/cli/main.py:2360
 msgid "Remove peer from blacklist"
 msgstr "Retirer un pair de la liste noire"
 
-#: urpm/cli/main.py:2298
+#: urpm/cli/main.py:2362
 msgid "Peer host to unblacklist"
 msgstr "Hôte pair à retirer de la liste noire"
 
-#: urpm/cli/main.py:2307
+#: urpm/cli/main.py:2371
 msgid "Delete RPMs downloaded from a peer (use after blacklist)"
 msgstr ""
 "Supprimer les RPM téléchargés depuis un pair (à utiliser après la mise sur "
 "liste noire)"
 
-#: urpm/cli/main.py:2309
+#: urpm/cli/main.py:2373
 msgid "Peer host to clean"
 msgstr "Hôte pair à nettoyer"
 
-#: urpm/cli/main.py:2313
+#: urpm/cli/main.py:2377
 msgid "Do not prompt for confirmation"
 msgstr "Ne pas demander de confirmation"
 
-#: urpm/cli/main.py:2318
+#: urpm/cli/main.py:2382
 msgid "Show all files (do not truncate list)"
 msgstr "Afficher tous les fichiers (sans tronquer la liste)"
 
-#: urpm/cli/main.py:2326
+#: urpm/cli/main.py:2390
 msgid ""
 "Manage AppStream metadata for software centers (Discover, GNOME Software)"
 msgstr ""
 "Gérer les métadonnées AppStream pour les centres logiciels (Discover, GNOME "
 "Software)"
 
-#: urpm/cli/main.py:2336
+#: urpm/cli/main.py:2400
 msgid "Generate AppStream catalog from package database"
 msgstr "Générer le catalogue AppStream depuis la base de données des paquets"
 
-#: urpm/cli/main.py:2340
+#: urpm/cli/main.py:2404
 #, python-brace-format
 msgid "Output file (default: /var/cache/swcatalog/xml/mageia-{version}.xml.gz)"
 msgstr ""
 "Fichier de sortie (par défaut : /var/cache/swcatalog/xml/mageia-"
 "{version}.xml.gz)"
 
-#: urpm/cli/main.py:2345
+#: urpm/cli/main.py:2409
 msgid "Do not gzip the output file"
 msgstr "Ne pas compresser le fichier de sortie avec gzip"
 
-#: urpm/cli/main.py:2349
+#: urpm/cli/main.py:2413
 msgid "Generate for specific media only"
 msgstr "Générer uniquement pour les médias spécifiés"
 
-#: urpm/cli/main.py:2355
+#: urpm/cli/main.py:2419
 msgid "Show AppStream status for all media"
 msgstr "Afficher l'état AppStream pour tous les médias"
 
-#: urpm/cli/main.py:2361
+#: urpm/cli/main.py:2425
 msgid "Merge per-media AppStream files into unified catalog"
 msgstr "Fusionner les fichiers AppStream par média en un catalogue unifié"
 
-#: urpm/cli/main.py:2366
+#: urpm/cli/main.py:2430
 msgid "Also refresh system AppStream cache"
 msgstr "Actualiser aussi le cache AppStream du système"
 
-#: urpm/cli/main.py:2372
+#: urpm/cli/main.py:2436
 msgid ""
 "Create OS metainfo file for AppStream (required for Discover/GNOME Software)"
 msgstr ""
 "Créer le fichier de métainformation OS pour AppStream (requis pour Discover/"
 "GNOME Software)"
 
-#: urpm/cli/main.py:2377
+#: urpm/cli/main.py:2441
 msgid "Overwrite existing metainfo file"
 msgstr "Écraser le fichier de métainformation existant"
 
-#: urpm/cli/main.py:2385
+#: urpm/cli/main.py:2449
 msgid "Show progress of background transaction"
 msgstr "Afficher la progression d'une transaction en arrière-plan"
 
-#: urpm/cli/main.py:2389
+#: urpm/cli/main.py:2453
 msgid "Continuously watch until completion"
 msgstr "Suivre en continu jusqu'à la fin"
 
-#: urpm/cli/main.py:2397
+#: urpm/cli/main.py:2461
 msgid "Show README messages from transactions"
 msgstr "Afficher les messages README des transactions"
 
-#: urpm/cli/main.py:2401
+#: urpm/cli/main.py:2465
 msgid "Show README from the last transaction (default)"
 msgstr "Afficher le README de la dernière transaction (défaut)"
 
-#: urpm/cli/main.py:2405
+#: urpm/cli/main.py:2469
 msgid "Show README from a specific transaction ID"
 msgstr "Afficher le README d'un identifiant de transaction spécifique"
 
-#: urpm/cli/main.py:2409
+#: urpm/cli/main.py:2473
 msgid "List transactions that have README messages"
 msgstr "Lister les transactions ayant des messages README"
 
-#: urpm/cli/main.py:2421
+#: urpm/cli/main.py:2485
 #, python-brace-format
 msgid "Command '{command}' not yet implemented"
 msgstr "La commande '{command}' n'est pas encore implémentée"
 
-#: urpm/cli/main.py:2456
+#: urpm/cli/main.py:2520
 #, python-brace-format
 msgid "unrecognized arguments: {args}"
 msgstr "arguments non reconnus : {args}"
 
-#: urpm/cli/main.py:2739
+#: urpm/cli/main.py:2612
+msgid "urpm genmedia is not installed on this system."
+msgstr "urpm genmedia n'est pas installé sur ce système."
+
+#: urpm/cli/main.py:2615
+msgid "Install the urpm-ng-genmedia subpackage:"
+msgstr "Installer le sous-paquet urpm-ng-genmedia :"
+
+#: urpm/cli/main.py:2815
 msgid "Interrupted"
 msgstr "Interrompu"
 
-#: urpm/cli/main.py:2747 urpm/cli/commands/install.py:207
-#: urpm/cli/commands/install.py:210 urpm/cli/commands/install.py:1209
-#: urpm/cli/commands/install.py:1212 urpm/cli/commands/history.py:619
-#: urpm/cli/commands/config.py:346 urpm/cli/commands/build.py:1602
+#: urpm/cli/main.py:2823 urpm/cli/commands/install.py:212
+#: urpm/cli/commands/install.py:215 urpm/cli/commands/install.py:1222
+#: urpm/cli/commands/install.py:1225 urpm/cli/commands/history.py:619
+#: urpm/cli/commands/config.py:346 urpm/cli/commands/build.py:1731
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "Erreur : {error}"
@@ -2050,29 +2126,33 @@ msgstr ""
 msgid "  (This message will not appear again)"
 msgstr " (Ce message n'apparaîtra plus)"
 
-#: urpm/cli/commands/install.py:153
-msgid "Error: --nodeps requires --download-only"
-msgstr "Erreur : --nodeps nécessite --download-only"
+#: urpm/cli/commands/install.py:158
+msgid ""
+"  --nodeps: dependency resolution skipped (installing exactly the requested "
+"packages)"
+msgstr ""
+"  --nodeps : résolution des dépendances ignorée (installation exacte des "
+"paquets demandés)"
 
-#: urpm/cli/commands/install.py:172 urpm/cli/commands/install.py:1175
+#: urpm/cli/commands/install.py:177 urpm/cli/commands/install.py:1188
 msgid "Multiple .spec files found:"
 msgstr "Plusieurs fichiers .spec trouvés :"
 
-#: urpm/cli/commands/install.py:176 urpm/cli/commands/install.py:1179
+#: urpm/cli/commands/install.py:181 urpm/cli/commands/install.py:1192
 msgid "Error: Multiple .spec files found. Specify which one to use."
 msgstr "Erreur : plusieurs fichiers .spec trouvés. Spécifiez lequel utiliser."
 
-#: urpm/cli/commands/install.py:179 urpm/cli/commands/install.py:1182
+#: urpm/cli/commands/install.py:184 urpm/cli/commands/install.py:1195
 msgid "Select spec file (number): "
 msgstr "Sélectionnez le fichier spec (numéro) : "
 
-#: urpm/cli/commands/install.py:184 urpm/cli/commands/install.py:1187
+#: urpm/cli/commands/install.py:189 urpm/cli/commands/install.py:1200
 msgid "Invalid choice"
 msgstr "Choix invalide"
 
-#: urpm/cli/commands/install.py:187 urpm/cli/commands/install.py:1190
-#: urpm/cli/commands/install.py:1322 urpm/cli/commands/upgrade.py:287
-#: urpm/cli/commands/media.py:1320 urpm/cli/commands/cleanup.py:214
+#: urpm/cli/commands/install.py:192 urpm/cli/commands/install.py:1203
+#: urpm/cli/commands/install.py:1341 urpm/cli/commands/upgrade.py:287
+#: urpm/cli/commands/media.py:1453 urpm/cli/commands/cleanup.py:214
 msgid ""
 "\n"
 "Aborted."
@@ -2080,85 +2160,84 @@ msgstr ""
 "\n"
 "Annulé."
 
-#: urpm/cli/commands/install.py:200 urpm/cli/commands/install.py:1203
+#: urpm/cli/commands/install.py:205 urpm/cli/commands/install.py:1216
 #, python-brace-format
 msgid "Build dependencies from: {source}"
 msgstr "Dépendances de construction depuis : {source}"
 
-#: urpm/cli/commands/install.py:201 urpm/cli/commands/install.py:1204
+#: urpm/cli/commands/install.py:206 urpm/cli/commands/install.py:1217
 #, python-brace-format
 msgid "Found {count} BuildRequires"
 msgstr "{count} BuildRequires trouvés"
 
-#: urpm/cli/commands/install.py:217 urpm/cli/commands/install.py:224
-#: urpm/cli/commands/install.py:1216
+#: urpm/cli/commands/install.py:222 urpm/cli/commands/install.py:229
+#: urpm/cli/commands/install.py:1229
 msgid "Error: No packages specified"
 msgstr "Erreur : aucun paquet spécifié"
 
-#: urpm/cli/commands/install.py:218
+#: urpm/cli/commands/install.py:223
 msgid "Usage: urpm install --install-src <srpm_file_or_package_name>"
 msgstr "Utilisation : urpm install --install-src <fichier_srpm_ou_nom_paquet>"
 
-#: urpm/cli/commands/install.py:225
+#: urpm/cli/commands/install.py:230
 msgid "Usage: urpm install <packages> or urpm install --buildrequires <spec>"
 msgstr ""
 "Utilisation : urpm install <paquets> ou urpm install --buildrequires <spec>"
 
-#: urpm/cli/commands/install.py:241 urpm/cli/commands/config.py:356
+#: urpm/cli/commands/install.py:246 urpm/cli/commands/config.py:356
 #, python-brace-format
 msgid "Error: file not found: {path}"
 msgstr "Erreur : fichier non trouvé : {path}"
 
-#: urpm/cli/commands/install.py:246
+#: urpm/cli/commands/install.py:251
 #, python-brace-format
 msgid "Error: cannot read RPM file: {path}"
 msgstr "Erreur : impossible de lire le fichier RPM : {path}"
 
-#: urpm/cli/commands/install.py:252
+#: urpm/cli/commands/install.py:257
 #, python-brace-format
 msgid "Error: signature verification failed for {path}"
 msgstr "Erreur : échec de la vérification de signature pour {path}"
 
-#: urpm/cli/commands/install.py:254 urpm/cli/commands/upgrade.py:95
+#: urpm/cli/commands/install.py:259 urpm/cli/commands/upgrade.py:95
 msgid "  Use --nosignature to skip verification (not recommended)"
 msgstr "Utilisez --nosignature pour ignorer la vérification (non recommandé)"
 
-#: urpm/cli/commands/install.py:295
+#: urpm/cli/commands/install.py:300
 #, python-brace-format
 msgid "Found {count} sibling RPMs (available for dependencies)"
 msgstr "{count} RPM frères trouvés (disponibles pour les dépendances)"
 
-#: urpm/cli/commands/install.py:299 urpm/cli/commands/upgrade.py:104
+#: urpm/cli/commands/install.py:304 urpm/cli/commands/upgrade.py:104
 #, python-brace-format
 msgid "Local RPM files ({count}):"
 msgstr "Fichiers RPM locaux ({count}) :"
 
-#: urpm/cli/commands/install.py:349 urpm/cli/commands/install.py:1319
+#: urpm/cli/commands/install.py:354 urpm/cli/commands/install.py:1338
 #: urpm/cli/commands/remove.py:186 urpm/cli/commands/remove.py:189
-#: urpm/cli/commands/upgrade.py:284 urpm/cli/commands/media.py:1317
-#: urpm/cli/commands/server.py:839 urpm/cli/commands/cleanup.py:211
+#: urpm/cli/commands/upgrade.py:284 urpm/cli/commands/media.py:1450
+#: urpm/cli/commands/server.py:866 urpm/cli/commands/cleanup.py:211
 msgid "Aborted."
 msgstr "Annulé."
 
-#: urpm/cli/commands/install.py:401 urpm/cli/commands/install.py:1275
+#: urpm/cli/commands/install.py:406 urpm/cli/commands/install.py:1288
 #, python-brace-format
 msgid "Packages not found ({count}):"
 msgstr "Paquets non trouvés ({count}) :"
 
-#: urpm/cli/commands/install.py:405 urpm/cli/commands/install.py:1279
-#: urpm/cli/commands/install.py:1311 urpm/cli/commands/history.py:131
+#: urpm/cli/commands/install.py:410 urpm/cli/commands/history.py:131
 #: urpm/cli/commands/mirror.py:514
 #, python-brace-format
 msgid "... and {count} more"
 msgstr "... et {count} autres"
 
-#: urpm/cli/commands/install.py:422 urpm/cli/commands/install.py:791
-#: urpm/cli/commands/install.py:1290 urpm/cli/commands/remove.py:76
+#: urpm/cli/commands/install.py:427 urpm/cli/commands/install.py:796
+#: urpm/cli/commands/install.py:1306 urpm/cli/commands/remove.py:76
 #: urpm/cli/commands/upgrade.py:140
 msgid "Resolution failed:"
 msgstr "Échec de la résolution :"
 
-#: urpm/cli/commands/install.py:492
+#: urpm/cli/commands/install.py:497
 #, python-brace-format
 msgid ""
 "Error: package '{pkg}' is not available for arch '{arch}' (available for: "
@@ -2167,26 +2246,27 @@ msgstr ""
 "Erreur : le paquet « {pkg} » n'est pas disponible pour l'arch « {arch} » "
 "(disponible pour : {archs})"
 
-#: urpm/cli/commands/install.py:506
+#: urpm/cli/commands/install.py:511
 msgid "Nothing to do"
 msgstr "Rien à faire"
 
-#: urpm/cli/commands/install.py:570 urpm/cli/helpers/package.py:314
+#: urpm/cli/commands/install.py:575 urpm/cli/helpers/package.py:314
 #: urpm/cli/helpers/package.py:346
 msgid "All"
 msgstr "Tous"
 
-#: urpm/cli/commands/install.py:573 urpm/cli/helpers/package.py:317
+#: urpm/cli/commands/install.py:578 urpm/cli/helpers/package.py:317
 #: urpm/cli/helpers/package.py:349
 msgid "Choice [1]: "
 msgstr "Choix [1] : "
 
-#: urpm/cli/commands/install.py:620 urpm/cli/commands/install.py:714
-#: urpm/cli/commands/install.py:727 urpm/cli/commands/install.py:876
-#: urpm/cli/commands/media.py:430 urpm/cli/commands/media.py:654
-#: urpm/cli/commands/cache.py:91 urpm/cli/commands/history.py:280
-#: urpm/cli/commands/history.py:741 urpm/cli/commands/config.py:399
-#: urpm/cli/commands/peer.py:207 urpm/cli/commands/cleanup.py:605
+#: urpm/cli/commands/install.py:625 urpm/cli/commands/install.py:719
+#: urpm/cli/commands/install.py:732 urpm/cli/commands/install.py:881
+#: urpm/cli/commands/media.py:402 urpm/cli/commands/media.py:731
+#: urpm/cli/commands/media.py:909 urpm/cli/commands/cache.py:91
+#: urpm/cli/commands/history.py:280 urpm/cli/commands/history.py:741
+#: urpm/cli/commands/config.py:399 urpm/cli/commands/peer.py:207
+#: urpm/cli/commands/cleanup.py:605
 msgid ""
 "\n"
 "Aborted"
@@ -2194,70 +2274,70 @@ msgstr ""
 "\n"
 "Annulé"
 
-#: urpm/cli/commands/install.py:706
+#: urpm/cli/commands/install.py:711
 #, python-brace-format
 msgid "Recommended packages ({count})"
 msgstr "Paquets recommandés ({count})"
 
-#: urpm/cli/commands/install.py:711
+#: urpm/cli/commands/install.py:716
 msgid "Install recommended packages? [Y/n] "
 msgstr "Installer les paquets recommandés ? [O/n] "
 
-#: urpm/cli/commands/install.py:719
+#: urpm/cli/commands/install.py:724
 #, python-brace-format
 msgid "Suggested packages ({count})"
 msgstr "Paquets suggérés ({count})"
 
-#: urpm/cli/commands/install.py:724
+#: urpm/cli/commands/install.py:729
 msgid "Install suggested packages? [Y/n] "
 msgstr "Installer les paquets suggérés ? [O/n] "
 
-#: urpm/cli/commands/install.py:799
+#: urpm/cli/commands/install.py:804
 msgid "Skipped suggests:"
 msgstr "Suggestions ignorées :"
 
-#: urpm/cli/commands/install.py:834 urpm/cli/commands/upgrade.py:247
+#: urpm/cli/commands/install.py:839 urpm/cli/commands/upgrade.py:247
 msgid "Transaction summary:"
 msgstr "Résumé de la transaction :"
 
-#: urpm/cli/commands/install.py:838
+#: urpm/cli/commands/install.py:843
 #, python-brace-format
 msgid "Requested ({count})"
 msgstr "Demandés ({count})"
 
-#: urpm/cli/commands/install.py:843
+#: urpm/cli/commands/install.py:848
 #, python-brace-format
 msgid "Dependencies ({count})"
 msgstr "Dépendances ({count})"
 
-#: urpm/cli/commands/install.py:848
+#: urpm/cli/commands/install.py:853
 #, python-brace-format
 msgid "Recommended ({count})"
 msgstr "Recommandés ({count})"
 
-#: urpm/cli/commands/install.py:853
+#: urpm/cli/commands/install.py:858
 #, python-brace-format
 msgid "Suggested ({count})"
 msgstr "Suggérés ({count})"
 
-#: urpm/cli/commands/install.py:859
+#: urpm/cli/commands/install.py:864
 #, python-brace-format
 msgid "Obsoleted ({count})"
 msgstr "Obsolètes ({count})"
 
-#: urpm/cli/commands/install.py:865
+#: urpm/cli/commands/install.py:870
 #, python-brace-format
 msgid "Total: {install} to install, {remove} to remove"
 msgstr "Total : {install} à installer, {remove} à supprimer"
 
-#: urpm/cli/commands/install.py:867
+#: urpm/cli/commands/install.py:872
 #, python-brace-format
 msgid "Total: {count} package"
 msgid_plural "Total: {count} packages"
 msgstr[0] "Total : {count} paquet"
 msgstr[1] "Total : {count} paquets"
 
-#: urpm/cli/commands/install.py:871
+#: urpm/cli/commands/install.py:876
 msgid ""
 "\n"
 "Proceed with installation? [y/N] "
@@ -2265,18 +2345,18 @@ msgstr ""
 "\n"
 "Procéder à l'installation ? [o/N] "
 
-#: urpm/cli/commands/install.py:873 urpm/cli/commands/media.py:427
-#: urpm/cli/commands/media.py:651 urpm/cli/commands/cache.py:88
-#: urpm/cli/commands/history.py:277 urpm/cli/commands/history.py:738
-#: urpm/cli/commands/config.py:396 urpm/cli/commands/peer.py:204
-#: urpm/cli/commands/depends.py:92 urpm/cli/commands/cleanup.py:602
-#: urpm/cli/helpers/alternatives.py:423 urpm/cli/helpers/alternatives.py:563
-#: urpm/cli/helpers/alternatives.py:938 urpm/cli/helpers/alternatives.py:1036
-#: urpm/cli/helpers/alternatives.py:1105
+#: urpm/cli/commands/install.py:878 urpm/cli/commands/media.py:399
+#: urpm/cli/commands/media.py:728 urpm/cli/commands/media.py:912
+#: urpm/cli/commands/cache.py:88 urpm/cli/commands/history.py:277
+#: urpm/cli/commands/history.py:738 urpm/cli/commands/config.py:396
+#: urpm/cli/commands/peer.py:204 urpm/cli/commands/depends.py:92
+#: urpm/cli/commands/cleanup.py:602 urpm/cli/helpers/alternatives.py:423
+#: urpm/cli/helpers/alternatives.py:563 urpm/cli/helpers/alternatives.py:938
+#: urpm/cli/helpers/alternatives.py:1036 urpm/cli/helpers/alternatives.py:1105
 msgid "Aborted"
 msgstr "Annulé"
 
-#: urpm/cli/commands/install.py:888 urpm/cli/commands/upgrade.py:291
+#: urpm/cli/commands/install.py:893 urpm/cli/commands/upgrade.py:291
 msgid ""
 "\n"
 "(dry run - no changes made)"
@@ -2284,7 +2364,7 @@ msgstr ""
 "\n"
 "(simulation - aucune modification effectuée)"
 
-#: urpm/cli/commands/install.py:898 urpm/cli/commands/upgrade.py:301
+#: urpm/cli/commands/install.py:903 urpm/cli/commands/upgrade.py:301
 #, python-brace-format
 msgid "Auto-added {count} mirror for parallel downloads:"
 msgid_plural "Auto-added {count} mirrors for parallel downloads:"
@@ -2293,7 +2373,7 @@ msgstr[0] ""
 msgstr[1] ""
 "{count} miroirs ajoutés automatiquement pour les téléchargements parallèles :"
 
-#: urpm/cli/commands/install.py:905 urpm/cli/commands/upgrade.py:308
+#: urpm/cli/commands/install.py:910 urpm/cli/commands/upgrade.py:308
 #, python-brace-format
 msgid ""
 "Not enough mirrors for {n} parallel downloads (have {had}, need {needed})"
@@ -2301,7 +2381,7 @@ msgstr ""
 "Pas assez de miroirs pour {n} téléchargements parallèles (disponibles : "
 "{had}, requis : {needed})"
 
-#: urpm/cli/commands/install.py:923 urpm/cli/commands/install.py:1342
+#: urpm/cli/commands/install.py:928 urpm/cli/commands/install.py:1361
 msgid ""
 "\n"
 "Downloading packages..."
@@ -2309,7 +2389,7 @@ msgstr ""
 "\n"
 "Téléchargement des paquets..."
 
-#: urpm/cli/commands/install.py:958 urpm/cli/commands/install.py:1373
+#: urpm/cli/commands/install.py:963 urpm/cli/commands/install.py:1392
 #: urpm/cli/commands/upgrade.py:359
 #, python-brace-format
 msgid "{count} download failed:"
@@ -2317,13 +2397,13 @@ msgid_plural "{count} downloads failed:"
 msgstr[0] "{count} téléchargement a échoué :"
 msgstr[1] "{count} téléchargements ont échoué :"
 
-#: urpm/cli/commands/install.py:971 urpm/cli/commands/install.py:973
+#: urpm/cli/commands/install.py:980 urpm/cli/commands/install.py:984
 #: urpm/cli/commands/upgrade.py:373 urpm/cli/commands/upgrade.py:378
 #, python-brace-format
 msgid "{count} downloaded"
 msgstr "{count} téléchargé(s)"
 
-#: urpm/cli/commands/install.py:971
+#: urpm/cli/commands/install.py:981
 #, python-brace-format
 msgid ""
 "({peers} from peers, {upstream} from mirrors), {cached} from cache in {time}"
@@ -2331,12 +2411,12 @@ msgstr ""
 "({peers} depuis les pairs, {upstream} depuis les miroirs), {cached} depuis "
 "le cache en {time}"
 
-#: urpm/cli/commands/install.py:973
+#: urpm/cli/commands/install.py:985
 #, python-brace-format
 msgid "{cached} from cache in {time}"
 msgstr "{cached} depuis le cache en {time}"
 
-#: urpm/cli/commands/install.py:982
+#: urpm/cli/commands/install.py:994
 msgid ""
 "\n"
 "Packages downloaded to cache. Use 'urpm install' to install them later."
@@ -2345,11 +2425,11 @@ msgstr ""
 "Paquets téléchargés dans le cache. Utilisez 'urpm install' pour les "
 "installer plus tard."
 
-#: urpm/cli/commands/install.py:996
+#: urpm/cli/commands/install.py:1008
 msgid "No packages to install"
 msgstr "Aucun paquet à installer"
 
-#: urpm/cli/commands/install.py:1021
+#: urpm/cli/commands/install.py:1033
 #, python-brace-format
 msgid ""
 "System restart required ({packages}) — triggers will run in synchronous mode."
@@ -2357,56 +2437,61 @@ msgstr ""
 "Redémarrage système requis ({packages}) — les triggers seront exécutés en "
 "mode synchrone."
 
-#: urpm/cli/commands/install.py:1092 urpm/cli/commands/history.py:495
+#: urpm/cli/commands/install.py:1105 urpm/cli/commands/history.py:495
 #, python-brace-format
 msgid "Installing {count} package..."
 msgid_plural "Installing {count} packages..."
 msgstr[0] "Installation de {count} paquet..."
 msgstr[1] "Installation de {count} paquets..."
 
-#: urpm/cli/commands/install.py:1217
+#: urpm/cli/commands/install.py:1230
 msgid "Usage: urpm download [packages...] [--buildrequires [spec]]"
 msgstr "Utilisation : urpm download [paquets...] [--buildrequires [spec]]"
 
-#: urpm/cli/commands/install.py:1230
+#: urpm/cli/commands/install.py:1243
 msgid "Resolving packages for download..."
 msgstr "Résolution des paquets pour le téléchargement..."
 
-#: urpm/cli/commands/install.py:1232
+#: urpm/cli/commands/install.py:1245
 #, python-brace-format
 msgid "Target release: {release}"
 msgstr "Version cible : {release}"
 
-#: urpm/cli/commands/install.py:1233
+#: urpm/cli/commands/install.py:1246
 #, python-brace-format
 msgid "Target arch: {arch}"
 msgstr "Architecture cible : {arch}"
 
-#: urpm/cli/commands/install.py:1234
+#: urpm/cli/commands/install.py:1247
 #, python-brace-format
 msgid "Packages: {packages}"
 msgstr "Paquets : {packages}"
 
-#: urpm/cli/commands/install.py:1234
+#: urpm/cli/commands/install.py:1247
 #, python-brace-format
 msgid " ... (+{count} more)"
 msgstr " ... (+{count} autres)"
 
-#: urpm/cli/commands/install.py:1299
+#: urpm/cli/commands/install.py:1294 urpm/cli/commands/install.py:1329
+#, python-brace-format
+msgid "... and {count} more (use --show-all to list them)"
+msgstr "... et {count} autres (utiliser --show-all pour tous les afficher)"
+
+#: urpm/cli/commands/install.py:1315
 msgid "Nothing to download - all packages already available."
 msgstr "Rien à télécharger - tous les paquets sont déjà disponibles."
 
-#: urpm/cli/commands/install.py:1306
+#: urpm/cli/commands/install.py:1322
 #, python-brace-format
 msgid "Packages to download ({count}):"
 msgstr "Paquets à télécharger ({count}) :"
 
-#: urpm/cli/commands/install.py:1312
+#: urpm/cli/commands/install.py:1331
 #, python-brace-format
 msgid "Total download size: {size}"
 msgstr "Taille totale du téléchargement : {size}"
 
-#: urpm/cli/commands/install.py:1317
+#: urpm/cli/commands/install.py:1336
 msgid ""
 "\n"
 "Proceed with download? [Y/n] "
@@ -2414,11 +2499,11 @@ msgstr ""
 "\n"
 "Procéder au téléchargement ? [O/n] "
 
-#: urpm/cli/commands/install.py:1338
+#: urpm/cli/commands/install.py:1357
 msgid "No packages to download"
 msgstr "Aucun paquet à télécharger"
 
-#: urpm/cli/commands/install.py:1388
+#: urpm/cli/commands/install.py:1407
 #, python-brace-format
 msgid "{count} downloaded package failed signature verification:"
 msgid_plural "{count} downloaded packages failed signature verification:"
@@ -2426,47 +2511,47 @@ msgstr[0] "{count} paquet téléchargé a échoué à la vérification de signat
 msgstr[1] ""
 "{count} paquets téléchargés ont échoué à la vérification de signature :"
 
-#: urpm/cli/commands/install.py:1395
+#: urpm/cli/commands/install.py:1414
 msgid "Corrupt files have been removed from cache."
 msgstr "Les fichiers corrompus ont été supprimés du cache."
 
-#: urpm/cli/commands/install.py:1402
+#: urpm/cli/commands/install.py:1421
 msgid "Download complete"
 msgstr "Téléchargement terminé"
 
-#: urpm/cli/commands/install.py:1403
+#: urpm/cli/commands/install.py:1422
 #, python-brace-format
 msgid "{downloaded} downloaded, {cached} from cache in {time}"
 msgstr "{downloaded} téléchargé(s), {cached} depuis le cache en {time}"
 
-#: urpm/cli/commands/install.py:1405
+#: urpm/cli/commands/install.py:1424
 #, python-brace-format
 msgid "P2P: {peers} from peers, {upstream} from upstream"
 msgstr ""
 "P2P : {peers} depuis les pairs, {upstream} depuis les sources distantes"
 
-#: urpm/cli/commands/install.py:1411
+#: urpm/cli/commands/install.py:1430
 msgid "Packages saved to cache. Use 'urpm install' to install them."
 msgstr ""
 "Paquets sauvegardés dans le cache. Utilisez 'urpm install' pour les "
 "installer."
 
-#: urpm/cli/commands/install.py:1441
+#: urpm/cli/commands/install.py:1460
 #, python-brace-format
 msgid "Error: cannot find source RPM for '{pkg}'"
 msgstr "Erreur : impossible de trouver le RPM source pour '{pkg}'"
 
-#: urpm/cli/commands/install.py:1457
+#: urpm/cli/commands/install.py:1476
 #, python-brace-format
 msgid "Extracting source RPM: {srpm}"
 msgstr "Extraction du RPM source : {srpm}"
 
-#: urpm/cli/commands/install.py:1469
+#: urpm/cli/commands/install.py:1488
 #, python-brace-format
 msgid "Error: rpm -i failed for {srpm}"
 msgstr "Erreur : rpm -i a échoué pour {srpm}"
 
-#: urpm/cli/commands/install.py:1480
+#: urpm/cli/commands/install.py:1499
 #, python-brace-format
 msgid "  Extracted {specs} spec file(s) and {sources} source file(s) to {dest}"
 msgstr ""
@@ -2809,7 +2894,7 @@ msgstr "Taille :"
 msgid "Group:"
 msgstr "Groupe :"
 
-#: urpm/cli/commands/query.py:234 urpm/cli/commands/media.py:1349
+#: urpm/cli/commands/query.py:234 urpm/cli/commands/media.py:1515
 msgid "Summary:"
 msgstr "Résumé :"
 
@@ -2948,7 +3033,7 @@ msgstr "Aucun média configuré"
 msgid "No enabled media (use --all to see disabled)"
 msgstr "Aucun média activé (utilisez --all pour voir les désactivés)"
 
-#: urpm/cli/commands/media.py:64 urpm/cli/commands/media.py:1710
+#: urpm/cli/commands/media.py:64 urpm/cli/commands/media.py:1886
 msgid "[x]"
 msgstr "[x]"
 
@@ -2969,24 +3054,24 @@ msgstr "(aucun serveur)"
 msgid "({n} disabled media hidden — use --all to see them)"
 msgstr "({n} média(s) désactivé(s) masqué(s) — utilisez --all pour les voir)"
 
-#: urpm/cli/commands/media.py:134
+#: urpm/cli/commands/media.py:123
 #, python-brace-format
 msgid "Using mirrorlist: {url}"
 msgstr "Utilisation de la liste des miroirs : {url}"
 
-#: urpm/cli/commands/media.py:136
+#: urpm/cli/commands/media.py:125
 msgid "Either --mirrorlist or --release is required"
 msgstr "--mirrorlist ou --release est requis"
 
-#: urpm/cli/commands/media.py:137
+#: urpm/cli/commands/media.py:126
 msgid "Examples:"
 msgstr "Exemples :"
 
-#: urpm/cli/commands/media.py:138
+#: urpm/cli/commands/media.py:127
 msgid "  urpm init --release 10"
 msgstr " urpm init --release 10"
 
-#: urpm/cli/commands/media.py:139
+#: urpm/cli/commands/media.py:128
 msgid ""
 "  urpm init --mirrorlist 'https://mirrors.mageia.org/api/"
 "mageia.10.x86_64.list'"
@@ -2994,146 +3079,131 @@ msgstr ""
 " urpm init --mirrorlist 'https://mirrors.mageia.org/api/"
 "mageia.10.x86_64.list'"
 
-#: urpm/cli/commands/media.py:163
+#: urpm/cli/commands/media.py:152
 msgid "Cannot determine Mageia version"
 msgstr "Impossible de déterminer la version de Mageia"
 
-#: urpm/cli/commands/media.py:164
+#: urpm/cli/commands/media.py:153
 msgid "Use --release to specify (e.g., --release 10 or --release cauldron)"
 msgstr ""
 "Utilisez --release pour spécifier (ex. : --release 10 ou --release cauldron)"
 
-#: urpm/cli/commands/media.py:169
+#: urpm/cli/commands/media.py:166
 #, python-brace-format
 msgid "Initializing urpm in {path}"
 msgstr "Initialisation d'urpm dans {path}"
 
-#: urpm/cli/commands/media.py:175
+#: urpm/cli/commands/media.py:172
 msgid "Preparing chroot filesystem..."
 msgstr "Préparation du système de fichiers chroot..."
 
-#: urpm/cli/commands/media.py:247
+#: urpm/cli/commands/media.py:245
 msgid "  Skipping mount operations (container mode)"
 msgstr " Opérations de montage ignorées (mode conteneur)"
 
-#: urpm/cli/commands/media.py:250
+#: urpm/cli/commands/media.py:248
 msgid "  Filesystem has nodev - bind mounting /dev from host..."
 msgstr ""
 " Le système de fichiers a nodev - montage bind de /dev depuis l'hôte..."
 
-#: urpm/cli/commands/media.py:252
+#: urpm/cli/commands/media.py:250
 msgid "  Bind mounting /dev from host..."
 msgstr " Montage bind de /dev depuis l'hôte..."
 
-#: urpm/cli/commands/media.py:260 urpm/cli/commands/media.py:328
+#: urpm/cli/commands/media.py:258 urpm/cli/commands/media.py:326
 #, python-brace-format
 msgid "  (unmount with: umount {path})"
 msgstr " (démonter avec : umount {path})"
 
-#: urpm/cli/commands/media.py:262
+#: urpm/cli/commands/media.py:260
 #, python-brace-format
 msgid "  Failed to mount /dev: {error}"
 msgstr " Échec du montage de /dev : {error}"
 
-#: urpm/cli/commands/media.py:264
+#: urpm/cli/commands/media.py:262
 msgid "  Falling back to creating device nodes..."
 msgstr " Repli sur la création de nœuds de périphériques..."
 
-#: urpm/cli/commands/media.py:285
+#: urpm/cli/commands/media.py:283
 msgid "  /dev already mounted"
 msgstr " /dev déjà monté"
 
-#: urpm/cli/commands/media.py:322
+#: urpm/cli/commands/media.py:320
 msgid "  Mounting /proc..."
 msgstr " Montage de /proc..."
 
-#: urpm/cli/commands/media.py:330
+#: urpm/cli/commands/media.py:328
 #, python-brace-format
 msgid "  Failed to mount /proc: {error}"
 msgstr " Échec du montage de /proc : {error}"
 
-#: urpm/cli/commands/media.py:332
+#: urpm/cli/commands/media.py:330
 msgid "  /proc already mounted"
 msgstr " /proc déjà monté"
 
-#: urpm/cli/commands/media.py:386
+#: urpm/cli/commands/media.py:358
 msgid "Initializing rpmdb..."
 msgstr "Initialisation de rpmdb..."
 
-#: urpm/cli/commands/media.py:392
+#: urpm/cli/commands/media.py:364
 #, python-brace-format
 msgid "Failed to initialize rpmdb: {error}"
 msgstr "Échec de l'initialisation de rpmdb : {error}"
 
-#: urpm/cli/commands/media.py:396
+#: urpm/cli/commands/media.py:368
 msgid "Importing Mageia GPG key..."
 msgstr "Importation de la clé GPG de Mageia..."
 
-#: urpm/cli/commands/media.py:410
+#: urpm/cli/commands/media.py:382
 #, python-brace-format
 msgid "  Imported key from {path}"
 msgstr " Clé importée depuis {path}"
 
-#: urpm/cli/commands/media.py:414
+#: urpm/cli/commands/media.py:386
 msgid "  Could not import GPG key (use --nosignature if needed)"
 msgstr ""
 " Impossible d'importer la clé GPG (utilisez --nosignature si nécessaire)"
 
-#: urpm/cli/commands/media.py:416
+#: urpm/cli/commands/media.py:388
 #, python-brace-format
 msgid "Initializing urpm for Mageia {version} ({arch})"
 msgstr "Initialisation d'urpm pour Mageia {version} ({arch})"
 
-#: urpm/cli/commands/media.py:421
+#: urpm/cli/commands/media.py:393
 #, python-brace-format
 msgid "Warning: {count} media already configured"
 msgstr "Attention : {count} média déjà configuré(s)"
 
-#: urpm/cli/commands/media.py:425
+#: urpm/cli/commands/media.py:397
 msgid "Continue and add more? [y/N] "
 msgstr "Continuer et en ajouter d'autres ? [o/N] "
 
-#: urpm/cli/commands/media.py:441
+#: urpm/cli/commands/media.py:413
 msgid "No servers could be added"
 msgstr "Aucun serveur n'a pu être ajouté"
 
-#: urpm/cli/commands/media.py:445
+#: urpm/cli/commands/media.py:428
 #, python-brace-format
 msgid ""
 "\n"
-"Adding standard media for Mageia {version} ({arch})..."
-msgstr ""
-"\n"
-"Ajout des médias standards pour Mageia {version} ({arch})..."
+"Discovering media for Mageia {version} ({arch})..."
+msgstr "\nDécouverte des médias pour Mageia {version} ({arch})..."
 
-#: urpm/cli/commands/media.py:457
+#: urpm/cli/commands/media.py:445
 #, python-brace-format
-msgid "  {name}: already exists"
-msgstr " {name} : existe déjà"
+msgid "  {name}: {error}"
+msgstr "  {name} : {error}"
 
-#: urpm/cli/commands/media.py:475
+#: urpm/cli/commands/media.py:459
+msgid "No media could be added"
+msgstr "Aucun média n'a pu être ajouté"
+
+#: urpm/cli/commands/media.py:463
 #, python-brace-format
 msgid "  {name} (id={id})"
 msgstr " {name} (id={id})"
 
-#: urpm/cli/commands/media.py:478
-#, python-brace-format
-msgid "  Failed to add {name}: {error}"
-msgstr " Échec de l'ajout de {name} : {error}"
-
-#: urpm/cli/commands/media.py:481
-msgid "No media could be added"
-msgstr "Aucun média n'a pu être ajouté"
-
-#: urpm/cli/commands/media.py:485
-msgid ""
-"\n"
-"Linking servers to media..."
-msgstr ""
-"\n"
-"Association des serveurs aux médias..."
-
-#: urpm/cli/commands/media.py:496
+#: urpm/cli/commands/media.py:466
 #, python-brace-format
 msgid ""
 "\n"
@@ -3142,33 +3212,60 @@ msgstr ""
 "\n"
 "Initialisé avec {servers} serveur(s) et {media} média(s)"
 
-#: urpm/cli/commands/media.py:500
+#: urpm/cli/commands/media.py:494
+#, python-brace-format
 msgid ""
 "\n"
-"Syncing media metadata..."
-msgstr ""
-"\n"
-"Synchronisation des métadonnées des médias..."
+"Syncing metadata for {n} enabled media..."
+msgstr "\nSynchronisation des métadonnées pour {n} médias activés..."
 
-#: urpm/cli/commands/media.py:505
+#: urpm/cli/commands/media.py:498
 #, python-brace-format
 msgid "  Syncing {name}..."
 msgstr " Synchronisation de {name}..."
 
-#: urpm/cli/commands/media.py:510 urpm/cli/commands/mirror.py:425
+#: urpm/cli/commands/media.py:504 urpm/cli/commands/mirror.py:425
 #, python-brace-format
 msgid "{count} package"
 msgid_plural "{count} packages"
 msgstr[0] "{count} paquet"
 msgstr[1] "{count} paquets"
 
-#: urpm/cli/commands/media.py:512 urpm/cli/commands/media.py:514
-#: urpm/cli/commands/media.py:1768 urpm/cli/commands/server.py:553
+#: urpm/cli/commands/media.py:508 urpm/cli/commands/media.py:511
+#: urpm/cli/commands/media.py:1944 urpm/cli/commands/server.py:613
 #, python-brace-format
 msgid "failed: {error}"
 msgstr "échec : {error}"
 
-#: urpm/cli/commands/media.py:516
+#: urpm/cli/commands/media.py:548
+#, python-brace-format
+msgid ""
+"\n"
+"Probing mirror availability for {n} disabled media ({s} mirrors, HEAD only, "
+"no download)..."
+msgstr ""
+"\n"
+"Sondage de la disponibilité des miroirs pour {n} médias désactivés ({s} "
+"miroirs, HEAD uniquement, pas de téléchargement)..."
+
+#: urpm/cli/commands/media.py:583
+#, python-brace-format
+msgid "{n}/{total} disabled media covered by at least one mirror"
+msgstr "{n}/{total} médias désactivés couverts par au moins un miroir"
+
+#: urpm/cli/commands/media.py:592
+#, python-brace-format
+msgid "{name}: 404 on {srv} (kept for retry)"
+msgstr "{name} : 404 sur {srv} (conservé pour ré-essai)"
+
+#: urpm/cli/commands/media.py:598
+#, python-brace-format
+msgid "{n} orphan media (no mirror hosts them):"
+msgid_plural "{n} orphan media (no mirror hosts them):"
+msgstr[0] "{n} média orphelin (aucun miroir ne l'héberge) :"
+msgstr[1] "{n} médias orphelins (aucun miroir ne les héberge) :"
+
+#: urpm/cli/commands/media.py:605
 msgid ""
 "\n"
 "Done! You can now install packages."
@@ -3176,90 +3273,81 @@ msgstr ""
 "\n"
 "Terminé ! Vous pouvez maintenant installer des paquets."
 
-#: urpm/cli/commands/media.py:518
+#: urpm/cli/commands/media.py:607
 #, python-brace-format
 msgid ""
 "Example: urpm --urpm-root {root} --root {root} install basesystem-minimal"
 msgstr ""
 "Exemple : urpm --urpm-root {root} --root {root} install basesystem-minimal"
 
-#: urpm/cli/commands/media.py:550
+#: urpm/cli/commands/media.py:639
 #, python-brace-format
 msgid "Error: could not parse URL: {url}"
 msgstr "Erreur : impossible d'analyser l'URL : {url}"
 
-#: urpm/cli/commands/media.py:573
-msgid "URL not recognized as official Mageia, using legacy mode"
-msgstr "URL non reconnue comme officielle Mageia, utilisation du mode hérité"
-
-#: urpm/cli/commands/media.py:580
-#, python-brace-format
-msgid "Added media '{name}' (id={id}) [legacy mode]"
-msgstr "Média '{name}' ajouté (id={id}) [mode hérité]"
-
-#: urpm/cli/commands/media.py:583
+#: urpm/cli/commands/media.py:660
 msgid "Error: URL not recognized as official Mageia media"
 msgstr "Erreur : URL non reconnue comme média officiel Mageia"
 
-#: urpm/cli/commands/media.py:584
+#: urpm/cli/commands/media.py:661 urpm/cli/commands/media.py:791
 msgid ""
 "For official media, URL must contain: .../version/arch/media/class/type/"
 msgstr ""
 "Pour un média officiel, l'URL doit contenir : .../version/arch/media/class/"
 "type/"
 
-#: urpm/cli/commands/media.py:585
+#: urpm/cli/commands/media.py:662 urpm/cli/commands/media.py:792
 msgid ""
 "For custom media, use: urpm media add --custom <name> <short_name> <url>"
 msgstr ""
 "Pour un média personnalisé, utilisez : urpm media add --custom <nom> "
 "<nom_court> <url>"
 
-#: urpm/cli/commands/media.py:609
+#: urpm/cli/commands/media.py:686
 msgid "Error: --allow-unsigned can only be used with custom media"
 msgstr ""
 "Erreur : --allow-unsigned ne peut être utilisé qu'avec des médias "
 "personnalisés"
 
-#: urpm/cli/commands/media.py:617
+#: urpm/cli/commands/media.py:694
 #, python-brace-format
 msgid "Fetching GPG key from {url}/media_info/pubkey..."
 msgstr "Récupération de la clé GPG depuis {url}/media_info/pubkey..."
 
-#: urpm/cli/commands/media.py:621
+#: urpm/cli/commands/media.py:698
 #, python-brace-format
 msgid "Error: could not fetch pubkey: {error}"
 msgstr "Erreur : impossible de récupérer la clé publique : {error}"
 
-#: urpm/cli/commands/media.py:625
+#: urpm/cli/commands/media.py:702
 msgid "Error: no pubkey found at media"
 msgstr "Erreur : aucune clé publique trouvée sur le média"
 
-#: urpm/cli/commands/media.py:630
+#: urpm/cli/commands/media.py:707
 msgid "Error: could not parse pubkey"
 msgstr "Erreur : impossible d'analyser la clé publique"
 
-#: urpm/cli/commands/media.py:634
+#: urpm/cli/commands/media.py:711
 #, python-brace-format
 msgid "  Key ID:      {keyid}"
 msgstr " ID de la clé : {keyid}"
 
-#: urpm/cli/commands/media.py:638
+#: urpm/cli/commands/media.py:715
 #, python-brace-format
 msgid "  Fingerprint: {fingerprint}"
 msgstr " Empreinte : {fingerprint}"
 
-#: urpm/cli/commands/media.py:640
+#: urpm/cli/commands/media.py:717
 #, python-brace-format
 msgid "  User ID:     {uid}"
 msgstr " ID utilisateur : {uid}"
 
-#: urpm/cli/commands/media.py:643
+#: urpm/cli/commands/media.py:720
 #, python-brace-format
 msgid "  Key {keyid} already in keyring"
 msgstr " Clé {keyid} déjà présente dans le trousseau"
 
-#: urpm/cli/commands/media.py:649
+#: urpm/cli/commands/media.py:726
 msgid ""
 "\n"
 "Import this key? [y/N] "
@@ -3267,26 +3355,16 @@ msgstr ""
 "\n"
 "Importer cette clé ? [o/N] "
 
-#: urpm/cli/commands/media.py:660
+#: urpm/cli/commands/media.py:737
 #, python-brace-format
 msgid "  Key {keyid} imported"
 msgstr " Clé {keyid} importée"
 
-#: urpm/cli/commands/media.py:662
+#: urpm/cli/commands/media.py:739
 msgid "  Failed to import key"
 msgstr " Échec de l'importation de la clé"
 
-#: urpm/cli/commands/media.py:688
-#, python-brace-format
-msgid "  Created server '{name}' (id={id})"
-msgstr " Serveur '{name}' créé (id={id})"
-
-#: urpm/cli/commands/media.py:698
-#, python-brace-format
-msgid "  Using existing server '{name}' (id={id})"
-msgstr " Utilisation du serveur existant '{name}' (id={id})"
-
-#: urpm/cli/commands/media.py:722
+#: urpm/cli/commands/media.py:756
 msgid ""
 "Error: media name {name!r} already taken by media #{id} ({existing}); pass a "
 "different --name"
@@ -3294,214 +3372,265 @@ msgstr ""
 "Erreur : le nom de média {name!r} est déjà pris par le média #{id} "
 "({existing}) ; fournissez un --name différent"
 
-#: urpm/cli/commands/media.py:733
-msgid ""
-"Error: derived name {name!r} already taken by media #{id} ({existing}); pass "
-"--name to override"
-msgstr ""
-"Erreur : le nom dérivé {name!r} est déjà pris par le média #{id} "
-"({existing}) ; utilisez --name pour le redéfinir"
+#: urpm/cli/commands/media.py:790
+msgid "Error: URL not recognized as a media tree."
+msgstr "Erreur : URL non reconnue comme arbre de médias."
 
-#: urpm/cli/commands/media.py:754
+#: urpm/cli/commands/media.py:796
+#, python-brace-format
+msgid "Cannot determine {field} for this media — {exc}"
+msgstr "Impossible de déterminer {field} pour ce média — {exc}"
+
+#: urpm/cli/commands/media.py:811
+#, python-brace-format
+msgid "  Created server '{name}' (id={id})"
+msgstr " Serveur '{name}' créé (id={id})"
+
+#: urpm/cli/commands/media.py:814
+#, python-brace-format
+msgid "  Using existing server '{name}' (id={id})"
+msgstr " Utilisation du serveur existant '{name}' (id={id})"
+
+#: urpm/cli/commands/media.py:822
+msgid ""
+"Pass --name to choose a different display name, or remove the colliding "
+"media first."
+msgstr ""
+"Passer --name pour choisir un nom d'affichage différent, ou retirer d'abord "
+"le média en conflit."
+
+#: urpm/cli/commands/media.py:827
 #, python-brace-format
 msgid "  Created media '{name}' (id={id})"
 msgstr " Média '{name}' créé (id={id})"
 
-#: urpm/cli/commands/media.py:757
+#: urpm/cli/commands/media.py:830
 #, python-brace-format
 msgid "  Using existing media '{name}' (id={id})"
 msgstr " Utilisation du média existant '{name}' (id={id})"
 
-#: urpm/cli/commands/media.py:767
+#: urpm/cli/commands/media.py:842
 #, python-brace-format
 msgid "  Media '{name}' re-enabled (was disabled)"
 msgstr "  Média « {name} » réactivé (était désactivé)"
 
-#: urpm/cli/commands/media.py:772
+#: urpm/cli/commands/media.py:846
 #, python-brace-format
 msgid "  Linked server '{server}' -> media '{media}'"
 msgstr " Serveur '{server}' lié au média '{media}'"
 
-#: urpm/cli/commands/media.py:774
+#: urpm/cli/commands/media.py:849
 #, python-brace-format
 msgid "  Link already exists: server '{server}' -> media '{media}'"
 msgstr " Lien déjà existant : serveur '{server}' -> média '{media}'"
 
-#: urpm/cli/commands/media.py:782
+#: urpm/cli/commands/media.py:857
 #, python-brace-format
 msgid "Added media '{name}' with new server"
 msgstr "Média '{name}' ajouté avec un nouveau serveur"
 
-#: urpm/cli/commands/media.py:784
+#: urpm/cli/commands/media.py:859
 #, python-brace-format
 msgid "Added media '{name}' to existing server"
 msgstr "Média '{name}' ajouté au serveur existant"
 
-#: urpm/cli/commands/media.py:786
+#: urpm/cli/commands/media.py:861
 #, python-brace-format
 msgid "Added new server for existing media '{name}'"
 msgstr "Nouveau serveur ajouté pour le média existant '{name}'"
 
-#: urpm/cli/commands/media.py:788
+#: urpm/cli/commands/media.py:863
 #, python-brace-format
 msgid "Re-enabled existing media '{name}'"
 msgstr "Média existant '{name}' réactivé"
 
-#: urpm/cli/commands/media.py:790
+#: urpm/cli/commands/media.py:865
 #, python-brace-format
 msgid "Linked existing server to existing media '{name}'"
 msgstr "Serveur existant lié au média existant '{name}'"
 
-#: urpm/cli/commands/media.py:804 urpm/cli/commands/media.py:821
-#: urpm/cli/commands/media.py:838 urpm/cli/commands/media.py:913
-#: urpm/cli/commands/media.py:1393 urpm/cli/commands/media.py:1487
-#: urpm/cli/commands/media.py:1621
+#: urpm/cli/commands/media.py:895
+msgid "--all conflicts with an explicit list of names"
+msgstr "--all est en conflit avec une liste explicite de noms"
+
+#: urpm/cli/commands/media.py:901
+msgid "No media to remove"
+msgstr "Aucun média à retirer"
+
+#: urpm/cli/commands/media.py:905
+#, python-brace-format
+msgid "About to remove ALL {n} media sources"
+msgstr "Sur le point de retirer TOUTES les {n} sources de média"
+
+#: urpm/cli/commands/media.py:907
+msgid "Proceed? [y/N] "
+msgstr "Continuer ? [o/N] "
+
+#: urpm/cli/commands/media.py:919
+msgid ""
+"Missing media name; pass one or more names, or --all to remove everything"
+msgstr ""
+"Nom de média manquant ; passer un ou plusieurs noms, ou --all pour tout "
+"retirer"
+
+#: urpm/cli/commands/media.py:926 urpm/cli/commands/media.py:958
+#: urpm/cli/commands/media.py:975 urpm/cli/commands/media.py:1063
+#: urpm/cli/commands/media.py:1569 urpm/cli/commands/media.py:1663
+#: urpm/cli/commands/media.py:1797
 #, python-brace-format
 msgid "Media '{name}' not found"
 msgstr "Média '{name}' non trouvé"
 
-#: urpm/cli/commands/media.py:808
+#: urpm/cli/commands/media.py:930
 #, python-brace-format
 msgid "Removed media '{name}'"
 msgstr "Média '{name}' supprimé"
 
-#: urpm/cli/commands/media.py:825
+#: urpm/cli/commands/media.py:943
+#, python-brace-format
+msgid "Removed orphan server '{name}' (no media left)"
+msgstr "Serveur orphelin '{name}' retiré (plus aucun média)"
+
+#: urpm/cli/commands/media.py:962
 #, python-brace-format
 msgid "Enabled media '{name}'"
 msgstr "Média '{name}' activé"
 
-#: urpm/cli/commands/media.py:842
+#: urpm/cli/commands/media.py:979
 #, python-brace-format
 msgid "Disabled media '{name}'"
 msgstr "Média '{name}' désactivé"
 
-#: urpm/cli/commands/media.py:869
+#: urpm/cli/commands/media.py:1019
 #, python-brace-format
 msgid "Media update already in progress (PID {pid})."
 msgstr "Mise à jour des médias déjà en cours (PID {pid})."
 
-#: urpm/cli/commands/media.py:872
+#: urpm/cli/commands/media.py:1022
 msgid "Media update already in progress."
 msgstr "Mise à jour des médias déjà en cours."
 
-#: urpm/cli/commands/media.py:873
+#: urpm/cli/commands/media.py:1023
 msgid "Waiting for lock... (Ctrl+C to cancel)"
 msgstr "En attente du verrou... (Ctrl+C pour annuler)"
 
-#: urpm/cli/commands/media.py:884
+#: urpm/cli/commands/media.py:1034
 msgid "Database is busy. Another operation may be in progress."
 msgstr ""
 "La base de données est occupée. Une autre opération est peut-être en cours."
 
-#: urpm/cli/commands/media.py:885
+#: urpm/cli/commands/media.py:1035
 msgid "Please retry in a few moments."
 msgstr "Réessayer dans quelques instants."
 
-#: urpm/cli/commands/media.py:916
+#: urpm/cli/commands/media.py:1066
 #, python-brace-format
 msgid "Updating {name}..."
 msgstr "Mise à jour de {name}..."
 
-#: urpm/cli/commands/media.py:929 urpm/cli/commands/media.py:1003
+#: urpm/cli/commands/media.py:1079 urpm/cli/commands/media.py:1154
 msgid "up-to-date"
 msgstr "à jour"
 
-#: urpm/cli/commands/media.py:931
+#: urpm/cli/commands/media.py:1081
 #, python-brace-format
 msgid "  {count} package"
 msgid_plural "  {count} packages"
 msgstr[0] " {count} paquet"
 msgstr[1] " {count} paquets"
 
-#: urpm/cli/commands/media.py:934
+#: urpm/cli/commands/media.py:1084
 msgid "Error"
 msgstr "Erreur"
 
-#: urpm/cli/commands/media.py:939
+#: urpm/cli/commands/media.py:1089
 msgid "Updating all media (parallel)..."
 msgstr "Mise à jour de tous les médias (en parallèle)..."
 
-#: urpm/cli/commands/media.py:995
+#: urpm/cli/commands/media.py:1146
 #, python-brace-format
 msgid "ERROR - {error}"
 msgstr "ERREUR - {error}"
 
-#: urpm/cli/commands/media.py:1008
+#: urpm/cli/commands/media.py:1159
 msgid "package"
 msgid_plural "packages"
 msgstr[0] "paquet"
 msgstr[1] "paquets"
 
-#: urpm/cli/commands/media.py:1014 urpm/cli/commands/media.py:1016
-#: urpm/cli/commands/media.py:1018
+#: urpm/cli/commands/media.py:1165 urpm/cli/commands/media.py:1167
+#: urpm/cli/commands/media.py:1169
 msgid "Total"
 msgstr "Total"
 
-#: urpm/cli/commands/media.py:1014
+#: urpm/cli/commands/media.py:1165
 #, python-brace-format
 msgid "packages from {count} media in {elapsed} ({errors} errors)"
 msgstr "paquets issus de {count} médias en {elapsed} ({errors} erreurs)"
 
-#: urpm/cli/commands/media.py:1016
+#: urpm/cli/commands/media.py:1167
 #, python-brace-format
 msgid "all {count} media up-to-date in {elapsed}"
 msgstr "{count} médias à jour en {elapsed}"
 
-#: urpm/cli/commands/media.py:1018
+#: urpm/cli/commands/media.py:1169
 #, python-brace-format
 msgid "packages from {count} media in {elapsed}"
 msgstr "paquets issus de {count} médias en {elapsed}"
 
-#: urpm/cli/commands/media.py:1245 urpm/cli/commands/config.py:200
+#: urpm/cli/commands/media.py:1340 urpm/cli/commands/config.py:200
 #, python-brace-format
 msgid "File not found: {path}"
 msgstr "Fichier non trouvé : {path}"
 
-#: urpm/cli/commands/media.py:1251
+#: urpm/cli/commands/media.py:1346
 #, python-brace-format
 msgid "Failed to parse {path}: {error}"
 msgstr "Échec de l'analyse de {path} : {error}"
 
-#: urpm/cli/commands/media.py:1255
+#: urpm/cli/commands/media.py:1350
 msgid "No media found in file"
 msgstr "Aucun média trouvé dans le fichier"
 
-#: urpm/cli/commands/media.py:1280
+#: urpm/cli/commands/media.py:1403
 msgid "Import from:"
 msgstr "Importer depuis :"
 
-#: urpm/cli/commands/media.py:1281
+#: urpm/cli/commands/media.py:1404
 #, python-brace-format
 msgid "Found: {total} media ({direct} with URL, {mirrorlist} mirrorlist-based)"
 msgstr ""
 "Trouvés : {total} médias ({direct} avec URL, {mirrorlist} basés sur "
 "mirrorlist)"
 
-#: urpm/cli/commands/media.py:1284
-msgid "Skipped (mirrorlist-based):"
-msgstr "Ignorés (basés sur mirrorlist) :"
+#: urpm/cli/commands/media.py:1407
+#, python-brace-format
+msgid "Cannot resolve version for {n} mirrorlist media"
+msgstr "Impossible de résoudre la version pour {n} médias mirrorlist"
 
-#: urpm/cli/commands/media.py:1285
-msgid "    These use $MIRRORLIST and require autoconfig."
-msgstr " Ceux-ci utilisent $MIRRORLIST et nécessitent autoconfig."
+#: urpm/cli/commands/media.py:1408
+msgid "    Pass --release <version> so the target Mageia version is known."
+msgstr ""
+"    Passer --release <version> pour que la version Mageia cible soit connue."
 
-#: urpm/cli/commands/media.py:1286
-msgid "    Run: urpm media autoconfig -r <version>"
-msgstr " Exécutez : urpm media autoconfig -r <version>"
+#: urpm/cli/commands/media.py:1411
+msgid "Mirrorlist-based to add (server links via `urpm server autoconfig`):"
+msgstr ""
+"Basés sur mirrorlist à ajouter (liens serveur via `urpm server autoconfig`) :"
 
-#: urpm/cli/commands/media.py:1289
+#: urpm/cli/commands/media.py:1421
 msgid "To add:"
 msgstr "À ajouter :"
 
-#: urpm/cli/commands/media.py:1299
+#: urpm/cli/commands/media.py:1431
 msgid "To replace:"
 msgstr "À remplacer :"
 
-#: urpm/cli/commands/media.py:1304
+#: urpm/cli/commands/media.py:1436
 msgid "Skipped (already exist):"
 msgstr "Ignorés (existent déjà) :"
 
-#: urpm/cli/commands/media.py:1309
+#: urpm/cli/commands/media.py:1441
 msgid ""
 "\n"
 "Nothing to import"
@@ -3509,34 +3638,58 @@ msgstr ""
 "\n"
 "Rien à importer"
 
-#: urpm/cli/commands/media.py:1315
+#: urpm/cli/commands/media.py:1448
 #, python-brace-format
 msgid "Import {count} media? [y/N] "
 msgstr "Importer {count} médias ? [o/N] "
 
-#: urpm/cli/commands/media.py:1335
+#: urpm/cli/commands/media.py:1468
 msgid "Replaced:"
 msgstr "Remplacés :"
 
-#: urpm/cli/commands/media.py:1337 urpm/cli/commands/media.py:1346
+#: urpm/cli/commands/media.py:1470 urpm/cli/commands/media.py:1479
+#: urpm/cli/commands/media.py:1512
 msgid "Error:"
 msgstr "Erreur :"
 
-#: urpm/cli/commands/media.py:1344
+#: urpm/cli/commands/media.py:1477
 msgid "Added:"
 msgstr "Ajoutés :"
 
-#: urpm/cli/commands/media.py:1349
-#, python-brace-format
-msgid "{added} added, {replaced} replaced, {errors} errors"
-msgstr "{added} ajouté(s), {replaced} remplacé(s), {errors} erreur(s)"
+#: urpm/cli/commands/media.py:1504
+msgid "Pending:"
+msgstr "En attente :"
 
-#: urpm/cli/commands/media.py:1360
+#: urpm/cli/commands/media.py:1506
+msgid "Already present:"
+msgstr "Déjà présents :"
+
+#: urpm/cli/commands/media.py:1508
+msgid "Skipped:"
+msgstr "Ignoré :"
+
+#: urpm/cli/commands/media.py:1516
+#, python-brace-format
+msgid ""
+"{added} added, {mirrorlist} mirrorlist-based, {replaced} replaced, {errors} "
+"errors"
+msgstr "{added} ajouté(s), {mirrorlist} basés sur mirrorlist, {replaced} remplacé(s), {errors} erreur(s)"
+
+#: urpm/cli/commands/media.py:1523
+#, python-brace-format
+msgid ""
+"Next step: run 'urpm server autoconfig' to attach servers to the {n} "
+"mirrorlist-based media"
+msgstr ""
+"Étape suivante : exécutez 'urpm server autoconfig' pour rattacher des "
+"serveurs aux {n} médias basés sur mirrorlist"
+
+#: urpm/cli/commands/media.py:1536
 #, python-brace-format
 msgid "Probing {count} servers..."
 msgstr "Vérification de {count} serveurs..."
 
-#: urpm/cli/commands/media.py:1372
+#: urpm/cli/commands/media.py:1548
 msgid ""
 "\n"
 "Run 'urpm media update' to fetch package lists"
@@ -3544,66 +3697,66 @@ msgstr ""
 "\n"
 "Exécutez 'urpm media update' pour récupérer les listes de paquets"
 
-#: urpm/cli/commands/media.py:1388
+#: urpm/cli/commands/media.py:1564
 msgid "Media name required"
 msgstr "Nom du média requis"
 
-#: urpm/cli/commands/media.py:1411
+#: urpm/cli/commands/media.py:1587
 #, python-brace-format
 msgid "Invalid replication policy: {policy}"
 msgstr "Politique de réplication invalide : {policy}"
 
-#: urpm/cli/commands/media.py:1412
+#: urpm/cli/commands/media.py:1588
 msgid "Valid values: none, on_demand, seed"
 msgstr "Valeurs valides : none, on_demand, seed"
 
-#: urpm/cli/commands/media.py:1435 urpm/cli/commands/mirror.py:127
+#: urpm/cli/commands/media.py:1611 urpm/cli/commands/mirror.py:127
 #, python-brace-format
 msgid "Invalid size format: {size}"
 msgstr "Format de taille invalide : {size}"
 
-#: urpm/cli/commands/media.py:1447
+#: urpm/cli/commands/media.py:1623
 msgid "No changes specified"
 msgstr "Aucun changement spécifié"
 
-#: urpm/cli/commands/media.py:1448
+#: urpm/cli/commands/media.py:1624
 msgid ""
 "Use --shared, --replication, --seeds, --quota, --retention or --priority"
 msgstr ""
 "Utilisez --shared, --replication, --seeds, --quota, --retention ou --priority"
 
-#: urpm/cli/commands/media.py:1471
+#: urpm/cli/commands/media.py:1647
 #, python-brace-format
 msgid "Updated '{name}':"
 msgstr "Mis à jour '{name}' :"
 
-#: urpm/cli/commands/media.py:1492
+#: urpm/cli/commands/media.py:1668
 #, python-brace-format
 msgid "Media '{name}' has replication_policy='{policy}', not 'seed'"
 msgstr "Le média '{name}' a replication_policy='{policy}', pas 'seed'"
 
-#: urpm/cli/commands/media.py:1493
+#: urpm/cli/commands/media.py:1669
 msgid ""
 "Use: urpm media set <name> --replication=seed --seeds=INSTALL,CAT_PLASMA5,..."
 msgstr ""
 "Utilisez : urpm media set <nom> --replication=seed --"
 "seeds=INSTALL,CAT_PLASMA5,..."
 
-#: urpm/cli/commands/media.py:1525
+#: urpm/cli/commands/media.py:1701
 msgid "Invalid replication_seeds JSON in database"
 msgstr "JSON replication_seeds invalide dans la base de données"
 
-#: urpm/cli/commands/media.py:1530
+#: urpm/cli/commands/media.py:1706
 #, python-brace-format
 msgid "Media: {name}"
 msgstr "Média : {name}"
 
-#: urpm/cli/commands/media.py:1531
+#: urpm/cli/commands/media.py:1707
 #, python-brace-format
 msgid "Sections: {sections}"
 msgstr "Sections : {sections}"
 
-#: urpm/cli/commands/media.py:1535
+#: urpm/cli/commands/media.py:1711
 #, python-brace-format
 msgid ""
 "\n"
@@ -3612,37 +3765,37 @@ msgstr ""
 "\n"
 "rpmsrate-raw non trouvé à {path}"
 
-#: urpm/cli/commands/media.py:1536 urpm/cli/commands/mirror.py:296
+#: urpm/cli/commands/media.py:1712 urpm/cli/commands/mirror.py:296
 msgid "Install the meta-task package to enable seed-based replication"
 msgstr ""
 "Installez le paquet meta-task pour activer la réplication basée sur seed"
 
-#: urpm/cli/commands/media.py:1544 urpm/cli/commands/mirror.py:303
+#: urpm/cli/commands/media.py:1720 urpm/cli/commands/mirror.py:303
 #, python-brace-format
 msgid "Error parsing rpmsrate-raw: {error}"
 msgstr "Erreur lors de l'analyse de rpmsrate-raw : {error}"
 
-#: urpm/cli/commands/media.py:1558
+#: urpm/cli/commands/media.py:1734
 #, python-brace-format
 msgid "Packages from rpmsrate: {count}"
 msgstr "Paquets issus de rpmsrate : {count}"
 
-#: urpm/cli/commands/media.py:1565
+#: urpm/cli/commands/media.py:1741
 #, python-brace-format
 msgid "Matching in this media: {count}"
 msgstr "Correspondances dans ce média : {count}"
 
-#: urpm/cli/commands/media.py:1569
+#: urpm/cli/commands/media.py:1745
 #, python-brace-format
 msgid "Installed size (seeds only): {size} GB"
 msgstr "Taille installée (seeds uniquement) : {size} Go"
 
-#: urpm/cli/commands/media.py:1574
+#: urpm/cli/commands/media.py:1750
 #, python-brace-format
 msgid "{count} seeds not in media: {names}..."
 msgstr "{count} seeds absents du média : {names}..."
 
-#: urpm/cli/commands/media.py:1576
+#: urpm/cli/commands/media.py:1752
 msgid ""
 "\n"
 "Collecting dependencies..."
@@ -3650,168 +3803,164 @@ msgstr ""
 "\n"
 "Récupération des dépendances..."
 
-#: urpm/cli/commands/media.py:1585 urpm/cli/commands/mirror.py:335
+#: urpm/cli/commands/media.py:1761 urpm/cli/commands/mirror.py:335
 #, python-brace-format
 msgid "With dependencies: {count} packages"
 msgstr "Avec dépendances : {count} paquets"
 
-#: urpm/cli/commands/media.py:1587
+#: urpm/cli/commands/media.py:1763
 #, python-brace-format
 msgid "Estimated download: ~{download} GB (installed: {installed:.1f} GB)"
 msgstr "Téléchargement estimé : ~{download} Go (installé : {installed:.1f} Go)"
 
-#: urpm/cli/commands/media.py:1591
+#: urpm/cli/commands/media.py:1767
 #, python-brace-format
 msgid "  - Seeds: {seeds}, Dependencies: {deps}"
 msgstr " - Seeds : {seeds}, Dépendances : {deps}"
 
-#: urpm/cli/commands/media.py:1594
+#: urpm/cli/commands/media.py:1770
 #, python-brace-format
 msgid "Not found: {count} ({names}...)"
 msgstr "Non trouvés : {count} ({names}...)"
 
-#: urpm/cli/commands/media.py:1597
+#: urpm/cli/commands/media.py:1773
 #, python-brace-format
 msgid "Dependency collection failed: {error}"
 msgstr "Échec de la collecte des dépendances : {error}"
 
-#: urpm/cli/commands/media.py:1603
+#: urpm/cli/commands/media.py:1779
 #, python-brace-format
 msgid "Example seed packages: {packages}..."
 msgstr "Exemples de paquets seed : {packages}..."
 
-#: urpm/cli/commands/media.py:1652
+#: urpm/cli/commands/media.py:1828
 #, python-brace-format
 msgid "Checking {count} servers..."
 msgstr "Vérification de {count} serveurs..."
 
-#: urpm/cli/commands/media.py:1695
+#: urpm/cli/commands/media.py:1871
 #, python-brace-format
 msgid "Added: {names}"
 msgstr "Ajoutés : {names}"
 
-#: urpm/cli/commands/media.py:1697
+#: urpm/cli/commands/media.py:1873
 #, python-brace-format
 msgid "Removed: {names}"
 msgstr "Supprimés : {names}"
 
-#: urpm/cli/commands/media.py:1699
+#: urpm/cli/commands/media.py:1875
 #, python-brace-format
 msgid "Skipped (media not available): {names}"
 msgstr "Ignorés (média non disponible) : {names}"
 
-#: urpm/cli/commands/media.py:1708
+#: urpm/cli/commands/media.py:1884
 #, python-brace-format
 msgid "Servers for '{name}':"
 msgstr "Serveurs pour '{name}' :"
 
-#: urpm/cli/commands/media.py:1710
+#: urpm/cli/commands/media.py:1886
 msgid "[ ]"
 msgstr "[ ]"
 
-#: urpm/cli/commands/media.py:1713
+#: urpm/cli/commands/media.py:1889
 #, python-brace-format
 msgid "No servers linked to '{name}'"
 msgstr "Aucun serveur lié à '{name}'"
 
-#: urpm/cli/commands/media.py:1743
+#: urpm/cli/commands/media.py:1919
 #, python-brace-format
 msgid "Auto-configuring media for Mageia {release} ({arch})"
 msgstr "Configuration automatique des médias pour Mageia {release} ({arch})"
 
-#: urpm/cli/commands/media.py:1763
+#: urpm/cli/commands/media.py:1939
 msgid "Fetching mirrorlist..."
 msgstr "Récupération de la liste des miroirs..."
 
-#: urpm/cli/commands/media.py:1772
+#: urpm/cli/commands/media.py:1948
 msgid "no http/https mirrors found"
 msgstr "aucun miroir http/https trouvé"
 
-#: urpm/cli/commands/media.py:1777
+#: urpm/cli/commands/media.py:1953
 #, python-brace-format
 msgid "{count} http(s) mirror"
 msgid_plural "{count} http(s) mirrors"
 msgstr[0] "{count} miroir http(s)"
 msgstr[1] "{count} miroirs http(s)"
 
-#: urpm/cli/commands/media.py:1780
+#: urpm/cli/commands/media.py:1956
 msgid "Testing mirror latency..."
 msgstr "Test de latence des miroirs..."
 
-#: urpm/cli/commands/media.py:1811
+#: urpm/cli/commands/media.py:1987
 msgid "all mirrors unreachable"
 msgstr "tous les miroirs inaccessibles"
 
-#: urpm/cli/commands/media.py:1817
+#: urpm/cli/commands/media.py:1994
 #, python-brace-format
 msgid "best: {latency:.0f}ms"
 msgstr "meilleur : {latency:.0f} ms"
 
-#: urpm/cli/commands/media.py:1857
+#: urpm/cli/commands/media.py:2038
 #, python-brace-format
-msgid "  Added server: {name}"
-msgstr " Serveur ajouté : {name}"
+msgid "Failed to fetch catalogue: {error}"
+msgstr "Échec de la récupération du catalogue : {error}"
 
-#: urpm/cli/commands/media.py:1860
+#: urpm/cli/commands/media.py:2044
 #, python-brace-format
-msgid "  Would add server: {name} ({url})"
-msgstr " Ajouterait le serveur : {name} ({url})"
+msgid "Dry run — would attach {n} media from {n_mirrors} mirror(s):"
+msgstr "Simulation — attacherait {n} médias depuis {n_mirrors} miroir(s) :"
 
-#: urpm/cli/commands/media.py:1871
+#: urpm/cli/commands/media.py:2067
 #, python-brace-format
-msgid "  Skipping {name} (already exists)"
-msgstr " Ignoré {name} (existe déjà)"
+msgid "  Skipping {url}: {exc}"
+msgstr "  {url} ignoré : {exc}"
 
-#: urpm/cli/commands/media.py:1879
+#: urpm/cli/commands/media.py:2071
 #, python-brace-format
-msgid "  Would add media: {name} -> {path}"
-msgstr " Ajouterait le média : {name} -> {path}"
+msgid "  Skipping {url}: missing {field}"
+msgstr "  {url} ignoré : {field} manquant"
 
-#: urpm/cli/commands/media.py:1892
+#: urpm/cli/commands/media.py:2077
 #, python-brace-format
-msgid "  Added media: {name}"
-msgstr " Média ajouté : {name}"
+msgid "  Added server: {name} ({lat:.0f}ms)"
+msgstr "  Serveur ajouté : {name} ({lat:.0f}ms)"
 
-#: urpm/cli/commands/media.py:1911
+#: urpm/cli/commands/media.py:2091
 #, python-brace-format
-msgid "Dry run: would add {added} media, {skipped} already exist"
-msgstr "Simulation : ajouterait {added} médias, {skipped} existent déjà"
+msgid "Added {servers} server(s), {added} new media, {relinked} re-linked"
+msgstr ""
+"{servers} serveur(s) ajouté(s), {added} nouveaux médias, {relinked} re-liés"
 
-#: urpm/cli/commands/media.py:1913
-#, python-brace-format
-msgid "Added {added} media, {skipped} already existed"
-msgstr "{added} médias ajoutés, {skipped} existaient déjà"
-
-#: urpm/cli/commands/media.py:1915 urpm/cli/commands/media.py:2214
+#: urpm/cli/commands/media.py:2094 urpm/cli/commands/media.py:2374
 msgid "Run 'urpm media update' to sync metadata"
 msgstr "Exécutez 'urpm media update' pour synchroniser les métadonnées"
 
-#: urpm/cli/commands/media.py:1990
+#: urpm/cli/commands/media.py:2173
 #, python-brace-format
 msgid "Fetching media.cfg from {url}..."
 msgstr "Récupération de media.cfg depuis {url}..."
 
-#: urpm/cli/commands/media.py:2002
+#: urpm/cli/commands/media.py:2185
 msgid "media.cfg has no version — cannot proceed"
 msgstr "media.cfg n'a pas de version — impossible de continuer"
 
-#: urpm/cli/commands/media.py:2020
+#: urpm/cli/commands/media.py:2203
 msgid "No media found in media.cfg"
 msgstr "Aucun média trouvé dans media.cfg"
 
-#: urpm/cli/commands/media.py:2028
+#: urpm/cli/commands/media.py:2211
 msgid "  Detected nonfree packages installed"
 msgstr "  Paquets nonfree détectés comme installés"
 
-#: urpm/cli/commands/media.py:2030
+#: urpm/cli/commands/media.py:2213
 msgid "  Detected tainted packages installed"
 msgstr "  Paquets tainted détectés comme installés"
 
-#: urpm/cli/commands/media.py:2032
+#: urpm/cli/commands/media.py:2215
 msgid "  Detected 32-bit packages installed"
 msgstr "  Paquets 32 bits détectés comme installés"
 
-#: urpm/cli/commands/media.py:2050
+#: urpm/cli/commands/media.py:2241
 #, python-brace-format
 msgid ""
 "Warning: these media are for Mageia {repo_ver}, this system runs Mageia "
@@ -3820,38 +3969,38 @@ msgstr ""
 "Attention : ces médias sont pour Mageia {repo_ver}, ce système tourne sous "
 "Mageia {local_ver}"
 
-#: urpm/cli/commands/media.py:2054
+#: urpm/cli/commands/media.py:2245
 msgid "  They will only be served to LAN peers, not used locally."
 msgstr "  Ils seront uniquement servis aux pairs LAN, non utilisés localement."
 
-#: urpm/cli/commands/media.py:2058
+#: urpm/cli/commands/media.py:2249
 #, python-brace-format
 msgid "Found {n} media for {branch} {version} ({arch}):"
 msgstr "{n} média(s) trouvé(s) pour {branch} {version} ({arch}) :"
 
-#: urpm/cli/commands/media.py:2076 urpm/cli/commands/server.py:38
-#: urpm/cli/commands/server.py:923 urpm/cli/commands/cache.py:191
+#: urpm/cli/commands/media.py:2267 urpm/cli/commands/server.py:40
+#: urpm/cli/commands/server.py:950 urpm/cli/commands/cache.py:191
 #: urpm/cli/commands/config.py:262 urpm/cli/commands/mirror.py:23
 msgid "enabled"
 msgstr "activé"
 
-#: urpm/cli/commands/media.py:2076 urpm/cli/commands/server.py:40
-#: urpm/cli/commands/server.py:925 urpm/cli/commands/cache.py:191
+#: urpm/cli/commands/media.py:2267 urpm/cli/commands/server.py:42
+#: urpm/cli/commands/server.py:952 urpm/cli/commands/cache.py:191
 #: urpm/cli/commands/config.py:262 urpm/cli/commands/mirror.py:23
 msgid "disabled"
 msgstr "désactivé"
 
-#: urpm/cli/commands/media.py:2086
+#: urpm/cli/commands/media.py:2277
 #, python-brace-format
 msgid "  ({n} source media hidden, use --sources to include)"
 msgstr "  ({n} médias sources masqués, utiliser --sources pour les inclure)"
 
-#: urpm/cli/commands/media.py:2088
+#: urpm/cli/commands/media.py:2279
 #, python-brace-format
 msgid "  ({n} debug media hidden, use --debug to include)"
 msgstr "  ({n} médias debug masqués, utiliser --debug pour les inclure)"
 
-#: urpm/cli/commands/media.py:2091
+#: urpm/cli/commands/media.py:2282
 msgid ""
 "\n"
 "Dry run — no changes made"
@@ -3859,36 +4008,27 @@ msgstr ""
 "\n"
 "(simulation - aucune modification effectuée)"
 
-#: urpm/cli/commands/media.py:2114
+#: urpm/cli/commands/media.py:2322
+#, python-brace-format
+msgid "Cannot determine {field} for media — {exc}"
+msgstr "Impossible de déterminer {field} pour le média — {exc}"
+
+#: urpm/cli/commands/media.py:2328
 #, python-brace-format
 msgid "  Server: {name} (new)"
 msgstr "  Serveur : {name} (nouveau)"
 
-#: urpm/cli/commands/media.py:2116
+#: urpm/cli/commands/media.py:2330
 #, python-brace-format
 msgid "  Server: {name} (existing)"
 msgstr "  Serveur : {name} (existant)"
 
-#: urpm/cli/commands/media.py:2159
-#, python-brace-format
-msgid ""
-"  Skipping {section}: display name '{name}' already taken by media #{id} "
-"('{existing}')"
-msgstr ""
-"  {section} ignoré : le nom d'affichage '{name}' est déjà pris par le média "
-"#{id} ('{existing}')"
-
-#: urpm/cli/commands/media.py:2182
-#, python-brace-format
-msgid "  Failed to add {name}: {err}"
-msgstr "  Échec de l'ajout de {name} : {err}"
-
-#: urpm/cli/commands/media.py:2206
+#: urpm/cli/commands/media.py:2366
 #, python-brace-format
 msgid "{count} additional server-media links (MD5 verified)"
 msgstr "{count} liens server-media supplémentaires (vérifiés MD5)"
 
-#: urpm/cli/commands/media.py:2211
+#: urpm/cli/commands/media.py:2371
 #, python-brace-format
 msgid ""
 "\n"
@@ -3897,386 +4037,379 @@ msgstr ""
 "\n"
 "{added} média(s) ajouté(s), {existed} existai(en)t déjà"
 
-#: urpm/cli/commands/server.py:18
+#: urpm/cli/commands/server.py:20
 msgid "No servers configured"
 msgstr "Aucun serveur configuré"
 
-#: urpm/cli/commands/server.py:26
+#: urpm/cli/commands/server.py:28
 msgid "Name"
 msgstr "Nom"
 
-#: urpm/cli/commands/server.py:26 urpm/cli/commands/server.py:881
+#: urpm/cli/commands/server.py:28 urpm/cli/commands/server.py:908
 msgid "Protocol"
 msgstr "Protocole"
 
-#: urpm/cli/commands/server.py:26 urpm/cli/commands/server.py:882
+#: urpm/cli/commands/server.py:28 urpm/cli/commands/server.py:909
 msgid "Host"
 msgstr "Hôte"
 
-#: urpm/cli/commands/server.py:27
+#: urpm/cli/commands/server.py:29
 msgid "Pri"
 msgstr "Pri"
 
-#: urpm/cli/commands/server.py:27
+#: urpm/cli/commands/server.py:29
 msgid "IP"
 msgstr "IP"
 
-#: urpm/cli/commands/server.py:28
+#: urpm/cli/commands/server.py:30
 msgid "BW"
 msgstr "BP"
 
-#: urpm/cli/commands/server.py:28
+#: urpm/cli/commands/server.py:30
 msgid "Lat"
 msgstr "Lat"
 
-#: urpm/cli/commands/server.py:29 urpm/cli/commands/server.py:444
-#: urpm/cli/commands/server.py:923 urpm/cli/commands/server.py:925
+#: urpm/cli/commands/server.py:31 urpm/cli/commands/server.py:446
+#: urpm/cli/commands/server.py:950 urpm/cli/commands/server.py:952
 #: urpm/cli/commands/history.py:164 urpm/cli/commands/peer.py:67
 msgid "Status"
 msgstr "Statut"
 
-#: urpm/cli/commands/server.py:36
+#: urpm/cli/commands/server.py:38
 msgid "BLACKLIST"
 msgstr "LISTE NOIRE"
 
-#: urpm/cli/commands/server.py:106
+#: urpm/cli/commands/server.py:108
 #, python-brace-format
 msgid "Invalid protocol: {protocol}"
 msgstr "Protocole invalide : {protocol}"
 
-#: urpm/cli/commands/server.py:107
+#: urpm/cli/commands/server.py:109
 msgid "Supported protocols: http, https, file"
 msgstr "Protocoles supportés : http, https, file"
 
-#: urpm/cli/commands/server.py:117
+#: urpm/cli/commands/server.py:119
 #, python-brace-format
 msgid "Server already exists: {name}"
 msgstr "Le serveur existe déjà : {name}"
 
-#: urpm/cli/commands/server.py:122
+#: urpm/cli/commands/server.py:124
 #, python-brace-format
 msgid "Server name already exists: {name}"
 msgstr "Le nom de serveur existe déjà : {name}"
 
-#: urpm/cli/commands/server.py:129
+#: urpm/cli/commands/server.py:131
 #, python-brace-format
 msgid "Testing connectivity to {host}..."
 msgstr "Test de connectivité vers {host}..."
 
-#: urpm/cli/commands/server.py:131 urpm/cli/commands/server.py:154
+#: urpm/cli/commands/server.py:133 urpm/cli/commands/server.py:156
 #, python-brace-format
 msgid "IP mode: {mode}"
 msgstr "Mode IP : {mode}"
 
-#: urpm/cli/commands/server.py:151
+#: urpm/cli/commands/server.py:153
 #, python-brace-format
 msgid "Added server: {name}"
 msgstr "Serveur ajouté : {name}"
 
-#: urpm/cli/commands/server.py:152
+#: urpm/cli/commands/server.py:154
 #, python-brace-format
 msgid "URL: {url}"
 msgstr "URL : {url}"
 
-#: urpm/cli/commands/server.py:153
+#: urpm/cli/commands/server.py:155
 #, python-brace-format
 msgid "Priority: {priority}"
 msgstr "Priorité : {priority}"
 
-#: urpm/cli/commands/server.py:156
+#: urpm/cli/commands/server.py:158
 msgid "  Status: disabled"
 msgstr " Statut : désactivé"
 
-#: urpm/cli/commands/server.py:158
+#: urpm/cli/commands/server.py:160
 #, python-brace-format
 msgid "Failed to add server: {error}"
 msgstr "Échec de l'ajout du serveur : {error}"
 
-#: urpm/cli/commands/server.py:173
+#: urpm/cli/commands/server.py:175 urpm/cli/commands/server.py:806
 #, python-brace-format
 msgid "Scanning {count} media..."
 msgid_plural "Scanning {count} media..."
 msgstr[0] "Scan de {count} média..."
 msgstr[1] "Scan de {count} médias..."
 
-#: urpm/cli/commands/server.py:230
+#: urpm/cli/commands/server.py:232
 #, python-brace-format
 msgid "{count} found"
 msgstr "{count} trouvé(s)"
 
-#: urpm/cli/commands/server.py:235
+#: urpm/cli/commands/server.py:237
 msgid "No existing media found on this server"
 msgstr "Aucun média existant trouvé sur ce serveur"
 
-#: urpm/cli/commands/server.py:251 urpm/cli/commands/server.py:268
-#: urpm/cli/commands/server.py:289 urpm/cli/commands/server.py:310
-#: urpm/cli/commands/server.py:333 urpm/cli/commands/server.py:379
-#: urpm/cli/commands/server.py:395
+#: urpm/cli/commands/server.py:253 urpm/cli/commands/server.py:270
+#: urpm/cli/commands/server.py:291 urpm/cli/commands/server.py:312
+#: urpm/cli/commands/server.py:335 urpm/cli/commands/server.py:381
+#: urpm/cli/commands/server.py:397
 #, python-brace-format
 msgid "Server not found: {name}"
 msgstr "Serveur non trouvé : {name}"
 
-#: urpm/cli/commands/server.py:255
+#: urpm/cli/commands/server.py:257
 #, python-brace-format
 msgid "Removed server: {name}"
 msgstr "Serveur supprimé : {name}"
 
-#: urpm/cli/commands/server.py:272
+#: urpm/cli/commands/server.py:274
 #, python-brace-format
 msgid "Server already enabled: {name}"
 msgstr "Serveur déjà activé : {name}"
 
-#: urpm/cli/commands/server.py:276
+#: urpm/cli/commands/server.py:278
 #, python-brace-format
 msgid "Enabled server: {name}"
 msgstr "Serveur activé : {name}"
 
-#: urpm/cli/commands/server.py:293
+#: urpm/cli/commands/server.py:295
 #, python-brace-format
 msgid "Server already disabled: {name}"
 msgstr "Serveur déjà désactivé : {name}"
 
-#: urpm/cli/commands/server.py:297
+#: urpm/cli/commands/server.py:299
 #, python-brace-format
 msgid "Disabled server: {name}"
 msgstr "Serveur désactivé : {name}"
 
-#: urpm/cli/commands/server.py:314
+#: urpm/cli/commands/server.py:316
 #, python-brace-format
 msgid "Set priority for {name}: {priority}"
 msgstr "Priorité définie pour {name} : {priority}"
 
-#: urpm/cli/commands/server.py:341
+#: urpm/cli/commands/server.py:343
 msgid "No servers to test"
 msgstr "Aucun serveur à tester"
 
-#: urpm/cli/commands/server.py:347
+#: urpm/cli/commands/server.py:349
 msgid "local filesystem (skipped)"
 msgstr "système de fichiers local (ignoré)"
 
-#: urpm/cli/commands/server.py:352
+#: urpm/cli/commands/server.py:354
 #, python-brace-format
 msgid "Testing {name} ({host})..."
 msgstr "Test de {name} ({host})..."
 
-#: urpm/cli/commands/server.py:359
+#: urpm/cli/commands/server.py:361
 #, python-brace-format
 msgid "unreachable (keeping {mode})"
 msgstr "inaccessible (conservation de {mode})"
 
-#: urpm/cli/commands/server.py:363
+#: urpm/cli/commands/server.py:365
 #, python-brace-format
 msgid "{new_mode} (was {old_mode})"
 msgstr "{new_mode} (était {old_mode})"
 
-#: urpm/cli/commands/server.py:384
+#: urpm/cli/commands/server.py:386
 #, python-brace-format
 msgid "Set IP mode for {name}: {new_mode} (was {old_mode})"
 msgstr "Mode IP défini pour {name} : {new_mode} (était {old_mode})"
 
-#: urpm/cli/commands/server.py:401 urpm/cli/commands/server.py:410
-#: urpm/cli/commands/server.py:438
+#: urpm/cli/commands/server.py:403 urpm/cli/commands/server.py:412
+#: urpm/cli/commands/server.py:440
 msgid "no data"
 msgstr "aucune donnée"
 
-#: urpm/cli/commands/server.py:419
+#: urpm/cli/commands/server.py:421
 msgid "never"
 msgstr "jamais"
 
-#: urpm/cli/commands/server.py:422
+#: urpm/cli/commands/server.py:424
 #, python-brace-format
 msgid "{n}s ago"
 msgstr "il y a {n}s"
 
-#: urpm/cli/commands/server.py:424
+#: urpm/cli/commands/server.py:426
 #, python-brace-format
 msgid "{n}m ago"
 msgstr "il y a {n}min"
 
-#: urpm/cli/commands/server.py:426
+#: urpm/cli/commands/server.py:428
 #, python-brace-format
 msgid "{n}h ago"
 msgstr "il y a {n}h"
 
-#: urpm/cli/commands/server.py:427
+#: urpm/cli/commands/server.py:429
 #, python-brace-format
 msgid "{n}d ago"
 msgstr "il y a {n}j"
 
-#: urpm/cli/commands/server.py:443
+#: urpm/cli/commands/server.py:445
 msgid "URL"
 msgstr "URL"
 
-#: urpm/cli/commands/server.py:445
+#: urpm/cli/commands/server.py:447
 msgid "Priority"
 msgstr "Priorité"
 
-#: urpm/cli/commands/server.py:446
+#: urpm/cli/commands/server.py:448
 msgid "IP mode"
 msgstr "Mode IP"
 
-#: urpm/cli/commands/server.py:448
+#: urpm/cli/commands/server.py:450
 msgid "Bandwidth"
 msgstr "Débit"
 
-#: urpm/cli/commands/server.py:449
+#: urpm/cli/commands/server.py:451
 msgid "Latency"
 msgstr "Latence"
 
-#: urpm/cli/commands/server.py:450
+#: urpm/cli/commands/server.py:452
 msgid "Success rate"
 msgstr "Taux de succès"
 
-#: urpm/cli/commands/server.py:450
+#: urpm/cli/commands/server.py:452
 msgid "failed"
 msgstr "échecs"
 
-#: urpm/cli/commands/server.py:451
+#: urpm/cli/commands/server.py:453
 msgid "Last check"
 msgstr "Dernier contrôle"
 
-#: urpm/cli/commands/server.py:458
+#: urpm/cli/commands/server.py:460
 msgid "No linked media"
 msgstr "Aucun média lié"
 
-#: urpm/cli/commands/server.py:522
+#: urpm/cli/commands/server.py:582
 #, python-brace-format
 msgid "Already have {count} enabled servers (target: {target})"
 msgstr "Déjà {count} serveurs activés (cible : {target})"
 
-#: urpm/cli/commands/server.py:524
+#: urpm/cli/commands/server.py:584
 msgid "Use 'urpm server remove' to remove some first if needed."
 msgstr "Utilisez 'urpm server remove' pour en supprimer d'abord si nécessaire."
 
-#: urpm/cli/commands/server.py:527
+#: urpm/cli/commands/server.py:587
 #, python-brace-format
 msgid "Have {count} enabled servers, need {needed} more to reach {target}"
 msgstr ""
 "{count} serveurs activés, besoin de {needed} de plus pour atteindre {target}"
 
-#: urpm/cli/commands/server.py:539
+#: urpm/cli/commands/server.py:599
 #, python-brace-format
 msgid "Fetching mirrorlist for Mageia {version} ({arch})..."
 msgstr "Récupération de la liste des miroirs pour Mageia {version} ({arch})..."
 
-#: urpm/cli/commands/server.py:557
+#: urpm/cli/commands/server.py:617
 msgid "empty"
 msgstr "vide"
 
-#: urpm/cli/commands/server.py:558
+#: urpm/cli/commands/server.py:618
 msgid "The mirrorlist may not be available yet for this version."
 msgstr ""
 "La liste des miroirs n'est peut-être pas encore disponible pour cette "
 "version."
 
-#: urpm/cli/commands/server.py:561
+#: urpm/cli/commands/server.py:621
 #, python-brace-format
 msgid "{count} mirror"
 msgid_plural "{count} mirrors"
 msgstr[0] "{count} miroir"
 msgstr[1] "{count} miroirs"
 
-#: urpm/cli/commands/server.py:591
+#: urpm/cli/commands/server.py:651
 msgid "No new servers to add"
 msgstr "Aucun nouveau serveur à ajouter"
 
-#: urpm/cli/commands/server.py:593
+#: urpm/cli/commands/server.py:653
 #, python-brace-format
 msgid "({count} already configured or duplicates)"
 msgstr "({count} déjà configuré(s) ou doublon(s))"
 
-#: urpm/cli/commands/server.py:598
+#: urpm/cli/commands/server.py:658
 #, python-brace-format
 msgid "Testing latency to {count} candidates..."
 msgstr "Test de latence vers {count} candidats..."
 
-#: urpm/cli/commands/server.py:621
+#: urpm/cli/commands/server.py:681
 #, python-brace-format
 msgid "{count} reachable"
 msgstr "{count} accessible(s)"
 
-#: urpm/cli/commands/server.py:624
+#: urpm/cli/commands/server.py:684
 msgid "No reachable mirrors found"
 msgstr "Aucun miroir accessible trouvé"
 
-#: urpm/cli/commands/server.py:668
+#: urpm/cli/commands/server.py:728
 #, python-brace-format
 msgid "Added: {name} ({latency}ms)"
 msgstr "Ajouté : {name} ({latency} ms)"
 
-#: urpm/cli/commands/server.py:681
+#: urpm/cli/commands/server.py:741
 #, python-brace-format
 msgid "Failed to add {name}: {error}"
 msgstr "Échec de l'ajout de {name} : {error}"
 
-#: urpm/cli/commands/server.py:717
+#: urpm/cli/commands/server.py:777
 msgid "Cannot detect Mageia version from /etc/os-release"
 msgstr "Impossible de détecter la version de Mageia depuis /etc/os-release"
 
-#: urpm/cli/commands/server.py:718
+#: urpm/cli/commands/server.py:778
 msgid "Use --release to specify manually (e.g., --release 9)"
 msgstr "Utilisez --release pour spécifier manuellement (ex. : --release 9)"
 
-#: urpm/cli/commands/server.py:731
+#: urpm/cli/commands/server.py:791
 #, python-brace-format
 msgid "Would add {count} server:"
 msgid_plural "Would add {count} servers:"
 msgstr[0] "Ajouterait {count} serveur :"
 msgstr[1] "Ajouterait {count} serveurs :"
 
-#: urpm/cli/commands/server.py:745
+#: urpm/cli/commands/server.py:804
 msgid ""
 "\n"
-"No enabled media to scan"
-msgstr ""
-"\n"
-"Aucun média activé à scanner"
+"No media to scan"
+msgstr "\nAucun média à scanner"
 
-#: urpm/cli/commands/server.py:754
-#, python-brace-format
-msgid "Scanning {count} enabled media..."
-msgstr "Scan de {count} médias activés..."
-
-#: urpm/cli/commands/server.py:782
+#: urpm/cli/commands/server.py:809
 #, python-brace-format
 msgid "{count} links created"
 msgstr "{count} liens créés"
 
-#: urpm/cli/commands/server.py:787
+#: urpm/cli/commands/server.py:814
 #, python-brace-format
 msgid "Added {added} server, now have {total} enabled"
 msgid_plural "Added {added} servers, now have {total} enabled"
 msgstr[0] "{added} serveur ajouté, maintenant {total} activé(s)"
 msgstr[1] "{added} serveurs ajoutés, maintenant {total} activé(s)"
 
-#: urpm/cli/commands/server.py:810 urpm/cli/commands/server.py:877
-#: urpm/cli/commands/server.py:969
+#: urpm/cli/commands/server.py:837 urpm/cli/commands/server.py:904
+#: urpm/cli/commands/server.py:996
 #, python-brace-format
 msgid "Error: server '{name}' not found"
 msgstr "Erreur : serveur '{name}' non trouvé"
 
-#: urpm/cli/commands/server.py:815 urpm/cli/commands/server.py:974
+#: urpm/cli/commands/server.py:842 urpm/cli/commands/server.py:1001
 #, python-brace-format
 msgid "Server '{name}' is not blacklisted."
 msgstr "Le serveur '{name}' n'est pas sur liste noire."
 
-#: urpm/cli/commands/server.py:823
+#: urpm/cli/commands/server.py:850
 msgid "⚠ You are about to re-enable a BLACKLISTED server."
 msgstr "⚠ Vous êtes sur le point de réactiver un serveur SUR LISTE NOIRE."
 
-#: urpm/cli/commands/server.py:824
+#: urpm/cli/commands/server.py:851
 msgid "  Server:  "
 msgstr "  Serveur :  "
 
-#: urpm/cli/commands/server.py:825
+#: urpm/cli/commands/server.py:852
 msgid "  Reason:  "
 msgstr "  Raison :  "
 
-#: urpm/cli/commands/server.py:826
+#: urpm/cli/commands/server.py:853
 msgid "  Since:   "
 msgstr "  Depuis :  "
 
-#: urpm/cli/commands/server.py:828
+#: urpm/cli/commands/server.py:855
 msgid ""
 "\n"
 "  Re-enabling means you have manually verified the media"
@@ -4284,51 +4417,51 @@ msgstr ""
 "\n"
 "  Réactiver signifie que vous avez vérifié manuellement l'intégrité du média"
 
-#: urpm/cli/commands/server.py:831
+#: urpm/cli/commands/server.py:858
 msgid "  integrity (GPG keys, mirror source authenticity)."
 msgstr "  (clés GPG, authenticité de la source du miroir)."
 
-#: urpm/cli/commands/server.py:837
+#: urpm/cli/commands/server.py:864
 msgid "Type 'yes' to confirm reactivation: "
 msgstr "Tapez 'yes' pour confirmer la réactivation : "
 
-#: urpm/cli/commands/server.py:854
+#: urpm/cli/commands/server.py:881
 #, python-brace-format
 msgid "Server '{name}' is no longer blacklisted."
 msgstr "Le serveur '{name}' n'est plus sur liste noire."
 
-#: urpm/cli/commands/server.py:859
+#: urpm/cli/commands/server.py:886
 #, python-brace-format
 msgid "Server '{name}' was no longer blacklisted (cleared concurrently)."
 msgstr ""
 "Le serveur '{name}' n'était plus sur liste noire (effacée par une autre "
 "opération concurrente)."
 
-#: urpm/cli/commands/server.py:883
+#: urpm/cli/commands/server.py:910
 msgid "Path"
 msgstr "Chemin"
 
-#: urpm/cli/commands/server.py:889
+#: urpm/cli/commands/server.py:916
 msgid "  Security blacklist: ACTIVE"
 msgstr "  Liste noire de sécurité : ACTIVE"
 
-#: urpm/cli/commands/server.py:890
+#: urpm/cli/commands/server.py:917
 msgid "    Reason: "
 msgstr "    Raison : "
 
-#: urpm/cli/commands/server.py:892
+#: urpm/cli/commands/server.py:919
 msgid "    Since:  "
 msgstr "    Depuis : "
 
-#: urpm/cli/commands/server.py:897
+#: urpm/cli/commands/server.py:924
 msgid "    Ack'd:  "
 msgstr "    Acquittée : "
 
-#: urpm/cli/commands/server.py:898
+#: urpm/cli/commands/server.py:925
 msgid " (persistent reminder silenced)"
 msgstr " (rappel persistant silencieux)"
 
-#: urpm/cli/commands/server.py:901
+#: urpm/cli/commands/server.py:928
 #, python-brace-format
 msgid ""
 "    Run 'urpm server ack-blacklist {name}' to silence the reminder while you "
@@ -4337,7 +4470,7 @@ msgstr ""
 "    Exécutez 'urpm server ack-blacklist {name}' pour faire taire le rappel "
 "pendant que vous enquêtez."
 
-#: urpm/cli/commands/server.py:904
+#: urpm/cli/commands/server.py:931
 #, python-brace-format
 msgid ""
 "    Run 'urpm server unblacklist {name}' after manual verification to re-"
@@ -4346,15 +4479,15 @@ msgstr ""
 "    Exécutez 'urpm server unblacklist {name}' après vérification manuelle "
 "pour réactiver."
 
-#: urpm/cli/commands/server.py:915
+#: urpm/cli/commands/server.py:942
 msgid "  Compromise history (signature failures):"
 msgstr "  Historique des compromissions (échecs de signature) :"
 
-#: urpm/cli/commands/server.py:934
+#: urpm/cli/commands/server.py:961
 msgid "Reputation"
 msgstr "Réputation"
 
-#: urpm/cli/commands/server.py:938
+#: urpm/cli/commands/server.py:965
 msgid ""
 "\n"
 "Recent failures (last 24h):"
@@ -4362,12 +4495,12 @@ msgstr ""
 "\n"
 "Échecs récents (dernières 24 h) :"
 
-#: urpm/cli/commands/server.py:979
+#: urpm/cli/commands/server.py:1006
 #, python-brace-format
 msgid "Server '{name}' was already acknowledged."
 msgstr "Le serveur '{name}' a déjà été acquitté."
 
-#: urpm/cli/commands/server.py:985
+#: urpm/cli/commands/server.py:1012
 #, python-brace-format
 msgid ""
 "Acknowledged blacklist of '{name}'.  The persistent reminder is now "
@@ -6238,397 +6371,375 @@ msgid_plural "  {count} filesystems unmounted"
 msgstr[0] " {count} système de fichiers démonté"
 msgstr[1] " {count} systèmes de fichiers démontés"
 
-#: urpm/cli/commands/build.py:193
+#: urpm/cli/commands/build.py:203
 #, python-brace-format
 msgid "Image {tag} already exists (remove with: {rt} rmi {tag})"
 msgstr "L'image {tag} existe déjà (supprimer avec : {rt} rmi {tag})"
 
-#: urpm/cli/commands/build.py:201
+#: urpm/cli/commands/build.py:211
 #, python-brace-format
 msgid "Unknown profile: {p}"
 msgstr "Profil inconnu : {p}"
 
-#: urpm/cli/commands/build.py:246
+#: urpm/cli/commands/build.py:256
 #, python-brace-format
 msgid "[Phase 1/2] Building bootstrap chroot → {tag}"
 msgstr "[Phase 1/2] Construction du chroot de bootstrap → {tag}"
 
-#: urpm/cli/commands/build.py:255
+#: urpm/cli/commands/build.py:265
 #, python-brace-format
 msgid "[Phase 1/2] Reusing cached {tag} (remove with: podman rmi {tag})"
 msgstr ""
 "[Phase 1/2] Réutilisation de {tag} en cache (supprimer avec : podman rmi "
 "{tag})"
 
-#: urpm/cli/commands/build.py:259
+#: urpm/cli/commands/build.py:269
 #, python-brace-format
 msgid "[Phase 2/2] Promoting {src} → {dst}"
 msgstr "[Phase 2/2] Promotion {src} → {dst}"
 
-#: urpm/cli/commands/build.py:286
+#: urpm/cli/commands/build.py:296
 #, python-brace-format
 msgid "  Booting minimal image {tag}..."
 msgstr "  Démarrage de l'image minimale {tag}..."
 
-#: urpm/cli/commands/build.py:291 urpm/cli/commands/build.py:1014
-#: urpm/cli/commands/build.py:1559
+#: urpm/cli/commands/build.py:301 urpm/cli/commands/build.py:1091
+#: urpm/cli/commands/build.py:1636
 #, python-brace-format
 msgid "  Container: {cid}"
 msgstr " Conteneur : {cid}"
 
-#: urpm/cli/commands/build.py:301
+#: urpm/cli/commands/build.py:311
 #, python-brace-format
 msgid "  Adding media {name}..."
 msgstr "  Ajout du média {name}..."
 
-#: urpm/cli/commands/build.py:308
+#: urpm/cli/commands/build.py:318
 #, python-brace-format
 msgid "Failed to add media {name} ({url})"
 msgstr "Échec de l'ajout du média {name} ({url})"
 
-#: urpm/cli/commands/build.py:312 urpm/cli/commands/build.py:1109
-#: urpm/cli/commands/build.py:1562
+#: urpm/cli/commands/build.py:322 urpm/cli/commands/build.py:1186
+#: urpm/cli/commands/build.py:1639
 msgid "  Updating media..."
 msgstr "  Mise à jour des médias..."
 
-#: urpm/cli/commands/build.py:315
+#: urpm/cli/commands/build.py:325
 #, python-brace-format
 msgid "  Warning: media update returned {code}"
 msgstr "  Attention : la mise à jour des médias a retourné {code}"
 
-#: urpm/cli/commands/build.py:325
+#: urpm/cli/commands/build.py:335
 msgid "  Upgrading packages (picks up any newer versions)..."
 msgstr "  Mise à jour des paquets (récupère les versions plus récentes)..."
 
-#: urpm/cli/commands/build.py:328
+#: urpm/cli/commands/build.py:338
 #, python-brace-format
 msgid "  Warning: upgrade returned {code}"
 msgstr "  Attention : la mise à jour a retourné {code}"
 
-#: urpm/cli/commands/build.py:331
+#: urpm/cli/commands/build.py:352
 #, python-brace-format
 msgid "  Installing {n} extra packages..."
 msgstr "  Installation de {n} paquet(s) supplémentaire(s)..."
 
-#: urpm/cli/commands/build.py:335
+#: urpm/cli/commands/build.py:357
 msgid "Failed to install extra packages"
 msgstr "Échec de l'installation des paquets supplémentaires"
 
-#: urpm/cli/commands/build.py:341
+#: urpm/cli/commands/build.py:363
 #, python-brace-format
 msgid "BuildRequires source not found: {p}"
 msgstr "Source BuildRequires non trouvée : {p}"
 
-#: urpm/cli/commands/build.py:348
+#: urpm/cli/commands/build.py:370
 #, python-brace-format
 msgid "  Copying {name} into container..."
 msgstr "  Copie de {name} dans le conteneur..."
 
-#: urpm/cli/commands/build.py:350
+#: urpm/cli/commands/build.py:372
 msgid "Failed to copy BuildRequires source"
 msgstr "Échec de la copie de la source BuildRequires"
 
-#: urpm/cli/commands/build.py:352 urpm/cli/commands/build.py:1148
+#: urpm/cli/commands/build.py:374 urpm/cli/commands/build.py:1225
 msgid "  Installing BuildRequires..."
 msgstr " Installation des BuildRequires..."
 
-#: urpm/cli/commands/build.py:356
+#: urpm/cli/commands/build.py:379
 msgid "Failed to install BuildRequires"
 msgstr "Échec de l'installation des BuildRequires"
 
-#: urpm/cli/commands/build.py:362
+#: urpm/cli/commands/build.py:385
 #, python-brace-format
 msgid "  Committing image {tag}..."
 msgstr "  Validation de l'image {tag}..."
 
-#: urpm/cli/commands/build.py:365 urpm/cli/commands/build.py:1583
+#: urpm/cli/commands/build.py:388 urpm/cli/commands/build.py:1712
 msgid "Failed to commit image"
 msgstr "Échec de la validation de l'image"
 
-#: urpm/cli/commands/build.py:367 urpm/cli/commands/build.py:693
-#: urpm/cli/commands/build.py:1585
+#: urpm/cli/commands/build.py:390 urpm/cli/commands/build.py:688
+#: urpm/cli/commands/build.py:822 urpm/cli/commands/build.py:1714
 msgid " done"
 msgstr " terminé"
 
-#: urpm/cli/commands/build.py:371
+#: urpm/cli/commands/build.py:394
 #, python-brace-format
 msgid "Phase 2 failed: {error}"
 msgstr "Phase 2 échouée : {error}"
 
-#: urpm/cli/commands/build.py:502
+#: urpm/cli/commands/build.py:443
 msgid "Error: 'bootstrap' profile not found"
 msgstr "Erreur : profil 'bootstrap' non trouvé"
 
-#: urpm/cli/commands/build.py:521
+#: urpm/cli/commands/build.py:462
 #, python-brace-format
 msgid "Insufficient disk space in {path}"
 msgstr "Espace disque insuffisant dans {path}"
 
-#: urpm/cli/commands/build.py:522
+#: urpm/cli/commands/build.py:463
 #, python-brace-format
 msgid "  Available: {available:.1f} GB, required: {required} GB"
 msgstr " Disponible : {available:.1f} Go, requis : {required} Go"
 
-#: urpm/cli/commands/build.py:526
+#: urpm/cli/commands/build.py:467
 #, python-brace-format
 msgid "Could not check disk space: {error}"
 msgstr "Impossible de vérifier l'espace disque : {error}"
 
-#: urpm/cli/commands/build.py:529
+#: urpm/cli/commands/build.py:470
 #, python-brace-format
 msgid "  Bootstrap chroot: {path}"
 msgstr "  Chroot de bootstrap : {path}"
 
-#: urpm/cli/commands/build.py:537
+#: urpm/cli/commands/build.py:478
 msgid "  Initializing chroot media..."
 msgstr "  Initialisation des médias du chroot..."
 
-#: urpm/cli/commands/build.py:544
+#: urpm/cli/commands/build.py:485
 msgid "Failed to initialize chroot"
 msgstr "Échec de l'initialisation du chroot"
 
-#: urpm/cli/commands/build.py:558
-#, python-brace-format
-msgid "  Installing {label}..."
-msgstr "  Installation de {label}..."
+#: urpm/cli/commands/build.py:522
+msgid "[no-scripts] "
+msgstr "[no-scripts] "
 
-#: urpm/cli/commands/build.py:603
-msgid "Failed to install setup"
-msgstr "Échec de l'installation de setup"
+#: urpm/cli/commands/build.py:523
+#, python-brace-format
+msgid "  Installing {mode}{label}..."
+msgstr "  Installation {mode}de {label}..."
 
 #: urpm/cli/commands/build.py:610
+msgid "Failed to seed /etc via setup"
+msgstr "Échec de l'initialisation de /etc via setup"
+
+#: urpm/cli/commands/build.py:614
 msgid "Failed to install filesystem"
 msgstr "Échec de l'installation de filesystem"
 
-#: urpm/cli/commands/build.py:613
-msgid "Failed to install coreutils"
-msgstr "Échec de l'installation de coreutils"
+#: urpm/cli/commands/build.py:617
+msgid "Failed to install makedev"
+msgstr "Échec de l'installation de makedev"
 
-#: urpm/cli/commands/build.py:619
+#: urpm/cli/commands/build.py:622
+msgid "Failed to install basesystem-minimal-core"
+msgstr "Échec de l'installation de basesystem-minimal-core"
+
+#: urpm/cli/commands/build.py:628
 #, python-brace-format
 msgid "bootstrap remainder ({n} pkgs)"
 msgstr "reste du bootstrap ({n} paquets)"
 
-#: urpm/cli/commands/build.py:621
+#: urpm/cli/commands/build.py:630
 msgid "Failed to install bootstrap packages"
 msgstr "Échec de l'installation des paquets de bootstrap"
 
-#: urpm/cli/commands/build.py:625
-msgid "  Installing urpm-ng..."
-msgstr "  Installation d'urpm-ng..."
+#: urpm/cli/commands/build.py:638
+msgid "  Installing urpm-ng-core..."
+msgstr "  Installation d'urpm-ng-core..."
 
-#: urpm/cli/commands/build.py:627
-#, python-brace-format
-msgid "    repos failed, looking for local urpm-ng RPM ({arch})..."
-msgstr "    dépôts en échec, recherche d'un RPM urpm-ng local ({arch})..."
-
-#: urpm/cli/commands/build.py:631
-#, python-brace-format
-msgid ""
-"  Found: {path}\n"
-"  Press Enter to use, or provide another path: "
-msgstr ""
-"  Trouvé : {path}\n"
-"  Appuyez sur Entrée pour utiliser, ou fournissez un autre chemin : "
-
-#: urpm/cli/commands/build.py:640
-#, python-brace-format
-msgid ""
-"    No local urpm-ng RPM found matching arch '{arch}'.  Build one on a "
-"matching host (or in a {arch} container) and drop it into ~/Downloads or ./"
-"rpmbuild/RPMS/{arch}/."
-msgstr ""
-"    Aucun RPM urpm-ng local correspondant à l'arch '{arch}' n'a été trouvé.  "
-"Compilez-en un sur un hôte compatible (ou dans un conteneur {arch}) et "
-"déposez-le dans ~/Downloads ou ./rpmbuild/RPMS/{arch}/."
-
-#: urpm/cli/commands/build.py:645
-#, python-brace-format
-msgid "  Path to urpm-ng RPM file ({arch}): "
-msgstr "  Chemin vers le fichier RPM urpm-ng ({arch}) : "
+#: urpm/cli/commands/build.py:650
+msgid "Failed to install urpm-ng-core"
+msgstr "Échec de l'installation d'urpm-ng-core"
 
 #: urpm/cli/commands/build.py:651
-msgid "No urpm-ng RPM provided or file not found"
-msgstr "Aucun RPM urpm-ng fourni ou fichier non trouvé"
+msgid ""
+"  Build it locally with 'make rpm' and retry, or ensure a media providing "
+"urpm-ng-core is configured on the host."
+msgstr ""
+"  Le construire localement avec 'make rpm' et ré-essayer, ou s'assurer qu'un "
+"média fournissant urpm-ng-core est configuré sur l'hôte."
 
-#: urpm/cli/commands/build.py:652
-msgid "  Build it with: make rpm"
-msgstr " Compilez-le avec : make rpm"
-
-#: urpm/cli/commands/build.py:655
-#, python-brace-format
-msgid "urpm-ng from {name}"
-msgstr "urpm-ng depuis {name}"
-
-#: urpm/cli/commands/build.py:657
-msgid "Failed to install urpm-ng"
-msgstr "Échec de l'installation d'urpm-ng"
-
-#: urpm/cli/commands/build.py:659
-#, python-brace-format
-msgid "  Installed {name}"
-msgstr " Installé {name}"
-
-#: urpm/cli/commands/build.py:667
+#: urpm/cli/commands/build.py:662
 msgid "  Bootstrapping TLS trust store..."
 msgstr "  Initialisation du magasin de confiance TLS..."
 
-#: urpm/cli/commands/build.py:676
+#: urpm/cli/commands/build.py:671
 #, python-brace-format
 msgid "  Warning: update-ca-trust returned {rc}: {err}"
 msgstr "  Attention : update-ca-trust a retourné {rc} : {err}"
 
-#: urpm/cli/commands/build.py:680
+#: urpm/cli/commands/build.py:675
 msgid "  Warning: update-ca-trust not found in chroot (TLS may fail)"
 msgstr ""
 "  Attention : update-ca-trust introuvable dans le chroot (TLS peut échouer)"
 
-#: urpm/cli/commands/build.py:682
+#: urpm/cli/commands/build.py:677
 msgid "  Cleaning up chroot..."
 msgstr "  Nettoyage du chroot..."
 
-#: urpm/cli/commands/build.py:687
+#: urpm/cli/commands/build.py:682
 #, python-brace-format
 msgid "  Importing as {tag}..."
 msgstr "  Importation en tant que {tag}..."
 
-#: urpm/cli/commands/build.py:691
+#: urpm/cli/commands/build.py:686
 msgid "Failed to import minimal image"
 msgstr "Échec de l'importation de l'image minimale"
 
-#: urpm/cli/commands/build.py:697
+#: urpm/cli/commands/build.py:692
 #, python-brace-format
 msgid "Phase 1 failed: {error}"
 msgstr "Phase 1 échouée : {error}"
 
-#: urpm/cli/commands/build.py:705
+#: urpm/cli/commands/build.py:703
 #, python-brace-format
 msgid "Chroot kept at: {path}"
 msgstr "Chroot conservé à : {path}"
 
-#: urpm/cli/commands/build.py:748
+#: urpm/cli/commands/build.py:784
+#, python-brace-format
+msgid "  Compacting {db}..."
+msgstr "  Compaction de {db}..."
+
+#: urpm/cli/commands/build.py:797
+#, python-brace-format
+msgid "  Warning: WAL flush failed on {db}: {err}"
+msgstr "  Attention : échec du flush WAL sur {db} : {err}"
+
+#: urpm/cli/commands/build.py:825
 #, python-brace-format
 msgid "  Removed {count} cache/log entry"
 msgid_plural "  Removed {count} cache/log entries"
 msgstr[0] " {count} entrée de cache/journal supprimée"
 msgstr[1] " {count} entrées de cache/journal supprimées"
 
-#: urpm/cli/commands/build.py:756
+#: urpm/cli/commands/build.py:833
 msgid "  Created /var/tmp"
 msgstr " Créé /var/tmp"
 
-#: urpm/cli/commands/build.py:770
+#: urpm/cli/commands/build.py:847
 msgid "  Added PATH fix to /etc/bashrc"
 msgstr " Ajout de la correction PATH dans /etc/bashrc"
 
-#: urpm/cli/commands/build.py:782
+#: urpm/cli/commands/build.py:859
 msgid "  Created /etc/machine-id"
 msgstr " Créé /etc/machine-id"
 
-#: urpm/cli/commands/build.py:806
+#: urpm/cli/commands/build.py:883
 #, python-brace-format
 msgid "rpmmacros file not found: {path}"
 msgstr "Fichier rpmmacros introuvable : {path}"
 
-#: urpm/cli/commands/build.py:819
+#: urpm/cli/commands/build.py:896
 #, python-brace-format
 msgid "No RPMs found matching: {pattern}"
 msgstr "Aucun RPM trouvé correspondant à : {pattern}"
 
-#: urpm/cli/commands/build.py:829
+#: urpm/cli/commands/build.py:906
 #, python-brace-format
 msgid "Using {name} {version}"
 msgstr "Utilisation de {name} {version}"
 
-#: urpm/cli/commands/build.py:833
+#: urpm/cli/commands/build.py:910
 #, python-brace-format
 msgid "Image not found: {image}"
 msgstr "Image non trouvée : {image}"
 
-#: urpm/cli/commands/build.py:834
+#: urpm/cli/commands/build.py:911
 msgid "Create one with: urpm mkimage --release 10 --tag <tag>"
 msgstr "Créez-en une avec : urpm mkimage --release 10 --tag <tag>"
 
-#: urpm/cli/commands/build.py:842
+#: urpm/cli/commands/build.py:919
 #, python-brace-format
 msgid "Source not found: {source}"
 msgstr "Source non trouvée : {source}"
 
-#: urpm/cli/commands/build.py:850
+#: urpm/cli/commands/build.py:927
 #, python-brace-format
 msgid "Binary RPM cannot be built: {source}"
 msgstr "Impossible de compiler un RPM binaire : {source}"
 
-#: urpm/cli/commands/build.py:851
+#: urpm/cli/commands/build.py:928
 msgid "  Use a .src.rpm or .spec file instead"
 msgstr " Utilisez un fichier .src.rpm ou .spec à la place"
 
-#: urpm/cli/commands/build.py:854
+#: urpm/cli/commands/build.py:931
 #, python-brace-format
 msgid "Unsupported source type: {source}"
 msgstr "Type de source non supporté : {source}"
 
-#: urpm/cli/commands/build.py:858
+#: urpm/cli/commands/build.py:935
 msgid "No valid sources to build"
 msgstr "Aucune source valide à compiler"
 
-#: urpm/cli/commands/build.py:862
+#: urpm/cli/commands/build.py:939
 #, python-brace-format
 msgid "Building {count} package"
 msgid_plural "Building {count} packages"
 msgstr[0] "Compilation de {count} paquet"
 msgstr[1] "Compilation de {count} paquets"
 
-#: urpm/cli/commands/build.py:865
+#: urpm/cli/commands/build.py:942
 #, python-brace-format
 msgid "Image:  {image}"
 msgstr "Image : {image}"
 
-#: urpm/cli/commands/build.py:868
+#: urpm/cli/commands/build.py:945
 #, python-brace-format
 msgid "Pre-install: {count} local RPM"
 msgid_plural "Pre-install: {count} local RPMs"
 msgstr[0] "Pré-installation : {count} RPM local"
 msgstr[1] "Pré-installation : {count} RPM locaux"
 
-#: urpm/cli/commands/build.py:872
+#: urpm/cli/commands/build.py:949
 #, python-brace-format
 msgid "Parallel: {parallel}"
 msgstr "Parallèle : {parallel}"
 
-#: urpm/cli/commands/build.py:892
+#: urpm/cli/commands/build.py:969
 msgid "OK"
 msgstr "OK"
 
-#: urpm/cli/commands/build.py:892
+#: urpm/cli/commands/build.py:969
 msgid "FAIL"
 msgstr "ÉCHEC"
 
-#: urpm/cli/commands/build.py:898
+#: urpm/cli/commands/build.py:975
 #, python-brace-format
 msgid "Building: {name}"
 msgstr "Compilation : {name}"
 
-#: urpm/cli/commands/build.py:908
+#: urpm/cli/commands/build.py:985
 msgid "Build Summary"
 msgstr "Résumé de la compilation"
 
-#: urpm/cli/commands/build.py:910
+#: urpm/cli/commands/build.py:987
 #, python-brace-format
 msgid "Success: {count}"
 msgstr "Succès : {count}"
 
-#: urpm/cli/commands/build.py:911
+#: urpm/cli/commands/build.py:988
 #, python-brace-format
 msgid "Failed:  {count}"
 msgstr "Échecs : {count}"
 
-#: urpm/cli/commands/build.py:912
+#: urpm/cli/commands/build.py:989
 #, python-brace-format
 msgid "Output:  {path}"
 msgstr "Sortie : {path}"
 
-#: urpm/cli/commands/build.py:915
+#: urpm/cli/commands/build.py:992
 msgid ""
 "\n"
 "Failed packages:"
@@ -6636,129 +6747,129 @@ msgstr ""
 "\n"
 "Paquets en échec :"
 
-#: urpm/cli/commands/build.py:1033
+#: urpm/cli/commands/build.py:1110
 #, python-brace-format
 msgid "  rpmmacros: {path}"
 msgstr "  rpmmacros : {path}"
 
-#: urpm/cli/commands/build.py:1038
+#: urpm/cli/commands/build.py:1115
 #, python-brace-format
 msgid "  Sub-release tag: {tag}"
 msgstr "  Tag de sous-release : {tag}"
 
-#: urpm/cli/commands/build.py:1063
+#: urpm/cli/commands/build.py:1140
 msgid "  Copying source..."
 msgstr " Copie de la source..."
 
-#: urpm/cli/commands/build.py:1070
+#: urpm/cli/commands/build.py:1147
 msgid "  Installing SRPM..."
 msgstr " Installation du SRPM..."
 
-#: urpm/cli/commands/build.py:1096
+#: urpm/cli/commands/build.py:1173
 #, python-brace-format
 msgid "  Copying {count} source file from {path}..."
 msgid_plural "  Copying {count} source files from {path}..."
 msgstr[0] " Copie de {count} fichier source depuis {path}..."
 msgstr[1] " Copie de {count} fichiers sources depuis {path}..."
 
-#: urpm/cli/commands/build.py:1102
+#: urpm/cli/commands/build.py:1179
 msgid "  Warning: No SOURCES directory found"
 msgstr " Attention : aucun répertoire SOURCES trouvé"
 
-#: urpm/cli/commands/build.py:1112
+#: urpm/cli/commands/build.py:1189
 msgid "  Warning: media update failed, continuing..."
 msgstr "  Attention : mise à jour des médias échouée, on continue..."
 
-#: urpm/cli/commands/build.py:1113
+#: urpm/cli/commands/build.py:1190
 msgid "  Updating packages..."
 msgstr "  Mise à jour des paquets..."
 
-#: urpm/cli/commands/build.py:1116
+#: urpm/cli/commands/build.py:1193
 msgid "  Warning: package update failed, continuing..."
 msgstr "  Attention : mise à jour des paquets échouée, on continue..."
 
-#: urpm/cli/commands/build.py:1119
+#: urpm/cli/commands/build.py:1196
 msgid "  Installing rpm-build..."
 msgstr " Installation de rpm-build..."
 
-#: urpm/cli/commands/build.py:1129
+#: urpm/cli/commands/build.py:1206
 #, python-brace-format
 msgid "  Installing {count} local RPM..."
 msgid_plural "  Installing {count} local RPMs..."
 msgstr[0] " Installation de {count} RPM local..."
 msgstr[1] " Installation de {count} RPM locaux..."
 
-#: urpm/cli/commands/build.py:1216
+#: urpm/cli/commands/build.py:1293
 #, python-brace-format
 msgid "rpmbuild -br failed before %build (rc={rc}, see log)"
 msgstr "rpmbuild -br a échoué avant %build (rc={rc}, voir log)"
 
-#: urpm/cli/commands/build.py:1223
+#: urpm/cli/commands/build.py:1300
 msgid ""
 "rpmbuild reported missing BRs but .buildreqs.nosrc.rpm could not be read"
 msgstr ""
 "rpmbuild a signalé des BR manquants mais .buildreqs.nosrc.rpm n'a pas pu "
 "être lu"
 
-#: urpm/cli/commands/build.py:1242
+#: urpm/cli/commands/build.py:1319
 msgid "rpmbuild requested more BRs but emitted no installable requirements"
 msgstr ""
 "rpmbuild a demandé plus de BR mais n'a émis aucun prérequis installable"
 
-#: urpm/cli/commands/build.py:1250
+#: urpm/cli/commands/build.py:1327
 #, python-brace-format
 msgid "Getting dynamic buildrequires (round {n}), found :"
 msgstr "Récupération des buildrequires dynamiques (passe {n}), trouvé :"
 
-#: urpm/cli/commands/build.py:1268
+#: urpm/cli/commands/build.py:1345
 msgid "Dynamic BuildRequires install failed"
 msgstr "Échec de l'installation des BuildRequires dynamiques"
 
-#: urpm/cli/commands/build.py:1271
+#: urpm/cli/commands/build.py:1348
 #, python-brace-format
 msgid "Dynamic BuildRequires did not converge in {n} passes"
 msgstr "Les BuildRequires dynamiques n'ont pas convergé en {n} passes"
 
-#: urpm/cli/commands/build.py:1274
+#: urpm/cli/commands/build.py:1351
 msgid "  Building..."
 msgstr " Compilation en cours..."
 
-#: urpm/cli/commands/build.py:1301
+#: urpm/cli/commands/build.py:1378
 #, python-brace-format
 msgid "  Build log: {path}"
 msgstr " Journal de compilation : {path}"
 
-#: urpm/cli/commands/build.py:1306
+#: urpm/cli/commands/build.py:1383
 #, python-brace-format
 msgid "  Copying RPMs to {path}/"
 msgstr " Copie des RPM vers {path}/"
 
-#: urpm/cli/commands/build.py:1309
+#: urpm/cli/commands/build.py:1386
 #, python-brace-format
 msgid "  Copying SRPMs to {path}/"
 msgstr " Copie des SRPM vers {path}/"
 
-#: urpm/cli/commands/build.py:1355
+#: urpm/cli/commands/build.py:1432
 msgid "Dynamic BuildRequires cannot be satisfied:"
 msgstr "Les BuildRequires dynamiques ne peuvent pas être satisfaits :"
 
-#: urpm/cli/commands/build.py:1371
+#: urpm/cli/commands/build.py:1448
 msgid "want"
 msgstr "demandé"
 
-#: urpm/cli/commands/build.py:1372
+#: urpm/cli/commands/build.py:1449
 msgid "have"
 msgstr "présent"
 
-#: urpm/cli/commands/build.py:1378
+#: urpm/cli/commands/build.py:1455
 msgid "no provider in any enabled medium"
 msgstr "aucun fournisseur dans les médias activés"
 
-#: urpm/cli/commands/build.py:1467
+#: urpm/cli/commands/build.py:1544
 msgid "No container images found."
 msgstr "Aucune image de conteneur trouvée."
 
-#: urpm/cli/commands/build.py:1480
+#: urpm/cli/commands/build.py:1557
 #, python-brace-format
 msgid ""
 "\n"
@@ -6773,44 +6884,52 @@ msgstr[1] ""
 "\n"
 "{count} images"
 
-#: urpm/cli/commands/build.py:1507 urpm/cli/commands/build.py:1544
+#: urpm/cli/commands/build.py:1584 urpm/cli/commands/build.py:1621
 #, python-brace-format
 msgid "Image not found: {tag}"
 msgstr "Image non trouvée : {tag}"
 
-#: urpm/cli/commands/build.py:1512
+#: urpm/cli/commands/build.py:1589
 #, python-brace-format
 msgid "Deleted: {tag}"
 msgstr "Supprimée : {tag}"
 
-#: urpm/cli/commands/build.py:1515
+#: urpm/cli/commands/build.py:1592
 #, python-brace-format
 msgid "Failed to delete: {tag}"
 msgstr "Échec de la suppression : {tag}"
 
-#: urpm/cli/commands/build.py:1551
+#: urpm/cli/commands/build.py:1628
 #, python-brace-format
 msgid "Updating image {tag}..."
 msgstr "Mise à jour de l'image {tag}..."
 
-#: urpm/cli/commands/build.py:1566
+#: urpm/cli/commands/build.py:1643
 msgid "  Warning: media update failed"
 msgstr "  Attention : échec de la mise à jour des médias"
 
-#: urpm/cli/commands/build.py:1569
+#: urpm/cli/commands/build.py:1660
 msgid "  Upgrading packages..."
 msgstr "  Mise à jour des paquets..."
 
-#: urpm/cli/commands/build.py:1573
+#: urpm/cli/commands/build.py:1664
 #, python-brace-format
 msgid "  Warning: package update returned {code}"
 msgstr "  Attention : la mise à jour des paquets a retourné {code}"
 
-#: urpm/cli/commands/build.py:1580
-msgid "  Committing..."
-msgstr "  Validation..."
+#: urpm/cli/commands/build.py:1671
+msgid "  Cleaning caches..."
+msgstr "  Nettoyage des caches..."
 
-#: urpm/cli/commands/build.py:1596
+#: urpm/cli/commands/build.py:1683
+msgid "  Compacting SQLite databases..."
+msgstr "  Compaction des bases SQLite..."
+
+#: urpm/cli/commands/build.py:1709
+msgid "  Committing (squashed)..."
+msgstr "  Validation (squashed)..."
+
+#: urpm/cli/commands/build.py:1725
 #, python-brace-format
 msgid ""
 "\n"
@@ -7123,6 +7242,10 @@ msgstr "rdep de {pkg} (silencieusement maintenu)"
 msgid "resolver anomaly; see log for details"
 msgstr "anomalie résolveur ; voir log pour le détail"
 
+#: urpm/core/transaction_queue.py:729
+msgid "Waiting for scriptlets to complete..."
+msgstr "Attente de la fin des scriptlets..."
+
 #: urpm/core/needs_restart.py:274
 #, python-brace-format
 msgid "You should restart your computer for {packages}"
@@ -7227,6 +7350,140 @@ msgstr "Exécutez : {cmd}"
 #: urpm/auth/privileges.py:113
 msgid "Try one of:"
 msgstr "Essayez l'une des commandes :"
+
+#~ msgid "Generate media metadata from RPM directory"
+#~ msgstr "Générer les métadonnées du média depuis un répertoire de RPM"
+
+#~ msgid "Media name(s)"
+#~ msgstr "Nom(s) de média"
+
+#~ msgid "Error: --nodeps requires --download-only"
+#~ msgstr "Erreur : --nodeps nécessite --download-only"
+
+#, python-brace-format
+#~ msgid "  {name}: already exists"
+#~ msgstr " {name} : existe déjà"
+
+#, python-brace-format
+#~ msgid "  Failed to add {name}: {error}"
+#~ msgstr " Échec de l'ajout de {name} : {error}"
+
+#~ msgid ""
+#~ "\n"
+#~ "Linking servers to media..."
+#~ msgstr ""
+#~ "\n"
+#~ "Association des serveurs aux médias..."
+
+#~ msgid ""
+#~ "\n"
+#~ "Syncing media metadata..."
+#~ msgstr ""
+#~ "\n"
+#~ "Synchronisation des métadonnées des médias..."
+
+#~ msgid "URL not recognized as official Mageia, using legacy mode"
+#~ msgstr ""
+#~ "URL non reconnue comme officielle Mageia, utilisation du mode hérité"
+
+#, python-brace-format
+#~ msgid "Added media '{name}' (id={id}) [legacy mode]"
+#~ msgstr "Média '{name}' ajouté (id={id}) [mode hérité]"
+
+#~ msgid ""
+#~ "Error: derived name {name!r} already taken by media #{id} ({existing}); "
+#~ "pass --name to override"
+#~ msgstr ""
+#~ "Erreur : le nom dérivé {name!r} est déjà pris par le média #{id} "
+#~ "({existing}) ; utilisez --name pour le redéfinir"
+
+#~ msgid "Skipped (mirrorlist-based):"
+#~ msgstr "Ignorés (basés sur mirrorlist) :"
+
+#~ msgid "    These use $MIRRORLIST and require autoconfig."
+#~ msgstr " Ceux-ci utilisent $MIRRORLIST et nécessitent autoconfig."
+
+#~ msgid "    Run: urpm media autoconfig -r <version>"
+#~ msgstr " Exécutez : urpm media autoconfig -r <version>"
+
+#, python-brace-format
+#~ msgid "  Would add server: {name} ({url})"
+#~ msgstr " Ajouterait le serveur : {name} ({url})"
+
+#, python-brace-format
+#~ msgid "  Skipping {name} (already exists)"
+#~ msgstr " Ignoré {name} (existe déjà)"
+
+#, python-brace-format
+#~ msgid "  Would add media: {name} -> {path}"
+#~ msgstr " Ajouterait le média : {name} -> {path}"
+
+#, python-brace-format
+#~ msgid "  Added media: {name}"
+#~ msgstr " Média ajouté : {name}"
+
+#, python-brace-format
+#~ msgid "Dry run: would add {added} media, {skipped} already exist"
+#~ msgstr "Simulation : ajouterait {added} médias, {skipped} existent déjà"
+
+#, python-brace-format
+#~ msgid "Added {added} media, {skipped} already existed"
+#~ msgstr "{added} médias ajoutés, {skipped} existaient déjà"
+
+#, python-brace-format
+#~ msgid ""
+#~ "  Skipping {section}: display name '{name}' already taken by media #{id} "
+#~ "('{existing}')"
+#~ msgstr ""
+#~ "  {section} ignoré : le nom d'affichage '{name}' est déjà pris par le "
+#~ "média #{id} ('{existing}')"
+
+#, python-brace-format
+#~ msgid "  Failed to add {name}: {err}"
+#~ msgstr "  Échec de l'ajout de {name} : {err}"
+
+#~ msgid "Failed to install coreutils"
+#~ msgstr "Échec de l'installation de coreutils"
+
+#, python-brace-format
+#~ msgid "    repos failed, looking for local urpm-ng RPM ({arch})..."
+#~ msgstr "    dépôts en échec, recherche d'un RPM urpm-ng local ({arch})..."
+
+#, python-brace-format
+#~ msgid ""
+#~ "  Found: {path}\n"
+#~ "  Press Enter to use, or provide another path: "
+#~ msgstr ""
+#~ "  Trouvé : {path}\n"
+#~ "  Appuyez sur Entrée pour utiliser, ou fournissez un autre chemin : "
+
+#, python-brace-format
+#~ msgid ""
+#~ "    No local urpm-ng RPM found matching arch '{arch}'.  Build one on a "
+#~ "matching host (or in a {arch} container) and drop it into ~/Downloads "
+#~ "or ./rpmbuild/RPMS/{arch}/."
+#~ msgstr ""
+#~ "    Aucun RPM urpm-ng local correspondant à l'arch '{arch}' n'a été "
+#~ "trouvé.  Compilez-en un sur un hôte compatible (ou dans un conteneur "
+#~ "{arch}) et déposez-le dans ~/Downloads ou ./rpmbuild/RPMS/{arch}/."
+
+#, python-brace-format
+#~ msgid "  Path to urpm-ng RPM file ({arch}): "
+#~ msgstr "  Chemin vers le fichier RPM urpm-ng ({arch}) : "
+
+#~ msgid "No urpm-ng RPM provided or file not found"
+#~ msgstr "Aucun RPM urpm-ng fourni ou fichier non trouvé"
+
+#~ msgid "  Build it with: make rpm"
+#~ msgstr " Compilez-le avec : make rpm"
+
+#, python-brace-format
+#~ msgid "urpm-ng from {name}"
+#~ msgstr "urpm-ng depuis {name}"
+
+#, python-brace-format
+#~ msgid "  Installed {name}"
+#~ msgstr " Installé {name}"
 
 #~ msgid "Installation interrupted"
 #~ msgstr "Installation interrompue"
@@ -7426,9 +7683,6 @@ msgstr "Essayez l'une des commandes :"
 
 #~ msgid "files"
 #~ msgstr "fichiers"
-
-#~ msgid "Target architecture (default: host arch)"
-#~ msgstr "Architecture cible (par défaut : architecture de l'hôte)"
 
 #~ msgid "Target architecture"
 #~ msgstr "Architecture :"
@@ -7683,11 +7937,6 @@ msgstr "Essayez l'une des commandes :"
 #~ msgid "alternatives"
 #~ msgstr "alternatives"
 
-#~ msgid "Wait for all scriptlets and triggers to complete before returning"
-#~ msgstr ""
-#~ "Attendre que tous les scriptlets et déclencheurs soient terminés avant de "
-#~ "revenir"
-
 #~ msgid "{count} orphaned package being removed in background..."
 #~ msgid_plural "{count} orphaned packages being removed in background..."
 #~ msgstr[0] ""
@@ -7746,8 +7995,3 @@ msgstr "Essayez l'une des commandes :"
 #~ msgctxt "server"
 #~ msgid "Media"
 #~ msgstr "Médias"
-
-#: urpm/cli/commands/media.py:1499
-#, python-brace-format
-msgid "Next step: run 'urpm server autoconfig' to attach servers to the {n} mirrorlist-based media"
-msgstr "Étape suivante : exécutez 'urpm server autoconfig' pour rattacher des serveurs aux {n} médias basés sur mirrorlist"
