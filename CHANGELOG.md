@@ -15,6 +15,139 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.8.2] — 2026-07-11
+
+Mkimage tightening pass.  Cross-version chroots (mga9 built from a
+mga10 host) work, the `-minimal` image drops from ~1 GB to ~380 MB,
+and the whole pipeline runs cleanly rootless.  Under the hood a
+critical `PackageDatabase.close()` leak that was shipping ~90 MB
+of stale SQLite WAL in every image is fixed, and `urpm install
+--nodeps` finally behaves like `rpm -i --nodeps` has since
+forever.  `urpm-ng-core` inclusion in fresh images is rewritten
+around an explicit four-rule matrix (local / media / github /
+auto) with source-override flags.
+
+### Major Features
+
+- **Mkimage cross-version chroot** — `urpm mkimage --release 9`
+  from a mga10 host used to blow up at stage 0 with "Package not
+  found" because every `get_package` query filtered by the host
+  release.  `cmd_init` now pins `mageia-version` into the chroot
+  DB's own config; `_get_accepted_versions` honours that pin over
+  auto-detect and the host os-release fallback.
+- **`urpm-ng-core` inclusion — 4-rule matrix** — explicit decision
+  tree deterministic across `urpm image make` and `urpm image
+  update`: (1) local match + no target media → local, (2) local
+  matches + target media + local newer → prompt (auto keeps
+  media), (3) host media covers target arch+release → replicate
+  into the container, (4) otherwise → GitHub Releases.  Two new
+  flags override the waterfall: `--urpm-ng-source={auto,local,
+  media,github}` and `--urpm-ng-core=<path>`.  Media reachability
+  is now HEAD-probed against `media_info/media.cfg` before rule 3
+  fires, so a third-party repo that publishes mga10/x86_64 but
+  nothing for mga9/aarch64 falls through to github instead of
+  shipping a doomed media into the container.
+- **`-minimal` image size divided by ~2.5** — several cumulative
+  wins land together: `basesystem-minimal` → `basesystem-minimal-
+  core` in the bootstrap profile (drops cronie / logrotate /
+  initscripts / kbd / kmod / iproute2 / binutils via file /
+  ncurses full, ~30 MB); `urpm/dbus/` + `urpm/auth/polkit.py`
+  moved out of `-core` into `-daemon` so headless containers no
+  longer pay for polkit + typelib(Polkit) they never load
+  (~10 MB); every file under `/var/lib/urpm/medias/` flushed
+  before commit (packages.db alone drives the solver, ~150 MB);
+  stage-0 `setup` seed via `--noscripts --nodeps` before
+  filesystem, so glibc's Lua `%preinstall` finds `/etc/passwd`
+  and `/etc/group` posed and doesn't emit cross-package group
+  lookup warnings; SQLite databases compacted at commit
+  (`wal_checkpoint(TRUNCATE)` + `journal_mode=DELETE` + `VACUUM`;
+  ~90 MB WAL alone); `podman commit --squash` on `urpm image
+  update` so successive updates don't snowball the on-disk
+  footprint.
+
+### Improvements
+
+- `urpm install --nodeps` now works standalone.  The previous
+  guard rejected it outside `--download-only` but the underlying
+  implementation already knew how to build the action list
+  without a solver pass, mirroring `rpm -i --nodeps`.  Guard
+  gone; a warning informs the operator that dep resolution was
+  skipped.
+- New `urpm install --no-readme` flag surfaces the internal
+  `args.no_readme` toggle so `urpm image update` and phase 2 of
+  `urpm mkimage` can suppress the "package X's lesspipe.sh is
+  available" post-install noise without going through
+  argparse.Namespace kludges.  Detection is dynamic on older
+  `urpm-ng-core` inside containers (mgabiz mga9 still ships
+  `urpm-ng-core-0.8.1-1.mga9`, which predates the flag).
+- Phase-1 stderr silencer — benign `rpm` and systemd-sysusers
+  messages that fire during `setup` extraction and basesystem
+  install (`failed to open /etc/group for id/name lookup`,
+  `Creating group X`, `/proc/ is not mounted`, `systemd.catalog:
+  No such file`) are filtered behind an `URPM_MKIMAGE_SILENCE=1`
+  env var, scoped to phase 1 only.  `urpm install` outside
+  mkimage is unaffected.
+
+### Bug Fixes
+
+- **`PackageDatabase.close()` leaked worker-thread connections.**
+  The main-thread close only released one connection; every
+  connection created by `ThreadPoolExecutor` workers (download,
+  resolver, import) stayed open until process exit.  In mkimage
+  that left ~13 fd on `packages.db{,-wal,-shm}` at cleanup time,
+  which blocked the WAL checkpoint and shipped ~90 MB of stale
+  WAL in every committed image.  Fixed by tracking every
+  connection in a lock-guarded list and closing them all in
+  `close()`.
+- `cmd_media_update` honours `args.allow_no_root` for its
+  `require_privileges` guard AND skips the `/run/urpm/`
+  sync_lock in the same path — the lock file lives on the host,
+  is unwritable from rootless podman-unshare, and the mkimage
+  pipeline is single-threaded anyway.
+- `cmd_media_update` in "update all media" mode was missing
+  `urpm_root=` on its `sync_all_media` call (the single-media
+  branch had it); sync tried to write synthesis under the host's
+  `/var/lib/urpm/` and hit EACCES.  Now propagated.
+- `cmd_media_discover` honours `args.allow_no_root` too, so the
+  mkimage stage that replicates the host's mgabiz media into a
+  fresh chroot can run rootless.
+- `_detect_host_source` used to preserve the host's own sub-repo
+  suffix (e.g. `urpm/release`) when rebuilding the target URL,
+  so `cmd_media_discover` ended up asking for
+  `.../media/urpm/release/media_info/media.cfg` — a 404 because
+  the real manifest sits one level up.  Rebuild from scratch
+  using target release + arch.
+- `container.commit(squash=True)` used `--squash-all`, a flag
+  that exists on `podman build` but not on `podman commit` —
+  every `urpm image update` aborted with "unknown flag" on
+  recent podman.  Now uses `--squash`.
+- `podman exec` in `container.exec_stream` allocates a
+  pseudo-TTY (`-t`) when the host stdout is a terminal, so
+  programs run inside the container inherit the real terminal
+  width via TIOCGWINSZ instead of drawing truncated progress
+  bars at the runtime's 80-column fallback.  Piped or
+  redirected stdout still runs without `-t` to keep
+  `urpm build 2>&1 | tee log` and CI paths working.
+
+### Packaging
+
+- `urpm-ng-daemon` now declares strict `Requires: polkit` and
+  `python3-gobject`, since `urpm/dbus/` + `urpm/auth/polkit.py`
+  moved there from `urpm-ng-core`.
+- Bootstrap and minimal profiles (`data/profiles/*.yaml`)
+  switched to `basesystem-minimal-core`.
+
+### Documentation
+
+- New `doc/TODO_OPTIMIZE_CONTAINER_SIZE.md` in the parent repo
+  captures the container-size playbook: what worked this cycle,
+  what remains (Recommends-off at the solver level,
+  `containersystem-minimal` upstream package, file-level
+  stripping à la buildah), and the roof set by python-stdlib +
+  glibc + icu when `urpm-ng-core` is kept in the image.
+
+---
+
 ## [0.8.1] — 2026-07-04
 
 First 0.8.x tag.  Ships the `genmedia` subsystem, a from-scratch
