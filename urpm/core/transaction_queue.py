@@ -725,8 +725,9 @@ class TransactionQueue:
                 progress_callback.cleanup()
             if full_sync:
                 # Newline to close the progress display before the wait message
-                print(f"\n\033[33m  Waiting for scriptlets to complete...\033[0m",
-                      flush=True)
+                from ..i18n import _
+                print("\n\033[33m  " + _("Waiting for scriptlets to complete...")
+                      + "\033[0m", flush=True)
             proc.wait()
 
             # Collect stderr (RPM warnings, systemd inhibition messages, etc.)
