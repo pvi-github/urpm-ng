@@ -329,6 +329,12 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             len(_pool.added)).format(count=len(_pool.added))))
         for name, latency in _pool.added:
             print(colors.dim(f"    {name} ({latency}ms)"))
+    elif _pool.disabled_by_config:
+        # Admin has explicitly set ``[server] auto_add = false`` —
+        # this is a state, not a failure.  Say so factually.
+        print(colors.dim("\n  " + _(
+            "Not adding servers to reach {needed} (auto_add disabled)").format(
+            needed=_pool.needed)))
     elif not _pool.sufficient and get_settings().download.parallel > 1:
         print(colors.warning("\n  " + _(
             "Not enough mirrors for {n} parallel downloads "

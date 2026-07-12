@@ -46,11 +46,16 @@ class PoolCheckResult:
         had: Number of enabled servers before the check.
         needed: Minimum number required for the configured parallelism.
         added: List of (name, latency_ms) for each server added.
+        disabled_by_config: True when the pool is below the minimum
+            only because the admin set ``[server] auto_add = false``.
+            The CLI uses this to swap the anxious "not enough mirrors"
+            warning for a factual dim line acknowledging the choice.
     """
     sufficient: bool
     had: int
     needed: int
     added: List[tuple] = field(default_factory=list)
+    disabled_by_config: bool = False
 
 
 def minimum_servers_for(parallel: int, pool_ratio: float = 1.5) -> int:
@@ -100,12 +105,15 @@ def ensure_minimum_servers(db: 'PackageDatabase',
         return PoolCheckResult(sufficient=True, had=official_count,
                                needed=min_needed)
 
-    # Respect [server] auto_add = false
+    # Respect [server] auto_add = false — the admin has made an
+    # explicit choice, so we surface that as its own outcome instead
+    # of the generic "pool too small" state used for network failures.
     if not server_cfg.auto_add:
         logger.info("Server pool too small (%d/%d) but auto_add is disabled",
                      official_count, min_needed)
         return PoolCheckResult(sufficient=False, had=official_count,
-                               needed=min_needed)
+                               needed=min_needed,
+                               disabled_by_config=True)
 
     to_add = min_needed - official_count
     logger.info("Server pool too small (%d/%d) for %d parallel downloads, "
