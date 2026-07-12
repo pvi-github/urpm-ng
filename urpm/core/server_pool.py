@@ -80,7 +80,24 @@ def ensure_minimum_servers(db: 'PackageDatabase',
 
     Returns:
         PoolCheckResult describing what happened.
+
+    Note:
+        Setting ``URPM_SKIP_MIRROR_DISCOVERY=1`` short-circuits this
+        function entirely: no version detection, no country backfill,
+        no mirrorlist fetch, no latency probes.  Returns a
+        ``sufficient=True`` result so callers do not print any warning.
+        Used by the test suite (via ``urpm/tests/conftest.py``) to keep
+        unit tests off the network and free of ``Auto-added N mirrors``
+        stdout noise; individual tests that exercise the discovery
+        logic clear the variable in a ``monkeypatch``.
     """
+    import os
+    if os.environ.get("URPM_SKIP_MIRROR_DISCOVERY") == "1":
+        # Silent short-circuit: no logger.info either, since the caller
+        # opted in explicitly.  ``sufficient=True`` means the CLI will
+        # not emit the "not enough mirrors" warning.
+        return PoolCheckResult(sufficient=True, had=0, needed=0)
+
     from .settings import get_settings
     server_cfg = get_settings().server
     min_needed = minimum_servers_for(parallel, server_cfg.pool_ratio)

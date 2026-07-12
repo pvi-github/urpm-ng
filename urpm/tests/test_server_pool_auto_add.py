@@ -29,6 +29,17 @@ def _fake_settings(auto_add: bool, pool_ratio: float = 1.5):
     )
 
 
+@pytest.fixture(autouse=True)
+def _reenable_mirror_discovery(monkeypatch):
+    """Undo the suite-wide ``URPM_SKIP_MIRROR_DISCOVERY`` from conftest.
+
+    This file is the only place that exercises the real branch structure
+    of ``ensure_minimum_servers``, so we need the short-circuit gone;
+    other tests keep the default protection.
+    """
+    monkeypatch.delenv("URPM_SKIP_MIRROR_DISCOVERY", raising=False)
+
+
 def test_pool_check_result_default_disabled_by_config_is_false():
     """The default value must be False so existing call sites that
     construct :class:`PoolCheckResult` without naming the field keep
