@@ -915,9 +915,18 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                     # Remove None key (packages without version like nginx, lighttpd)
                     versionless = version_groups.pop(None, set())
                     if len(version_groups) > 1 and not auto_mode:
-                        # Multiple versions detected, ask user
+                        # Multiple versions detected, ask user.
+                        # Sort with rpm.labelCompare so "5.10" comes after
+                        # "5.9" (plain lex sort was the historical bug —
+                        # see doc/TODO_RPM_VERSION_HELPER.md for the four
+                        # other latent sites and the 0.9.x refactor plan).
+                        import functools
+                        import rpm as _rpm
+                        _ver_key = functools.cmp_to_key(
+                            lambda a, b: _rpm.labelCompare(('', a, ''), ('', b, ''))
+                        )
                         print("\n" + _("Multiple versions in preferences:"))
-                        sorted_versions = sorted(version_groups.keys())
+                        sorted_versions = sorted(version_groups.keys(), key=_ver_key)
                         for i, ver in enumerate(sorted_versions, 1):
                             pkgs = version_groups[ver]
                             print(f"  {i}. {ver} ({', '.join(sorted(pkgs)[:3])}{'...' if len(pkgs) > 3 else ''})")
