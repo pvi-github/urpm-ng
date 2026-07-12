@@ -999,8 +999,14 @@ Container runtime (default: auto-detect).
 .RE
 .TP
 .B build \fB\-\-image\fR \fItag\fR \fIsource\fR ...
-Build RPM packages in isolated containers. Media metadata and installed packages
-inside the container are automatically updated before building.
+Build RPM packages in a container. When multiple sources are passed, all specs
+compile in a single shared container: the setup phases
+(\fBurpm media update\fR, \fBurpm upgrade\fR, \fBrpm\-build\fR install)
+run once, and each spec then builds inside its own \fB/root/<name>\fR topdir.
+RPMs built during the chain are re-injected as a local media so a later spec
+whose BuildRequires depends on them picks them up via the resolver.
+Use \fB\-\-parallel\fR to switch to the isolated multi-container path (one
+container per spec, useful for build-system-of-the-poor experiments).
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR
@@ -1022,10 +1028,22 @@ Skip media sync and package update before building.
 Container runtime (default: auto-detect).
 .TP
 .BR \-j ", " \-\-parallel " " \fIN\fR
-Number of parallel builds (default: 1).
+Number of parallel builds (default: 1). When set above 1, each spec
+runs in its own container up to \fIN\fR in flight, instead of chaining
+them in a single shared container.
 .TP
 .B \-\-keep\-container
 Keep container after build (for debugging).
+.TP
+.B \-\-stop\-on\-fail
+Stop the chain at the first failing spec instead of trying the remaining
+ones (default: continue).
+.TP
+.BR \-\-rollback\-between\-builds ", " \-\-rbb
+Roll back each spec's BuildRequires after its build so the next spec
+starts from the same shared baseline. The base setup
+(\fBurpm upgrade\fR, \fBrpm\-build\fR install) is preserved; only
+per\-spec dependencies are rewound. Off by default.
 .TP
 .BR \-\-subrel " " \fItag\fR
 Tag this build with a sub\-release marker so output RPMs become

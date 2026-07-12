@@ -1033,7 +1033,9 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 -w, --with-rpms <pattern>     # Pre-instalar RPMs locales antes del build (glob, repetible)
 --no-update                   # Saltarse la auto-actualización de medios y paquetes antes del build
 --runtime docker|podman       # Runtime de contenedor (por defecto: auto-detección)
--j, --parallel <N>            # Número de builds en paralelo (por defecto: 1)
+-j, --parallel <N>            # Compilaciones aisladas multi-contenedor (por defecto: 1, encadenadas en contenedor compartido)
+--stop-on-fail                # Detener la cadena al primer spec fallido (por defecto: continuar)
+--rollback-between-builds     # Revertir los BuildRequires de cada spec entre builds (alias: --rbb)
 --keep-container              # Conservar el contenedor tras el build (para debug)
 --subrel <tag>                # Inyecta %subrel TAG para que los RPMs de salida sean NAME-VERSION-RELEASE.TAG.DIST.ARCH.rpm
 --rpmmacros <file>            # Inyecta FILE como /root/.rpmmacros en el contenedor de build (combinable con --subrel)

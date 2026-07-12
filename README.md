@@ -1038,6 +1038,15 @@ before building, so that builds always run against the latest repository state.
 Use `--no-update` to skip this step when working offline or to speed up
 repeated builds.
 
+When you pass multiple sources at once, the specs are compiled in a single
+shared container: the shared setup (`urpm upgrade`, `rpm-build` install) runs
+once, each spec builds in its own `/root/<name>` topdir, and the RPMs
+produced by an earlier spec are automatically visible to later specs as a
+local media (useful when the second spec's BuildRequires include the first
+one's output). Use `--parallel N` to switch to the isolated path (one
+container per spec, N in flight) when you want each build to be sealed off
+from the others.
+
 ```bash
 # Build from source RPM (output to ./build-output/)
 urpm build -i mageia:10-build foo-1.0-1.mga10.src.rpm
@@ -1058,6 +1067,15 @@ urpm build -i mageia:10-build SPECS/app.spec \
 # Multiple builds in parallel
 urpm build -i mageia:10-build *.src.rpm --parallel 4
 
+# Chain multiple specs in a single shared container (default when
+# passing several sources): setup happens once, artefacts of the
+# first spec are visible to the second one.
+urpm build -i mageia:10-build libfoo.spec app-using-libfoo.spec
+
+# Same as above, but stop at the first failure and roll back each
+# spec's BuildRequires so every spec starts from the shared baseline.
+urpm build -i mageia:10-build --stop-on-fail --rbb *.spec
+
 # Third-party builder: tag output as foo-1.0-1.mlo.mga10.x86_64.rpm
 urpm build -i mageia:10-build --subrel mlo SPECS/foo.spec
 
@@ -1070,8 +1088,10 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 -w, --with-rpms <pattern>     # Pre-install local RPMs before build (glob, repeatable)
 --no-update                   # Skip auto-update of media and packages before build
 --runtime docker|podman       # Container runtime (default: auto-detect)
--j, --parallel <N>            # Number of parallel builds (default: 1)
+-j, --parallel <N>            # Isolated multi-container builds (default: 1, chain in a shared container)
 --keep-container              # Keep container after build (for debugging)
+--stop-on-fail                # Abort the chain at the first failing spec (default: continue)
+--rollback-between-builds     # Rewind per-spec BuildRequires between specs (alias: --rbb)
 --subrel <tag>                # Inject %subrel TAG so output RPMs become NAME-VERSION-RELEASE.TAG.DIST.ARCH.rpm
 --rpmmacros <file>            # Inject FILE as /root/.rpmmacros in the build container (combinable with --subrel)
 ```

@@ -1066,7 +1066,9 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 -w, --with-rpms <pattern>     # Lokale RPMs pre-installeren voor de build (glob, herhaalbaar)
 --no-update                   # Auto-update van media en pakketten voor de build overslaan
 --runtime docker|podman       # Container-runtime (standaard: auto-detect)
--j, --parallel <N>            # Aantal parallelle builds (standaard: 1)
+-j, --parallel <N>            # Geïsoleerde multi-container builds (standaard: 1, anders geketend in gedeelde container)
+--stop-on-fail                # Keten stoppen bij eerste falende spec (standaard: doorgaan)
+--rollback-between-builds     # Rollback van BuildRequires per spec tussen de builds (alias: --rbb)
 --keep-container              # Container behouden na build (voor debugging)
 --subrel <tag>                # Injecteert %subrel TAG, zodat de uitvoer-RPMs NAAM-VERSIE-RELEASE.TAG.DIST.ARCH.rpm worden
 --rpmmacros <file>            # Injecteert FILE als /root/.rpmmacros in de build-container (combineerbaar met --subrel)

@@ -853,7 +853,8 @@ Examples:
         '--parallel', '-j',
         type=int,
         default=1,
-        help=_('Number of parallel builds (default: 1)')
+        help=_('Isolated multi-container builds (default: 1, otherwise '
+               'specs chain in a single shared container).')
     )
     build_parser.add_argument(
         '--keep-container',
