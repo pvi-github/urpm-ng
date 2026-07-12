@@ -657,6 +657,22 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
         parsed = parse_mageia_media_url(url)
 
         if not parsed:
+            # SRPMS trees do not carry an ``arch`` segment (their layout
+            # is ``.../version/SRPMS/class/type/``) so the official
+            # parser rightly rejects them.  But the generic message
+            # sends the user hunting for a URL formatting bug instead
+            # of telling them SRPMS are not installable to begin with.
+            if '/SRPMS/' in url or url.rstrip('/').endswith('/SRPMS'):
+                print(colors.error(_(
+                    "Error: SRPMS URLs point to source packages, not to "
+                    "installable binary media.")))
+                print(_(
+                    "SRPMS are used by tools like 'urpm build' to rebuild "
+                    "packages from source; they are not added as install "
+                    "media.  If you really need to track this tree "
+                    "(for example to mirror it), pass --custom with an "
+                    "explicit name and short_name."))
+                return 1
             print(colors.error(_("Error: URL not recognized as official Mageia media")))
             print(_("For official media, URL must contain: .../version/arch/media/class/type/"))
             print(_("For custom media, use: urpm media add --custom <name> <short_name> <url>"))

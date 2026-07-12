@@ -157,3 +157,37 @@ class TestAutoDerivedCollision:
         assert rc != 0
         out = capsys.readouterr().out
         assert "already taken" in out.lower()
+
+
+# ── SRPMS URL rejection with a dedicated hint ─────────────────────────
+
+
+class TestSRPMSRejection:
+    """SRPMS trees are laid out ``.../version/SRPMS/class/type/`` (no
+    ``arch`` segment), so the official parser rightly rejects them.
+
+    The generic "URL not recognized as official Mageia media" hint,
+    however, sends the user hunting for a URL formatting bug.  The
+    fix: detect the ``/SRPMS/`` segment first and emit a message that
+    explains SRPMS carry sources, not installable binaries.
+    """
+
+    URL_SRPMS = "https://example.org/distrib/10/SRPMS/core/release/"
+    URL_SRPMS_TRAILING = "https://example.org/distrib/10/SRPMS"
+
+    def test_srpms_url_gets_dedicated_error(self, db, capsys):
+        rc = cmd_media_add(_make_args(url=self.URL_SRPMS, auto=True), db)
+        assert rc == 1
+        out = capsys.readouterr().out.lower()
+        assert "srpms" in out
+        assert "source" in out
+        # The generic layout hint must NOT be shown alongside — that
+        # would defeat the whole point of the specialised message.
+        assert ".../version/arch/media/class/type/" not in out
+
+    def test_srpms_trailing_variant_also_detected(self, db, capsys):
+        rc = cmd_media_add(
+            _make_args(url=self.URL_SRPMS_TRAILING, auto=True), db)
+        assert rc == 1
+        out = capsys.readouterr().out.lower()
+        assert "srpms" in out
