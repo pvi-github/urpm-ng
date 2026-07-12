@@ -879,6 +879,21 @@ Examples:
                '--subrel, the %%subrel line is appended last so it takes '
                'precedence.')
     )
+    build_parser.add_argument(
+        '--stop-on-fail',
+        action='store_true',
+        help=_('Stop the chain at the first failing spec instead of '
+               'trying the remaining ones (default: continue).')
+    )
+    build_parser.add_argument(
+        '--rollback-between-builds', '--rbb',
+        action='store_true',
+        help=_('Roll back each spec\'s BuildRequires after its build '
+               'so the next spec starts from the same shared baseline. '
+               'The base setup (urpm upgrade, rpm-build install) is '
+               'kept — the rollback covers only per-spec deps. '
+               'Off by default.')
+    )
 
     # =========================================================================
     # genmedia - Generate media metadata (hdlist, synthesis, XML, AppStream)

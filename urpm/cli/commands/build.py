@@ -964,8 +964,15 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             rpmmacros_path=rpmmacros_path,
         )
 
+    stop_on_fail = getattr(args, 'stop_on_fail', False)
+    rollback_between_builds = getattr(args, 'rollback_between_builds', False)
+
     if parallel > 1 and len(valid_sources) > 1:
-        # Parallel builds
+        # Isolated multi-container path: one fresh container per spec,
+        # up to ``parallel`` running in flight.  Kept for build-system
+        # experiments (see doc/TODO_BUILD_MULTI_IMAGE_DASHBOARD.md);
+        # not the interactive default because its interleaved output
+        # is hard to follow.
         with ThreadPoolExecutor(max_workers=parallel) as executor:
             futures = {executor.submit(build_one, src): src for src in valid_sources}
             for future in as_completed(futures):
@@ -975,13 +982,24 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
                 status = colors.success(_("OK")) if success else colors.error(_("FAIL"))
                 print(f"  [{status}] {source.name}: {msg}")
     else:
-        # Sequential builds
-        for source_path in valid_sources:
-            print(f"\n{'='*60}")
-            print(_("Building: {name}").format(name=source_path.name))
-            print(f"{'='*60}")
-            result = build_one(source_path)
-            results.append(result)
+        # Default: chain every spec inside a single container so the
+        # shared setup (media update, urpm upgrade, rpm-build install)
+        # runs once and the artefacts of an earlier spec are available
+        # as BuildRequires for a later spec via the produced-rpms
+        # local media.
+        from ..helpers.build_chain import run_shared_container_chain
+        results = run_shared_container_chain(
+            container, image, valid_sources, output_dir,
+            keep_container=keep_container,
+            with_rpms=with_rpms,
+            no_update=no_update,
+            subrel=subrel,
+            rpmmacros_path=rpmmacros_path,
+            stop_on_fail=stop_on_fail,
+            rollback_between_builds=rollback_between_builds,
+            _find_workspace_fn=_find_workspace,
+            _diagnose_fn=_diagnose_unsatisfied_buildrequires,
+        )
 
     # Summary
     success_count = sum(1 for _n, ok, _m in results if ok)
