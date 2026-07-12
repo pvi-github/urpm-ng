@@ -214,6 +214,32 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                         and a.name.lower() in cancelled_new_versions)
             ]
 
+    # --with-suggests: iterate ``find_available_suggests`` and inject the
+    # resulting SUGGESTED actions into ``result.actions`` so the
+    # transaction summary and the download layer both see them.
+    # Historically the flag was parsed but never consumed on the upgrade
+    # path — see helpers/suggests.py for the shared implementation.
+    if getattr(args, 'with_suggests', False):
+        from ..helpers.suggests import (
+            SuggestsAborted,
+            resolve_iterative_suggests,
+        )
+        try:
+            extra_suggests, _leftover = resolve_iterative_suggests(
+                resolver,
+                initial_actions=result.actions,
+                choices={},
+                # ``--prefer`` is not exposed on upgrade today, so the
+                # matcher has no user hints — providers are still filtered
+                # by installed-arch and by ``--arch``.
+                preferences=PreferencesMatcher(None),
+                auto=getattr(args, 'auto', False),
+            )
+        except SuggestsAborted:
+            return 1
+        if extra_suggests:
+            result.actions.extend(extra_suggests)
+
     # Categorize actions (after the orphan projection above)
     upgrades = [a for a in result.actions if a.action.value == 'upgrade']
     installs = [a for a in result.actions if a.action.value == 'install']

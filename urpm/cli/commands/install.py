@@ -105,8 +105,6 @@ def _apply_config_policy(rpmnew_files: List[str], policy: str) -> int:
 
 def cmd_install(args, db: 'PackageDatabase') -> int:
     """Handle install command."""
-    import solv
-    from ...core.resolution.pool import lookup_all_requires
     from ...core.resolver import Resolver, Resolution, format_size, set_solver_debug, PackageAction, TransactionType
     from ...core.operations import PackageOperations, InstallOptions
     from ...core.background_install import (
@@ -515,190 +513,24 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # Categorize packages by install reason
     rec_pkgs = [a for a in result.actions if a.reason == InstallReason.RECOMMENDED]
 
-    # Find available suggests only if --with-suggests is specified
-    # Iterate to find suggests of suggests (e.g., digikam -> marble -> marble-qt)
-    all_to_install = [a.name for a in result.actions]
+    # Find available suggests only if --with-suggests is specified.
+    # The full iterative pass lives in helpers/suggests.py (shared with
+    # upgrade); we only handle the surrounding CLI state here.
     if with_suggests:
-        suggests = []
-        suggest_alternatives = []
-        # Use NEVRAs so find_available_suggests matches the exact resolved version
-        packages_to_check = [a.nevra for a in result.actions if a.nevra] or all_to_install[:]
-        checked_packages = set(p.lower() for p in all_to_install)
-        max_iterations = 10  # Safety limit against infinite loops
-
-        for _iteration in range(max_iterations):
-            new_suggests, new_alternatives = resolver.find_available_suggests(
-                packages_to_check, choices=choices, resolved_packages=list(checked_packages)
+        from ..helpers.suggests import (
+            SuggestsAborted,
+            resolve_iterative_suggests,
+        )
+        try:
+            suggests, suggest_alternatives = resolve_iterative_suggests(
+                resolver,
+                initial_actions=result.actions,
+                choices=choices,
+                preferences=preferences,
+                auto=args.auto,
             )
-
-            if not new_suggests and not new_alternatives:
-                break
-
-            # Handle alternatives for this iteration
-            new_packages_from_alternatives = []
-
-            if new_alternatives and not args.auto:
-                for alt in new_alternatives:
-                    if alt.capability in choices:
-                        continue
-
-                    # Filter providers based on preferences
-                    filtered = preferences.filter_providers(alt.providers)
-
-                    # If only one after filtering, auto-select
-                    if len(filtered) == 1:
-                        chosen_pkg = filtered[0]
-                        choices[alt.capability] = chosen_pkg
-                        sel = resolver.pool.select(chosen_pkg, solv.Selection.SELECTION_NAME)
-                        for s in sel.solvables():
-                            if s.repo and s.repo.name != '@System':
-                                from ...core.resolver import InstallReason
-                                pkg_action = PackageAction(
-                                    action=TransactionType.INSTALL,
-                                    name=s.name,
-                                    evr=s.evr,
-                                    arch=s.arch,
-                                    nevra=f"{s.name}-{s.evr}.{s.arch}",
-                                    size=s.size,
-                                    media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
-                                    reason=InstallReason.SUGGESTED,
-                                    solvable_id=s.id,
-                                )
-                                if s.name.lower() not in checked_packages:
-                                    new_suggests.append(pkg_action)
-                                    new_packages_from_alternatives.append(s.name)
-                                break
-                        continue
-
-                    # Ask user to choose
-                    print(f"\n{alt.capability} ({alt.required_by}):")
-                    for i, provider in enumerate(filtered, 1):
-                        print(f"  {i}) {provider}")
-                    print(f"  {len(filtered) + 1}) " + _("All"))
-
-                    try:
-                        choice = input("\n" + _("Choice [1]: ")).strip() or "1"
-                        if choice == str(len(filtered) + 1):
-                            # "All" selected - add all providers
-                            for prov_name in filtered:
-                                choices[alt.capability] = prov_name
-                                sel = resolver.pool.select(prov_name, solv.Selection.SELECTION_NAME)
-                                for s in sel.solvables():
-                                    if s.repo and s.repo.name != '@System':
-                                        from ...core.resolver import InstallReason
-                                        pkg_action = PackageAction(
-                                            action=TransactionType.INSTALL,
-                                            name=s.name,
-                                            evr=s.evr,
-                                            arch=s.arch,
-                                            nevra=f"{s.name}-{s.evr}.{s.arch}",
-                                            size=s.size,
-                                            media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
-                                            reason=InstallReason.SUGGESTED,
-                                            solvable_id=s.id,
-                                        )
-                                        if s.name.lower() not in checked_packages:
-                                            new_suggests.append(pkg_action)
-                                            new_packages_from_alternatives.append(s.name)
-                                        break
-                        else:
-                            idx = int(choice) - 1
-                            if 0 <= idx < len(filtered):
-                                chosen_pkg = filtered[idx]
-                                choices[alt.capability] = chosen_pkg
-                                sel = resolver.pool.select(chosen_pkg, solv.Selection.SELECTION_NAME)
-                                for s in sel.solvables():
-                                    if s.repo and s.repo.name != '@System':
-                                        from ...core.resolver import InstallReason
-                                        pkg_action = PackageAction(
-                                            action=TransactionType.INSTALL,
-                                            name=s.name,
-                                            evr=s.evr,
-                                            arch=s.arch,
-                                            nevra=f"{s.name}-{s.evr}.{s.arch}",
-                                            size=s.size,
-                                            media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
-                                            reason=InstallReason.SUGGESTED,
-                                            solvable_id=s.id,
-                                        )
-                                        if s.name.lower() not in checked_packages:
-                                            new_suggests.append(pkg_action)
-                                            new_packages_from_alternatives.append(s.name)
-                                        break
-                    except (ValueError, EOFError, KeyboardInterrupt):
-                        print(_("\nAborted"))
-                        return 1
-
-            elif new_alternatives and args.auto:
-                # Auto mode: select first provider (already sorted by missing deps count)
-                for alt in new_alternatives:
-                    if alt.capability in choices:
-                        continue
-
-                    filtered = preferences.filter_providers(alt.providers)
-                    if not filtered:
-                        continue
-
-                    chosen_pkg = filtered[0]
-                    choices[alt.capability] = chosen_pkg
-
-                    sel = resolver.pool.select(chosen_pkg, solv.Selection.SELECTION_NAME)
-                    for s in sel.solvables():
-                        if s.repo and s.repo.name != '@System':
-                            from ...core.resolver import InstallReason
-                            pkg_action = PackageAction(
-                                action=TransactionType.INSTALL,
-                                name=s.name,
-                                evr=s.evr,
-                                arch=s.arch,
-                                nevra=f"{s.name}-{s.evr}.{s.arch}",
-                                size=s.size,
-                                media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
-                                reason=InstallReason.SUGGESTED,
-                                solvable_id=s.id,
-                            )
-                            if s.name.lower() not in checked_packages:
-                                new_suggests.append(pkg_action)
-                                new_packages_from_alternatives.append(s.name)
-                            break
-
-            # Collect new suggests (not already checked)
-            next_packages = []
-            for s in new_suggests:
-                if s.name.lower() not in checked_packages:
-                    suggests.append(s)
-                    checked_packages.add(s.name.lower())
-                    next_packages.append(s.name)
-
-                    # Also resolve dependencies of this suggest to check their suggests
-                    # e.g., konq-plugins requires konqueror, konqueror suggests konqueror-handbook
-                    sel = resolver.pool.select(s.name, solv.Selection.SELECTION_NAME)
-                    for solv_pkg in sel.solvables():
-                        if solv_pkg.repo and solv_pkg.repo.name != '@System':
-                            for dep in lookup_all_requires(solv_pkg):
-                                dep_str = str(dep).split()[0]
-                                if dep_str.startswith(('rpmlib(', '/', 'config(')):
-                                    continue
-                                # Find provider of this dependency
-                                dep_obj = resolver.pool.Dep(dep_str)
-                                for provider in resolver.pool.whatprovides(dep_obj):
-                                    if provider.repo and provider.repo.name != '@System':
-                                        if provider.name.lower() not in checked_packages:
-                                            checked_packages.add(provider.name.lower())
-                                            next_packages.append(provider.name)
-                                        break
-                            break
-
-            # Add packages from alternatives to next check
-            for pkg_name in new_packages_from_alternatives:
-                if pkg_name.lower() not in checked_packages:
-                    checked_packages.add(pkg_name.lower())
-                    next_packages.append(pkg_name)
-
-            # Next iteration: check newly found suggests
-            packages_to_check = next_packages
-            if not packages_to_check:
-                break
+        except SuggestsAborted:
+            return 1
     else:
         suggests = []
         suggest_alternatives = []
