@@ -15,6 +15,124 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.8.3] — 2026-07-12
+
+Focus release on the daily-use surface.  `urpm build` chains
+multi-spec runs in a single container, LocalRPM installation is
+O(1) instead of scanning the whole pool, the "not enough mirrors"
+warning stops shouting at admins who configured their own setup,
+and the test suite runs 5× faster after mirror auto-discovery is
+inhibited off-network.
+
+### Major Features
+
+- **Shared-container multi-spec build** — `urpm build spec1
+  spec2 ...` now instantiates a single container for the whole
+  run.  Shared setup (`urpm media update`, `urpm upgrade`,
+  `rpm-build` install) executes once; each spec then compiles
+  inside its own `/root/<pkg>` topdir, and the RPMs produced by
+  an earlier spec are re-injected as a local media so a later
+  spec whose BuildRequires depend on them picks them up via the
+  resolver.  Two new flags cover the failure and cleanup cases:
+  `--stop-on-fail` aborts the chain at the first failing spec
+  instead of trying the remaining ones; `--rollback-between-
+  builds` / `--rbb` rewinds per-spec BuildRequires between builds
+  while keeping the shared setup.  `--parallel N` is kept for
+  isolated multi-container experiments.
+- **`urpm upgrade --with-suggests` finally wired.**  The flag
+  was parsed but never consumed on the upgrade path.  Extracted
+  the iterative resolution into `cli/helpers/suggests.py`
+  (dropping ~185 lines of duplicated `PackageAction`
+  construction) and hooked it into both `install.py` and
+  `upgrade.py`.
+
+### Improvements
+
+- **LocalRPM install pipeline — O(N) → O(1).**  `PackageAction`
+  now carries a `solvable_id`, populated at every construction
+  site.  `operations.build_download_items` resolves LocalRPM
+  paths via a proper index instead of scanning the whole
+  `_solvable_to_pkg` dict on every action.  Historical impact
+  grew with the pool size — measurable already at ~20 local
+  RPMs, painful (tens of seconds) at 2000 (build-system-in-
+  container scenarios).  The defensive fallback stays but now
+  emits a loud orange warning when it fires, so a broken
+  `solvable_id` chain surfaces instead of silently degrading.
+- **`depends` / `rdepends` orthogonalised.**  `--tree` now
+  controls format, `--all` controls scope; combining them yields
+  an unlimited-depth tree (previously inconsistent between the
+  two commands — one gave a flat list, the other a tree).
+  `rdepends` default depth aligned to 5 (was 3); a header prints
+  the active depth so users know how to raise it.
+  `--hide-uninstalled` now also applies inside `depends --tree`.
+- **`rdepends` performance rewrite.**  Full pool rdeps map is
+  built once instead of scanned per package.  `rdepends --all
+  openssl` returns 18074 rdeps in 2.7 s (was minutes-or-worse
+  on a heavy cauldron pool).  BFS switched to a deque with
+  visited-at-enqueue so cyclic ancestors no longer inflate the
+  queue.
+- **Container locale propagation for `urpm build`.**  `LANGUAGE`
+  is now forwarded verbatim from the host instead of being
+  derived from a single code out of `LANG` — a bilingual
+  `en_US:fr_FR:fr` no longer loses its fallback chain in the
+  container.  `C.UTF-8` availability is probed once per
+  container (cached); mga9-minimal images now fall back to
+  `LC_ALL=C` instead of spamming "Setting locale failed" from
+  every perl spec-helper.
+
+### Bug Fixes
+
+- **"Not enough mirrors" warning silenced when
+  `[server] auto_add = false`.**  The admin has made a
+  deliberate choice; the CLI now shows a factual dim line
+  ("Not adding servers to reach N (auto_add disabled)")
+  instead of the anxious warning.
+- **Multi-version dialog under `--prefer` sorts RPM-style.**
+  `sorted()` on version strings gave `"5.10" < "5.9"` under
+  lex sort.  Wrapped with `cmp_to_key(rpm.labelCompare)` on
+  that call site; the broader helper refactor is captured in
+  `doc/TODO_RPM_VERSION_HELPER.md` for the 0.9.x cycle (four
+  other latent sort sites still use lex on `epoch:version`
+  keys).
+- **SRPMS URL on `urpm media add` gets a dedicated hint.**  The
+  official parser rightly rejects `.../SRPMS/...` URLs (no
+  arch segment), but the generic "URL not recognized" message
+  sent users hunting for a formatting bug.  Now detects the
+  `/SRPMS/` segment and explains that SRPMS are sources, not
+  installable binary media, with a pointer to `--custom` for
+  the mirroring use case.
+- **Test suite: mirror auto-discovery inhibited.**  A new
+  `URPM_SKIP_MIRROR_DISCOVERY=1` env var short-circuits
+  `ensure_minimum_servers` before any network work; a pytest
+  autouse fixture sets it for every test.  Full suite drops
+  from ~32 min to under 6 min because the offline mirrorlist
+  retries are gone.
+
+### Packaging & Distribution
+
+- Version bumped to 0.8.3 across `urpm-ng` and `rpmdrake-ng`.
+- `install_recommends` config comment reworded to a self-
+  contained description; the cross-manager reference is gone.
+
+### Documentation
+
+- Man page updated with the chained build mode and the new
+  flags.
+- READMEs (en + fr / de / es / it / nl / pt) list the new
+  build flags in their Options tables; English gets the full
+  descriptive paragraph and worked examples.
+- `doc/TODO_LOCAL_RPM_INDEX.md` captures the LocalRPM audit
+  that led to the O(1) rewrite (kept as a reference for the
+  0.9.x resilient-install chantier).
+- `doc/TODO_RPM_VERSION_HELPER.md` captures the wider
+  version-sort refactor deferred to 0.9.x.
+- `doc/TODO_BUILD_MULTI_IMAGE_DASHBOARD.md` captures the
+  long-term multi-image + dashboard vision for `urpm build`.
+- Full i18n refresh: 1442 messages translated across the six
+  languages; 0 untranslated, 0 fuzzy.
+
+---
+
 ## [0.8.2] — 2026-07-11
 
 Mkimage tightening pass.  Cross-version chroots (mga9 built from a
