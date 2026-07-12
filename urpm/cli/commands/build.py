@@ -174,6 +174,12 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     # ``LANG`` in a dedicated env var so ``exec_stream`` can hand
     # it to the container without disturbing our own C locale.
     os.environ['URPM_HOST_LANG'] = os.environ.get('LANG', '') or ''
+    # LANGUAGE is a colon-separated fallback list ("en_US:fr_FR:fr")
+    # that gettext consults independently of LANG.  Saving it lets
+    # container.exec_stream forward the operator's full preference
+    # list into phase-2 containers instead of guessing a single code
+    # from LANG (which would drop the fallbacks silently).
+    os.environ['URPM_HOST_LANGUAGE'] = os.environ.get('LANGUAGE', '') or ''
     os.environ['LC_ALL'] = 'C'
     os.environ['LANGUAGE'] = 'C'
     os.environ['SYSTEMD_OFFLINE'] = '1'

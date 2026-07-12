@@ -85,6 +85,13 @@ class Container:
         self.runtime = runtime
         self.cmd = runtime.path
         self._arch_by_cid: dict[str, str] = {}
+        # Cache "does this container have C.UTF-8 compiled?" per cid.
+        # Mageia 9 predates glibc 2.35 (where C.UTF-8 became builtin)
+        # and the -minimal images ship no locales, so a naive
+        # LC_ALL=C.UTF-8 there produces the "Setting locale failed"
+        # spam.  The probe is one podman-exec locale -a; the cache
+        # keeps it out of the hot path.
+        self._has_c_utf8_by_cid: dict[str, bool] = {}
 
     def run(
         self,
@@ -230,6 +237,31 @@ class Container:
         logger.debug(f"Exec: {' '.join(args)}")
         return subprocess.run(args, capture_output=capture_output, text=True)
 
+    def _container_has_c_utf8(self, container_id: str) -> bool:
+        """Return True when ``C.UTF-8`` is a valid locale in the container.
+
+        Runs ``locale -a`` once per container id and caches the result.
+        Failures (timeout, missing ``locale`` binary, non-zero exit)
+        conservatively map to ``False`` so the caller falls back to
+        the always-defined ``C`` locale instead of leaking warnings.
+        """
+        cached = self._has_c_utf8_by_cid.get(container_id)
+        if cached is not None:
+            return cached
+        try:
+            probe = subprocess.run(
+                [self.cmd, 'exec', container_id, 'locale', '-a'],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            has_it = probe.returncode == 0 and any(
+                line.strip() in ('C.UTF-8', 'C.utf8')
+                for line in probe.stdout.splitlines()
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            has_it = False
+        self._has_c_utf8_by_cid[container_id] = has_it
+        return has_it
+
     def exec_stream(
         self,
         container_id: str,
@@ -267,32 +299,49 @@ class Container:
         # ``podman exec`` scrubs environment by default; only variables
         # passed via ``-e`` reach the child.
         #
-        # Locale propagation.  We can't hand the container the caller's
-        # raw ``LANG=fr_FR.UTF-8``: glibc-based Mageia containers ship
-        # ``C.UTF-8`` only (langpacks stay out of the -minimal image to
-        # keep it small), so ``setlocale()`` would fail and every perl
-        # spec-helper called by rpm-build would fill the log with
-        # "Setting locale failed" pages.
+        # There are two orthogonal decisions here:
         #
-        # Convert instead to ``LC_ALL=C.UTF-8`` (always defined, keeps
-        # perl and friends happy) + ``LANGUAGE=<lang>`` (consulted by
-        # gettext to pick the .mo catalogue), so urpm output still
-        # comes out translated.
+        # 1. Which language(s) should the container's gettext consult?
+        #    GNU gettext reads ``LANGUAGE`` as a colon-separated
+        #    priority list (``"en_US:fr_FR:fr"`` means "try en_US,
+        #    then fr_FR, then fr"), independently of ``LANG``.  We
+        #    forward ``URPM_HOST_LANGUAGE`` (saved by ``cmd_mkimage``
+        #    before it clamps its own env to C for the stderr
+        #    silencer) if set, else the caller's current ``LANGUAGE``
+        #    if it is not itself C/POSIX.  Only as a last resort do
+        #    we derive a single code from ``LANG`` — that loses the
+        #    fallback list a bilingual operator relies on.
         #
-        # ``cmd_mkimage`` intentionally forces its own process into
-        # ``LC_ALL=C`` / ``LANGUAGE=C`` for the stderr silencer to
-        # match rpm warnings by their English wording; it stashes the
-        # caller's real ``LANG`` in ``URPM_HOST_LANG`` so we still
-        # know what language to hand the container.  Any other CLI
-        # path (``urpm build``, ``urpm image update``, ...) reads
-        # ``LANG`` from the process environment directly.
-        _host_lang = (_os.environ.get('URPM_HOST_LANG')
-                      or _os.environ.get('LANG', ''))
-        if _host_lang:
-            _code = _host_lang.split('.')[0].split('_')[0]
-            if _code and _code not in ('C', 'POSIX'):
+        # 2. What locale can the container's shells/perl actually
+        #    setlocale() to?  Mageia 9 predates glibc 2.35 so
+        #    ``C.UTF-8`` is not builtin, and the -minimal images ship
+        #    no compiled locales — forcing ``LC_ALL=C.UTF-8`` there
+        #    produces "Setting locale failed" spam from every perl
+        #    spec-helper called during rpmbuild.  We probe
+        #    ``locale -a`` inside the container (cached) and fall back
+        #    to ``LC_ALL=C`` when ``C.UTF-8`` is missing.  ``LC_ALL=C``
+        #    makes gettext ignore ``LANGUAGE`` too, so container-side
+        #    urpm prints stay in English in that fallback path —
+        #    acceptable in a build container.
+        _host_language = (_os.environ.get('URPM_HOST_LANGUAGE')
+                          or _os.environ.get('LANGUAGE', ''))
+        if _host_language and _host_language not in ('C', 'POSIX'):
+            language_to_send = _host_language
+        else:
+            _host_lang = (_os.environ.get('URPM_HOST_LANG')
+                          or _os.environ.get('LANG', ''))
+            language_to_send = None
+            if _host_lang:
+                _code = _host_lang.split('.')[0].split('_')[0]
+                if _code and _code not in ('C', 'POSIX'):
+                    language_to_send = _code
+
+        if language_to_send:
+            if self._container_has_c_utf8(container_id):
                 args.extend(['-e', 'LC_ALL=C.UTF-8'])
-                args.extend(['-e', f'LANGUAGE={_code}'])
+                args.extend(['-e', f'LANGUAGE={language_to_send}'])
+            else:
+                args.extend(['-e', 'LC_ALL=C'])
 
         args.append(container_id)
         args.extend(self._personality_wrap(container_id))
