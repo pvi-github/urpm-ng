@@ -129,7 +129,7 @@ msgstr "Afficher tous les éléments sans troncature"
 
 #: urpm/cli/main.py:322
 msgid "Enable debug output (solver, tsrun, orphans, download, timing, all)"
-msgstr ""
+msgstr "Activer la sortie de débogage (solver, tsrun, orphans, download, timing, all)"
 "Activer la sortie de débogage (solver, tsrun, orphans, download, timing, all)"
 
 #: urpm/cli/main.py:328

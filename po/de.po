@@ -128,7 +128,7 @@ msgstr "Alle Einträge ohne Kürzung anzeigen"
 
 #: urpm/cli/main.py:322
 msgid "Enable debug output (solver, tsrun, orphans, download, timing, all)"
-msgstr "Debug-Ausgabe aktivieren (solver, download, all)"
+msgstr "Debug-Ausgabe aktivieren (solver, tsrun, orphans, download, timing, all)"
 
 #: urpm/cli/main.py:328
 msgid "Watch specific packages during resolution (comma-separated)"
@@ -210,7 +210,7 @@ msgstr "Pakete installieren"
 
 #: urpm/cli/main.py:417
 msgid "Package names to install (optional with --buildrequires)"
-msgstr "Namen der zu installierenden Pakete (optional bei --builddeps)"
+msgstr "Namen der zu installierenden Pakete (optional bei --buildrequires)"
 
 #: urpm/cli/main.py:422 urpm/cli/main.py:560 urpm/cli/main.py:975
 #: urpm/cli/main.py:1331 urpm/cli/main.py:1441 urpm/cli/main.py:1677
@@ -323,7 +323,7 @@ msgstr "Pakete in den cache herunterladen ohne Installation"
 
 #: urpm/cli/main.py:543
 msgid "Package names to download (optional with --buildrequires)"
-msgstr "Namen der herunterzuladenden Pakete (optional bei --builddeps)"
+msgstr "Namen der herunterzuladenden Pakete (optional bei --buildrequires)"
 
 #: urpm/cli/main.py:548
 msgid "Target release (e.g., 10, cauldron). Downloads for this release."
@@ -786,7 +786,7 @@ msgstr "Von verbleibenden Paketen vorgeschlagene Pakete behalten"
 
 #: urpm/cli/main.py:1010
 msgid "Enable debug output (solver, tsrun, all)"
-msgstr "Debug-Ausgabe aktivieren (solver, all)"
+msgstr "Debug-Ausgabe aktivieren (solver, tsrun, all)"
 
 #: urpm/cli/main.py:1022
 msgid "Search packages"
@@ -2144,7 +2144,7 @@ msgstr "Verwendung: urpm install --install-src <srpm_datei_oder_paketname>"
 
 #: urpm/cli/commands/install.py:230
 msgid "Usage: urpm install <packages> or urpm install --buildrequires <spec>"
-msgstr "Verwendung: urpm install <Pakete> oder urpm install --builddeps <spec>"
+msgstr "Verwendung: urpm install <Pakete> oder urpm install --buildrequires <spec>"
 
 #: urpm/cli/commands/install.py:246 urpm/cli/commands/config.py:356
 #, python-brace-format
@@ -2405,7 +2405,7 @@ msgstr[1] "{count} Pakete werden installiert..."
 
 #: urpm/cli/commands/install.py:1230
 msgid "Usage: urpm download [packages...] [--buildrequires [spec]]"
-msgstr "Verwendung: urpm download [Pakete...] [--builddeps [spec]]"
+msgstr "Verwendung: urpm download [Pakete...] [--buildrequires [spec]]"
 
 #: urpm/cli/commands/install.py:1243
 msgid "Resolving packages for download..."
