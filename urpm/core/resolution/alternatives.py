@@ -597,6 +597,7 @@ class AlternativesMixin:
                             filesize=pkg_info.get('filesize', 0),
                             media_name=pkg_info.get('media_name', ''),
                             reason=InstallReason.SUGGESTED,
+                            solvable_id=provider.id,
                         ))
                     else:
                         # Multiple providers - create an alternative for user choice

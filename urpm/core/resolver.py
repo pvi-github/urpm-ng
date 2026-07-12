@@ -314,7 +314,20 @@ class InstallReason(Enum):
 
 @dataclass
 class PackageAction:
-    """A single package action in a transaction."""
+    """A single package action in a transaction.
+
+    ``solvable_id`` is the libsolv id of the solvable this action came
+    from, when available.  It is the canonical key for retrieving the
+    original metadata via ``resolver._solvable_to_pkg[action.solvable_id]``
+    in O(1) — critical for the ``@LocalRPMs`` path lookup during download
+    building (see ``operations.build_download_items``), but also useful
+    anywhere else that would otherwise scan the whole ``_solvable_to_pkg``.
+
+    ``None`` for actions synthesised outside the solver (rpmdb-only orphan
+    detection, ``--nodeps`` direct-DB fast-path, and REINSTALL derived from
+    a local RPM header when the caller could not resolve the id — those
+    fall back to the ``local_rpm_infos`` safety net).
+    """
     action: TransactionType
     name: str
     evr: str
@@ -325,6 +338,7 @@ class PackageAction:
     media_name: str = ""
     reason: InstallReason = InstallReason.DEPENDENCY
     from_evr: str = ""  # Previous version for upgrades
+    solvable_id: Optional[int] = None
 
 
 @dataclass
@@ -479,6 +493,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         self.sortmedia = sortmedia.split(',') if sortmedia else None
         self.pool = None
         self._solvable_to_pkg = {}  # Map solvable id -> pkg dict
+        self._localrpm_nevra_to_id = {}  # Map NEVRA -> solvable id for @LocalRPMs
         self._installed_count = 0  # Number of installed packages loaded
         self._held_obsolete_warnings = []  # List of (held_pkg, obsoleting_pkg) tuples
         self._held_upgrade_warnings = []  # List of held package names skipped from upgrade
@@ -960,6 +975,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         )
         if not has_local_rpms and not (self._preserve_pool and self.pool is not None):
             self._solvable_to_pkg = {}
+            self._localrpm_nevra_to_id = {}
             self.pool = self._create_pool()
 
         jobs = []
@@ -1315,6 +1331,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 media_name=pkg_info.get('media_name', ''),
                 reason=reason,
                 from_evr=from_evr,
+                solvable_id=s.id,
             ))
 
         # Detect alternatives: packages that could satisfy the same dependency
@@ -1570,6 +1587,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         )
         if not has_local_rpms:
             self._solvable_to_pkg = {}
+            self._localrpm_nevra_to_id = {}
             self.pool = self._create_pool()
             debug.log_pool_stats(self.pool)
 
@@ -1894,6 +1912,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 media_name=pkg_info.get('media_name', ''),
                 reason=reason,
                 from_evr=from_evr,
+                solvable_id=s.id,
             ))
 
         skipped = list(_skipped or [])
@@ -1922,6 +1941,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             Resolution with success status and package actions
         """
         self._solvable_to_pkg = {}
+        self._localrpm_nevra_to_id = {}
         self.pool = self._create_system_pool()
 
         jobs = []
@@ -2002,7 +2022,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     arch=s.arch,
                     nevra=f"{s.name}-{s.evr}.{s.arch}",
                     size=size,
-                    filesize=pkg_info.get('filesize', 0)
+                    filesize=pkg_info.get('filesize', 0),
+                    solvable_id=s.id,
                 ))
 
         # Find orphaned dependencies if requested

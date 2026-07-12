@@ -638,6 +638,11 @@ class PoolMixin:
                 'media_name': '@LocalRPMs',
                 'local_path': info['path'],  # Critical: path to the RPM file
             }
+            # Secondary index by NEVRA — used by REINSTALL actions in the
+            # CLI (which reconstruct a PackageAction from the read_rpm_header
+            # info, without a direct reference to the solvable) to recover
+            # the solvable_id and go through the canonical O(1) lookup.
+            self._localrpm_nevra_to_id[info['nevra']] = s.id
 
         # Rebuild whatprovides index
         self.pool.createwhatprovides()

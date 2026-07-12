@@ -149,28 +149,42 @@ class PackageOperations:
         media_cache = {}
         servers_cache = {}
 
+        defensive_fallback_hits = []  # collected for a single end-of-loop warn
+
         for action in actions:
             if action.action == TransactionType.REMOVE:
                 continue
 
             media_name = action.media_name
 
-            # Local RPMs don't need download
+            # Local RPMs don't need download.  The action carries the
+            # solvable_id it came from (populated by the resolver at
+            # PackageAction construction and by add_local_rpms via the
+            # NEVRA→id secondary index for REINSTALL cases); we use it to
+            # go straight to the LocalRPM metadata in O(1).
             if media_name == '@LocalRPMs':
-                pkg_info = resolver._solvable_to_pkg.get(action.nevra)
-                if not pkg_info:
-                    for sid, info in resolver._solvable_to_pkg.items():
-                        if (info.get('name') == action.name and
-                            info.get('evr') == action.evr and
-                            info.get('arch') == action.arch and
-                            info.get('media_name') == '@LocalRPMs'):
-                            pkg_info = info
-                            break
-                if not pkg_info and local_rpm_infos:
+                pkg_info = None
+                if action.solvable_id is not None:
+                    pkg_info = resolver._solvable_to_pkg.get(action.solvable_id)
+                if pkg_info is None and local_rpm_infos:
+                    # Defensive safety net: if solvable_id is missing (call
+                    # path that did not go through add_local_rpms) or points
+                    # to a stale entry, recover by matching the header info
+                    # the CLI passed in.  This should not fire in normal
+                    # operation — we warn loudly so mismatches surface.
                     for info in local_rpm_infos:
-                        if info.get('name') == action.name:
+                        if info.get('nevra') == action.nevra:
                             pkg_info = info
+                            defensive_fallback_hits.append(action.nevra)
                             break
+                    if pkg_info is None:
+                        # Fall back once more on name-only match, historical
+                        # behaviour — still counted as a defensive hit.
+                        for info in local_rpm_infos:
+                            if info.get('name') == action.name:
+                                pkg_info = info
+                                defensive_fallback_hits.append(action.nevra)
+                                break
                 if pkg_info and pkg_info.get('local_path', pkg_info.get('path')):
                     local_action_paths.append(
                         pkg_info.get('local_path') or pkg_info.get('path')
@@ -225,6 +239,28 @@ class PackageOperations:
                 ))
             else:
                 logger.warning(f"No URL or servers for media '{media_name}'")
+
+        if defensive_fallback_hits:
+            # This is an internal-consistency alarm: an @LocalRPMs action
+            # made it here without a valid solvable_id.  Normally
+            # add_local_rpms() populates both _solvable_to_pkg[s.id] and
+            # _localrpm_nevra_to_id[nevra], and every construction site
+            # forwards s.id to the PackageAction.  If we land in the safety
+            # net, one of those links is broken and future actions may drop
+            # silently.  Log + orange line on stderr so the operator sees it.
+            import sys
+            count = len(defensive_fallback_hits)
+            sample = ', '.join(defensive_fallback_hits[:3])
+            if count > 3:
+                sample += f', … ({count - 3} more)'
+            msg = (f"LocalRPM lookup fell through the safety net for "
+                   f"{count} action(s): {sample}. This indicates a broken "
+                   f"solvable_id chain (add_local_rpms → PackageAction → "
+                   f"operations); please report.")
+            logger.warning(msg)
+            # ANSI 33 = yellow/orange, bold.  No dependency on cli.colors
+            # (core layer must not import CLI).
+            print(f"\x1b[1;33mWarning:\x1b[0m {msg}", file=sys.stderr)
 
         return download_items, local_action_paths
 

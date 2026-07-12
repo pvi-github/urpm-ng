@@ -459,7 +459,8 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     nevra=info['nevra'],
                     size=info.get('filesize', 0) or 0,
                     media_name='@LocalRPMs',
-                    reason=InstallReason.EXPLICIT
+                    reason=InstallReason.EXPLICIT,
+                    solvable_id=resolver._localrpm_nevra_to_id.get(info['nevra']),
                 )
                 result.actions.append(reinstall_action)
 
@@ -561,6 +562,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                                     size=s.size,
                                     media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
                                     reason=InstallReason.SUGGESTED,
+                                    solvable_id=s.id,
                                 )
                                 if s.name.lower() not in checked_packages:
                                     new_suggests.append(pkg_action)
@@ -593,6 +595,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                                             size=s.size,
                                             media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
                                             reason=InstallReason.SUGGESTED,
+                                            solvable_id=s.id,
                                         )
                                         if s.name.lower() not in checked_packages:
                                             new_suggests.append(pkg_action)
@@ -616,6 +619,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                                             size=s.size,
                                             media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
                                             reason=InstallReason.SUGGESTED,
+                                            solvable_id=s.id,
                                         )
                                         if s.name.lower() not in checked_packages:
                                             new_suggests.append(pkg_action)
@@ -651,6 +655,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                                 size=s.size,
                                 media_name=resolver._solvable_to_pkg.get(s.id, {}).get('media_name', ''),
                                 reason=InstallReason.SUGGESTED,
+                                solvable_id=s.id,
                             )
                             if s.name.lower() not in checked_packages:
                                 new_suggests.append(pkg_action)
