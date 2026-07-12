@@ -1143,7 +1143,6 @@ Examples:
     depends_parser = subparsers.add_parser(
         'depends', aliases=['d', 'requires', 'req'],
         help=_('Show package dependencies'),
-        parents=[display_parent]
     )
     depends_parser.add_argument(
         'package',
@@ -1183,7 +1182,7 @@ Examples:
         '--depth',
         type=int,
         default=5,
-        help=_('Maximum tree depth (default: 5)')
+        help=_('Maximum tree depth (default: 5, use --all for unlimited)')
     )
     depends_parser.add_argument(
         '--legend',
@@ -1202,7 +1201,6 @@ Examples:
     rdepends_parser = subparsers.add_parser(
         'rdepends', aliases=['rd', 'whatrequires', 'wr'],
         help=_('Show reverse dependencies'),
-        parents=[display_parent]
     )
     rdepends_parser.add_argument(
         'package',
@@ -1221,8 +1219,8 @@ Examples:
     rdepends_parser.add_argument(
         '--depth',
         type=int,
-        default=3,
-        help=_('Maximum depth for tree display (default: 3)')
+        default=5,
+        help=_('Maximum tree depth (default: 5, use --all for unlimited)')
     )
     rdepends_parser.add_argument(
         '--hide-uninstalled',

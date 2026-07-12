@@ -116,7 +116,31 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
                            if a.action == TransactionType.INSTALL
                            and a.name != pkg_name})
 
-        if show_all:
+        if show_tree:
+            # --tree: build graph and display as tree.
+            # --all combined with --tree extends the tree to unlimited depth
+            # (format = tree, scope = full transitive closure).
+            graph = resolver.build_dependency_graph(result, [pkg_name])
+            no_libs = getattr(args, 'no_libs', False)
+            use_pager = getattr(args, 'pager', False)
+            if show_all:
+                max_depth = float('inf')
+                print(colors.dim(_("Depth: unlimited (--all)")))
+            else:
+                max_depth = getattr(args, 'depth', 5)
+                print(colors.dim(_(
+                    "Depth: {n} levels (use --depth N or --all for more)"
+                ).format(n=max_depth)))
+
+            _print_depends_tree(
+                pkg_name, graph, colors,
+                no_libs=no_libs, max_depth=max_depth, use_pager=use_pager,
+                hide_uninstalled=hide_uninstalled,
+            )
+            if getattr(args, 'legend', False):
+                _print_depends_legend(colors)
+        else:
+            # --all only: flat list of the transitive closure.
             if hide_uninstalled:
                 dep_names = [n for n in dep_names if n in installed_pkgs]
             print(ngettext(
@@ -126,19 +150,6 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
             ).format(package=package, count=len(dep_names)) + "\n")
             for name in dep_names:
                 print(f"  {name}")
-        else:
-            # --tree: build graph and display as tree
-            graph = resolver.build_dependency_graph(result, [pkg_name])
-            no_libs = getattr(args, 'no_libs', False)
-            max_depth = getattr(args, 'depth', 5)
-            use_pager = getattr(args, 'pager', False)
-
-            _print_depends_tree(
-                pkg_name, graph, colors,
-                no_libs=no_libs, max_depth=max_depth, use_pager=use_pager
-            )
-            if getattr(args, 'legend', False):
-                _print_depends_legend(colors)
     else:
         # Default mode: direct deps from solver + unresolved alternatives shown separately
         result = resolver.resolve_install([pkg_name])
@@ -191,7 +202,8 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
 
 def _print_depends_tree(pkg_name: str, graph: dict, colors,
                         no_libs: bool = False, max_depth: int = 5,
-                        use_pager: bool = False):
+                        use_pager: bool = False,
+                        hide_uninstalled: bool = False):
     """Print dependency tree from solver graph.
 
     Uses the adjacency list from build_dependency_graph() for accurate
@@ -204,6 +216,8 @@ def _print_depends_tree(pkg_name: str, graph: dict, colors,
         no_libs: If True, hide library packages (lib*, glibc, etc.)
         max_depth: Maximum recursion depth
         use_pager: If True, pipe output through less -R
+        hide_uninstalled: If True, drop packages not present in rpmdb
+            (and their whole subtree, since they wouldn't be reachable anyway).
     """
     # Build installed set for coloring
     installed_pkgs = set()
@@ -225,6 +239,8 @@ def _print_depends_tree(pkg_name: str, graph: dict, colors,
         deps = sorted(graph.get(pkg, []))
         if no_libs:
             deps = [d for d in deps if not is_lib_package(d)]
+        if hide_uninstalled:
+            deps = [d for d in deps if d in installed_pkgs]
 
         for i, dep in enumerate(deps):
             is_last = (i == len(deps) - 1)
@@ -447,6 +463,56 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
     return rdeps
 
 
+def _build_rdeps_map_from_pool(pool) -> dict:
+    """Build a full reverse-dependency map from the libsolv pool in one scan.
+
+    Instead of scanning the pool once per package (as
+    ``_get_rdeps_from_pool`` does), this walks every solvable twice:
+    first to index provides -> pkg names, then to invert each solvable's
+    requires into that index.  The resulting ``{pkg_name: {rdeps}}``
+    supports O(1) lookups for the BFS in ``rdepends --all`` and the
+    recursive walk in ``rdepends --tree``.
+
+    Ignores ``rpmlib(...)`` and other virtual provides that would create
+    spurious edges to unrelated packages.
+
+    Returns:
+        dict mapping ``pkg_name`` to the set of package names that
+        require any capability it provides.  Packages with no rdeps are
+        absent from the map.
+    """
+    import solv
+    from ...core.resolution.pool import lookup_all_requires
+
+    # Pass 1: capability string -> providers.  Names count as their own
+    # provides (a Requires: foo matches a solvable named 'foo').
+    provides_index = {}
+    for s in pool.solvables:
+        if not s.repo or s.name == 'gpg-pubkey':
+            continue
+        provides_index.setdefault(s.name, set()).add(s.name)
+        for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
+            cap = str(dep).split()[0]
+            if not _is_virtual_provide(cap):
+                provides_index.setdefault(cap, set()).add(s.name)
+
+    # Pass 2: invert each solvable's requires into the rdeps map.
+    rdeps_map = {}
+    for s in pool.solvables:
+        if not s.repo or s.name == 'gpg-pubkey':
+            continue
+        for dep in lookup_all_requires(s):
+            cap = str(dep).split()[0]
+            providers = provides_index.get(cap)
+            if not providers:
+                continue
+            for p in providers:
+                if p != s.name:
+                    rdeps_map.setdefault(p, set()).add(s.name)
+
+    return rdeps_map
+
+
 def _get_rdeps_from_pool(pool, pkg_name: str, installed_only: bool = True,
                          cache: dict = None) -> list:
     """Get reverse dependencies of a package using the libsolv pool.
@@ -541,12 +607,15 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
     # Get unrequested packages (auto-installed as deps)
     unrequested_pkgs = resolver._get_unrequested_packages()
 
-    # Cache for rdeps lookup
-    rdeps_cache = {}
+    # Build the full rdeps map from the pool once.  Every subsequent
+    # get_rdeps() is a dict lookup instead of a fresh pool scan -- the
+    # difference is night and day on --all / --tree --all for
+    # heavily-required libraries (openssl, glibc, ...).
+    rdeps_map = _build_rdeps_map_from_pool(pool)
 
     def get_rdeps(name: str) -> list:
-        """Get reverse deps via pool, with caching."""
-        return _get_rdeps_from_pool(pool, name, installed_only=False, cache=rdeps_cache)
+        """Return the sorted list of packages that require `name`."""
+        return sorted(rdeps_map.get(name, ()))
 
     # Get direct reverse deps
     direct_rdeps = get_rdeps(pkg_name)
@@ -564,10 +633,21 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
         return colors.dim(name)             # grey: not installed
 
     if show_tree:
-        # Recursive tree with reverse arrows
-        max_depth = getattr(args, 'depth', 3)
+        # Recursive tree with reverse arrows.
+        # --all combined with --tree extends the tree to unlimited depth
+        # (format = tree, scope = full transitive closure).
+        if show_all:
+            max_depth = float('inf')
+            print(colors.dim(_("Depth: unlimited (--all)")))
+        else:
+            max_depth = getattr(args, 'depth', 5)
+            print(colors.dim(_(
+                "Depth: {n} levels (use --depth N or --all for more)"
+            ).format(n=max_depth)))
 
-        # Pre-compute reachable set for --hide-uninstalled optimization
+        # Pre-compute reachable set for --hide-uninstalled optimization.
+        # Passing max_depth as-is is fine even when unlimited: DFS terminates
+        # via `visited` and the rdeps graph is finite.
         reachable_cache = None
         if hide_uninstalled:
             rdeps_graph = _build_rdeps_graph(db)
@@ -581,22 +661,28 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
         if getattr(args, 'legend', False):
             _print_rdepends_legend(colors)
     elif show_all:
-        # Flat list of all recursive reverse dependencies (BFS)
-        all_rdeps = set(direct_rdeps)
+        # Flat list of the full transitive rdeps closure.  BFS on the
+        # pre-built rdeps_map: O(K) instead of O(K*N).  Using a deque
+        # keeps popleft() O(1); using visited-at-enqueue avoids piling
+        # up duplicates for shared ancestors in a cyclic graph.
+        from collections import deque
+
+        all_rdeps = set()
         visited = {package}
-        to_process = list(direct_rdeps)
+        queue = deque()
+        for r in direct_rdeps:
+            if r not in visited:
+                visited.add(r)
+                all_rdeps.add(r)
+                queue.append(r)
 
-        while to_process:
-            pkg = to_process.pop(0)
-            if pkg in visited:
-                continue
-            visited.add(pkg)
-
-            sub_rdeps = get_rdeps(pkg)
-            for rdep in sub_rdeps:
+        while queue:
+            pkg = queue.popleft()
+            for rdep in rdeps_map.get(pkg, ()):
                 if rdep not in visited:
+                    visited.add(rdep)
                     all_rdeps.add(rdep)
-                    to_process.append(rdep)
+                    queue.append(rdep)
 
         if hide_uninstalled:
             all_rdeps = {r for r in all_rdeps if r in installed_pkgs}
