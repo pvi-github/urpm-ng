@@ -1,6 +1,6 @@
 %define name urpm-ng
 %define version 0.8.3
-%define release 1
+%define release 2
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
@@ -344,6 +344,24 @@ install -Dm644 data/appstream-mageia.conf %{buildroot}%{_datadir}/appstream/apps
 # Install OS metainfo for Discover/GNOME Software
 install -Dm644 data/mageia.metainfo.xml %{buildroot}%{_datadir}/metainfo/mageia.metainfo.xml
 
+# Install per-subpackage AppStream metainfo — Discover / GNOME Software
+# use these to describe our components in their catalogues.
+install -Dm644 data/urpm-ng-core.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/org.mageia.urpm-ng-core.metainfo.xml
+install -Dm644 data/urpm-ng-daemon.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/org.mageia.urpm-ng-daemon.metainfo.xml
+install -Dm644 data/urpm-ng-packagekit-backend.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/org.mageia.urpm-ng-packagekit-backend.metainfo.xml
+install -Dm644 data/urpm-ng-appstream.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/org.mageia.urpm-ng-appstream.metainfo.xml
+
+# Install the shared urpm-ng icon (used by every metainfo above and
+# by desktop shells that browse installed console applications).
+install -Dm644 data/icons/urpm-ng.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/urpm-ng.svg
+install -Dm644 data/icons/urpm-ng.png \
+    %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/urpm-ng.png
+
 # Install D-Bus service executable
 install -Dm755 /dev/null %{buildroot}%{_libexecdir}/urpm-dbus-service
 cat > %{buildroot}%{_libexecdir}/urpm-dbus-service << 'EOFSCRIPT'
@@ -551,6 +569,13 @@ fi
 %{_datadir}/urpm/profiles/*.yaml
 # Locale files
 %{_datadir}/locale/*/LC_MESSAGES/urpm.mo
+# AppStream metainfo (console-application) + shared urpm-ng icon.
+# The icon is shipped with -core so every subpackage that references
+# ``<icon type="stock">urpm-ng</icon>`` in its own metainfo can
+# resolve it against a single install.
+%{_datadir}/metainfo/org.mageia.urpm-ng-core.metainfo.xml
+%{_datadir}/icons/hicolor/scalable/apps/urpm-ng.svg
+%{_datadir}/icons/hicolor/128x128/apps/urpm-ng.png
 # genmedia files belong to the urpm-ng-genmedia subpackage.
 # The pyproject_save_files macro sweeps every urpm/ file into
 # pyproject_files; the exclusions below claw the genmedia ones
@@ -579,6 +604,7 @@ fi
 %{python3_sitelib}/urpm/dbus
 %{python3_sitelib}/urpm/auth/polkit.py
 %{python3_sitelib}/urpm/auth/__pycache__/polkit.*.pyc
+%{_datadir}/metainfo/org.mageia.urpm-ng-daemon.metainfo.xml
 
 # ============================================================================
 # Files for urpm-ng-appstream
@@ -586,6 +612,7 @@ fi
 %files appstream
 %{_datadir}/appstream/appstream.conf.d/mageia.conf
 %{_datadir}/metainfo/mageia.metainfo.xml
+%{_datadir}/metainfo/org.mageia.urpm-ng-appstream.metainfo.xml
 
 # ============================================================================
 # Files for urpm-ng-packagekit-backend
@@ -598,6 +625,7 @@ fi
 %config(noreplace) %{_sysconfdir}/dbus-1/system.d/org.mageia.Urpm.v1.conf
 %{_datadir}/polkit-1/actions/org.mageia.urpm.policy
 %{_libdir}/packagekit-backend/libpk_backend_urpm.so
+%{_datadir}/metainfo/org.mageia.urpm-ng-packagekit-backend.metainfo.xml
 
 # ============================================================================
 # Files for urpm-ng-desktop (meta-package - empty)

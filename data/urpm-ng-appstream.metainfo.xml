@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.mageia.urpm-ng-appstream</id>
+  <extends>org.freedesktop.appstream</extends>
+
+  <name>AppStream metadata for Mageia</name>
+  <name xml:lang="fr">Métadonnées AppStream pour Mageia</name>
+  <name xml:lang="de">AppStream-Metadaten für Mageia</name>
+  <name xml:lang="es">Metadatos AppStream para Mageia</name>
+  <name xml:lang="it">Metadati AppStream per Mageia</name>
+  <name xml:lang="nl">AppStream-metadata voor Mageia</name>
+  <name xml:lang="pt">Metadados AppStream para Mageia</name>
+
+  <summary>Distribution metainfo consumed by Discover and GNOME Software</summary>
+  <summary xml:lang="fr">Métainfo de la distribution consommées par Discover et GNOME Logiciels</summary>
+  <summary xml:lang="de">Distributions-Metainfo, konsumiert von Discover und GNOME Software</summary>
+  <summary xml:lang="es">Metainfo de la distribución consumidos por Discover y GNOME Software</summary>
+  <summary xml:lang="it">Metainfo di distribuzione consumati da Discover e GNOME Software</summary>
+  <summary xml:lang="nl">Distributiemetadata gebruikt door Discover en GNOME Software</summary>
+  <summary xml:lang="pt">Metainfo de distribuição consumidos pelo Discover e pelo GNOME Software</summary>
+
+  <description>
+    <p>
+      Provides the operating-system metainfo (``mageia.metainfo.xml``)
+      and the AppStream configuration snippet that identifies
+      Mageia repositories to the local AppStream cache builder.
+      Enables the "System Upgrade" banner and the distribution
+      channel selector in graphical package managers.
+    </p>
+    <p xml:lang="fr">
+      Fournit la métainfo du système d'exploitation
+      (``mageia.metainfo.xml``) et le fragment de configuration
+      AppStream qui identifie les dépôts Mageia auprès du
+      générateur de cache AppStream local.  Active le bandeau
+      « Mise à niveau système » et le sélecteur de canal de
+      distribution dans les gestionnaires graphiques.
+    </p>
+    <p xml:lang="de">
+      Stellt die Betriebssystem-Metainfo (``mageia.metainfo.xml``)
+      und das AppStream-Konfigurationssnippet bereit, das die
+      Mageia-Repositorien für den lokalen AppStream-Cache-Bau
+      identifiziert.  Aktiviert das „Systemaktualisierung"-Banner
+      und die Distributionskanal-Auswahl in grafischen
+      Paketmanagern.
+    </p>
+    <p xml:lang="es">
+      Proporciona los metainfo del sistema operativo
+      (``mageia.metainfo.xml``) y el fragmento de configuración
+      AppStream que identifica los repositorios Mageia ante el
+      generador de caché AppStream local.  Habilita el aviso de
+      "Actualización del sistema" y el selector de canal de
+      distribución en los gestores gráficos.
+    </p>
+    <p xml:lang="it">
+      Fornisce i metainfo del sistema operativo
+      (``mageia.metainfo.xml``) e il frammento di configurazione
+      AppStream che identifica i repository Mageia al generatore
+      di cache AppStream locale.  Abilita il banner
+      "Aggiornamento di sistema" e il selettore del canale di
+      distribuzione nei gestori grafici.
+    </p>
+    <p xml:lang="nl">
+      Levert de besturingssysteem-metainfo (``mageia.metainfo.xml``)
+      en het AppStream-configuratiesnippet dat de Mageia-
+      repositories aan de lokale AppStream-cachebouwer
+      identificeert.  Activeert de banner "Systeemupgrade" en de
+      distributiekanaalkiezer in grafische pakketbeheerders.
+    </p>
+    <p xml:lang="pt">
+      Fornece o metainfo do sistema operativo
+      (``mageia.metainfo.xml``) e o fragmento de configuração
+      AppStream que identifica os repositórios Mageia ao gerador
+      de cache AppStream local.  Ativa o banner "Atualização do
+      sistema" e o seletor de canal de distribuição nos gestores
+      gráficos.
+    </p>
+  </description>
+
+  <icon type="stock">urpm-ng</icon>
+
+  <url type="homepage">https://github.com/pvi-github/urpm-ng</url>
+  <url type="bugtracker">https://github.com/pvi-github/urpm-ng/issues</url>
+
+  <project_license>GPL-2.0-or-later</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+
+  <developer id="org.mageia">
+    <name>Mageia Community</name>
+  </developer>
+</component>

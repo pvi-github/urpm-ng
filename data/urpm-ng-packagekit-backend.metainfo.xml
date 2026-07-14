@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.mageia.urpm-ng-packagekit-backend</id>
+  <extends>org.freedesktop.PackageKit</extends>
+
+  <name>urpm PackageKit backend</name>
+  <name xml:lang="fr">Backend PackageKit urpm</name>
+  <name xml:lang="de">urpm-PackageKit-Backend</name>
+  <name xml:lang="es">Backend PackageKit urpm</name>
+  <name xml:lang="it">Backend PackageKit urpm</name>
+  <name xml:lang="nl">urpm-PackageKit-backend</name>
+  <name xml:lang="pt">Backend PackageKit urpm</name>
+
+  <summary>Route PackageKit requests through urpm-ng (Discover, GNOME Software)</summary>
+  <summary xml:lang="fr">Faire passer les requêtes PackageKit par urpm-ng (Discover, GNOME Logiciels)</summary>
+  <summary xml:lang="de">PackageKit-Anfragen über urpm-ng leiten (Discover, GNOME Software)</summary>
+  <summary xml:lang="es">Enrutar las peticiones de PackageKit a través de urpm-ng (Discover, GNOME Software)</summary>
+  <summary xml:lang="it">Instradare le richieste PackageKit tramite urpm-ng (Discover, GNOME Software)</summary>
+  <summary xml:lang="nl">PackageKit-verzoeken via urpm-ng laten lopen (Discover, GNOME Software)</summary>
+  <summary xml:lang="pt">Encaminhar os pedidos do PackageKit através do urpm-ng (Discover, GNOME Software)</summary>
+
+  <description>
+    <p>
+      This backend plugs the urpm-ng D-Bus service into
+      PackageKit so any consumer of the freedesktop.org
+      package-management API (KDE Discover, GNOME Software,
+      pkcon...) uses urpm-ng under the hood.  Once installed
+      the choice of default backend is set to ``urpm`` in
+      /etc/PackageKit/PackageKit.conf.
+    </p>
+    <p xml:lang="fr">
+      Ce backend branche le service D-Bus urpm-ng sur
+      PackageKit, de sorte que tout consommateur de l'API de
+      gestion de paquets freedesktop.org (KDE Discover, GNOME
+      Logiciels, pkcon...) utilise urpm-ng en dessous.  Une
+      fois installé, le backend par défaut est positionné sur
+      ``urpm`` dans /etc/PackageKit/PackageKit.conf.
+    </p>
+    <p xml:lang="de">
+      Dieses Backend verbindet den urpm-ng D-Bus-Dienst mit
+      PackageKit, sodass jeder Konsument der freedesktop.org-
+      Paketmanagement-API (KDE Discover, GNOME Software,
+      pkcon...) im Hintergrund urpm-ng verwendet.  Nach der
+      Installation wird das Standard-Backend in
+      /etc/PackageKit/PackageKit.conf auf ``urpm`` gesetzt.
+    </p>
+    <p xml:lang="es">
+      Este backend conecta el servicio D-Bus urpm-ng con
+      PackageKit, de modo que cualquier consumidor de la API
+      de gestión de paquetes freedesktop.org (KDE Discover,
+      GNOME Software, pkcon...) usa urpm-ng por debajo.  Una
+      vez instalado, el backend por defecto se establece en
+      ``urpm`` en /etc/PackageKit/PackageKit.conf.
+    </p>
+    <p xml:lang="it">
+      Questo backend collega il servizio D-Bus urpm-ng a
+      PackageKit, in modo che qualsiasi consumatore dell'API
+      di gestione pacchetti freedesktop.org (KDE Discover,
+      GNOME Software, pkcon...) usi urpm-ng dietro le
+      quinte.  Una volta installato, il backend predefinito è
+      impostato su ``urpm`` in /etc/PackageKit/PackageKit.conf.
+    </p>
+    <p xml:lang="nl">
+      Deze backend koppelt de urpm-ng D-Bus-service aan
+      PackageKit, zodat elke consument van de freedesktop.org-
+      pakketbeheer-API (KDE Discover, GNOME Software,
+      pkcon...) onder de motorkap urpm-ng gebruikt.  Na
+      installatie wordt de standaardbackend in
+      /etc/PackageKit/PackageKit.conf op ``urpm`` gezet.
+    </p>
+    <p xml:lang="pt">
+      Este backend liga o serviço D-Bus urpm-ng ao
+      PackageKit, de forma a que qualquer consumidor da API
+      de gestão de pacotes freedesktop.org (KDE Discover,
+      GNOME Software, pkcon...) use o urpm-ng por baixo.
+      Uma vez instalado, o backend predefinido é definido
+      como ``urpm`` em /etc/PackageKit/PackageKit.conf.
+    </p>
+  </description>
+
+  <icon type="stock">urpm-ng</icon>
+
+  <url type="homepage">https://github.com/pvi-github/urpm-ng</url>
+  <url type="bugtracker">https://github.com/pvi-github/urpm-ng/issues</url>
+
+  <project_license>GPL-2.0-or-later</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+
+  <developer id="org.mageia">
+    <name>Mageia Community</name>
+  </developer>
+</component>

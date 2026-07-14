@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.mageia.rpmdrake-ng</id>
+  <launchable type="desktop-id">rpmdrake-ng.desktop</launchable>
+
+  <name>rpmdrake-ng</name>
+  <name xml:lang="fr">rpmdrake-ng</name>
+  <name xml:lang="de">rpmdrake-ng</name>
+  <name xml:lang="es">rpmdrake-ng</name>
+  <name xml:lang="it">rpmdrake-ng</name>
+  <name xml:lang="nl">rpmdrake-ng</name>
+  <name xml:lang="pt">rpmdrake-ng</name>
+
+  <summary>Modern graphical package manager for Mageia</summary>
+  <summary xml:lang="fr">Gestionnaire de paquets graphique moderne pour Mageia</summary>
+  <summary xml:lang="de">Moderner grafischer Paketmanager für Mageia</summary>
+  <summary xml:lang="es">Gestor gráfico moderno de paquetes para Mageia</summary>
+  <summary xml:lang="it">Gestore grafico moderno di pacchetti per Mageia</summary>
+  <summary xml:lang="nl">Moderne grafische pakketbeheerder voor Mageia</summary>
+  <summary xml:lang="pt">Gestor gráfico moderno de pacotes para Mageia</summary>
+
+  <description>
+    <p>
+      rpmdrake-ng is the Qt6 front end for the urpm-ng package
+      manager.  It replaces the historical rpmdrake with a
+      responsive interface built around the urpm-ng D-Bus service:
+      no separate process spawn per action, a live view of the
+      package database, and native Mageia semantics for holds,
+      rollbacks and per-media selection.
+    </p>
+    <p xml:lang="fr">
+      rpmdrake-ng est l'interface Qt6 du gestionnaire de paquets
+      urpm-ng.  Elle remplace le rpmdrake historique par une
+      interface réactive construite autour du service D-Bus
+      urpm-ng : plus de processus séparé par action, une vue en
+      direct de la base de paquets, et une sémantique Mageia
+      native pour les hold, rollback et sélection par média.
+    </p>
+    <p xml:lang="de">
+      rpmdrake-ng ist die Qt6-Oberfläche des Paketmanagers
+      urpm-ng.  Sie ersetzt das klassische rpmdrake durch eine
+      reaktionsschnelle Oberfläche auf Basis des urpm-ng D-Bus-
+      Dienstes: kein separater Prozessstart je Aktion, eine
+      Live-Ansicht der Paketdatenbank und native Mageia-Semantik
+      für Hold, Rollback und Medienauswahl.
+    </p>
+    <p xml:lang="es">
+      rpmdrake-ng es la interfaz Qt6 del gestor de paquetes
+      urpm-ng.  Reemplaza al rpmdrake histórico con una interfaz
+      responsiva construida en torno al servicio D-Bus urpm-ng:
+      sin proceso separado por acción, una vista en vivo de la
+      base de paquetes y semántica nativa de Mageia para retener,
+      revertir y seleccionar por medio.
+    </p>
+    <p xml:lang="it">
+      rpmdrake-ng è l'interfaccia Qt6 del gestore di pacchetti
+      urpm-ng.  Sostituisce il rpmdrake storico con un'interfaccia
+      reattiva costruita intorno al servizio D-Bus urpm-ng:
+      nessun processo separato per azione, una vista live del
+      database dei pacchetti e semantica nativa Mageia per
+      hold, rollback e selezione per media.
+    </p>
+    <p xml:lang="nl">
+      rpmdrake-ng is de Qt6-frontend voor de pakketbeheerder
+      urpm-ng.  Het vervangt de historische rpmdrake door een
+      responsieve interface gebouwd rond de urpm-ng D-Bus-service:
+      geen apart proces per actie, een live-weergave van de
+      pakketdatabase en native Mageia-semantiek voor holds,
+      rollbacks en selectie per media.
+    </p>
+    <p xml:lang="pt">
+      rpmdrake-ng é a interface Qt6 do gestor de pacotes urpm-ng.
+      Substitui o rpmdrake histórico com uma interface reativa
+      construída em torno do serviço D-Bus urpm-ng: sem processo
+      separado por ação, uma vista ao vivo da base de dados de
+      pacotes e semântica nativa Mageia para hold, rollback e
+      seleção por meio.
+    </p>
+  </description>
+
+  <categories>
+    <category>System</category>
+    <category>PackageManager</category>
+    <category>Settings</category>
+  </categories>
+
+  <keywords>
+    <keyword>package</keyword>
+    <keyword>rpm</keyword>
+    <keyword>install</keyword>
+    <keyword>update</keyword>
+    <keyword>software</keyword>
+    <keyword>urpm</keyword>
+    <keyword xml:lang="fr">paquet</keyword>
+    <keyword xml:lang="fr">installer</keyword>
+    <keyword xml:lang="fr">mise à jour</keyword>
+    <keyword xml:lang="fr">logiciel</keyword>
+  </keywords>
+
+  <icon type="stock">rpmdrake-ng</icon>
+
+  <url type="homepage">https://github.com/pvi-github/urpm-ng</url>
+  <url type="bugtracker">https://github.com/pvi-github/urpm-ng/issues</url>
+
+  <project_license>GPL-2.0-or-later</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+
+  <developer id="org.mageia">
+    <name>Mageia Community</name>
+  </developer>
+
+  <provides>
+    <binary>rpmdrake-ng</binary>
+  </provides>
+
+  <content_rating type="oars-1.1" />
+</component>

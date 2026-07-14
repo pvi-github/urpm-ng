@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="service">
+  <id>org.mageia.urpm-ng-daemon</id>
+  <launchable type="service">urpmd.service</launchable>
+
+  <name>urpmd</name>
+  <name xml:lang="fr">urpmd</name>
+  <name xml:lang="de">urpmd</name>
+  <name xml:lang="es">urpmd</name>
+  <name xml:lang="it">urpmd</name>
+  <name xml:lang="nl">urpmd</name>
+  <name xml:lang="pt">urpmd</name>
+
+  <summary>Background service for urpm-ng: idle refresh and LAN peer sharing</summary>
+  <summary xml:lang="fr">Service d'arrière-plan pour urpm-ng : rafraîchissement idle et partage entre pairs LAN</summary>
+  <summary xml:lang="de">Hintergrunddienst für urpm-ng: Idle-Aktualisierung und LAN-Peer-Sharing</summary>
+  <summary xml:lang="es">Servicio en segundo plano para urpm-ng: actualización en reposo y compartición entre pares LAN</summary>
+  <summary xml:lang="it">Servizio in background per urpm-ng: aggiornamento a riposo e condivisione tra peer LAN</summary>
+  <summary xml:lang="nl">Achtergronddienst voor urpm-ng: idle-verversing en LAN-peerdeling</summary>
+  <summary xml:lang="pt">Serviço em segundo plano para urpm-ng: atualização em repouso e partilha entre pares LAN</summary>
+
+  <description>
+    <p>
+      urpmd runs an idle-aware scheduler that refreshes media
+      metadata off the interactive path and offers a small
+      HTTP endpoint so other Mageia machines on the same LAN
+      can reuse the local RPM cache instead of hitting a
+      distant mirror.  Optional service — safe to disable if
+      you prefer the classic on-demand behaviour of urpm.
+    </p>
+    <p xml:lang="fr">
+      urpmd exécute un ordonnanceur conscient de l'inactivité
+      qui rafraîchit les métadonnées des médias en dehors du
+      chemin interactif, et expose un petit point HTTP pour
+      que d'autres machines Mageia du même LAN réutilisent le
+      cache RPM local plutôt qu'un miroir distant.  Service
+      optionnel — désactivable sans risque si vous préférez le
+      comportement classique à la demande d'urpm.
+    </p>
+    <p xml:lang="de">
+      urpmd führt einen Idle-bewussten Scheduler aus, der
+      Medienmetadaten außerhalb des interaktiven Pfads
+      aktualisiert, und stellt einen kleinen HTTP-Endpunkt
+      bereit, damit andere Mageia-Rechner im selben LAN den
+      lokalen RPM-Cache statt eines entfernten Spiegels
+      nutzen können.  Optionaler Dienst — kann sicher
+      deaktiviert werden, wenn Sie das klassische On-Demand-
+      Verhalten von urpm bevorzugen.
+    </p>
+    <p xml:lang="es">
+      urpmd ejecuta un planificador consciente del reposo que
+      actualiza los metadatos de los medios fuera de la ruta
+      interactiva y expone un pequeño punto HTTP para que
+      otras máquinas Mageia en la misma LAN reutilicen la
+      caché RPM local en vez de consultar un espejo distante.
+      Servicio opcional, se puede desactivar sin problemas si
+      prefiere el comportamiento clásico a demanda de urpm.
+    </p>
+    <p xml:lang="it">
+      urpmd esegue uno scheduler consapevole dell'inattività
+      che aggiorna i metadati dei media al di fuori del
+      percorso interattivo, ed espone un piccolo endpoint
+      HTTP affinché altre macchine Mageia nella stessa LAN
+      riutilizzino la cache RPM locale invece di un mirror
+      remoto.  Servizio opzionale — disattivabile senza
+      rischi se preferisci il comportamento classico a
+      richiesta di urpm.
+    </p>
+    <p xml:lang="nl">
+      urpmd voert een idle-bewuste scheduler uit die media-
+      metadata buiten het interactieve pad ververst, en biedt
+      een klein HTTP-eindpunt zodat andere Mageia-machines op
+      hetzelfde LAN de lokale RPM-cache hergebruiken in
+      plaats van een externe mirror te raadplegen.  Optionele
+      service — veilig uit te schakelen als u het klassieke
+      on-demand-gedrag van urpm verkiest.
+    </p>
+    <p xml:lang="pt">
+      urpmd executa um agendador consciente da inatividade
+      que atualiza os metadados dos meios fora do caminho
+      interativo e expõe um pequeno ponto HTTP para que
+      outras máquinas Mageia na mesma LAN reutilizem a cache
+      RPM local em vez de consultar um espelho distante.
+      Serviço opcional — pode ser desativado sem problemas se
+      preferir o comportamento clássico a pedido do urpm.
+    </p>
+  </description>
+
+  <icon type="stock">urpm-ng</icon>
+
+  <url type="homepage">https://github.com/pvi-github/urpm-ng</url>
+  <url type="bugtracker">https://github.com/pvi-github/urpm-ng/issues</url>
+
+  <project_license>GPL-2.0-or-later</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+
+  <developer id="org.mageia">
+    <name>Mageia Community</name>
+  </developer>
+</component>

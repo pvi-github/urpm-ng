@@ -1,6 +1,6 @@
 %define name rpmdrake-ng
 %define version 0.8.3
-%define release 1
+%define release 2
 
 Name:           %{name}
 Version:        %{version}
@@ -83,6 +83,12 @@ install -Dm644 data/rpmdrake-ng.desktop %{buildroot}%{_datadir}/applications/rpm
 install -Dm644 data/icons/rpmdrake-ng.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/rpmdrake-ng.svg
 install -Dm644 data/icons/rpmdrake-ng-48.png %{buildroot}%{_datadir}/icons/hicolor/48x48/apps/rpmdrake-ng.png
 
+# Install AppStream metainfo — Discover, GNOME Software and the
+# distribution-side appstream-generator pick this up to build the
+# component entry that ties the .desktop file to a Mageia package.
+install -Dm644 data/rpmdrake-ng.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/org.mageia.rpmdrake-ng.metainfo.xml
+
 # Install PolicyKit policy for GUI authentication
 install -Dm644 data/org.mageia.rpmdrake.policy %{buildroot}%{_datadir}/polkit-1/actions/org.mageia.rpmdrake.policy
 
@@ -124,6 +130,7 @@ fi
 %{_datadir}/applications/rpmdrake-ng.desktop
 %{_datadir}/icons/hicolor/scalable/apps/rpmdrake-ng.svg
 %{_datadir}/icons/hicolor/48x48/apps/rpmdrake-ng.png
+%{_datadir}/metainfo/org.mageia.rpmdrake-ng.metainfo.xml
 %{_datadir}/polkit-1/actions/org.mageia.rpmdrake.policy
 %{_mandir}/man1/rpmdrake-ng.1*
 %{_mandir}/fr/man1/rpmdrake-ng.1*

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>org.mageia.urpm-ng-core</id>
+
+  <name>urpm</name>
+  <name xml:lang="fr">urpm</name>
+  <name xml:lang="de">urpm</name>
+  <name xml:lang="es">urpm</name>
+  <name xml:lang="it">urpm</name>
+  <name xml:lang="nl">urpm</name>
+  <name xml:lang="pt">urpm</name>
+
+  <summary>Modern command-line package manager for Mageia</summary>
+  <summary xml:lang="fr">Gestionnaire de paquets en ligne de commande moderne pour Mageia</summary>
+  <summary xml:lang="de">Moderner Kommandozeilen-Paketmanager für Mageia</summary>
+  <summary xml:lang="es">Gestor de paquetes de línea de comandos moderno para Mageia</summary>
+  <summary xml:lang="it">Gestore di pacchetti a riga di comando moderno per Mageia</summary>
+  <summary xml:lang="nl">Moderne pakketbeheerder voor de opdrachtregel voor Mageia</summary>
+  <summary xml:lang="pt">Gestor de pacotes de linha de comandos moderno para Mageia</summary>
+
+  <description>
+    <p>
+      urpm is the command-line front end of urpm-ng, the modern
+      replacement for urpmi on Mageia Linux.  It builds on
+      libsolv for resolution, keeps a persistent SQLite package
+      database, and exposes a coherent verb-based interface
+      (install / erase / upgrade / search / show / depends /
+      rdepends / history / rollback / build / mkimage / ...).
+    </p>
+    <p xml:lang="fr">
+      urpm est l'interface en ligne de commande d'urpm-ng, le
+      remplaçant moderne d'urpmi pour Mageia Linux.  Elle
+      s'appuie sur libsolv pour la résolution, garde une base
+      SQLite persistante des paquets et propose une interface
+      cohérente à base de verbes (install / erase / upgrade /
+      search / show / depends / rdepends / history / rollback /
+      build / mkimage / ...).
+    </p>
+    <p xml:lang="de">
+      urpm ist die Kommandozeilen-Oberfläche von urpm-ng, dem
+      modernen Ersatz für urpmi unter Mageia Linux.  Sie
+      verwendet libsolv zur Auflösung, führt eine persistente
+      SQLite-Paketdatenbank und bietet eine kohärente,
+      verbbasierte Schnittstelle (install / erase / upgrade /
+      search / show / depends / rdepends / history / rollback /
+      build / mkimage / ...).
+    </p>
+    <p xml:lang="es">
+      urpm es la interfaz de línea de comandos de urpm-ng, el
+      sustituto moderno de urpmi en Mageia Linux.  Se apoya en
+      libsolv para la resolución, mantiene una base de datos
+      SQLite persistente de paquetes y ofrece una interfaz
+      coherente basada en verbos (install / erase / upgrade /
+      search / show / depends / rdepends / history / rollback /
+      build / mkimage / ...).
+    </p>
+    <p xml:lang="it">
+      urpm è l'interfaccia a riga di comando di urpm-ng, il
+      sostituto moderno di urpmi su Mageia Linux.  Si basa su
+      libsolv per la risoluzione, mantiene un database SQLite
+      persistente dei pacchetti e offre un'interfaccia coerente
+      basata su verbi (install / erase / upgrade / search /
+      show / depends / rdepends / history / rollback / build /
+      mkimage / ...).
+    </p>
+    <p xml:lang="nl">
+      urpm is de opdrachtregel-frontend van urpm-ng, de moderne
+      vervanger van urpmi op Mageia Linux.  Het bouwt op
+      libsolv voor de resolutie, houdt een persistente SQLite-
+      pakketdatabase bij en biedt een coherente werkwoord-
+      gebaseerde interface (install / erase / upgrade / search /
+      show / depends / rdepends / history / rollback / build /
+      mkimage / ...).
+    </p>
+    <p xml:lang="pt">
+      urpm é a interface de linha de comandos do urpm-ng, o
+      substituto moderno do urpmi no Mageia Linux.  Baseia-se
+      no libsolv para a resolução, mantém uma base de dados
+      SQLite persistente de pacotes e oferece uma interface
+      coerente baseada em verbos (install / erase / upgrade /
+      search / show / depends / rdepends / history / rollback /
+      build / mkimage / ...).
+    </p>
+  </description>
+
+  <icon type="stock">urpm-ng</icon>
+
+  <url type="homepage">https://github.com/pvi-github/urpm-ng</url>
+  <url type="bugtracker">https://github.com/pvi-github/urpm-ng/issues</url>
+
+  <project_license>GPL-2.0-or-later</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+
+  <developer id="org.mageia">
+    <name>Mageia Community</name>
+  </developer>
+
+  <provides>
+    <binary>urpm</binary>
+  </provides>
+</component>
