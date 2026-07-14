@@ -689,7 +689,14 @@ class UrpmDBusService:
                     op_id, "refreshing", media_name, current, total, stage
                 )
 
-            results = sync_all_media(self._db, refresh_progress, force=True)
+            # ``force=False`` mirrors the CLI default: each medium sends
+            # an ``If-Modified-Since`` HEAD and skips the download when
+            # the mirror confirms it is up to date.  ``force=True`` used
+            # to re-download every synthesis on every call, taking ~17 s
+            # on a full Mageia install versus ~3 s for the CLI —
+            # Discover's periodic RefreshCache became painful for no
+            # gain (Discover already calls this at its own cadence).
+            results = sync_all_media(self._db, refresh_progress, force=False)
 
             success_count = sum(1 for _n, r in results if r.success)
             fail_count = sum(1 for _n, r in results if not r.success)
