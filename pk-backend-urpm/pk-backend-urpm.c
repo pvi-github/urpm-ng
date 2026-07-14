@@ -96,10 +96,17 @@ emit_packages_from_json(PkBackendJob *job, const gchar *json_str, PkInfoEnum inf
         const gchar *arch = json_object_get_string_member_with_default(pkg, "arch", "");
         const gchar *summary = json_object_get_string_member_with_default(pkg, "summary", "");
         gboolean installed = json_object_get_boolean_member_with_default(pkg, "installed", FALSE);
+        const gchar *media_name = json_object_get_string_member_with_default(pkg, "media_name", "");
 
-        /* Build package_id: name;version-release;arch;urpm */
+        /* PackageKit convention: package_id data field is "installed"
+         * for installed packages and the repository name otherwise —
+         * Discover and AppStream matching depend on this distinction.
+         * Fall back to a stable placeholder when media_name is missing
+         * (older DBus payloads). */
         g_autofree gchar *evr = g_strdup_printf("%s-%s", version, release);
-        g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, "urpm");
+        const gchar *data = installed ? "installed"
+                                      : (media_name[0] ? media_name : "urpm");
+        g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, data);
 
         /* Override info enum based on installed status */
         PkInfoEnum pkg_info = info;
@@ -330,6 +337,7 @@ pk_backend_get_updates_thread(PkBackendJob *job, GVariant *params, gpointer user
                     const gchar *name = json_object_get_string_member_with_default(pkg, "name", "");
                     const gchar *nevra = json_object_get_string_member_with_default(pkg, "nevra", "");
                     const gchar *arch = json_object_get_string_member_with_default(pkg, "arch", "");
+                    const gchar *media_name = json_object_get_string_member_with_default(pkg, "media_name", "");
 
                     /* Extract version from nevra (name-version-release.arch) */
                     g_autofree gchar *evr = NULL;
@@ -346,7 +354,10 @@ pk_backend_get_updates_thread(PkBackendJob *job, GVariant *params, gpointer user
                     if (evr == NULL)
                         evr = g_strdup("0");
 
-                    g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, "urpm");
+                    /* An update is by definition available from a repo,
+                     * never "installed" at this point. */
+                    const gchar *data = media_name[0] ? media_name : "urpm";
+                    g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, data);
                     pk_backend_job_package(job, PK_INFO_ENUM_NORMAL, package_id, "");
                 }
             }
@@ -654,7 +665,10 @@ pk_backend_install_packages_thread(PkBackendJob *job, GVariant *params, gpointer
                         const gchar *arch = json_object_get_string_member_with_default(pkg, "arch", "");
 
                         g_autofree gchar *evr = g_strdup_printf("%s-%s", version, release);
-                        g_autofree gchar *pkg_id = pk_package_id_build(name, evr, arch, "urpm");
+                        /* Post-install callback: the package is on the
+                         * system now, hence "installed" in the data
+                         * field regardless of its origin repo. */
+                        g_autofree gchar *pkg_id = pk_package_id_build(name, evr, arch, "installed");
                         pk_backend_job_package(job, PK_INFO_ENUM_FINISHED, pkg_id, "");
                     }
                 }
@@ -865,6 +879,130 @@ pk_backend_update_packages(PkBackend *backend, PkBackendJob *job,
 /* Get Package Details                                                       */
 /* ========================================================================= */
 
+/* Map the RPM ``Group`` tag string (e.g. "Applications/Multimedia")
+ * to the closest PackageKit group enum.  Discover uses the returned
+ * enum to place the package into a category in its browsing UI;
+ * PK_GROUP_ENUM_OTHER lands the package into a catch-all bucket which
+ * makes navigation frustrating (every category ends up empty).
+ *
+ * The lookup uses prefix matching because the RPM group hierarchy
+ * uses ``/`` as separator and every distribution has its own
+ * conventions (this table follows Mageia's).  Order matters: more
+ * specific prefixes are tested first.
+ */
+static PkGroupEnum
+rpm_group_to_pk_enum(const gchar *rpm_group)
+{
+    if (!rpm_group || !*rpm_group)
+        return PK_GROUP_ENUM_OTHER;
+
+    /* Desktop environments — most specific first. */
+    if (g_str_has_prefix(rpm_group, "Graphical desktop/KDE"))
+        return PK_GROUP_ENUM_DESKTOP_KDE;
+    if (g_str_has_prefix(rpm_group, "Graphical desktop/GNOME"))
+        return PK_GROUP_ENUM_DESKTOP_GNOME;
+    if (g_str_has_prefix(rpm_group, "Graphical desktop/Xfce"))
+        return PK_GROUP_ENUM_DESKTOP_XFCE;
+    if (g_str_has_prefix(rpm_group, "Graphical desktop/"))
+        return PK_GROUP_ENUM_DESKTOP_OTHER;
+
+    /* Development. */
+    if (g_str_has_prefix(rpm_group, "Development/"))
+        return PK_GROUP_ENUM_PROGRAMMING;
+
+    /* Applications/*. */
+    if (g_str_has_prefix(rpm_group, "Applications/Multimedia"))
+        return PK_GROUP_ENUM_MULTIMEDIA;
+    if (g_str_has_prefix(rpm_group, "Applications/Sound"))
+        return PK_GROUP_ENUM_MULTIMEDIA;
+    if (g_str_has_prefix(rpm_group, "Applications/Video"))
+        return PK_GROUP_ENUM_MULTIMEDIA;
+    if (g_str_has_prefix(rpm_group, "Applications/Graphics"))
+        return PK_GROUP_ENUM_GRAPHICS;
+    if (g_str_has_prefix(rpm_group, "Applications/Communications"))
+        return PK_GROUP_ENUM_COMMUNICATION;
+    if (g_str_has_prefix(rpm_group, "Applications/Internet"))
+        return PK_GROUP_ENUM_INTERNET;
+    if (g_str_has_prefix(rpm_group, "Applications/Networking"))
+        return PK_GROUP_ENUM_NETWORK;
+    if (g_str_has_prefix(rpm_group, "Applications/Publishing"))
+        return PK_GROUP_ENUM_PUBLISHING;
+    if (g_str_has_prefix(rpm_group, "Applications/Editors"))
+        return PK_GROUP_ENUM_PUBLISHING;
+    if (g_str_has_prefix(rpm_group, "Applications/Text"))
+        return PK_GROUP_ENUM_PUBLISHING;
+    if (g_str_has_prefix(rpm_group, "Applications/Databases"))
+        return PK_GROUP_ENUM_SERVERS;
+    if (g_str_has_prefix(rpm_group, "Applications/Sciences"))
+        return PK_GROUP_ENUM_SCIENCE;
+    if (g_str_has_prefix(rpm_group, "Applications/Archiving"))
+        return PK_GROUP_ENUM_ADMIN_TOOLS;
+    if (g_str_has_prefix(rpm_group, "Applications/File"))
+        return PK_GROUP_ENUM_ADMIN_TOOLS;
+    if (g_str_has_prefix(rpm_group, "Applications/Games"))
+        return PK_GROUP_ENUM_GAMES;
+    if (g_str_has_prefix(rpm_group, "Applications/"))
+        return PK_GROUP_ENUM_OTHER;
+
+    /* System/*. */
+    if (g_str_has_prefix(rpm_group, "System/Servers"))
+        return PK_GROUP_ENUM_SERVERS;
+    if (g_str_has_prefix(rpm_group, "System/Configuration"))
+        return PK_GROUP_ENUM_ADMIN_TOOLS;
+    if (g_str_has_prefix(rpm_group, "System/Kernel"))
+        return PK_GROUP_ENUM_SYSTEM;
+    if (g_str_has_prefix(rpm_group, "System/Libraries"))
+        return PK_GROUP_ENUM_SYSTEM;
+    if (g_str_has_prefix(rpm_group, "System/Fonts"))
+        return PK_GROUP_ENUM_FONTS;
+    if (g_str_has_prefix(rpm_group, "System/Legacy"))
+        return PK_GROUP_ENUM_LEGACY;
+    if (g_str_has_prefix(rpm_group, "System/Internationalization"))
+        return PK_GROUP_ENUM_LOCALIZATION;
+    if (g_str_has_prefix(rpm_group, "System/Base"))
+        return PK_GROUP_ENUM_SYSTEM;
+    if (g_str_has_prefix(rpm_group, "System/"))
+        return PK_GROUP_ENUM_SYSTEM;
+
+    /* Top-level RPM groups (older Fedora / imported specs). */
+    if (g_str_has_prefix(rpm_group, "Amusements/Games"))
+        return PK_GROUP_ENUM_GAMES;
+    if (g_str_has_prefix(rpm_group, "Amusements/"))
+        return PK_GROUP_ENUM_GAMES;
+    if (g_str_has_prefix(rpm_group, "Documentation"))
+        return PK_GROUP_ENUM_DOCUMENTATION;
+    if (g_str_has_prefix(rpm_group, "Networking"))
+        return PK_GROUP_ENUM_NETWORK;
+    if (g_str_has_prefix(rpm_group, "Publishing"))
+        return PK_GROUP_ENUM_PUBLISHING;
+    if (g_str_has_prefix(rpm_group, "Sciences"))
+        return PK_GROUP_ENUM_SCIENCE;
+    if (g_str_has_prefix(rpm_group, "Sound"))
+        return PK_GROUP_ENUM_MULTIMEDIA;
+    if (g_str_has_prefix(rpm_group, "Video"))
+        return PK_GROUP_ENUM_MULTIMEDIA;
+    if (g_str_has_prefix(rpm_group, "Books/Documentation"))
+        return PK_GROUP_ENUM_DOCUMENTATION;
+    if (g_str_has_prefix(rpm_group, "Terminals"))
+        return PK_GROUP_ENUM_SYSTEM;
+    if (g_str_has_prefix(rpm_group, "Toys"))
+        return PK_GROUP_ENUM_GAMES;
+    if (g_str_has_prefix(rpm_group, "Emulators"))
+        return PK_GROUP_ENUM_OTHER;
+    if (g_str_has_prefix(rpm_group, "Accessibility"))
+        return PK_GROUP_ENUM_ACCESSIBILITY;
+    if (g_str_has_prefix(rpm_group, "Fonts"))
+        return PK_GROUP_ENUM_FONTS;
+    if (g_str_has_prefix(rpm_group, "Security"))
+        return PK_GROUP_ENUM_SECURITY;
+    if (g_str_has_prefix(rpm_group, "Virtualization"))
+        return PK_GROUP_ENUM_VIRTUALIZATION;
+    if (g_str_has_prefix(rpm_group, "Cluster"))
+        return PK_GROUP_ENUM_ADMIN_TOOLS;
+
+    return PK_GROUP_ENUM_OTHER;
+}
+
 static void
 pk_backend_get_details_thread(PkBackendJob *job, GVariant *params, gpointer user_data)
 {
@@ -919,13 +1057,15 @@ pk_backend_get_details_thread(PkBackendJob *job, GVariant *params, gpointer user
                     pkg, "url", "");
                 const gchar *license = json_object_get_string_member_with_default(
                     pkg, "license", "");
+                const gchar *rpm_group = json_object_get_string_member_with_default(
+                    pkg, "group_name", "");
                 gint64 size = json_object_get_int_member_with_default(
                     pkg, "size", 0);
 
                 pk_backend_job_details(job, package_ids[i],
                                        NULL,  /* summary (already have from package) */
                                        license,
-                                       PK_GROUP_ENUM_OTHER,
+                                       rpm_group_to_pk_enum(rpm_group),
                                        description,
                                        url,
                                        (gulong)size,
@@ -1035,6 +1175,8 @@ pk_backend_resolve_thread(PkBackendJob *job, GVariant *params, gpointer user_dat
                     pkg, "summary", "");
                 gboolean installed = json_object_get_boolean_member_with_default(
                     pkg, "installed", FALSE);
+                const gchar *media_name = json_object_get_string_member_with_default(
+                    pkg, "media_name", "");
 
                 /* Apply filters */
                 if (pk_bitfield_contain(filters, PK_FILTER_ENUM_INSTALLED) && !installed)
@@ -1047,8 +1189,10 @@ pk_backend_resolve_thread(PkBackendJob *job, GVariant *params, gpointer user_dat
                     continue;
 
                 g_autofree gchar *evr = g_strdup_printf("%s-%s", version, release);
+                const gchar *data = installed ? "installed"
+                                              : (media_name[0] ? media_name : "urpm");
                 g_autofree gchar *package_id = pk_package_id_build(
-                    name, evr, arch, "urpm");
+                    name, evr, arch, data);
 
                 PkInfoEnum info = installed ? PK_INFO_ENUM_INSTALLED
                                             : PK_INFO_ENUM_AVAILABLE;
@@ -1205,8 +1349,12 @@ pk_backend_get_packages_thread(PkBackendJob *job, GVariant *params, gpointer use
                 if (name[0] == '\0' || version[0] == '\0')
                     continue;
 
+                /* This thread only serves the INSTALLED filter, so
+                 * every emitted package_id gets the canonical
+                 * "installed" data field — Discover uses it to build
+                 * its "Installed" view. */
                 g_autofree gchar *evr = g_strdup_printf("%s-%s", version, release);
-                g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, "urpm");
+                g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, "installed");
 
                 pk_backend_job_package(job, PK_INFO_ENUM_INSTALLED, package_id, summary);
             }
@@ -1294,13 +1442,15 @@ pk_backend_depends_on_thread(PkBackendJob *job, GVariant *params, gpointer user_
                         const gchar *release = json_object_get_string_member_with_default(pkg, "release", "");
                         const gchar *arch = json_object_get_string_member_with_default(pkg, "arch", "");
                         const gchar *summary = json_object_get_string_member_with_default(pkg, "summary", "");
+                        const gchar *media_name = json_object_get_string_member_with_default(pkg, "media_name", "");
 
                         /* Skip the package itself */
                         if (g_strcmp0(name, parts[0]) == 0)
                             continue;
 
                         g_autofree gchar *evr = g_strdup_printf("%s-%s", version, release);
-                        g_autofree gchar *dep_id = pk_package_id_build(name, evr, arch, "urpm");
+                        const gchar *data = media_name[0] ? media_name : "urpm";
+                        g_autofree gchar *dep_id = pk_package_id_build(name, evr, arch, data);
                         pk_backend_job_package(job, PK_INFO_ENUM_AVAILABLE, dep_id, summary);
                     }
                 }
@@ -1381,12 +1531,14 @@ pk_backend_required_by_thread(PkBackendJob *job, GVariant *params, gpointer user
                     const gchar *release = json_object_get_string_member_with_default(pkg, "release", "");
                     const gchar *arch = json_object_get_string_member_with_default(pkg, "arch", "");
                     const gchar *summary = json_object_get_string_member_with_default(pkg, "summary", "");
+                    const gchar *media_name = json_object_get_string_member_with_default(pkg, "media_name", "");
 
                     if (name[0] == '\0')
                         continue;
 
                     g_autofree gchar *evr = g_strdup_printf("%s-%s", version, release);
-                    g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, "urpm");
+                    const gchar *data = media_name[0] ? media_name : "urpm";
+                    g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, data);
 
                     pk_backend_job_package(job, PK_INFO_ENUM_AVAILABLE, package_id, summary);
                 }
@@ -1739,6 +1891,8 @@ pk_backend_search_files_thread(PkBackendJob *job, GVariant *params, gpointer use
 
                     const gchar *pkg_nevra = json_object_get_string_member_with_default(
                         file_info, "pkg_nevra", "");
+                    const gchar *media_name = json_object_get_string_member_with_default(
+                        file_info, "media_name", "");
 
                     /* Skip if already emitted */
                     if (g_hash_table_contains(seen, pkg_nevra))
@@ -1764,7 +1918,8 @@ pk_backend_search_files_thread(PkBackendJob *job, GVariant *params, gpointer use
                     const gchar *name = nevra_copy;
 
                     g_autofree gchar *evr = g_strdup_printf("%s-%s", version, release);
-                    g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, "urpm");
+                    const gchar *data = media_name[0] ? media_name : "urpm";
+                    g_autofree gchar *package_id = pk_package_id_build(name, evr, arch, data);
 
                     pk_backend_job_package(job, PK_INFO_ENUM_AVAILABLE, package_id, "");
                 }
