@@ -891,23 +891,55 @@ class PackageOperations:
         should prefer ``urpm show --files`` which already reads the
         rpmdb for installed packages.
 
-        Two-stage scan for performance: an ``xzgrep -q`` containment
-        check probes each medium's ``files.xml.lzma`` (xz decompresses
-        in parallel with grep, ~0.5 s for the 26 MB compressed Core
-        Release), and only the medium that actually carries the
-        package is fully parsed.  Without this, a single D-Bus call
-        could decompress several hundred MB just to discover the
-        package lives in the second or third medium.  Falls back to a
-        straight parse when ``xzgrep`` is missing.
+        Two-stage lookup:
+
+        1. **Try rpmdb first.**  If the package is installed on this
+           machine, ``rpm -ql`` is the authoritative source and takes
+           a few ms — no synthesis parsing, no case-sensitivity
+           surprise between the media's ``files.xml.lzma`` NEVRA and
+           the one we were handed.  Discover's ``GetFiles`` call for
+           an installed application to locate its ``.desktop`` (used
+           by the *Launch* button) always hit this path.
+        2. **Fall back to the media** ``files.xml.lzma``:  ``xzgrep -q``
+           containment check probes each medium (xz decompresses in
+           parallel with grep, ~0.5 s for the 26 MB compressed Core
+           Release), and only the medium that actually carries the
+           package is fully parsed.  Falls back to a straight parse
+           when ``xzgrep`` is missing.
 
         Returns:
             List of file paths shipped by ``nevra``, or empty list
-            when the package is not in any on-disk ``files.xml.lzma``.
+            when neither the rpmdb nor any ``files.xml.lzma`` knows
+            the package.
         """
         import subprocess
         from .config import get_base_dir, get_media_local_path
         from .files_xml import parse_files_xml
         from .sync import FILES_XML_PATH
+
+        # rpmdb path: ``rpm -ql <name>`` is the fast, authoritative
+        # source for an installed package.  ``rpm -q`` does not
+        # accept the ``.arch`` suffix appended to our NEVRAs
+        # (``foo-1.2-3.mga10.x86_64`` fails, ``foo-1.2-3.mga10``
+        # works), so we extract the bare name via the standard NEVRA
+        # split ``name-version-release.arch`` and query by name.
+        import re as _re
+        _m = _re.match(r'^(.+?)-[^-]+-[^-]+\.[^.]+$', nevra)
+        name = _m.group(1) if _m else nevra
+        try:
+            listing = subprocess.run(
+                ['rpm', '-ql', name],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            if listing.returncode == 0 and listing.stdout:
+                files = [ln for ln in listing.stdout.splitlines() if ln]
+                # ``(contains no files)`` is what rpm prints for a
+                # metadata-only package; treat as empty and fall
+                # through to the media-side scan below.
+                if files and not files[0].startswith('(contains'):
+                    return files
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
 
         base_dir = get_base_dir()
         # We grep for the literal ``fn="<nevra>"`` attribute, which
