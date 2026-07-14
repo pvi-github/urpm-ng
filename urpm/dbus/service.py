@@ -321,6 +321,10 @@ class UrpmDBusService:
                 'evr': u.evr,
                 'arch': u.arch,
                 'size': u.size or 0,
+                # media_name lets the PackageKit backend build a proper
+                # package_id data field (repository origin) instead of
+                # a placeholder that breaks AppStream matching.
+                'media_name': getattr(u, 'media_name', '') or '',
             })
 
         return success, upgrade_dicts, problems

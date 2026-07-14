@@ -1905,6 +1905,46 @@ class PackageDatabase(
         ).fetchone()
         return row is not None
 
+    def _augment_with_media_name(self, results: List[Dict]) -> None:
+        """Fill the ``media_name`` key on each result dict.
+
+        The various search / resolve SELECTs do not carry a
+        ``LEFT JOIN media`` because they were designed before the
+        PackageKit backend needed the repository origin.  Rather than
+        touching every one of them, this helper resolves the join
+        once at the Python layer via a single ``id IN (…)`` query.
+
+        Rows that already have a ``media_name`` set (some callers do
+        the join themselves) are left untouched.  Rows without a
+        ``media_id`` fall through with ``media_name = None`` — the
+        caller must then either read it from another source or fall
+        back to a repository-agnostic placeholder.
+        """
+        need_id_lookup = [pkg for pkg in results
+                          if 'media_name' not in pkg]
+        if not need_id_lookup:
+            return
+
+        # ``packages.media_id`` is on the row already for anything that
+        # went through get_package / get_package_smart, but the search
+        # helpers do not project it.  Query it in batch here.
+        pkg_ids = [pkg['id'] for pkg in need_id_lookup if pkg.get('id')]
+        if not pkg_ids:
+            for pkg in need_id_lookup:
+                pkg['media_name'] = None
+            return
+
+        placeholders = ','.join(['?'] * len(pkg_ids))
+        cursor = self.conn.execute(f"""
+            SELECT p.id, m.name AS media_name
+            FROM packages p
+            LEFT JOIN media m ON m.id = p.media_id
+            WHERE p.id IN ({placeholders})
+        """, pkg_ids)
+        name_by_id = {row['id']: row['media_name'] for row in cursor}
+        for pkg in need_id_lookup:
+            pkg['media_name'] = name_by_id.get(pkg.get('id'))
+
     def search(self, pattern: str, limit: int = None, search_provides: bool = False) -> List[Dict]:
         """Search packages by name, summary, and optionally provides.
 
@@ -1989,6 +2029,11 @@ class PackageDatabase(
         # Add installed status by checking RPM database
         for pkg in results:
             pkg['installed'] = self._is_installed(pkg['name'])
+
+        # Enrich with media_name — the PackageKit backend needs this
+        # to build a proper ``package_id`` data field (repo name for
+        # available packages, "installed" for installed ones).
+        self._augment_with_media_name(results)
 
         return results
 
@@ -2177,6 +2222,7 @@ class PackageDatabase(
         pkg['recommends'] = self._get_deps(pkg['id'], 'recommends')
         pkg['suggests'] = self._get_deps(pkg['id'], 'suggests')
         pkg['installed'] = self._is_installed(pkg['name'])
+        self._augment_with_media_name([pkg])
 
         return pkg
 
@@ -2200,6 +2246,7 @@ class PackageDatabase(
         pkg['recommends'] = self._get_deps(pkg['id'], 'recommends')
         pkg['suggests'] = self._get_deps(pkg['id'], 'suggests')
         pkg['installed'] = self._is_installed(pkg['name'])
+        self._augment_with_media_name([pkg])
 
         return pkg
 
@@ -2409,7 +2456,7 @@ class PackageDatabase(
 
         if version_join:
             query = f"""
-                SELECT p.name, p.version, p.release, p.arch, p.summary
+                SELECT p.id, p.name, p.version, p.release, p.arch, p.summary
                 FROM packages p
                 {version_join}
                 WHERE p.name_lower IN ({placeholders}) {version_filter}
@@ -2417,7 +2464,7 @@ class PackageDatabase(
             params = tuple(names_lower) + version_params
         else:
             query = f"""
-                SELECT name, version, release, arch, summary
+                SELECT id, name, version, release, arch, summary
                 FROM packages
                 WHERE name_lower IN ({placeholders})
             """
@@ -2426,17 +2473,19 @@ class PackageDatabase(
         cursor = self.conn.execute(query, params)
         rows = cursor.fetchall()
 
-        # Build result dict by name (handle duplicates - keep first/latest)
+        # Build result dict by name (handle duplicates - keep first/latest).
+        # Row layout: (id, name, version, release, arch, summary).
         seen = {}
         for row in rows:
-            name = row[0]
+            name = row[1]
             if name not in seen:
                 seen[name] = {
+                    'id': row[0],
                     'name': name,
-                    'version': row[1],
-                    'release': row[2],
-                    'arch': row[3],
-                    'summary': row[4] or '',
+                    'version': row[2],
+                    'release': row[3],
+                    'arch': row[4],
+                    'summary': row[5] or '',
                 }
 
         # Check installed status in batch using single rpm call
@@ -2464,6 +2513,10 @@ class PackageDatabase(
                 pkg = seen[name].copy()
                 pkg['installed'] = name in installed_set
                 results.append(pkg)
+
+        # Same rationale as search(): the PK backend needs media_name
+        # to distinguish repositories in the package_id data field.
+        self._augment_with_media_name(results)
 
         return results
 
