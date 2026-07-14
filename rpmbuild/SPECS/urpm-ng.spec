@@ -1,6 +1,6 @@
 %define name urpm-ng
 %define version 0.8.3
-%define release 2
+%define release 4
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
@@ -404,6 +404,14 @@ install -m644 data/profiles/*.yaml %{buildroot}%{_datadir}/urpm/profiles/
 # ============================================================================
 %post daemon
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
+# Restart urpmd on upgrade so the newly installed Python code
+# takes effect immediately instead of the previous service
+# continuing to serve stale behaviour from before the RPM swap.
+# ``try-restart`` is a no-op if urpmd was not running, which is
+# what we want (fresh install path does its own start via preset).
+if [ "$1" -ge 2 ]; then
+    /usr/bin/systemctl try-restart urpmd.service >/dev/null 2>&1 || :
+fi
 
 # --- Shorewall firewall configuration ---
 # We ship /etc/shorewall/rules.urpm-ng as an include file.
@@ -506,6 +514,15 @@ fi
 # ============================================================================
 %post packagekit-backend
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
+# Same rationale as urpm-ng-daemon: after an upgrade, restart the
+# D-Bus service that carries the Python business logic AND the
+# PackageKit daemon that dlopens libpk_backend_urpm.so, so
+# Discover / GNOME Software immediately see the new backend.
+# Guard by ``$1 -ge 2`` (upgrade) — fresh installs do not need it.
+if [ "$1" -ge 2 ]; then
+    /usr/bin/systemctl try-restart urpm-dbus.service >/dev/null 2>&1 || :
+    /usr/bin/systemctl try-restart packagekit.service >/dev/null 2>&1 || :
+fi
 
 CONFIG_FILE=/etc/PackageKit/PackageKit.conf
 
