@@ -451,9 +451,17 @@ class UrpmDBusService:
                                     tp.packages_done, tp.packages_total)
 
             options = InstallOptions()
+            # ``full_sync=False`` matches the CLI default: rpm's own
+            # extraction is awaited synchronously (so the progress bar
+            # reaches 100 % when the payload is really on disk), but
+            # post-install triggers (bytecompile, desktop-database,
+            # mkinitrd…) run in the background via urpmd.  With
+            # ``full_sync=True`` Discover's progress bar sat at 100 %
+            # for several seconds waiting for those triggers, giving
+            # the impression of a hung install.
             result = self._ops.execute_install(
                 rpm_paths, options=options,
-                full_sync=True,
+                full_sync=False,
                 progress_callback=install_progress,
                 auth_context=context
             )
@@ -550,9 +558,13 @@ class UrpmDBusService:
                                     tp.packages_done, tp.packages_total)
 
             options = InstallOptions()
+            # ``full_sync=False``: same rationale as install — hand
+            # the caller back as soon as rpm has finished the erase
+            # itself, and let post-uninstall triggers run in the
+            # background instead of stalling Discover at 100 %.
             result = self._ops.execute_erase(
                 remove_names, options=options,
-                full_sync=True,
+                full_sync=False,
                 progress_callback=erase_progress,
                 auth_context=context
             )
@@ -651,10 +663,14 @@ class UrpmDBusService:
                                     tp.packages_done, tp.packages_total)
 
             options = InstallOptions()
+            # ``full_sync=False``: return as soon as rpm's extraction
+            # is over, let post-install triggers finish in the
+            # background via urpmd — matches the CLI default and
+            # keeps Discover's progress bar honest.
             self._ops.execute_upgrade(
                 rpm_paths, erase_names=remove_names,
                 options=options,
-                full_sync=True,
+                full_sync=False,
                 progress_callback=upgrade_progress,
                 auth_context=context
             )
