@@ -422,6 +422,19 @@ pk_backend_refresh_cache_thread(PkBackendJob *job, GVariant *params, gpointer us
     }
 
     pk_backend_job_set_percentage(job, 100);
+
+    /* After a metadata refresh the repository list and the pending
+     * updates can both have changed — let PackageKit clients know
+     * so Discover pulls a fresh view instead of hanging on to its
+     * pre-refresh cache. */
+    if (success) {
+        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
+        if (backend) {
+            pk_backend_repo_list_changed(backend);
+            pk_backend_updates_changed(backend);
+        }
+    }
+
     g_variant_unref(result);
     pk_backend_job_finished(job);
 }
@@ -680,6 +693,19 @@ pk_backend_install_packages_thread(PkBackendJob *job, GVariant *params, gpointer
     }
 
     pk_backend_job_set_percentage(job, 100);
+
+    /* Signal PackageKit clients (Discover, GNOME Software) that the
+     * installed set and the pending updates changed.  Without these
+     * calls, Discover keeps its cached "not installed" state until
+     * the window is closed and reopened. */
+    if (success && !simulate) {
+        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
+        if (backend) {
+            pk_backend_installed_db_changed(backend);
+            pk_backend_updates_changed(backend);
+        }
+    }
+
     g_variant_unref(ctx.result);
     pk_backend_job_finished(job);
 }
@@ -784,6 +810,17 @@ pk_backend_remove_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
     }
 
     pk_backend_job_set_percentage(job, 100);
+
+    /* Signal PackageKit clients that the installed set changed —
+     * same rationale as install_packages_thread. */
+    if (success && !simulate) {
+        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
+        if (backend) {
+            pk_backend_installed_db_changed(backend);
+            pk_backend_updates_changed(backend);
+        }
+    }
+
     g_variant_unref(result);
     pk_backend_job_finished(job);
 }
@@ -864,6 +901,18 @@ pk_backend_update_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
     }
 
     pk_backend_job_set_percentage(job, 100);
+
+    /* Same rationale as install/remove: tell Discover to invalidate
+     * both its installed and its updates cache after a successful
+     * upgrade transaction. */
+    if (success && !simulate) {
+        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
+        if (backend) {
+            pk_backend_installed_db_changed(backend);
+            pk_backend_updates_changed(backend);
+        }
+    }
+
     g_variant_unref(result);
     pk_backend_job_finished(job);
 }
@@ -1791,13 +1840,14 @@ pk_backend_install_files_thread(PkBackendJob *job, GVariant *params, gpointer us
     g_variant_get(result, "(&s)", &json_str);
 
     JsonParser *parser = json_parser_new();
+    gboolean install_ok = FALSE;
     if (json_parser_load_from_data(parser, json_str, -1, NULL)) {
         JsonNode *root = json_parser_get_root(parser);
         if (JSON_NODE_HOLDS_OBJECT(root)) {
             JsonObject *obj = json_node_get_object(root);
-            gboolean success = json_object_get_boolean_member_with_default(obj, "success", FALSE);
+            install_ok = json_object_get_boolean_member_with_default(obj, "success", FALSE);
 
-            if (!success) {
+            if (!install_ok) {
                 const gchar *err_msg = json_object_get_string_member_with_default(obj, "error", "Unknown error");
                 pk_backend_job_error_code(job, PK_ERROR_ENUM_TRANSACTION_ERROR,
                                           "Install failed: %s", err_msg);
@@ -1806,6 +1856,15 @@ pk_backend_install_files_thread(PkBackendJob *job, GVariant *params, gpointer us
     }
     g_object_unref(parser);
     g_variant_unref(result);
+
+    /* Same signal-emission pattern as install_packages_thread. */
+    if (install_ok) {
+        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
+        if (backend) {
+            pk_backend_installed_db_changed(backend);
+            pk_backend_updates_changed(backend);
+        }
+    }
 
     pk_backend_job_finished(job);
 }
