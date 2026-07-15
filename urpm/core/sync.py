@@ -6,6 +6,7 @@ Downloads synthesis/hdlist files from media sources and imports into cache.
 
 import hashlib
 import logging
+import os
 import shutil
 import tempfile
 import time
@@ -29,6 +30,14 @@ HDLIST_PATH = "media_info/hdlist.cz"
 MD5SUM_PATH = "media_info/MD5SUM"
 FILES_XML_PATH = "media_info/files.xml.lzma"
 APPSTREAM_PATH = "media_info/appstream.xml.lzma"
+
+# Public read for anything landing under /var/lib/urpm/medias. shutil.move
+# from a tempfile.NamedTemporaryFile preserves its 0o600 mode, and
+# shutil.copy2 preserves whatever the source carried — both leave catalog
+# files unreadable outside root, which breaks non-privileged `urpm f`,
+# AppStream generation, and any client reading the media metadata.
+MEDIA_FILE_MODE = 0o644
+MEDIA_DIR_MODE = 0o755
 
 
 # Import from config
@@ -417,6 +426,7 @@ def _fetch_files_xml_if_changed(db: PackageDatabase, media_id: int,
             )
             return
         shutil.move(str(tmp_path), str(dest))
+        os.chmod(dest, MEDIA_FILE_MODE)
         db.update_media_files_xml_md5(media_id, remote_md5)
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -690,15 +700,18 @@ def sync_media(db: PackageDatabase, media_name: str,
 
         cache_media_info = cache_media_dir / "media_info"
         cache_media_info.mkdir(parents=True, exist_ok=True)
+        os.chmod(cache_media_info, MEDIA_DIR_MODE)
 
         # Copy synthesis
         cache_synthesis = cache_media_info / "synthesis.hdlist.cz"
         shutil.copy2(synthesis_path, cache_synthesis)
+        os.chmod(cache_synthesis, MEDIA_FILE_MODE)
 
         # Copy hdlist if downloaded
         if hdlist_downloaded:
             cache_hdlist = cache_media_info / "hdlist.cz"
             shutil.copy2(tmpdir / "hdlist.cz", cache_hdlist)
+            os.chmod(cache_hdlist, MEDIA_FILE_MODE)
 
         # Download and copy MD5SUM
         if server:
@@ -717,7 +730,9 @@ def sync_media(db: PackageDatabase, media_name: str,
         # the files.xml.lzma conditional fetch (below) rely on it.
         md5sums = {}
         if md5_result.success:
-            shutil.copy2(md5sum_path, cache_media_info / "MD5SUM")
+            cache_md5sum = cache_media_info / "MD5SUM"
+            shutil.copy2(md5sum_path, cache_md5sum)
+            os.chmod(cache_md5sum, MEDIA_FILE_MODE)
             try:
                 md5sums = parse_md5sum_file(md5sum_path.read_text())
             except Exception as exc:
