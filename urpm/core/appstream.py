@@ -12,6 +12,7 @@ import gzip
 import logging
 import lzma
 import json
+import platform
 import subprocess
 import os
 import re
@@ -25,50 +26,12 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Iterato
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from .appstream_scan import parse_nevra, scan_media_appstream_candidates
+
 if TYPE_CHECKING:
     from .database import PackageDatabase
 
 logger = logging.getLogger(__name__)
-
-# RPM groups that indicate desktop applications
-DESKTOP_GROUPS = {
-    # Games
-    'games', 'games/arcade', 'games/boards', 'games/cards', 'games/puzzles',
-    'games/sports', 'games/strategy', 'games/adventure', 'games/rpg',
-    # Graphical desktop applications
-    'graphical desktop/gnome', 'graphical desktop/kde', 'graphical desktop/xfce',
-    'graphical desktop/other',
-    # Office & productivity
-    'office', 'office/suite', 'office/wordprocessor', 'office/spreadsheet',
-    'office/presentation', 'office/database', 'office/finance',
-    # Graphics
-    'graphics', 'graphics/viewer', 'graphics/editor', 'graphics/3d',
-    'graphics/photography', 'graphics/scanning',
-    # Multimedia
-    'video', 'video/players', 'video/editors',
-    'sound', 'sound/players', 'sound/editors', 'sound/mixers',
-    # Networking / Internet
-    'networking/www', 'networking/mail', 'networking/chat',
-    'networking/instant messaging', 'networking/news', 'networking/ftp',
-    'networking/file transfer', 'networking/remote access',
-    # Education & Science
-    'education', 'sciences', 'sciences/astronomy', 'sciences/chemistry',
-    'sciences/mathematics', 'sciences/physics',
-    # Development (IDEs only)
-    'development/ide',
-    # Accessibility
-    'accessibility',
-    # Archiving
-    'archiving/compression',
-    # Editors
-    'editors',
-    # Emulators
-    'emulators',
-    # File tools
-    'file tools',
-    # Terminals
-    'terminals',
-}
 
 # Map RPM groups to freedesktop categories
 GROUP_TO_CATEGORY = {
@@ -201,110 +164,284 @@ class AppStreamManager:
         """Get path for a media's AppStream file."""
         return self.appstream_dir / f"{self._sanitize_filename(media_name)}.xml"
 
+    def _get_files_xml_path(self, media: Dict) -> Optional[Path]:
+        """Locate a media's on-disk ``files.xml.lzma``, or ``None`` if absent.
+
+        The manager only knows its ``base_dir`` via ``appstream_dir.parent``
+        — reconstruct the media cache path from that root using the same
+        helper the sync pipeline uses, so we consume the exact file the
+        last sync landed on disk.
+        """
+        from .config import get_media_local_path
+        base_dir = self.appstream_dir.parent
+        cache_dir = get_media_local_path(media, base_dir)
+        path = cache_dir / 'media_info' / 'files.xml.lzma'
+        return path if path.exists() else None
+
+    def _scan_with_cache(
+        self, media_id: int, files_xml_path: Path,
+    ) -> Dict[str, List[str]]:
+        """Run the AppStream candidate scan, reusing the DB cache when fresh.
+
+        The freshness key is ``(mtime, size)`` of ``files_xml_path``.  The
+        archive is already MD5-validated at sync time (:mod:`urpm.core.sync`),
+        so an unchanged mtime+size guarantees unchanged content — no need
+        for a second hash pass.
+        """
+        stat = files_xml_path.stat()
+        mtime = int(stat.st_mtime)
+        size = stat.st_size
+
+        cached = self.db.get_appstream_scan(media_id)
+        if cached is not None and cached[0] == mtime and cached[1] == size:
+            return cached[2]
+
+        candidates = scan_media_appstream_candidates(files_xml_path)
+        self.db.set_appstream_scan(media_id, mtime, size, candidates)
+        return candidates
+
+    @staticmethod
+    def _arch_priority(arch: str, native_arch: str) -> int:
+        """Rank archs for one-component-per-pkgname deduplication.
+
+        Lower is better.  Native arch first (what the user will actually
+        install), then ``noarch`` (portable payload), then everything else
+        (foreign multiarch — i686 on x86_64, etc.).
+        """
+        if arch == native_arch:
+            return 0
+        if arch == 'noarch':
+            return 1
+        return 2
+
+    @staticmethod
+    def _pick_component_id(pkgname: str, paths: List[str]) -> str:
+        """Choose the AppStream ``<id>`` for a package from its candidate paths.
+
+        Preference order:
+
+        1. A ``/usr/share/applications/<pkgname>.desktop`` if present — the
+           common case, and the one Discover already maps to when
+           enriching from the installed metainfo.
+        2. Otherwise, the basename of the first ``.desktop`` found.
+        3. Otherwise (metainfo-only package with no desktop entry),
+           ``<pkgname>.desktop`` as a stable synthetic id.
+        """
+        desktops = [Path(p).name for p in paths if p.endswith('.desktop')]
+        preferred = f'{pkgname}.desktop'
+        if preferred in desktops:
+            return preferred
+        if desktops:
+            return desktops[0]
+        return preferred
+
+    def _append_component(
+        self,
+        root: ET.Element,
+        pkgname: str,
+        summary: Optional[str],
+        description: Optional[str],
+        url: Optional[str],
+        license_: Optional[str],
+        group_name: Optional[str],
+        paths: List[str],
+    ) -> None:
+        """Append one ``<component type="desktop-application">`` to *root*.
+
+        Emits a *stub* component: enough for Discover to map the AppStream
+        id to a PackageKit ``pkgname``, but without the rich upstream
+        metadata (screenshots, releases, long description).  Those live in
+        the ``/usr/share/metainfo/*.xml`` files installed with the package
+        itself and are merged in by appstreamcli once the package is on
+        disk.  For available-but-not-installed packages, this stub is what
+        surfaces the app in the store view.
+        """
+        desktop_id = self._pick_component_id(pkgname, paths)
+        component = ET.SubElement(root, 'component')
+        component.set('type', 'desktop-application')
+
+        ET.SubElement(component, 'id').text = desktop_id
+        ET.SubElement(component, 'pkgname').text = pkgname
+        ET.SubElement(component, 'name').text = pkgname
+        ET.SubElement(component, 'summary').text = (
+            summary or f'{pkgname} application'
+        )
+
+        launchable = ET.SubElement(component, 'launchable')
+        launchable.set('type', 'desktop-id')
+        launchable.text = desktop_id
+
+        if description:
+            desc_elem = ET.SubElement(component, 'description')
+            p_elem = ET.SubElement(desc_elem, 'p')
+            p_elem.text = description[:500]
+
+        if url:
+            url_elem = ET.SubElement(component, 'url')
+            url_elem.set('type', 'homepage')
+            url_elem.text = url
+
+        if license_:
+            ET.SubElement(component, 'project_license').text = license_
+
+        group_lower = (group_name or '').lower()
+        categories = ET.SubElement(component, 'categories')
+        category = GROUP_TO_CATEGORY.get(group_lower, 'Utility')
+        ET.SubElement(categories, 'category').text = category
+
+        icon = ET.SubElement(component, 'icon')
+        icon.set('type', 'stock')
+        icon.text = pkgname
+
     def generate_for_media(
         self,
         media_id: int,
         media_name: str,
         origin: Optional[str] = None
     ) -> Tuple[str, int]:
-        """
-        Generate AppStream XML for a single media from package metadata.
+        """Generate the AppStream catalog XML for a single media.
 
-        This creates a "degraded" AppStream that only includes basic info
-        from the synthesis (name, summary, description, group).
+        The selection is driven exclusively by *file signals*: a package
+        appears iff it ships a ``.desktop`` under
+        ``/usr/share/applications/`` or an XML under
+        ``/usr/share/metainfo/`` / ``/usr/share/appdata/``.  No heuristic
+        filtering on package name or RPM group — those used to wrongly
+        exclude ``libreoffice-*`` (started with ``lib``), ``librecad``,
+        and any application whose group didn't sit in a hardcoded
+        whitelist.
+
+        Data flow:
+
+        1. Look up the media's on-disk ``files.xml.lzma``; if absent,
+           return an empty catalog (custom media without a file list —
+           Discover keeps working from installed metainfo alone).
+        2. Scan (or reuse cached scan) → ``{nevra: [candidate paths]}``.
+        3. Deduplicate on package name, preferring the native arch so a
+           multiarch package (``x86_64`` + ``i686``) yields one component.
+        4. For each surviving package, fetch the summary/description/
+           group/url/license from the ``packages`` table and emit a stub
+           ``desktop-application`` component.
 
         Args:
-            media_id: Database ID of the media
-            media_name: Name of the media (for origin attribute)
-            origin: Origin string for the catalog (default: media name)
+            media_id: Row id in the ``media`` table.
+            media_name: Display name — only used for the catalog origin
+                attribute.
+            origin: Overrides the default ``mageia-<slug>`` origin.
 
         Returns:
-            Tuple of (xml_string, component_count)
+            ``(xml_string, component_count)``.  The XML always has a valid
+            ``<components>`` root, even when the count is zero, so the
+            caller can persist it as the media's per-file catalog without
+            special-casing empty results.
         """
         if origin is None:
-            origin = f"mageia-{self._sanitize_filename(media_name)}"
+            origin = f'mageia-{self._sanitize_filename(media_name)}'
 
-        # Create root element
         root = ET.Element('components')
         root.set('version', '0.16')
         root.set('origin', origin)
 
-        conn = self.db._get_connection()
-        cursor = conn.cursor()
+        media = self.db.get_media_by_id(media_id)
+        if media is None:
+            logger.warning(
+                'AppStream: media_id %d not found in DB, empty catalog',
+                media_id,
+            )
+            return self._serialize_root(root), 0
 
-        cursor.execute('''
-            SELECT DISTINCT
-                p.name, p.version, p.release, p.arch,
-                p.summary, p.description, p.url, p.license,
-                p.size, p.group_name
-            FROM packages p
-            WHERE p.media_id = ?
-            ORDER BY p.name
-        ''', (media_id,))
+        files_xml_path = self._get_files_xml_path(media)
+        if files_xml_path is None:
+            logger.info(
+                'AppStream: no files.xml.lzma for %s, empty catalog',
+                media_name,
+            )
+            return self._serialize_root(root), 0
+
+        try:
+            candidates = self._scan_with_cache(media_id, files_xml_path)
+        except (RuntimeError, OSError) as exc:
+            logger.warning(
+                'AppStream scan failed for %s: %s',
+                media_name, exc,
+            )
+            return self._serialize_root(root), 0
+
+        if not candidates:
+            return self._serialize_root(root), 0
+
+        # Dedup NEVRA → one entry per pkgname, prefer native arch.
+        native_arch = platform.machine()
+        by_name: Dict[str, Dict] = {}
+        for nevra, paths in candidates.items():
+            parsed = parse_nevra(nevra)
+            if parsed is None:
+                logger.debug('AppStream: unparseable NEVRA %r, skipping', nevra)
+                continue
+            name, _, _, arch = parsed
+            prio = self._arch_priority(arch, native_arch)
+            existing = by_name.get(name)
+            if existing is None or prio < existing['prio']:
+                by_name[name] = {'arch': arch, 'paths': paths, 'prio': prio}
+
+        if not by_name:
+            # Every NEVRA failed to parse — nothing to emit.
+            return self._serialize_root(root), 0
+
+        # Batch-fetch metadata for every surviving pkgname in this media.
+        # A single query beats N round-trips through ``get_package_by_nevra``.
+        conn = self.db._get_connection()
+        placeholders = ','.join('?' * len(by_name))
+        cursor = conn.execute(
+            f'SELECT name, arch, summary, description, url, license, group_name '
+            f'FROM packages '
+            f'WHERE media_id = ? AND name IN ({placeholders})',
+            (media_id, *by_name.keys()),
+        )
+        # Prefer the row that matches the arch chosen at dedup time;
+        # fall back to any row for that name if the arch is missing.
+        meta_by_name_arch: Dict[Tuple[str, str], Dict] = {}
+        meta_any_arch: Dict[str, Dict] = {}
+        for row in cursor:
+            row_dict = dict(row)
+            meta_by_name_arch[(row_dict['name'], row_dict['arch'])] = row_dict
+            meta_any_arch.setdefault(row_dict['name'], row_dict)
 
         pkg_count = 0
-        for row in cursor.fetchall():
-            name, ver, release, arch, summary, description, url, license_, size, group_name = row
-
-            # Skip non-application packages
-            if name.endswith(('-debug', '-debuginfo', '-devel', '-static', '-doc', '-docs')):
+        for name in sorted(by_name):
+            entry = by_name[name]
+            meta = meta_by_name_arch.get((name, entry['arch']))
+            if meta is None:
+                meta = meta_any_arch.get(name)
+            if meta is None:
+                # Rarissime: le scan mentionne un paquet absent de
+                # packages.db (desynchro entre files.xml.lzma et
+                # synthesis).  On log et on continue.
+                logger.debug(
+                    'AppStream: %s in scan but missing from packages.db',
+                    name,
+                )
                 continue
-            if name.startswith(('lib', 'perl-', 'python-', 'python3-', 'ruby-', 'golang-', 'rust-')):
-                continue
-            if name.endswith(('-libs', '-common', '-data', '-lang', '-l10n', '-i18n')):
-                continue
-
-            # Filter by group - only desktop applications
-            group_lower = (group_name or '').lower()
-            if not any(group_lower.startswith(g) or group_lower == g for g in DESKTOP_GROUPS):
-                continue
-
-            # Create component as desktop-application
-            component = ET.SubElement(root, 'component')
-            component.set('type', 'desktop-application')
-
-            # Desktop ID (AppStream spec requires .desktop suffix)
-            desktop_id = f'{name}.desktop'
-            ET.SubElement(component, 'id').text = desktop_id
-            ET.SubElement(component, 'pkgname').text = name
-            ET.SubElement(component, 'name').text = name
-            ET.SubElement(component, 'summary').text = summary or f'{name} application'
-
-            # Launchable (desktop file reference)
-            launchable = ET.SubElement(component, 'launchable')
-            launchable.set('type', 'desktop-id')
-            launchable.text = desktop_id
-
-            if description:
-                desc_elem = ET.SubElement(component, 'description')
-                p_elem = ET.SubElement(desc_elem, 'p')
-                p_elem.text = description[:500]
-
-            if url:
-                url_elem = ET.SubElement(component, 'url')
-                url_elem.set('type', 'homepage')
-                url_elem.text = url
-
-            if license_:
-                ET.SubElement(component, 'project_license').text = license_
-
-            # Category from group mapping
-            categories = ET.SubElement(component, 'categories')
-            category = GROUP_TO_CATEGORY.get(group_lower, 'Utility')
-            ET.SubElement(categories, 'category').text = category
-
-            # Icon - use package name as stock icon
-            icon = ET.SubElement(component, 'icon')
-            icon.set('type', 'stock')
-            icon.text = name
-
+            self._append_component(
+                root,
+                pkgname=name,
+                summary=meta.get('summary'),
+                description=meta.get('description'),
+                url=meta.get('url'),
+                license_=meta.get('license'),
+                group_name=meta.get('group_name'),
+                paths=entry['paths'],
+            )
             pkg_count += 1
 
-        # Generate XML string
-        xml_str = ET.tostring(root, encoding='unicode')
-        xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_str
+        return self._serialize_root(root), pkg_count
 
-        return xml_str, pkg_count
+    @staticmethod
+    def _serialize_root(root: ET.Element) -> str:
+        """Serialise a ``<components>`` root with the standard XML preamble."""
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            + ET.tostring(root, encoding='unicode')
+        )
 
     def sync_media_appstream(
         self,

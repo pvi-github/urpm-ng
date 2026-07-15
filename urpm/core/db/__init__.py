@@ -19,6 +19,7 @@ from .constraints import ConstraintsMixin
 from .history import HistoryMixin
 from .peer import PeerMixin
 from .cache import CacheMixin
+from .appstream import AppStreamMixin
 
 __all__ = [
     'MediaMixin',
@@ -27,4 +28,5 @@ __all__ = [
     'HistoryMixin',
     'PeerMixin',
     'CacheMixin',
+    'AppStreamMixin',
 ]

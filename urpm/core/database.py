@@ -14,7 +14,7 @@ from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
 
 from .db import (
     MediaMixin, ServerMixin, ConstraintsMixin,
-    HistoryMixin, PeerMixin, CacheMixin,
+    HistoryMixin, PeerMixin, CacheMixin, AppStreamMixin,
 )
 
 
@@ -87,7 +87,7 @@ def _register_rpm_collation(conn: sqlite3.Connection) -> None:
     conn.create_collation('rpm_version_compare', _rpm_version_collation)
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -465,6 +465,19 @@ CREATE TABLE IF NOT EXISTS transaction_readmes (
 );
 CREATE INDEX IF NOT EXISTS idx_tr_transaction ON transaction_readmes(transaction_id);
 
+-- Per-media cache of the AppStream candidate scan.  The scan itself
+-- (grep+awk over files.xml.lzma) costs ~1 s per media; caching it
+-- keyed on the .lzma's (mtime, size) lets ``urpm media update`` skip
+-- the work whenever the archive is byte-identical to the last run.
+CREATE TABLE IF NOT EXISTS appstream_scan_cache (
+    media_id INTEGER PRIMARY KEY,
+    files_xml_mtime INTEGER NOT NULL,
+    files_xml_size INTEGER NOT NULL,
+    candidates_json TEXT NOT NULL,
+    scanned_at INTEGER NOT NULL,
+    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+);
+
 -- FTS5 index for fast package search (name, summary, description)
 CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(
     name,
@@ -837,12 +850,26 @@ MIGRATIONS = {
 
         ALTER TABLE cache_files ADD COLUMN served_by_server_id INTEGER;
     """),
+    30: (31, """
+        -- Migration v30 -> v31: AppStream candidate scan cache.
+        -- Populated by the AppStream catalog generator; keyed on
+        -- (mtime, size) of files.xml.lzma so unchanged archives skip
+        -- the ~1 s xzgrep+awk pass on subsequent ``urpm media update``.
+        CREATE TABLE IF NOT EXISTS appstream_scan_cache (
+            media_id INTEGER PRIMARY KEY,
+            files_xml_mtime INTEGER NOT NULL,
+            files_xml_size INTEGER NOT NULL,
+            candidates_json TEXT NOT NULL,
+            scanned_at INTEGER NOT NULL,
+            FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+        );
+    """),
 }
 
 
 class PackageDatabase(
     MediaMixin, ServerMixin, ConstraintsMixin,
-    HistoryMixin, PeerMixin, CacheMixin,
+    HistoryMixin, PeerMixin, CacheMixin, AppStreamMixin,
 ):
     """SQLite database for package metadata cache.
 
