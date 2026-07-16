@@ -1,6 +1,6 @@
 %define name urpm-ng
-%define version 0.8.3
-%define release 4
+%define version 0.8.4
+%define release 1
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
@@ -84,6 +84,15 @@ Requires:       python3-zstandard
 Requires:       python3-pyyaml
 Requires:       python3-curl
 Requires:       gnupg2
+# Fallback path for zstd decompression when python3-zstandard's cext
+# refuses to load (typical case: lib64zstd1 bumped, hardcoded ABI in the
+# cext no longer matches).  python3-cffi lets us switch to the pure-Python
+# backend transparently.  zstd's zstdcat is the last-resort subprocess and
+# must always be available (Requires, not Recommends) — without it a stack
+# with a broken cext and no cffi would leave urpm unable to decompress
+# synthesis at all.
+Recommends:     python3-cffi
+Requires:       zstd
 
 %description core
 Core components of urpm-ng package manager:
