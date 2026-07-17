@@ -15,6 +15,118 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.8.4] — 2026-07-17
+
+Discover / GNOME Software integration release.  urpm-ng ships
+AppStream metainfo, the PackageKit backend gains cache-refresh
+signals, accurate progress reporting, an rpmdb fast path for
+`GetFiles`, and correct RPM-Group → PK-enum mapping.  The
+AppStream catalog now scans `files.xml` for
+`/usr/share/applications` so libreoffice and other lib-prefixed
+apps finally show up.  A three-tier zstd decompression fallback
+(cext → cffi → `zstdcat`) makes urpm survive a `lib64zstd1` ABI
+bump without a matching `python3-zstandard` rebuild.
+
+### Major Features
+
+- **AppStream metainfo shipped.**  Five metainfo files land in
+  the right sub-packages so Discover and GNOME Software surface
+  our components: `rpmdrake-ng` (desktop-application),
+  `urpm-ng-core` (console-application), `urpm-ng-daemon`
+  (service, launchable `urpmd.service`),
+  `urpm-ng-packagekit-backend` (addon of PackageKit),
+  `urpm-ng-appstream` (addon of AppStream).  All six languages
+  get name / summary / description translations; a shared
+  128×128 icon lands under `hicolor/` via `-core`.  All five
+  files pass `appstreamcli validate --no-net`.
+- **Scan-based AppStream catalog generation.**  Selects
+  packages for the mageia-urpm catalog by scanning each
+  media's `files.xml.lzma` for
+  `/usr/share/applications/*.desktop` or `metainfo/appdata`
+  XML, instead of the previous name / group heuristic that
+  dropped every package starting with `lib` (libreoffice-*,
+  librecad…).  Two-pass `xzgrep + awk` pipeline returns ~2200
+  candidates in under a second on `core.release`; result
+  cached per media in a new `appstream_scan_cache` table keyed
+  on `(mtime, size)` of the `.lzma`.  Ships with 17 new unit
+  tests.
+
+### Improvements
+
+- **PackageKit backend — Discover UX overhaul.**  Write paths
+  now emit `installed_db_changed` / `updates_changed` /
+  `repo_list_changed` at the end of each successful
+  install / remove / upgrade / refresh, so Discover no longer
+  serves its pre-transaction cache after the operation lands.
+  The `package_id` `data` field carries the actual repository
+  origin (or `installed`) instead of a hardcoded `urpm`,
+  restoring the installed / available split and AppStream
+  matching.  A new `rpm_group_to_pk_enum()` maps the RPM Group
+  tag to the closest `PkGroupEnum`, so categories in Discover
+  finally populate instead of being all-Other.  D-Bus payloads
+  now include `media_name`, batch-resolved in a single SQL
+  round-trip.
+- **`GetPackageFiles` fast path via rpmdb.**  Tries `rpm -ql
+  <name>` before scanning the media `files.xml.lzma`.
+  Measurement on grisbi post-install: 815 ms → 12 ms,
+  0 → 572 files.  The lzma scan stays as fallback for packages
+  that are not installed.
+- **Progress reporting matches actual state on
+  install / upgrade / erase.**  D-Bus write paths switched
+  from `full_sync=True` to `full_sync=False`: the bar tracks
+  extraction, post-install triggers run in the background via
+  urpmd.  Discover's bar no longer sits at 100 % for several
+  seconds after the payload lands.
+- **`RefreshMetadata` no longer forces a full re-download.**
+  Switched the D-Bus method from `sync_all_media(force=True)`
+  to `force=False` (`If-Modified-Since` HEAD).  Discover's
+  periodic `RefreshCache` drops from ~17 s to ~3 s and stops
+  blocking the UI.  The `pkexec-refresh` path
+  (`urpm media update --force`) is unaffected.
+- **Robust zstd decompression on ABI breaks.**
+  `_ZstdWrapper` tries the cext first (fastest), then
+  re-imports with `PYTHON_ZSTANDARD_IMPORT_POLICY=cffi`
+  (survives any `lib64zstd1` ABI change), then falls back to
+  a `zstdcat` subprocess.  `check_dependencies` exercises the
+  full chain and surfaces the actual `ImportError` string when
+  everything fails, so the next packaging break doesn't
+  wrongly point at urpm.
+
+### Bug Fixes
+
+- **Permissions on `/var/lib/urpm/medias/*/media_info/`.**
+  `shutil.move` from a `NamedTemporaryFile` carries `0o600`
+  and `shutil.copy2` preserves the source mode; both left the
+  media metadata unreadable outside root, breaking
+  unprivileged `urpm f`, AppStream generation, and any client
+  reading the media metadata.  Explicit `chmod` after each
+  move / copy on `files.xml.lzma`, `synthesis.hdlist.cz`,
+  `hdlist.cz` and `MD5SUM`, plus `0755` on the `media_info`
+  directory itself.
+- **Services restart on upgrade.**  `%post daemon` and `%post
+  packagekit-backend` only ran `systemctl daemon-reload`, so
+  after an upgrade the previous urpmd / urpm-dbus / packagekit
+  processes kept serving the pre-upgrade Python code.  Added
+  `systemctl try-restart <svc>` in both scriptlets, gated on
+  `$1 -ge 2` so fresh installs are not disturbed.
+
+### Packaging & Distribution
+
+- Version bumped to 0.8.4 across `urpm-ng` and `rpmdrake-ng`.
+- `Recommends: python3-cffi` and `Requires: zstd` added to
+  `-core` to back the zstd fallback chain.  `zstd` is
+  `Requires:` (not `Recommends:`) because `zstdcat` is the
+  last-resort subprocess when both cext and cffi fail.
+- Shared `urpm-ng.svg` / `.png` icon installed into
+  `hicolor/{scalable,128x128}/apps/` via `-core`.
+
+### Documentation
+
+- All six languages (fr / de / es / it / nl / pt) refreshed
+  for the new metainfo strings.
+
+---
+
 ## [0.8.3] — 2026-07-12
 
 Focus release on the daily-use surface.  `urpm build` chains
