@@ -138,35 +138,67 @@ DEBUG_INSTALL = False
 
 
 def check_dependencies() -> list:
-    """Check for required Python modules.
+    """Check that the runtime dependencies urpm truly cannot start without.
+
+    Two hard dependencies:
+
+    * ``python3-solv`` — libsolv bindings, no equivalent fallback exists.
+    * A working zstd decompression path — exercised through
+      :class:`urpm.core.compression._ZstdWrapper`, which itself tries the
+      ``python3-zstandard`` cext, then its cffi backend, then
+      ``zstdcat``.  We only complain if all three fail.
 
     Returns:
-        List of missing module names (empty if all OK)
+        List of ``(package_hint, purpose, detail)`` tuples for anything
+        that failed.  ``detail`` carries the original exception string
+        when the module was actually installed but blew up at import —
+        typical case is an ABI mismatch after a ``lib64zstd1`` bump,
+        which used to be reported as « missing » and sent people looking
+        in the wrong direction.
     """
     missing = []
 
-    # Check libsolv (required for dependency resolution)
     try:
-        import solv
-    except ImportError:
-        missing.append(('python3-solv', 'dependency resolution'))
+        import solv  # noqa: F401
+    except ImportError as exc:
+        missing.append((
+            'python3-solv',
+            'dependency resolution',
+            str(exc) if str(exc) else None,
+        ))
 
-    # Check zstandard (required for .cz decompression)
     try:
-        import zstandard
-    except ImportError:
-        missing.append(('python3-zstandard', 'synthesis decompression'))
+        from urpm.core.compression import _get_zstd
+        _get_zstd()  # runs the full cext → cffi → zstdcat chain
+    except ImportError as exc:
+        missing.append((
+            'python3-zstandard (+ python3-cffi as fallback) or zstd',
+            'synthesis decompression',
+            str(exc) if str(exc) else None,
+        ))
 
     return missing
 
 
 def print_missing_dependencies(missing: list):
-    """Print error message for missing dependencies."""
-    print(_("ERROR: Missing required Python modules:") + "\n", file=sys.stderr)
-    for pkg, purpose in missing:
-        print(_("  - {pkg} ({purpose})").format(pkg=pkg, purpose=purpose), file=sys.stderr)
+    """Print a message that says *why* a dependency check failed."""
+    print(_("ERROR: Missing or broken runtime dependencies:") + "\n",
+          file=sys.stderr)
+    for pkg, purpose, detail in missing:
+        print(_("  - {pkg} ({purpose})").format(pkg=pkg, purpose=purpose),
+              file=sys.stderr)
+        if detail:
+            print("      → " + detail, file=sys.stderr)
     print("\n" + _("Install with:"), file=sys.stderr)
-    print("  urpmi {pkgs}".format(pkgs=' '.join(pkg for pkg, _purpose in missing)), file=sys.stderr)
+    # Only pass the primary package name (before " (+" or " or ") to urpmi.
+    def _primary(pkg_hint):
+        for sep in (' (+', ' or '):
+            if sep in pkg_hint:
+                return pkg_hint.split(sep, 1)[0]
+        return pkg_hint
+    print("  urpmi {pkgs}".format(
+        pkgs=' '.join(_primary(pkg) for pkg, _purpose, _detail in missing)),
+        file=sys.stderr)
 
 
 def print_quickstart_guide():

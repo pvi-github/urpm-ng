@@ -58,7 +58,8 @@ class _ZstdWrapper:
         self._module = None
         self._api_type = None  # 'zstandard', 'zstd_simple', or 'subprocess'
 
-        # Try 'zstandard' first (pip package, full API)
+        # 1. Try ``python3-zstandard``'s native C extension first — fastest
+        # path (typically 2–3× the cffi backend on multi-MB synthesis).
         try:
             import zstandard
             self._module = zstandard
@@ -67,23 +68,39 @@ class _ZstdWrapper:
         except ImportError:
             pass
 
-        # Check if zstdcat is available (most reliable on Mageia)
-        if shutil.which('zstdcat'):
-            self._api_type = 'subprocess'
-            return
-
-        # Try 'zstd' (Mageia python3-zstd, but may have issues)
+        # 2. The cext failed to load — usually an ABI mismatch between the
+        # bindings' hardcoded zstd version and the installed
+        # ``lib64zstd1``.  Retry with the pure-Python ``cffi`` backend,
+        # which resolves the ABI at runtime through libffi and survives
+        # any ``lib64zstd1`` bump.  Only requires ``python3-cffi``.
+        #
+        # Setting the env var alone isn't enough — Python has already
+        # cached the failed ``zstandard`` import; we must evict it so the
+        # re-import re-runs the module top-level with the new policy.
+        import os
+        import sys
+        for cached in [m for m in list(sys.modules) if m.startswith('zstandard')]:
+            del sys.modules[cached]
+        os.environ['PYTHON_ZSTANDARD_IMPORT_POLICY'] = 'cffi'
         try:
-            import zstd
-            self._module = zstd
-            self._api_type = 'zstd_simple'
+            import zstandard
+            self._module = zstandard
+            self._api_type = 'zstandard'
             return
         except ImportError:
             pass
 
+        # 3. Last resort: shell out to ``zstdcat``.  Slower (one fork per
+        # decompression) but immune to any Python-side breakage and
+        # linked dynamically against the current ``lib64zstd1``.
+        if shutil.which('zstdcat'):
+            self._api_type = 'subprocess'
+            return
+
         raise ImportError(
             "No zstd decompression available. "
-            "Install zstd tools (zstdcat) or pip install zstandard"
+            "Install python3-zstandard (with python3-cffi as fallback) "
+            "or the zstd package for zstdcat."
         )
 
     def decompress(self, data: bytes, max_output_size: int = None) -> bytes:
