@@ -64,7 +64,8 @@ ensure_connection(PkBackendJob *job, GError **error)
 /* ========================================================================= */
 
 static void
-emit_packages_from_json(PkBackendJob *job, const gchar *json_str, PkInfoEnum info)
+emit_packages_from_json(PkBackendJob *job, const gchar *json_str,
+                        PkInfoEnum info, PkBitfield filters)
 {
     JsonParser *parser = json_parser_new();
     GError *error = NULL;
@@ -82,6 +83,16 @@ emit_packages_from_json(PkBackendJob *job, const gchar *json_str, PkInfoEnum inf
         return;
     }
 
+    /* Filter presence — the callers pass the raw PkBitfield to us
+     * so we can drop packages that do not satisfy the client's
+     * INSTALLED / NOT_INSTALLED filter.  Without this every
+     * SearchNames returned the whole search space, and Discover
+     * showed installed and available packages jumbled together. */
+    gboolean only_installed =
+        pk_bitfield_contain(filters, PK_FILTER_ENUM_INSTALLED);
+    gboolean only_available =
+        pk_bitfield_contain(filters, PK_FILTER_ENUM_NOT_INSTALLED);
+
     JsonArray *packages = json_node_get_array(root);
     guint len = json_array_get_length(packages);
 
@@ -97,6 +108,11 @@ emit_packages_from_json(PkBackendJob *job, const gchar *json_str, PkInfoEnum inf
         const gchar *summary = json_object_get_string_member_with_default(pkg, "summary", "");
         gboolean installed = json_object_get_boolean_member_with_default(pkg, "installed", FALSE);
         const gchar *media_name = json_object_get_string_member_with_default(pkg, "media_name", "");
+
+        if (only_installed && !installed)
+            continue;
+        if (only_available && installed)
+            continue;
 
         /* PackageKit convention: package_id data field is "installed"
          * for installed packages and the repository name otherwise —
@@ -259,7 +275,7 @@ pk_backend_search_thread(PkBackendJob *job, GVariant *params, gpointer user_data
     if (pk_bitfield_contain(filters, PK_FILTER_ENUM_INSTALLED))
         info = PK_INFO_ENUM_INSTALLED;
 
-    emit_packages_from_json(job, json_str, info);
+    emit_packages_from_json(job, json_str, info, filters);
 
     g_variant_unref(result);
     pk_backend_job_finished(job);

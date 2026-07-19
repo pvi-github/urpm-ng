@@ -421,8 +421,18 @@ class UrpmDBusService:
             if download_items:
                 def dl_progress(name, pkg_num, pkg_total, dl_bytes, dl_total,
                                item_bytes=None, item_total=None, active_downloads=None):
+                    # Prefer the byte-level counter over the package
+                    # counter so Discover's progress bar advances
+                    # continuously instead of jumping in N steps for
+                    # an N-package transaction.  Fall back to the
+                    # package counter when the total is unknown
+                    # (mirror does not report Content-Length).
+                    if dl_total and dl_total > 0:
+                        current, total = dl_bytes, dl_total
+                    else:
+                        current, total = pkg_num, pkg_total
                     self._emit_progress(
-                        op_id, "downloading", name or "", pkg_num, pkg_total
+                        op_id, "downloading", name or "", current, total
                     )
 
                 dl_results, downloaded, cached, _ = self._ops.download_packages(
@@ -632,8 +642,18 @@ class UrpmDBusService:
             if download_items:
                 def dl_progress(name, pkg_num, pkg_total, dl_bytes, dl_total,
                                item_bytes=None, item_total=None, active_downloads=None):
+                    # Prefer the byte-level counter over the package
+                    # counter so Discover's progress bar advances
+                    # continuously instead of jumping in N steps for
+                    # an N-package transaction.  Fall back to the
+                    # package counter when the total is unknown
+                    # (mirror does not report Content-Length).
+                    if dl_total and dl_total > 0:
+                        current, total = dl_bytes, dl_total
+                    else:
+                        current, total = pkg_num, pkg_total
                     self._emit_progress(
-                        op_id, "downloading", name or "", pkg_num, pkg_total
+                        op_id, "downloading", name or "", current, total
                     )
 
                 dl_results, downloaded, cached, _ = self._ops.download_packages(

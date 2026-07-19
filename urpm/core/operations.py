@@ -996,6 +996,18 @@ class PackageOperations:
         for line in result.stdout.decode(errors='replace').splitlines():
             parts = line.split('\t', 6)
             if len(parts) >= 5:
+                # ``gpg-pubkey`` "packages" are RPM's way of storing
+                # imported GPG keys in the rpmdb.  Their ``arch`` is
+                # the literal ``(none)`` which is not a valid segment
+                # in a PackageKit package_id (``name;evr;arch;data``,
+                # parentheses forbidden), so the PK backend emits an
+                # invalid id and PackageKit silently drops the whole
+                # batch — Discover ends up with zero installed
+                # packages.  These entries are also not "installable"
+                # in any meaningful sense (Discover would never want
+                # to remove one), so we filter them at the source.
+                if parts[0] == 'gpg-pubkey':
+                    continue
                 epoch_str = parts[4]
                 packages.append({
                     'name': parts[0],
