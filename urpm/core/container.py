@@ -104,6 +104,9 @@ class Container:
         network: str = None,
         workdir: str = None,
         env: dict = None,
+        memory: Optional[str] = None,
+        memory_swap: Optional[str] = None,
+        cpus: Optional[int] = None,
     ) -> str:
         """Run a container.
 
@@ -117,6 +120,24 @@ class Container:
             network: Network mode ('host', 'bridge', etc.)
             workdir: Working directory in container
             env: Environment variables dict
+            memory: Container RAM ceiling (e.g. ``"8g"``, ``"12000m"``,
+                ``"16G"``).  Passed to ``--memory``.  ``None`` leaves
+                the runtime default (no cap).
+            memory_swap: Total ``memory + swap`` ceiling.  Passed to
+                ``--memory-swap`` verbatim, so podman semantics apply:
+                the string ``"-1"`` means "unlimited swap" (the
+                container can spill onto host swap without a cgroup
+                cap), any positive size caps combined RAM+swap, and
+                the same value as ``memory`` means "no swap headroom".
+                ``None`` skips the flag entirely, in which case podman
+                falls back to its own default (usually twice
+                ``memory``).  Ignored when ``memory`` is ``None``.
+            cpus: Maximum CPU cores the container may use.  Passed to
+                ``--cpus``.  ``None`` leaves the runtime default (all
+                host cores).  Note that ``--cpus`` caps *cumulative*
+                CPU time and does not by itself lower rpmbuild's ``-j``
+                — callers that want fewer parallel compile jobs must
+                also inject the corresponding ``%_smp_mflags`` override.
 
         Returns:
             Container ID if detached, else stdout
@@ -139,6 +160,12 @@ class Container:
         if env:
             for key, value in env.items():
                 args.extend(['-e', f'{key}={value}'])
+        if memory:
+            args.extend(['--memory', memory])
+            if memory_swap is not None:
+                args.extend(['--memory-swap', memory_swap])
+        if cpus:
+            args.extend(['--cpus', str(cpus)])
 
         args.append(image)
 

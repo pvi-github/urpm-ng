@@ -279,6 +279,8 @@ def _build_one_spec_in_container(
     output_dir: Path,
     _find_workspace_fn: Callable,
     _diagnose_fn: Callable,
+    limits: "BuildLimits | None" = None,
+    bcond_args: str = '',
 ) -> Tuple[Path, bool, str, List[str]]:
     """Build one spec inside a container that has already been set up.
 
@@ -287,11 +289,20 @@ def _build_one_spec_in_container(
     caller (``run_shared_container_chain``) passes them from
     ``build.py`` when it dispatches.
 
+    ``limits``, when set, contributes an extra
+    ``--define "_smp_mflags -jN"`` argument to every rpmbuild
+    invocation so the spec's ``%build`` runs at the requested
+    parallelism instead of rpm's default (typically ``-j$(nproc)``).
+
     Returns ``(source, success, message, produced_rpm_paths)`` where
     ``produced_rpm_paths`` is the container-side list of the RPMs
     that were just built — the caller feeds them to
     :func:`_publish_produced_rpms` so the next spec can consume them.
     """
+    smp_define = (
+        f'--define "_smp_mflags {limits.smp_mflags}" '
+        if limits and limits.smp_mflags else ''
+    )
     from .. import colors
 
     is_spec_build = source_path.suffix == '.spec'
@@ -401,7 +412,7 @@ def _build_one_spec_in_container(
         result = container.exec(cid, [
             'bash', '-c',
             f'set -o pipefail; '
-            f'rpmbuild --define "_topdir {pkg_topdir}" -br {spec_path} '
+            f'rpmbuild --define "_topdir {pkg_topdir}" {smp_define}{bcond_args}-br {spec_path} '
             f'2>&1 | tee -a {container_log}',
         ])
         rc = result.returncode
@@ -458,7 +469,7 @@ def _build_one_spec_in_container(
     result = container.exec_stream(cid, [
         'bash', '-c',
         f'set -o pipefail; '
-        f'rpmbuild --define "_topdir {pkg_topdir}" -ba {spec_path} '
+        f'rpmbuild --define "_topdir {pkg_topdir}" {smp_define}{bcond_args}-ba {spec_path} '
         f'2>&1 | tee -a {container_log}',
     ])
     build_failed = result != 0
@@ -518,6 +529,8 @@ def run_shared_container_chain(
     rollback_between_builds: bool,
     _find_workspace_fn: Callable,
     _diagnose_fn: Callable,
+    limits: "BuildLimits | None" = None,
+    bcond_args: str = '',
 ) -> List[Tuple[Path, bool, str]]:
     """Compile each spec in ``valid_sources`` in a single container.
 
@@ -542,6 +555,9 @@ def run_shared_container_chain(
             detach=True,
             rm=False,
             network='host',
+            memory=limits.memory if limits else None,
+            memory_swap=limits.memory_swap if limits else None,
+            cpus=limits.cpus if limits else None,
         )
         print(_("  Container: {cid}").format(cid=cid[:12]))
         try:
@@ -566,6 +582,8 @@ def run_shared_container_chain(
                 container, cid, source_path, output_dir,
                 _find_workspace_fn=_find_workspace_fn,
                 _diagnose_fn=_diagnose_fn,
+                limits=limits,
+                bcond_args=bcond_args,
             )
             results.append((src, ok, msg))
             if ok:

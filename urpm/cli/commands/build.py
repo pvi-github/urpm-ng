@@ -193,6 +193,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     buildrequires_src = getattr(args, 'buildrequires', None)
     addmedia = getattr(args, 'addmedia', None) or []
     import_key = getattr(args, 'import_key', False)
+    exclude_packages = getattr(args, 'exclude', None) or []
 
     # Detect container runtime
     try:
@@ -276,6 +277,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     return _phase2_container_promote(
         container, minimal_tag, tag, addmedia, import_key,
         phase2_packages, buildrequires_src,
+        exclude_packages=exclude_packages,
     )
 
 
@@ -287,6 +289,7 @@ def _phase2_container_promote(
     import_key: bool,
     extra_packages: list,
     buildrequires_src: str | None,
+    exclude_packages: list | None = None,
 ) -> int:
     """Promote a minimal bootstrap image into a full build image.
 
@@ -294,6 +297,18 @@ def _phase2_container_promote(
     adds custom media if requested, runs a full `urpm upgrade` (rejoue les
     scriptlets non tournés en Phase 1), installs the requested extras plus
     any BuildRequires, then commits the result as ``final_tag``.
+
+    ``exclude_packages``, when non-empty, is applied at the very end via
+    ``urpm erase --force --keep-orphans --sync`` right before the
+    commit.  Used for cases where a spec later built in this image
+    refuses to see a package the base install pulled in — canonical
+    example: ``python3-zstandard`` blocks firefox's mach ``pip check``
+    when the spec sets ``MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=system``.
+    ``--sync`` in particular guards against the rpm-DB lock race that
+    would otherwise fire when the previous ``urpm install`` still has
+    post-install triggers running.  Failures are warnings, not fatal —
+    a missing target is usually benign (the package wasn't pulled in
+    after all).
     """
     from .. import colors
 
@@ -384,6 +399,37 @@ def _phase2_container_promote(
             if ret != 0:
                 print(colors.error(_("Failed to install BuildRequires")))
                 return 1
+
+        if exclude_packages:
+            print(ngettext(
+                "  Excluding {n} package from the image...",
+                "  Excluding {n} packages from the image...",
+                len(exclude_packages)).format(n=len(exclude_packages)))
+            # ``urpm erase`` covers everything ``rpm -e --nodeps`` did
+            # here plus dependency-aware discipline: ``--force`` lets
+            # us intentionally break a Requires: (that's the whole
+            # point of the flag), ``--keep-orphans`` prevents a cascade
+            # into unrelated packages, and ``--sync`` waits for any
+            # pending post-install triggers to release the rpm lock
+            # before we return — which ``rpm -e`` did not, so calling
+            # exclude right after a big ``urpm install`` used to lose
+            # the race.
+            for pkg in exclude_packages:
+                res = container.exec(cid, [
+                    'urpm', 'erase', '--auto', '--force',
+                    '--keep-orphans', '--sync', pkg,
+                ])
+                if res.returncode == 0:
+                    print("    " + colors.dim(_("- removed {pkg}").format(pkg=pkg)))
+                else:
+                    combined = ((res.stderr or '') + (res.stdout or '')).strip()
+                    if 'not installed' in combined or 'no package' in combined.lower():
+                        print("    " + colors.dim(
+                            _("- {pkg} was not installed, skipped").format(pkg=pkg)))
+                    else:
+                        print(colors.warning("    " + _(
+                            "- urpm erase {pkg} failed: {msg}").format(
+                                pkg=pkg, msg=combined)))
 
         # Stop any lingering processes before commit
         container.exec(cid, ['sh', '-c', 'kill 1 2>/dev/null || true'])
@@ -890,6 +936,27 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
                 path=rpmmacros_path)))
             return 2
 
+    from ..helpers.build_limits import resolve_build_limits
+    try:
+        limits = resolve_build_limits(
+            build_cpus=getattr(args, 'build_cpus', None),
+            build_memory=getattr(args, 'build_memory', None),
+            full_throttle=getattr(args, 'full_throttle', False),
+            strict_memory=getattr(args, 'strict_memory', False),
+        )
+    except ValueError as e:
+        print(colors.error(str(e)))
+        return 2
+
+    # Turn --with/--without into a ready-to-splice rpmbuild arg string.
+    # Empty when neither flag is set → adds nothing to the command line.
+    with_bconds = getattr(args, 'with_bconds', None) or []
+    without_bconds = getattr(args, 'without_bconds', None) or []
+    bcond_args = ''.join(
+        [f'--with {f} ' for f in with_bconds] +
+        [f'--without {f} ' for f in without_bconds]
+    )
+
     # Expand glob patterns for --with-rpms
     with_rpms = []
     for pattern in with_rpms_patterns:
@@ -953,6 +1020,16 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             len(with_rpms)).format(count=len(with_rpms)))
     if parallel > 1:
         print("  " + _("Parallel: {parallel}").format(parallel=parallel))
+    if limits.memory is not None:
+        swap_note = (_("no swap") if limits.memory_swap == limits.memory
+                     else _("swap free"))
+        mem_txt = f"{limits.memory} ({swap_note})"
+    else:
+        mem_txt = _("unlimited")
+    print("  " + _("Build cap: {cpus} CPUs, {memory} memory").format(
+        cpus=(limits.cpus if limits.cpus is not None else _("unlimited")),
+        memory=mem_txt,
+    ))
 
     results = []
 
@@ -961,7 +1038,8 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
         return _build_single_package(
             container, image, source_path, output_dir, keep_container,
             with_rpms, no_update=no_update, subrel=subrel,
-            rpmmacros_path=rpmmacros_path,
+            rpmmacros_path=rpmmacros_path, limits=limits,
+            bcond_args=bcond_args,
         )
 
     stop_on_fail = getattr(args, 'stop_on_fail', False)
@@ -997,6 +1075,8 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             rpmmacros_path=rpmmacros_path,
             stop_on_fail=stop_on_fail,
             rollback_between_builds=rollback_between_builds,
+            limits=limits,
+            bcond_args=bcond_args,
             _find_workspace_fn=_find_workspace,
             _diagnose_fn=_diagnose_unsatisfied_buildrequires,
         )
@@ -1070,6 +1150,8 @@ def _build_single_package(
     no_update: bool = False,
     subrel: str | None = None,
     rpmmacros_path: Path | None = None,
+    limits: 'BuildLimits | None' = None,
+    bcond_args: str = '',
 ) -> tuple:
     """Build a single package in a container.
 
@@ -1091,6 +1173,9 @@ def _build_single_package(
             ``%subrel TAG`` line is appended after this file's content
             so ``--subrel`` takes precedence over anything the file
             may define.
+        limits: Resolved container resource caps.  When ``None`` the
+            container runs uncapped and rpmbuild uses its default
+            ``%_smp_mflags`` (typically ``-j$(nproc)``).
 
     Returns:
         Tuple of (source_path, success, message)
@@ -1102,6 +1187,10 @@ def _build_single_package(
     cid = None
     workspace = None
     is_spec_build = source_path.suffix == '.spec'
+    smp_define = (
+        f'--define "_smp_mflags {limits.smp_mflags}" '
+        if limits and limits.smp_mflags else ''
+    )
 
     try:
         # 1. Start fresh container with host network (for urpmd P2P access)
@@ -1110,7 +1199,10 @@ def _build_single_package(
             ['sleep', 'infinity'],
             detach=True,
             rm=False,
-            network='host'
+            network='host',
+            memory=limits.memory if limits else None,
+            memory_swap=limits.memory_swap if limits else None,
+            cpus=limits.cpus if limits else None,
         )
         print(_("  Container: {cid}").format(cid=cid[:12]))
         # See ``Container.probe_arch``: pin the personality wrapper
@@ -1303,7 +1395,7 @@ def _build_single_package(
             # rpmbuild's exit code, not tee's. Output captured + logged.
             result = container.exec(cid, [
                 'bash', '-c',
-                f'set -o pipefail; rpmbuild -br {spec_path} 2>&1 | tee -a {container_log}'
+                f'set -o pipefail; rpmbuild {smp_define}{bcond_args}-br {spec_path} 2>&1 | tee -a {container_log}'
             ])
             rc = result.returncode
             if rc == 0:
@@ -1374,7 +1466,7 @@ def _build_single_package(
         # 6. Build the package
         print(_("  Building..."))
         result = container.exec_stream(cid, [
-            'bash', '-c', f'set -o pipefail; rpmbuild -ba {spec_path} 2>&1 | tee -a {container_log}'
+            'bash', '-c', f'set -o pipefail; rpmbuild {smp_define}{bcond_args}-ba {spec_path} 2>&1 | tee -a {container_log}'
         ])
         build_failed = result != 0
 

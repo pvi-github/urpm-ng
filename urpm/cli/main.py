@@ -718,6 +718,20 @@ Examples:
         help=_('Install urpm-ng-core from this specific RPM file, '
                'overriding --urpm-ng-source and every waterfall rule.'),
     )
+    image_make.add_argument(
+        '--exclude', '-x',
+        action='append',
+        default=[],
+        metavar='PKG',
+        help=_('Remove PKG from the finished image via '
+               '``urpm erase --force --keep-orphans --sync``.  '
+               'Repeatable.  Useful when a package a spec would refuse '
+               'to build against ships as a hard dep of something we '
+               'do want — canonical case: '
+               '``--exclude python3-zstandard`` so firefox\'s mach '
+               'does not trip on its own version pin against the '
+               'system-installed one.'),
+    )
 
     # image update / u
     image_update = image_subparsers.add_parser(
@@ -926,6 +940,55 @@ Examples:
                'The base setup (urpm upgrade, rpm-build install) is '
                'kept — the rollback covers only per-spec deps. '
                'Off by default.')
+    )
+    build_parser.add_argument(
+        '--build-cpus',
+        type=int,
+        metavar='N',
+        help=_('Cap the build parallelism at N threads (translated to '
+               'rpmbuild %%_smp_mflags = -jN). Default: max(1, nproc - 2), '
+               'so the host keeps two cores free for interactive work. '
+               'Use --full-throttle for the whole CPU.')
+    )
+    build_parser.add_argument(
+        '--build-memory',
+        metavar='SIZE',
+        help=_('Cap the build container memory (e.g. 8G, 12000M, 16GB). '
+               'Enforced as podman --memory / --memory-swap. Default: '
+               'max(2G, MemTotal - 2G), so the host keeps ~2 GB free. '
+               'Use --full-throttle to remove the cap entirely.')
+    )
+    build_parser.add_argument(
+        '--full-throttle',
+        action='store_true',
+        help=_('Shortcut: no CPU cap, no memory cap. The build gets the '
+               'whole host — expect it to be sluggish while running. '
+               'Overrides --build-cpus and --build-memory.')
+    )
+    build_parser.add_argument(
+        '--strict-memory',
+        action='store_true',
+        help=_('Tie --memory-swap to --build-memory so the container '
+               'has no swap headroom (podman kills the process on '
+               'reaching the RAM ceiling). Default is to leave swap '
+               'unlimited — matches mock/systemd-nspawn behaviour. '
+               'Use in CI where quiet swapping would masquerade as a '
+               'timeout.')
+    )
+    build_parser.add_argument(
+        '--with',
+        action='append', default=[], dest='with_bconds',
+        metavar='FEATURE',
+        help=_('Enable a spec %%bcond, e.g. ``--with debug``. '
+               'Passed to rpmbuild verbatim.  Repeatable.'),
+    )
+    build_parser.add_argument(
+        '--without',
+        action='append', default=[], dest='without_bconds',
+        metavar='FEATURE',
+        help=_('Disable a spec %%bcond, e.g. ``--without unified_build`` '
+               'to force firefox\'s per-file translation units.  Passed '
+               'to rpmbuild verbatim.  Repeatable.'),
     )
 
     # =========================================================================
