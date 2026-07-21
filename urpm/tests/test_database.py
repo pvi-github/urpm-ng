@@ -989,50 +989,63 @@ class TestUnregisterCacheFile:
         assert db.get_cache_file("drop.rpm", media_id=media_id) is None
 
 
-class TestSchemaV30Migration:
-    """Tests for the v29 → v30 schema bump (bug #3 iteration B).
+class TestSchemaV31Migration:
+    """Tests for the schema bumps that landed after v29.
 
-    A fresh database boots straight to v30; an existing v29 database
-    is upgraded by the ``MIGRATIONS`` dict.  Both paths must end up
-    with the same final schema.
+    Three entry points must converge on the same final v31 shape:
+    a fresh database (``CREATE TABLE IF NOT EXISTS`` path), a
+    pre-existing v29 database (walks both migrations), and a
+    pre-existing v30 database (walks only the new v30→v31 leg).
+
+    v30 added the mirror-blacklist columns + ``server_failure_events``
+    table; v31 added the ``appstream_scan_cache`` table populated by
+    the AppStream catalog generator.
     """
 
-    def _expected_v30_shape(self, db):
+    def _expected_v31_shape(self, db):
         conn = db._get_connection()
 
-        # server gained two security columns
+        # v30: server gained two security columns
         server_cols = {r[1] for r in conn.execute(
             "PRAGMA table_info(server)").fetchall()}
         assert {"blacklisted_at", "blacklist_reason"} <= server_cols
 
-        # cache_files gained the provenance column
+        # v30: cache_files gained the provenance column
         cache_cols = {r[1] for r in conn.execute(
             "PRAGMA table_info(cache_files)").fetchall()}
         assert "served_by_server_id" in cache_cols
 
-        # server_failure_events table exists with the documented shape
+        # v30: server_failure_events table exists with the documented shape
         sfe_cols = [r[1] for r in conn.execute(
             "PRAGMA table_info(server_failure_events)").fetchall()]
         assert sfe_cols == [
             "id", "server_id", "ts", "category", "weight", "detail",
         ]
 
-        # The query path of mirror selection relies on this index
+        # v30: the query path of mirror selection relies on this index
         idx = conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='index' AND name='idx_sfe_server_ts'"
         ).fetchone()
         assert idx is not None
 
-    def test_fresh_db_bootstraps_to_v30(self, db):
-        from urpm.core.database import SCHEMA_VERSION
-        assert SCHEMA_VERSION == 30
-        # Bootstrap path through CREATE TABLE IF NOT EXISTS:
-        self._expected_v30_shape(db)
+        # v31: appstream_scan_cache table exists with the documented shape
+        asc_cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(appstream_scan_cache)").fetchall()]
+        assert asc_cols == [
+            "media_id", "files_xml_mtime", "files_xml_size",
+            "candidates_json", "scanned_at",
+        ]
 
-    def test_v29_db_is_upgraded_to_v30(self, monkeypatch):
-        """A pre-existing v29 database must accept the migration and
-        end up structurally identical to a fresh v30."""
+    def test_fresh_db_bootstraps_to_v31(self, db):
+        from urpm.core.database import SCHEMA_VERSION
+        assert SCHEMA_VERSION == 31
+        # Bootstrap path through CREATE TABLE IF NOT EXISTS:
+        self._expected_v31_shape(db)
+
+    def test_v29_db_is_upgraded_to_v31(self, monkeypatch):
+        """A pre-existing v29 database walks both migrations and
+        ends up structurally identical to a fresh v31."""
         import tempfile
         import sqlite3
         from pathlib import Path
@@ -1043,7 +1056,8 @@ class TestSchemaV30Migration:
 
         # Build a minimal v29 image by hand: just the tables that the
         # migration touches, with the v29-shape schema (no blacklist
-        # columns, no event table, no served_by_server_id).
+        # columns, no event table, no served_by_server_id, no
+        # appstream_scan_cache).
         raw = sqlite3.connect(str(db_path))
         raw.executescript("""
             CREATE TABLE server (
@@ -1076,7 +1090,73 @@ class TestSchemaV30Migration:
         )
         db = PackageDatabase(db_path)
         try:
-            self._expected_v30_shape(db)
+            self._expected_v31_shape(db)
+        finally:
+            db.close()
+            db_path.unlink(missing_ok=True)
+
+    def test_v30_db_is_upgraded_to_v31(self, monkeypatch):
+        """A pre-existing v30 database walks only the v30→v31 leg
+        and ends up structurally identical to a fresh v31.  Isolates
+        the appstream_scan_cache migration from the older security
+        one exercised by the v29 test above."""
+        import tempfile
+        import sqlite3
+        from pathlib import Path
+        from urpm.core.database import PackageDatabase
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = Path(f.name)
+
+        # v30 shape: server + cache_files already carry the security
+        # columns, server_failure_events already exists, but no
+        # appstream_scan_cache yet.
+        raw = sqlite3.connect(str(db_path))
+        raw.executescript("""
+            CREATE TABLE server (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                protocol TEXT,
+                host TEXT NOT NULL,
+                base_path TEXT NOT NULL DEFAULT '',
+                blacklisted_at INTEGER,
+                blacklist_reason TEXT
+            );
+            CREATE TABLE media (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE cache_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                media_id INTEGER,
+                file_path TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                added_time INTEGER NOT NULL,
+                served_by_server_id INTEGER,
+                UNIQUE(filename, media_id)
+            );
+            CREATE TABLE server_failure_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER NOT NULL,
+                ts INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                weight INTEGER NOT NULL,
+                detail TEXT
+            );
+            CREATE INDEX idx_sfe_server_ts
+                ON server_failure_events(server_id, ts);
+            CREATE TABLE schema_info (
+                version INTEGER PRIMARY KEY
+            );
+            INSERT INTO schema_info (version) VALUES (30);
+        """)
+        raw.commit()
+        raw.close()
+
+        monkeypatch.setattr(
+            'urpm.core.config.get_system_version', lambda: '10',
+        )
+        db = PackageDatabase(db_path)
+        try:
+            self._expected_v31_shape(db)
         finally:
             db.close()
             db_path.unlink(missing_ok=True)
