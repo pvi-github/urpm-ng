@@ -648,7 +648,8 @@ class Scheduler:
             last_log = [0, 0]  # [last_pct, last_pkg_num]
 
             def progress_callback(name, pkg_num, pkg_total, bytes_done, bytes_total,
-                                  item_bytes=None, item_total=None, active_downloads=None):
+                                  item_bytes=None, item_total=None,
+                                  active_downloads=None, coordinator_speed=0.0):
                 if bytes_total > 0:
                     pct = bytes_done * 100 // bytes_total
                     # Only log when percentage changes by 5% or new package
@@ -1005,7 +1006,8 @@ class Scheduler:
                        f"({len(batch)} packages)")
 
             def progress_callback(name, pkg_num, pkg_total, bytes_done, bytes_total,
-                                  item_bytes=None, item_total=None, active_downloads=None):
+                                  item_bytes=None, item_total=None,
+                                  active_downloads=None, coordinator_speed=0.0):
                 pass  # Silent progress for background replication
 
             results, downloaded, cached, peer_stats = downloader.download_all(batch, progress_callback)

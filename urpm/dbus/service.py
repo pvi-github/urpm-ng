@@ -420,7 +420,8 @@ class UrpmDBusService:
             rpm_paths = list(local_paths)
             if download_items:
                 def dl_progress(name, pkg_num, pkg_total, dl_bytes, dl_total,
-                               item_bytes=None, item_total=None, active_downloads=None):
+                               item_bytes=None, item_total=None,
+                               active_downloads=None, coordinator_speed=0.0):
                     # Prefer the byte-level counter over the package
                     # counter so Discover's progress bar advances
                     # continuously instead of jumping in N steps for
@@ -641,7 +642,8 @@ class UrpmDBusService:
             rpm_paths = list(local_paths)
             if download_items:
                 def dl_progress(name, pkg_num, pkg_total, dl_bytes, dl_total,
-                               item_bytes=None, item_total=None, active_downloads=None):
+                               item_bytes=None, item_total=None,
+                               active_downloads=None, coordinator_speed=0.0):
                     # Prefer the byte-level counter over the package
                     # counter so Discover's progress bar advances
                     # continuously instead of jumping in N steps for

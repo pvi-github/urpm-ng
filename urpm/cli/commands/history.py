@@ -475,7 +475,8 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
 
                 # Simple progress for undo
                 def progress(name, pkg_num, pkg_total, bytes_done, bytes_total,
-                             item_bytes=None, item_total=None, slots_status=None):
+                             item_bytes=None, item_total=None,
+                             slots_status=None, coordinator_speed=0.0):
                     pct = int(bytes_done * 100 / bytes_total) if bytes_total else 0
                     print(f"\r\033[K  {_('Downloading')} [{pkg_num}/{pkg_total}] {name} {pct}%", end='', flush=True)
 
