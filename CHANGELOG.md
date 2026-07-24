@@ -15,6 +15,150 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.8.5] — 2026-07-24
+
+Cauldron release.  urpm-ng gains a proper release-identity model
+that lets a single machine ride cauldron or a numeric stable
+without the resolver confusing the two.  Ships `urpm distro-switch`
+to bascule, a `--release cauldron:N` syntax for explicit numeric
+targets, plus a set of build-container robustness fixes that
+finally make `urpm build` a first-class replacement for mock on
+Mageia hosts.
+
+### Major Features
+
+- **Cauldron identity + `urpm distro-switch`.**  A machine now
+  carries a single release identity at a time (`cauldron`, `10`,
+  `11`, …) that pins which media the resolver considers.  Media
+  whose `mageia_version` doesn't match are left out of the
+  candidate pool even if they stay enabled in the DB — no more
+  ambiguous-media aborts on a cauldron chroot.  Switching is a
+  deliberate act, exposed as a dedicated verb:
+  `urpm distro-switch cauldron` / `urpm distro-switch 11` /
+  `urpm distro-switch cauldron:12`.  Preflight verifies the
+  target has enabled media, warns about stale media of the
+  previous identity, and best-effort refreshes `system-numeric`
+  via a `media.cfg` probe.  Underlying fix: `_resolve_version`
+  now treats the URL as the source of truth for the release
+  directory, undoing the regression where a catalogue's numeric
+  version silently overwrote `cauldron` on every media served
+  under `/distrib/cauldron/`.
+- **`--release cauldron:N` syntax.**  `urpm image make` and
+  `urpm init` accept an explicit numeric target alongside the
+  cauldron identity, so a packager working offline or during a
+  flip window can force the numeric that `.mgaN` release tags
+  and `%mgaversion` will resolve to, without depending on the
+  mirror catching up.  When omitted, the numeric is probed
+  best-effort at init time and cached in `system-numeric`.
+  Phase 1 mkimage seeds `/etc/mageia-release` from that value so
+  images built from a mid-flip cauldron still emit `.mgaN`
+  correctly at rpmbuild time.
+- **`urpm build` container resource caps.**  `--build-cpus N`,
+  `--build-memory SIZE`, `--full-throttle` cap CPU count and
+  container RAM via `podman --cpus` / `--memory`; `--build-cpus`
+  also injects `rpmbuild --define '_smp_mflags -jN'` so `%build`
+  honours the cap.  Defaults leave two CPUs and two GB of RAM
+  free for the host so it stays usable during heavy builds
+  (firefox, thunderbird).  Swap is unbounded by default,
+  matching mock's systemd-nspawn wrapper — the container can
+  spill cold pages onto host swap the way mock does, which is
+  what closes the gap on <16 GB hosts.  `--strict-memory`
+  re-ties `--memory-swap` for CI use.
+- **rpmbuild bcond passthrough.**  `--with FEATURE` and
+  `--without FEATURE` on `urpm build` forward verbatim to
+  rpmbuild so specs using `%bcond_with` / `%bcond_without`
+  can be flipped without shelling out.
+
+### Improvements
+
+- **Server↔media official mesh.**  `cmd_init` now runs a
+  full-mesh link between every `is_official=1` server and every
+  `is_official=1` media at the end of discovery.  Mageia's
+  mirror convention is that any mirror carrying
+  `/distrib/<release>/<arch>/media/` also carries the full
+  sub-tree at the same relative paths; discovery, however, only
+  linked pairs whose catalogue lookup succeeded at that specific
+  server, leaving holes whenever a mirror's catalogue timed out.
+  In the field this showed up as "All servers failed" on a
+  single hard 404 from one CDN clone even though other perfectly
+  good mirrors were configured.  The mesh restores the
+  assumption the download failover implicitly relies on.
+- **Local-RPM disttag N-1 window on cauldron targets.**
+  `urpm image make --urpm-ng-source local` now accepts an
+  `urpm-ng-core` RPM built for the previous stable when
+  targeting cauldron.  Numeric-target images stay strict (only
+  `.mgaN.`).  `--allow-disttag-mismatch` bypasses the check
+  entirely for the rare cross-release noarch case.
+- **`urpm image make --exclude PKG`.**  Repeatable flag that
+  removes PKG from the finished image via `urpm erase --force
+  --keep-orphans --sync`.  Canonical case:
+  `--exclude python3-zstandard` so firefox's `mach` does not
+  trip on its own version pin against the system-installed one.
+- **`podman commit` uses workdir as TMPDIR.**
+  `Container.commit` routes `TMPDIR` through the mkimage
+  workdir at both call sites (image make + image update), so
+  podman's blob-staging directory doesn't spill onto a small
+  `/tmp` partition during the final commit stage.  Symmetric
+  with what `Container.import_from_dir` already did.
+- **`urpm show --files` and `--changelog` now honoured.**  Both
+  flags were registered on the argparse but silently ignored.
+  `--files` uses `rpm -ql` for installed packages, parses the
+  media's `files.xml.lzma` for available ones.  `--changelog`
+  uses `rpm -q --changelog` for installed packages.
+- **`crypto-policies` pulled into the bootstrap profile.**
+  openssl on mga9 doesn't declare `Requires: crypto-policies`,
+  so every openssl invocation in a fresh mga9-64 container died
+  at startup.  The bootstrap profile now tugs
+  `crypto-policies` + `crypto-policies-scripts` explicitly.
+- **PackageKit backend polish.**  `emit_packages_from_json`
+  honours the client's `INSTALLED` / `NOT_INSTALLED` filter
+  (Discover no longer serves the two categories mixed together);
+  `gpg-pubkey` rpmdb entries are skipped (their `arch=(none)`
+  broke the PackageKit `package_id` format); download progress
+  now reports bytes instead of package counts, so Discover's
+  bar advances continuously.
+
+### Bug Fixes
+
+- **`BuildRequires:` parser respects `%if` / `%{?flag:…}` /
+  macros.**  The regex-based scanner used by
+  `urpm install --buildrequires` extracted every literal
+  `BuildRequires:` line regardless of the surrounding
+  conditional block, silently pulling packages the spec author
+  had explicitly guarded away.  Real hit:
+  `selinux-policy-devel` under `%if 0%{?with_selinux}` dragged
+  in `python3-dnf` → `mageia-dnf-conf` → `dnf-data`, which
+  itself has a broken auto-Requires and killed the transaction.
+  Replaced by a delegation to `rpmspec -q --buildrequires`,
+  which evaluates the spec the way rpmbuild will at build time.
+  Ships a unit test that reproduces the historical bug case.
+- **Ambiguous-media resolver.**  `get_accepted_versions` now
+  consults the `mageia-version` pin at the top, so a cauldron
+  chroot with mixed-tag media rows no longer hits the "both 11
+  and cauldron media are enabled" abort.
+- **`coordinator_speed` in download callbacks.**  Five
+  `dl_progress` sites refused the 9th positional argument
+  that `Container.download_all` had grown, so every Discover
+  upgrade died with a `TypeError` mid-transaction.
+
+### Packaging & Distribution
+
+- Version bumped to 0.8.5 across `urpm-ng` and `rpmdrake-ng`.
+
+### Documentation
+
+- New `distro-switch` chapter and `--release cauldron:N`
+  syntax section added to all seven READMEs (English +
+  fr / de / es / it / nl / pt) and seven man pages.
+- Build resource caps + bcond passthrough sections added to
+  the same set.
+- 42 new msgids across six `.po` files (build-cap argparse
+  help, distro-switch messages, cauldron probe status,
+  seed-mageia-release confirmation, exclude runtime).  Parity
+  1490 msgstrs per locale.
+
+---
+
 ## [0.8.4] — 2026-07-17
 
 Discover / GNOME Software integration release.  urpm-ng ships
