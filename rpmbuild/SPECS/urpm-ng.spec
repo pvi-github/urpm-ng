@@ -1,5 +1,5 @@
 %define name urpm-ng
-%define version 0.8.4
+%define version 0.8.5
 %define release 1
 
 # Full Release including the Mageia disttag, used in Obsoletes /
