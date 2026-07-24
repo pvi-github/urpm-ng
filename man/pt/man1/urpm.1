@@ -175,8 +175,12 @@ Permite arquitecturas adicionais (ex: \fB\-\-allow\-arch i686\fR).
 .B q|query \fIpadrão\fR
 Pesquisa pacotes por nome ou descrição. Alias: \fBs\fR, \fBsearch\fR.
 .TP
-.B show \fIpacote\fR
-Mostra informações detalhadas de um pacote.
+.B show \fIpacote\fR [\fB\-\-files\fR] [\fB\-\-changelog\fR]
+Mostra informações detalhadas de um pacote. Com \fB\-\-files\fR, imprime
+também a lista de ficheiros do pacote (\fBrpm \-ql\fR se instalado, caso
+contrário extraída do \fBfiles.xml.lzma\fR do meio). Com
+\fB\-\-changelog\fR, imprime o registo de alterações via
+\fBrpm \-q \-\-changelog\fR (apenas pacotes instalados).
 .TP
 .B list \fR[\fIpadrão\fR]
 Lista os pacotes. Utilize \fB\-\-installed\fR para os pacotes instalados.
@@ -225,6 +229,16 @@ Mostra a legenda dos símbolos após a árvore.
 .B why \fIpacote\fR
 Explica porque e que um pacote esta instalado.
 .SS Gestao de media e servidores
+.TP
+.B distro\-switch \fIalvo\fR
+Altera a identidade de release desta máquina. \fIalvo\fR pode ser
+\fBcauldron\fR, um numérico (p. ex. \fB11\fR) ou \fBcauldron:N\fR para
+fixar cauldron com um numérico alvo explícito. Verifica que pelo menos
+um meio activado já carrega a nova identidade, avisa sobre média da
+identidade antiga que continuam activados e refresca best\-effort
+\fBsystem\-numeric\fR (sonda o \fBmedia.cfg\fR de um servidor activado
+ao passar a cauldron nu). Após a mudança, executar
+\fBurpm media update\fR.
 .TP
 .B media \fR[\fIsubcomando\fR]
 Gere as fontes de media. Sem subcomando, lista os media.
@@ -621,7 +635,40 @@ Runtime de contentores (por omissão: auto-deteção).
 Manter o chroot temporário após a criação da imagem.
 .TP
 .BR \-w ", " \-\-workdir " " \fIcaminho\fR
-Directório de trabalho para o chroot (por omissão: /tmp).
+Directório de trabalho para o chroot (por omissão: \fB~/.cache/urpm/mkimage\fR).
+Serve também de \fBTMPDIR\fR para a fase de commit do podman, para que
+os blobs de imagem não transbordem um /tmp apertado.
+.TP
+.BR \-\-exclude " " \fIPKG\fR
+Remove \fIPKG\fR da imagem final via
+\fBurpm erase \-\-force \-\-keep\-orphans \-\-sync\fR. Repetível.
+Uso canónico: \fB\-\-exclude python3\-zstandard\fR para que o
+\fBmach\fR do firefox não tropece na sua própria restrição de versão.
+.TP
+.B \-\-urpm\-ng\-source " " auto|local|media|github
+De onde vem \fBurpm\-ng\-core\fR: \fBauto\fR (cascata por omissão:
+local > média do host > github), \fBlocal\fR (força RPM local),
+\fBmedia\fR (força média do host com recurso a github), \fBgithub\fR
+(força a release do GitHub).
+.TP
+.BR \-\-urpm\-ng\-core " " \fIcaminho_rpm\fR
+Instala \fBurpm\-ng\-core\fR a partir deste RPM específico, prevalecendo
+sobre \fB\-\-urpm\-ng\-source\fR e sobre a cascata.
+.TP
+.B \-\-allow\-disttag\-mismatch
+Aceita um RPM local cujo disttag fica fora da janela do alvo (por
+omissão: apenas \fB.mgaN.\fR para alvos numéricos;
+\fB.mgaN.\fR e \fB.mga{N\-1}.\fR para cauldron com numérico \fIN\fR).
+Usar com conhecimento (noarch cross\-release etc.).
+.PP
+O argumento \fB\-\-release\fR aceita três formas:
+\fB\-\-release 10\fR fixa numa stable numérica;
+\fB\-\-release cauldron\fR fixa na árvore de desenvolvimento em
+movimento e sonda best\-effort o \fBmedia.cfg\fR do espelho para o
+numérico efectivo; \fB\-\-release cauldron:11\fR fixa cauldron com um
+numérico alvo explícito, funciona offline e prevalece sobre o espelho
+quando o \fBmedia.cfg\fR do lado servidor está atrasado durante uma
+janela de flip.
 .RE
 .TP
 .B update \fItag\fR [\fB\-\-runtime\fR \fIruntime\fR]
@@ -698,6 +745,40 @@ de build. Útil para sobrescrever \fB%packager\fR, \fB%vendor\fR,
 \fB%dist\fR ou qualquer outra macro rpm sem tocar no spec. Combinado
 com \fB\-\-subrel\fR, a linha \fB%subrel\fR é adicionada por último,
 tendo precedência.
+.TP
+.BR \-\-build\-cpus " " \fIN\fR
+Limita o paralelismo de compilação a \fIN\fR threads (traduzido em
+\fBrpmbuild \-\-define '_smp_mflags \-jN'\fR + \fBpodman \-\-cpus\fR).
+Por omissão: \fBmax(1, nproc \- 2)\fR, para que o host mantenha dois
+núcleos livres para o trabalho interactivo.
+.TP
+.BR \-\-build\-memory " " \fItamanho\fR
+Tecto de RAM do contentor (p. ex. \fB8G\fR, \fB12000M\fR, \fB16GB\fR).
+Transmitido a \fBpodman \-\-memory\fR. Por omissão:
+\fBmax(2G, MemTotal \- 2G)\fR.
+.TP
+.B \-\-full\-throttle
+Atalho: sem tecto de CPU, sem tecto de memória. Sobrepõe\-se a
+\fB\-\-build\-cpus\fR e \fB\-\-build\-memory\fR.
+.TP
+.B \-\-strict\-memory
+Amarra \fB\-\-memory\-swap\fR a \fB\-\-build\-memory\fR (podman mata o
+processo ao atingir o tecto de RAM). Por omissão: swap ilimitado,
+alinhado com mock/systemd\-nspawn. Usar em CI onde swap silencioso
+não seria distinguível de um hang.
+.TP
+.BR \-\-with " " \fIFEATURE\fR
+Encaminha \fB\-\-with \fIFEATURE\fR\fR ao rpmbuild para que specs que
+usam \fB%bcond_with\fR possam ser alternados sem invocar o rpmbuild à
+mão. Repetível.
+.TP
+.BR \-\-without " " \fIFEATURE\fR
+Encaminha \fB\-\-without \fIFEATURE\fR\fR ao rpmbuild para que specs
+que usam \fB%bcond_without\fR possam ser alternados sem invocar o
+rpmbuild à mão. Repetível. Uso canónico:
+\fB\-\-without unified_build\fR para forçar specs tipo firefox a
+compilar com uma unidade de tradução por ficheiro (muito mais lento,
+muito menos RAM por cc1plus).
 .PP
 As fontes podem ser ficheiros .src.rpm ou .spec. Para ficheiros .spec,
 as fontes são automaticamente copiadas a partir do directório SOURCES/ (suporta

@@ -388,8 +388,12 @@ urpm q --unavailable php      # Filtrar por padrão
 ### Mostrar informação de um pacote
 
 ```bash
-urpm show <pacote>            # Mostrar detalhes do pacote
-urpm info <pacote>            # Alias
+urpm show <pacote>               # Mostrar detalhes do pacote
+urpm info <pacote>               # Alias
+urpm show --files <pacote>       # Acrescenta a lista de ficheiros do pacote
+                                 # (rpm -ql se instalado, files.xml.lzma caso contrário)
+urpm show --changelog <pacote>   # Acrescenta o registo de alterações do pacote
+                                 # (rpm -q --changelog; apenas pacotes instalados)
 ```
 
 ### Listar pacotes
@@ -517,6 +521,43 @@ Quando uma transacção é destacada (ex.: pelo daemon ou pelo PackageKit), acom
 urpm progress                 # Mostrar o progresso corrente e sair
 urpm progress --watch         # Observar continuamente até à conclusão
 ```
+
+## Identidade da distribuição (`distro-switch`)
+
+Uma máquina carrega uma única identidade de release de cada vez — ou uma
+stable numérica (`10`, `11`, …), ou `cauldron`. Essa identidade decide
+que média o resolvedor considera ao compor uma transacção de instalação
+ou actualização; as média cuja `mageia_version` não coincide ficam
+fora do pool de candidatos, mesmo que continuem activadas na BD.
+
+Mudar de identidade é um acto deliberado (uma dist-upgrade em
+filigrana), pelo que vive no seu próprio verbo em vez de em
+`urpm config`.
+
+```bash
+urpm distro-switch cauldron     # move a máquina para cauldron
+urpm distro-switch 11           # move-a para a árvore numérica mga11
+urpm distro-switch cauldron:12  # cauldron com um numérico alvo explícito
+```
+
+Antes de aplicar a mudança, o comando:
+
+- Verifica que pelo menos uma média activada já carrega a identidade
+  alvo (caso contrário ficaria com um pool de candidatos vazio). O
+  diagnóstico aponta para `urpm media autoconfig -r <alvo>` em caso de
+  falha.
+- Avisa sobre média da identidade antiga que continuam activadas —
+  saem do campo de visão do resolvedor até serem realinhadas ou
+  desactivadas.
+- Actualiza best-effort o `system-numeric` (o numérico efectivo usado
+  para renderizar as tags de release `.mgaN` e para semear
+  `/etc/mageia-release` dentro dos contentores de compilação): a
+  substituição explícita ganha primeiro, depois a própria identidade se
+  for numérica, senão uma sondagem do `media.cfg` de um servidor
+  activado.
+
+Após a mudança, executar `urpm media update` para sincronizar as
+metadata da nova identidade.
 
 ## Gestão de médias
 
@@ -983,8 +1024,34 @@ urpm image make --release 10 --tag mga:10-foo --buildrequires SPECS/foo.spec
                               # combina com --addmedia para médias terceiros assinados
 --runtime docker|podman       # Runtime de contentor (por omissão: auto-detecção)
 --keep-chroot                 # Manter o chroot temporário após criação da imagem
--w, --workdir <path>          # Directório de trabalho para o chroot (por omissão: /tmp)
+-w, --workdir <path>          # Directório de trabalho para o chroot (por omissão: ~/.cache/urpm/mkimage).
+                              # Também serve de TMPDIR para a fase de commit do podman, para
+                              # que os blobs de imagem não transbordem um /tmp apertado.
+--exclude PKG                 # Remove PKG da imagem final via
+                              # `urpm erase --force --keep-orphans --sync` (repetível).
+                              # Uso canónico: `--exclude python3-zstandard` para que o
+                              # mach do firefox não tropece na sua própria restrição de versão.
+--urpm-ng-source auto|local|media|github
+                              # Onde ir buscar o urpm-ng-core (por omissão: cascata auto)
+--urpm-ng-core <path>         # Instala o urpm-ng-core a partir deste RPM específico
+--allow-disttag-mismatch      # Aceita um RPM local cujo disttag fica fora da janela do
+                              # alvo (por omissão: apenas .mgaN. para numérico;
+                              # .mgaN. e .mga{N-1}. para cauldron/N — o empacotador que
+                              # recompila na sua stable já está coberto sem esta flag).
 ```
+
+**Identidade de release em `--release`.** O argumento aceita três formas:
+
+- `--release 10` — fixa a identidade da máquina numa stable numérica.
+- `--release cauldron` — fixa na árvore de desenvolvimento em movimento.
+  O numérico efectivo (usado para as tags de release `.mgaN` e para o
+  macro `%mgaversion` dentro dos contentores de compilação) é sondado
+  best-effort a partir do `media.cfg` do espelho no init. Offline ou
+  quando a sondagem falha, fica indefinido e os consumidores recorrem
+  a `/etc/mageia-release`.
+- `--release cauldron:11` — cauldron com um numérico alvo explícito.
+  Vence a sondagem, funciona offline e prevalece sobre o espelho quando
+  o `media.cfg` do lado servidor está atrasado durante uma janela de flip.
 
 > **Compatibilidade retroactiva:** `urpm mkimage` mantém-se como alias de `urpm image make`.
 
@@ -1044,7 +1111,44 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --keep-container              # Manter o contentor após o build (para debug)
 --subrel <tag>                # Injecta %subrel TAG para que os RPMs de saída fiquem NAME-VERSION-RELEASE.TAG.DIST.ARCH.rpm
 --rpmmacros <file>            # Injecta FILE como /root/.rpmmacros no contentor de build (combinável com --subrel)
+--build-cpus N                # Limita o paralelismo de compilação a N threads
+                              # (rpmbuild %_smp_mflags = -jN + podman --cpus).
+                              # Por omissão: max(1, nproc - 2), para que o host mantenha
+                              # dois núcleos livres para o trabalho interactivo.
+--build-memory SIZE           # Tecto de RAM do contentor (ex.: 8G, 12000M, 16GB).
+                              # Transmitido a podman --memory. Por omissão: max(2G, MemTotal - 2G).
+--full-throttle               # Atalho: sem tecto de CPU, sem tecto de memória.
+                              # Sobrepõe-se a --build-cpus e --build-memory.
+--strict-memory               # Amarra --memory-swap a --build-memory (podman mata o processo
+                              # ao atingir o tecto de RAM). Por omissão: swap ilimitado,
+                              # alinhado com mock/systemd-nspawn. Usar em CI onde swap silencioso
+                              # não seria distinguível de um hang.
+--with FEATURE                # Encaminha `--with FEATURE` ao rpmbuild (%bcond do spec). Repetível.
+--without FEATURE             # Encaminha `--without FEATURE` ao rpmbuild (%bcond do spec). Repetível.
 ```
+
+#### Tectos de recursos e paridade com mock
+
+O trio `--build-cpus` / `--build-memory` / `--strict-memory` é a alavanca
+principal para compilar specs pesados (firefox, thunderbird, chromium)
+em máquinas que não têm 32+ GB de RAM livre. Os valores por omissão
+deixam ao host dois CPUs e dois GB de RAM para que se mantenha
+utilizável e, sobretudo, **o swap fica ilimitado por omissão** — o
+contentor pode despejar páginas frias no swap do host tal como faz o
+wrapper systemd-nspawn do mock. Sem isso, o rustc do firefox apanha
+`SIGKILL` bem antes do verdadeiro tecto de RAM em hosts < 16 GB.
+`--strict-memory` volta a amarrar `--memory-swap` para a CI, onde swap
+silencioso seria indistinguível de um hang.
+
+#### Encaminhamento de bcond ao rpmbuild
+
+`--with FEATURE` e `--without FEATURE` são encaminhados tal e qual ao
+rpmbuild, para que specs que declarem `%bcond_with` / `%bcond_without`
+possam ser alternados sem invocar o rpmbuild à mão. Exemplo: um spec
+firefox que declara `%bcond_without unified_build` (unidades de
+tradução unificadas activas por omissão) pode ser compilado sem elas
+para um teste com restrições de memória via
+`urpm build --without unified_build ./SPECS/firefox.spec`.
 
 ### Layout do workspace
 

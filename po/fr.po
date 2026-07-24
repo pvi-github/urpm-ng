@@ -2952,6 +2952,267 @@ msgstr "Conflits ({count}) :"
 msgid "Obsoletes ({count}):"
 msgstr "Obsolète ({count}) :"
 
+#, python-brace-format
+msgid "Files ({count}):"
+msgstr "Fichiers ({count}) :"
+
+msgid "Files: not available (no media context)"
+msgstr "Fichiers : indisponibles (aucun média associé)"
+
+msgid "Files: not available (media missing)"
+msgstr "Fichiers : indisponibles (média manquant)"
+
+#, python-brace-format
+msgid ""
+"Files: not available (media '{name}' not synced — run 'urpm media update "
+"{name}')"
+msgstr ""
+"Fichiers : indisponibles (média « {name} » non synchronisé — lancez « urpm "
+"media update {name} »)"
+
+#, python-brace-format
+msgid ""
+"Files: NEVRA '{nevra}' not found in '{name}'.files.xml.lzma (metadata drift; "
+"try 'urpm media update {name}')"
+msgstr ""
+"Fichiers : NEVRA « {nevra} » introuvable dans « {name} ».files.xml.lzma "
+"(désynchronisation des méta-données ; essayez « urpm media update {name} »)"
+
+msgid "Changelog:"
+msgstr "Journal des modifications :"
+
+msgid ""
+"Changelog: available only for installed packages (would need to fetch the "
+"RPM header otherwise)."
+msgstr ""
+"Journal des modifications : disponible uniquement pour les paquets "
+"installés (télécharger l'en-tête RPM serait nécessaire sinon)."
+
+msgid "Changelog: rpm query failed"
+msgstr "Journal des modifications : la requête rpm a échoué"
+
+# Build resource caps
+msgid ""
+"Cap the build parallelism at N threads (translated to rpmbuild %_smp_mflags "
+"= -jN). Default: max(1, nproc - 2), so the host keeps two cores free for "
+"interactive work. Use --full-throttle for the whole CPU."
+msgstr ""
+"Plafond de parallélisme du build à N threads (traduit en rpmbuild "
+"%_smp_mflags = -jN). Défaut : max(1, nproc - 2), l'hôte garde deux cœurs "
+"libres pour l'usage interactif. --full-throttle pour tout le CPU."
+
+msgid ""
+"Cap the build container memory (e.g. 8G, 12000M, 16GB). Enforced as podman "
+"--memory / --memory-swap. Default: max(2G, MemTotal - 2G), so the host keeps "
+"~2 GB free. Use --full-throttle to remove the cap entirely."
+msgstr ""
+"Plafond RAM du conteneur (ex : 8G, 12000M, 16GB). Passé à podman --memory / "
+"--memory-swap. Défaut : max(2G, MemTotal - 2G), l'hôte garde ~2 GB libres. "
+"--full-throttle pour retirer le plafond."
+
+msgid ""
+"Shortcut: no CPU cap, no memory cap. The build gets the whole host — expect "
+"it to be sluggish while running. Overrides --build-cpus and --build-memory."
+msgstr ""
+"Raccourci : pas de plafond CPU, pas de plafond mémoire. Le build prend tout "
+"l'hôte — attends-toi à ce qu'il soit lent pendant l'exécution. Écrase "
+"--build-cpus et --build-memory."
+
+msgid ""
+"Tie --memory-swap to --build-memory so the container has no swap headroom "
+"(podman kills the process on reaching the RAM ceiling). Default is to leave "
+"swap unlimited — matches mock/systemd-nspawn behaviour. Use in CI where "
+"quiet swapping would masquerade as a timeout."
+msgstr ""
+"Ancre --memory-swap sur --build-memory pour que le conteneur n'ait pas de "
+"marge de swap (podman tue le process au plafond RAM). Défaut : swap "
+"illimité — aligné sur mock/systemd-nspawn. À utiliser en CI où un swap "
+"silencieux se confondrait avec un timeout."
+
+msgid ""
+"Enable a spec %bcond, e.g. ``--with debug``. Passed to rpmbuild verbatim.  "
+"Repeatable."
+msgstr ""
+"Active un %bcond du spec, ex : ``--with debug``. Passé tel quel à rpmbuild. "
+"Répétable."
+
+msgid ""
+"Disable a spec %bcond, e.g. ``--without unified_build`` to force firefox's "
+"per-file translation units.  Passed to rpmbuild verbatim.  Repeatable."
+msgstr ""
+"Désactive un %bcond du spec, ex : ``--without unified_build`` pour forcer "
+"les unités de traduction par fichier de firefox. Passé tel quel à rpmbuild. "
+"Répétable."
+
+# Image make --exclude / --allow-disttag-mismatch
+msgid ""
+"Remove PKG from the finished image via ``urpm erase --force --keep-orphans "
+"--sync``.  Repeatable.  Useful when a package a spec would refuse to build "
+"against ships as a hard dep of something we do want — canonical case: "
+"``--exclude python3-zstandard`` so firefox's mach does not trip on its own "
+"version pin against the system-installed one."
+msgstr ""
+"Retire PKG de l'image finale via ``urpm erase --force --keep-orphans "
+"--sync``. Répétable. Utile quand un paquet qu'un spec refuserait de builder "
+"est une dép dure de quelque chose qu'on veut — cas canonique : ``--exclude "
+"python3-zstandard`` pour que le mach de firefox ne se prenne pas sa propre "
+"contrainte de version sur celui du système."
+
+msgid ""
+"With --urpm-ng-source=local, accept a local RPM whose disttag doesn't match "
+"the target release/cauldron's N-1 window.  Use when you know what you're "
+"doing (cross-release Python noarch, etc.)."
+msgstr ""
+"Avec --urpm-ng-source=local, accepte un RPM local dont le disttag ne "
+"correspond pas à la fenêtre N-1 de la cible/cauldron. À utiliser en "
+"connaissance de cause (noarch Python cross-release, etc.)."
+
+msgid ""
+"With --urpm-ng-source=local, accept a local RPM whose disttag doesn't match "
+"the image's release/cauldron N-1 window."
+msgstr ""
+"Avec --urpm-ng-source=local, accepte un RPM local dont le disttag ne "
+"correspond pas à la fenêtre N-1 de la release/cauldron de l'image."
+
+# distro-switch
+msgid "Change the machine's release identity (cauldron ↔ N)"
+msgstr "Change l'identité de release de la machine (cauldron ↔ N)"
+
+msgid "New identity: <cauldron|N|cauldron:N>"
+msgstr "Nouvelle identité : <cauldron|N|cauldron:N>"
+
+msgid "Missing target — pass 'urpm distro-switch <cauldron|N|cauldron:N>'"
+msgstr "Cible manquante — passer 'urpm distro-switch <cauldron|N|cauldron:N>'"
+
+#, python-brace-format
+msgid "Already on {id}; refreshed system-numeric to {n}"
+msgstr "Déjà sur {id} ; system-numeric rafraîchi à {n}"
+
+#, python-brace-format
+msgid "Already on {id} — nothing to do"
+msgstr "Déjà sur {id} — rien à faire"
+
+#, python-brace-format
+msgid "Switching release identity: {old} → {new}"
+msgstr "Bascule d'identité de release : {old} → {new}"
+
+msgid "(unset)"
+msgstr "(non défini)"
+
+#, python-brace-format
+msgid "No enabled media carry identity {id}.  Add them first:"
+msgstr "Aucun média activé ne porte l'identité {id}. Ajoute-les d'abord :"
+
+#, python-brace-format
+msgid "  Then re-run: urpm distro-switch {arg}"
+msgstr "  Puis relance : urpm distro-switch {arg}"
+
+#, python-brace-format
+msgid ""
+"{n} enabled media stay tagged {old} and will drop out of resolver's view:"
+msgstr ""
+"{n} média activés restent taggés {old} et vont sortir du champ de vision du "
+"résolveur :"
+
+#, python-brace-format
+msgid "    ... and {n} more"
+msgstr "    … et {n} de plus"
+
+msgid ""
+"  Disable them (`urpm media disable NAME`) or rerun `urpm media autoconfig` "
+"for the new identity if you want them aligned."
+msgstr ""
+"  Désactive-les (`urpm media disable NAME`) ou relance `urpm media "
+"autoconfig` pour la nouvelle identité si tu veux les aligner."
+
+#, python-brace-format
+msgid "Target numeric: {n} (probed from {url})"
+msgstr "Numérique cible : {n} (sondé depuis {url})"
+
+msgid ""
+"Could not determine cauldron's numeric — pass 'cauldron:N' when online to "
+"set it explicitly."
+msgstr ""
+"Impossible de déterminer le numérique de cauldron — passer 'cauldron:N' "
+"quand en ligne pour le renseigner explicitement."
+
+#, python-brace-format
+msgid "Switched to {id}"
+msgstr "Basculé sur {id}"
+
+msgid ""
+"  Next: run 'urpm media update' to sync metadata for the new identity."
+msgstr ""
+"  Ensuite : lancer 'urpm media update' pour synchroniser les métadonnées de "
+"la nouvelle identité."
+
+# cmd_init cauldron numeric
+#, python-brace-format
+msgid "Target numeric version: {n} (explicit)"
+msgstr "Numérique cible : {n} (explicite)"
+
+#, python-brace-format
+msgid "Target numeric version: {n} (probed from {url})"
+msgstr "Numérique cible : {n} (sondé depuis {url})"
+
+msgid ""
+"Could not probe cauldron numeric — build/mkimage will fall back to /etc/"
+"mageia-release at read time.  Re-run with '--release cauldron:N' or 'urpm "
+"distro-switch cauldron' when online to set it explicitly."
+msgstr ""
+"Impossible de sonder le numérique de cauldron — build/mkimage se rabattra "
+"sur /etc/mageia-release à la lecture. Relance avec '--release cauldron:N' "
+"ou 'urpm distro-switch cauldron' quand en ligne pour le renseigner "
+"explicitement."
+
+msgid "  urpm init --release cauldron"
+msgstr "  urpm init --release cauldron"
+
+msgid "  urpm init --release cauldron:11  (explicit numeric)"
+msgstr "  urpm init --release cauldron:11  (numérique explicite)"
+
+# Build cap display
+#, python-brace-format
+msgid "Build cap: {cpus} CPUs, {memory} memory"
+msgstr "Plafond build : {cpus} CPUs, {memory} mémoire"
+
+msgid "unlimited"
+msgstr "illimité"
+
+msgid "no swap"
+msgstr "sans swap"
+
+msgid "swap free"
+msgstr "swap libre"
+
+# Phase 1 mkimage seed
+#, python-brace-format
+msgid "  Pinned /etc/mageia-release → {n}"
+msgstr "  /etc/mageia-release épinglé → {n}"
+
+#, python-brace-format
+msgid "  Could not rewrite /etc/mageia-release: {e}"
+msgstr "  Impossible de réécrire /etc/mageia-release : {e}"
+
+# --exclude runtime
+#, python-brace-format
+msgid "  Excluding {n} package from the image..."
+msgid_plural "  Excluding {n} packages from the image..."
+msgstr[0] "  Exclusion de {n} paquet de l'image..."
+msgstr[1] "  Exclusion de {n} paquets de l'image..."
+
+#, python-brace-format
+msgid "- removed {pkg}"
+msgstr "- {pkg} retiré"
+
+#, python-brace-format
+msgid "- {pkg} was not installed, skipped"
+msgstr "- {pkg} n'était pas installé, ignoré"
+
+#, python-brace-format
+msgid "- urpm erase {pkg} failed: {msg}"
+msgstr "- urpm erase {pkg} a échoué : {msg}"
+
 #: urpm/cli/commands/query.py:317 urpm/cli/commands/_install_pipeline.py:245
 #, python-brace-format
 msgid "{count} package installed"

@@ -176,8 +176,12 @@ Erlaubt zusätzliche Architekturen (z.B. \fB\-\-allow\-arch i686\fR).
 .B q|query \fIMuster\fR
 Sucht Pakete nach Name oder Beschreibung. Alias: \fBs\fR, \fBsearch\fR.
 .TP
-.B show \fIPaket\fR
-Zeigt detaillierte Paketinformationen an.
+.B show \fIPaket\fR [\fB\-\-files\fR] [\fB\-\-changelog\fR]
+Zeigt detaillierte Paketinformationen an. Mit \fB\-\-files\fR wird
+zusätzlich die Dateiliste des Pakets ausgegeben (\fBrpm \-ql\fR wenn
+installiert, sonst aus der \fBfiles.xml.lzma\fR des Mediums geparst).
+Mit \fB\-\-changelog\fR wird das Änderungsprotokoll via
+\fBrpm \-q \-\-changelog\fR ausgegeben (nur installierte Pakete).
 .TP
 .B list \fR[\fIMuster\fR]
 Listet Pakete auf. Verwenden Sie \fB\-\-installed\fR für nur installierte Pakete.
@@ -226,6 +230,16 @@ Zeigt die Symbollegende nach der Baumansicht an.
 .B why \fIPaket\fR
 Erklärt, warum ein Paket installiert ist.
 .SS Medien- und Serververwaltung
+.TP
+.B distro\-switch \fIziel\fR
+Ändert die Release-Identität dieser Maschine. \fIziel\fR ist
+\fBcauldron\fR, eine Zahl (z.B. \fB11\fR) oder \fBcauldron:N\fR, um
+cauldron mit expliziter Zielnummer zu pinnen. Prüft, ob mindestens ein
+aktiviertes Medium bereits die neue Identität trägt, warnt vor Medien
+der alten Identität, die aktiviert bleiben, und aktualisiert
+best\-effort \fBsystem\-numeric\fR (sondiert bei nacktem cauldron die
+\fBmedia.cfg\fR eines aktivierten Servers). Nach dem Wechsel
+\fBurpm media update\fR ausführen.
 .TP
 .B media \fR[\fIUnterbefehl\fR]
 Verwaltet Medienquellen. Ohne Unterbefehl werden die Medien aufgelistet.
@@ -620,7 +634,40 @@ Container-Laufzeitumgebung (Standard: automatische Erkennung).
 Temporäres Chroot nach der Image-Erstellung beibehalten.
 .TP
 .BR \-w ", " \-\-workdir " " \fIPfad\fR
-Arbeitsverzeichnis für das Chroot (Standard: /tmp).
+Arbeitsverzeichnis für das Chroot (Standard: \fB~/.cache/urpm/mkimage\fR).
+Dient auch als \fBTMPDIR\fR für die podman\-Commit\-Phase, damit
+Image\-Blobs nicht ein enges /tmp überlaufen lassen.
+.TP
+.BR \-\-exclude " " \fIPKG\fR
+Entfernt \fIPKG\fR aus dem fertigen Image via
+\fBurpm erase \-\-force \-\-keep\-orphans \-\-sync\fR. Wiederholbar.
+Kanonischer Fall: \fB\-\-exclude python3\-zstandard\fR, damit firefox'
+\fBmach\fR nicht in seine eigene Versionsbindung fällt.
+.TP
+.B \-\-urpm\-ng\-source " " auto|local|media|github
+Woher \fBurpm\-ng\-core\fR kommt: \fBauto\fR (Standardwasserfall: lokal >
+Host-Medien > github), \fBlocal\fR (erzwingt lokales RPM), \fBmedia\fR
+(erzwingt Host-Medien mit github-Fallback), \fBgithub\fR (erzwingt
+GitHub-Release).
+.TP
+.BR \-\-urpm\-ng\-core " " \fIrpm_pfad\fR
+Installiert \fBurpm\-ng\-core\fR aus dieser konkreten RPM\-Datei und
+übersteuert \fB\-\-urpm\-ng\-source\fR sowie alle Wasserfallregeln.
+.TP
+.B \-\-allow\-disttag\-mismatch
+Akzeptiert ein lokales RPM, dessen disttag außerhalb des Ziel\-Fensters
+liegt (Standard: nur \fB.mgaN.\fR für numerische Ziele;
+\fB.mgaN.\fR und \fB.mga{N\-1}.\fR für cauldron mit Zahl \fIN\fR). Nur
+bewusst einsetzen (cross\-release noarch etc.).
+.PP
+Das \fB\-\-release\fR-Argument akzeptiert drei Formen:
+\fB\-\-release 10\fR pinnt auf eine numerische Stable-Release;
+\fB\-\-release cauldron\fR pinnt auf den bewegten Entwicklungsbaum und
+sondiert best\-effort die \fBmedia.cfg\fR des Spiegels für die
+effektive Zahl; \fB\-\-release cauldron:11\fR pinnt cauldron mit
+explizit angegebener Zielnummer, funktioniert offline und übersteuert
+den Spiegel, wenn dessen \fBmedia.cfg\fR während eines Flip\-Fensters
+hinterherhinkt.
 .RE
 .TP
 .B update \fITag\fR [\fB\-\-runtime\fR \fILaufzeit\fR]
@@ -697,6 +744,40 @@ Nützlich, um \fB%packager\fR, \fB%vendor\fR, \fB%dist\fR oder ein anderes
 rpm\-Makro zu überschreiben, ohne das Spec zu verändern. In Kombination
 mit \fB\-\-subrel\fR wird die \fB%subrel\fR\-Zeile zuletzt angehängt,
 sodass sie Vorrang hat.
+.TP
+.BR \-\-build\-cpus " " \fIN\fR
+Begrenzt die Parallelität des Builds auf \fIN\fR Threads (übersetzt in
+\fBrpmbuild \-\-define '_smp_mflags \-jN'\fR + \fBpodman \-\-cpus\fR).
+Standard: \fBmax(1, nproc \- 2)\fR, damit der Host zwei Kerne für
+interaktives Arbeiten frei behält.
+.TP
+.BR \-\-build\-memory " " \fIgröße\fR
+RAM\-Deckel für den Container (z.B. \fB8G\fR, \fB12000M\fR, \fB16GB\fR).
+Weitergegeben an \fBpodman \-\-memory\fR. Standard:
+\fBmax(2G, MemTotal \- 2G)\fR.
+.TP
+.B \-\-full\-throttle
+Abkürzung: keine CPU\-Begrenzung, keine Speicher\-Begrenzung.
+Übersteuert \fB\-\-build\-cpus\fR und \fB\-\-build\-memory\fR.
+.TP
+.B \-\-strict\-memory
+Bindet \fB\-\-memory\-swap\fR an \fB\-\-build\-memory\fR (podman killt
+den Prozess beim Erreichen des RAM\-Deckels). Standard: Swap
+unbegrenzt, passt zu mock/systemd\-nspawn. In CI zu verwenden, wo
+stilles Swappen nicht von einem Hang unterschieden werden könnte.
+.TP
+.BR \-\-with " " \fIFEATURE\fR
+Gibt \fB\-\-with \fIFEATURE\fR\fR an rpmbuild weiter, sodass Specs mit
+\fB%bcond_with\fR umgeschaltet werden können, ohne rpmbuild direkt
+aufzurufen. Wiederholbar.
+.TP
+.BR \-\-without " " \fIFEATURE\fR
+Gibt \fB\-\-without \fIFEATURE\fR\fR an rpmbuild weiter, sodass Specs
+mit \fB%bcond_without\fR umgeschaltet werden können, ohne rpmbuild
+direkt aufzurufen. Wiederholbar. Kanonischer Fall:
+\fB\-\-without unified_build\fR zwingt firefox\-artige Specs zur
+Kompilierung mit einer Übersetzungseinheit pro Datei (viel langsamer,
+viel weniger RAM pro cc1plus).
 .PP
 Quellen können .src.rpm- oder .spec-Dateien sein. Bei .spec-Dateien werden die
 Quellen automatisch aus dem SOURCES/-Verzeichnis kopiert (unterstützt

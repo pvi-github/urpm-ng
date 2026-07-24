@@ -396,8 +396,12 @@ urpm q --unavailable php      # Filter op patroon
 ### Pakketinfo tonen
 
 ```bash
-urpm show <pakket>            # Pakketdetails tonen
-urpm info <pakket>            # Alias
+urpm show <pakket>               # Pakketdetails tonen
+urpm info <pakket>               # Alias
+urpm show --files <pakket>       # Voegt de bestandenlijst van het pakket toe
+                                 # (rpm -ql indien geïnstalleerd, anders files.xml.lzma)
+urpm show --changelog <pakket>   # Voegt het wijzigingslogboek van het pakket toe
+                                 # (rpm -q --changelog; alleen geïnstalleerde pakketten)
 ```
 
 ### Pakketten opsommen
@@ -525,6 +529,42 @@ Wanneer een transactie losgekoppeld draait (bv. via de daemon of PackageKit), vo
 urpm progress                 # Huidige voortgang tonen en stoppen
 urpm progress --watch         # Doorlopend volgen tot afronding
 ```
+
+## Distributie-identiteit (`distro-switch`)
+
+Een machine draagt op elk moment één release-identiteit — hetzij een
+numerieke stable (`10`, `11`, …), hetzij `cauldron`. Die identiteit
+bepaalt welke media de resolver in beschouwing neemt bij het opstellen
+van een installatie- of upgradetransactie; media waarvan
+`mageia_version` niet overeenkomt blijven buiten de kandidatenpool,
+ook als ze in de DB nog geactiveerd zijn.
+
+Van identiteit wisselen is een bewuste handeling (een dist-upgrade
+onderhuids), daarom leeft dit in een eigen werkwoord en niet in
+`urpm config`.
+
+```bash
+urpm distro-switch cauldron     # verplaatst de machine naar cauldron
+urpm distro-switch 11           # verplaatst hem naar de numerieke mga11-boom
+urpm distro-switch cauldron:12  # cauldron met een expliciet numeriek doel
+```
+
+Voor het toepassen van de wissel controleert het commando:
+
+- Ten minste één geactiveerd medium draagt reeds de doelidentiteit
+  (anders bleef je met een lege kandidatenpool). De diagnose wijst bij
+  mislukking naar `urpm media autoconfig -r <doel>`.
+- Waarschuwt voor media van de oude identiteit die geactiveerd blijven
+  — ze verdwijnen uit het gezichtsveld van de resolver totdat ze
+  uitgelijnd of uitgeschakeld worden.
+- Ververst best-effort `system-numeric` (het effectieve numeriek dat
+  gebruikt wordt voor `.mgaN`-releasetags en voor het seeden van
+  `/etc/mageia-release` binnen build-containers): de expliciete override
+  wint eerst, dan de identiteit zelf als deze numeriek is, anders een
+  peiling van de `media.cfg` van een geactiveerde server.
+
+Voer na de wissel `urpm media update` uit om de metadata van de
+nieuwe identiteit op te halen.
 
 ## Mediabeheer
 
@@ -1011,8 +1051,35 @@ urpm image make --release 10 --tag mga:10-foo --buildrequires SPECS/foo.spec
                               # combineert met --addmedia voor ondertekende derdenmedia
 --runtime docker|podman       # Container-runtime (standaard: auto-detect)
 --keep-chroot                 # Tijdelijke chroot behouden na image-aanmaak
--w, --workdir <path>          # Werkmap voor de chroot (standaard: /tmp)
+-w, --workdir <path>          # Werkmap voor de chroot (standaard: ~/.cache/urpm/mkimage).
+                              # Fungeert ook als TMPDIR voor de podman-commitfase zodat
+                              # image-blobs geen krappe /tmp doen overlopen.
+--exclude PKG                 # Verwijdert PKG uit het uiteindelijke image via
+                              # `urpm erase --force --keep-orphans --sync` (herhaalbaar).
+                              # Canoniek gebruik: `--exclude python3-zstandard` zodat
+                              # firefox' mach niet struikelt over zijn eigen versiepin.
+--urpm-ng-source auto|local|media|github
+                              # Waar urpm-ng-core vandaan komt (standaard: auto waterval)
+--urpm-ng-core <path>         # Installeer urpm-ng-core vanuit dit specifieke RPM
+--allow-disttag-mismatch      # Aanvaardt een lokaal RPM waarvan de disttag buiten het
+                              # target-venster valt (standaard: alleen .mgaN. voor
+                              # numeriek; .mgaN. en .mga{N-1}. voor cauldron/N — de
+                              # packager die op zijn stable-host herbouwt is zonder deze
+                              # vlag al gedekt).
 ```
+
+**Release-identiteit in `--release`.** Het argument accepteert drie vormen:
+
+- `--release 10` — zet de machine vast op een numerieke stable-release.
+- `--release cauldron` — zet vast op de bewegende ontwikkelingsboom. Het
+  effectieve numeriek (gebruikt voor `.mgaN`-releasetags en het
+  `%mgaversion`-macro binnen build-containers) wordt best-effort
+  gepeild uit de `media.cfg` van de mirror op het moment van init.
+  Offline of bij mislukte peiling blijft het ongedefinieerd en vallen
+  consumenten terug op `/etc/mageia-release`.
+- `--release cauldron:11` — cauldron met een expliciete numerieke
+  target. Wint van de peiling, werkt offline en overheerst de mirror
+  wanneer diens `media.cfg` achterloopt tijdens een flip-venster.
 
 > **Achterwaartse compatibiliteit:** `urpm mkimage` blijft behouden als alias voor `urpm image make`.
 
@@ -1072,7 +1139,44 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --keep-container              # Container behouden na build (voor debugging)
 --subrel <tag>                # Injecteert %subrel TAG, zodat de uitvoer-RPMs NAAM-VERSIE-RELEASE.TAG.DIST.ARCH.rpm worden
 --rpmmacros <file>            # Injecteert FILE als /root/.rpmmacros in de build-container (combineerbaar met --subrel)
+--build-cpus N                # Beperkt het parallellisme van de build tot N threads
+                              # (rpmbuild %_smp_mflags = -jN + podman --cpus).
+                              # Standaard: max(1, nproc - 2), zodat de host twee kernen
+                              # vrij houdt voor interactief werk.
+--build-memory SIZE           # RAM-plafond voor de container (bv. 8G, 12000M, 16GB).
+                              # Doorgegeven aan podman --memory. Standaard: max(2G, MemTotal - 2G).
+--full-throttle               # Snelkoppeling: geen CPU-plafond, geen geheugen-plafond.
+                              # Overschrijft --build-cpus en --build-memory.
+--strict-memory               # Bindt --memory-swap aan --build-memory (podman doodt het proces
+                              # bij het bereiken van het RAM-plafond). Standaard: swap onbeperkt,
+                              # afgestemd op mock/systemd-nspawn. Gebruik dit in CI waar stil
+                              # swappen onmogelijk van een hang te onderscheiden zou zijn.
+--with FEATURE                # Geeft `--with FEATURE` door aan rpmbuild (%bcond in de spec). Herhaalbaar.
+--without FEATURE             # Geeft `--without FEATURE` door aan rpmbuild (%bcond in de spec). Herhaalbaar.
 ```
+
+#### Resourcelimieten en pariteit met mock
+
+Het trio `--build-cpus` / `--build-memory` / `--strict-memory` is de
+belangrijkste hefboom om zware specs (firefox, thunderbird, chromium) te
+bouwen op machines die geen 32+ GB reserve-RAM hebben. De standaarden
+laten twee CPU's en twee GB RAM aan de host zodat die bruikbaar blijft,
+en vooral **swap is standaard onbeperkt** — de container mag koude
+pagina's naar de host-swap wegschrijven zoals mocks systemd-nspawn-wrapper
+doet. Zonder dat loopt firefox' rustc tegen `SIGKILL` aan ruim voor de
+werkelijke RAM-grens op < 16 GB-hosts. `--strict-memory` bindt
+`--memory-swap` weer aan voor CI, waar stil swappen niet van een hang te
+onderscheiden zou zijn.
+
+#### rpmbuild-bcond doorgeven
+
+`--with FEATURE` en `--without FEATURE` worden woordelijk aan rpmbuild
+doorgegeven zodat specs met `%bcond_with` / `%bcond_without` gewisseld
+kunnen worden zonder rpmbuild rechtstreeks aan te roepen. Voorbeeld: een
+firefox-spec met `%bcond_without unified_build` (unified translation
+units standaard aan) kan zonder deze gebouwd worden voor een
+geheugen-beperkte test via
+`urpm build --without unified_build ./SPECS/firefox.spec`.
 
 ### Workspace-layout
 
