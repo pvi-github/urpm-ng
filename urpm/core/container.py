@@ -605,7 +605,8 @@ class Container:
 
         return True
 
-    def commit(self, container_id: str, tag: str, squash: bool = False) -> bool:
+    def commit(self, container_id: str, tag: str,
+               squash: bool = False, tmpdir: str = None) -> bool:
         """Commit a container's changes as a new image.
 
         Args:
@@ -619,6 +620,13 @@ class Container:
                 image metadata (entrypoint, labels), so we stay with
                 ``--squash`` here.  Ignored on docker (``docker commit``
                 has no equivalent).
+            tmpdir: Directory podman should use as ``TMPDIR`` while
+                staging the commit's blob layers.  When ``None``,
+                podman falls through to the system default (``/tmp``),
+                which overflows small tmpfs mounts on commits that copy
+                multi-hundred-MB layers.  Symmetric with
+                :meth:`import_from_dir`, which has always accepted this
+                knob.
 
         Returns:
             True if successful
@@ -627,7 +635,10 @@ class Container:
         if squash and self.runtime.name == 'podman':
             cmd.append('--squash')
         cmd += [container_id, tag]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        env = os.environ.copy()
+        if tmpdir:
+            env['TMPDIR'] = tmpdir
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if result.returncode != 0:
             logger.error(f"Commit failed: {result.stderr.strip()}")
         return result.returncode == 0

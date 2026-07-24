@@ -277,8 +277,120 @@ def cmd_show(args, db: 'PackageDatabase') -> int:
         from .. import display
         display.print_package_list(pkg['obsoletes'], max_lines=5, color_func=colors.dim)
 
+    if getattr(args, 'files', False):
+        _show_package_files(pkg, db, colors)
+
+    if getattr(args, 'changelog', False):
+        _show_package_changelog(pkg, colors)
+
     print()
     return 0
+
+
+def _show_package_files(pkg: dict, db: 'PackageDatabase', colors) -> None:
+    """Emit the file list of a package under a ``Files (N):`` header.
+
+    Two sources depending on the package's installation state:
+
+    * Installed — ``rpm -ql <name>`` reads the local rpmdb.  Fastest,
+      always accurate, no network.
+    * Available — parses the media's ``files.xml.lzma`` and picks the
+      entry whose ``fn`` attribute matches the package's NEVRA.  Falls
+      through with a note when the file isn't on disk (media not
+      synced) or the NEVRA doesn't turn up (metadata drift).
+    """
+    import subprocess
+
+    name = pkg['name']
+
+    # Installed path — the rpmdb is the source of truth for filenames.
+    if pkg.get('installed'):
+        result = subprocess.run(
+            ['rpm', '-ql', name],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            files = [line for line in result.stdout.splitlines() if line]
+            _emit_file_section(files, colors)
+            return
+        # Fall through to media lookup on rpm error (shouldn't happen
+        # for a package flagged installed, but be defensive).
+
+    # Available path — read files.xml.lzma from the media's cache dir.
+    media_id = pkg.get('media_id')
+    if not media_id:
+        print("\n" + colors.dim(_("Files: not available (no media context)")))
+        return
+    media = db.get_media_by_id(media_id)
+    if not media:
+        print("\n" + colors.dim(_("Files: not available (media missing)")))
+        return
+
+    from ...core.config import get_base_dir, get_media_local_path
+    base_dir = get_base_dir()
+    cache_dir = get_media_local_path(media, base_dir)
+    files_xml = cache_dir / 'media_info' / 'files.xml.lzma'
+    if not files_xml.exists():
+        print("\n" + colors.dim(_(
+            "Files: not available (media '{name}' not synced — run "
+            "'urpm media update {name}')").format(name=media['name'])))
+        return
+
+    # Build the target NEVRA the same way media.cfg / synthesis do:
+    # ``name-[epoch:]version-release.arch``.  Epoch is omitted when 0
+    # (Mageia convention), matching the ``fn`` attribute the scanner
+    # emits.
+    epoch = pkg.get('epoch') or 0
+    evr = (f"{epoch}:{pkg['version']}-{pkg['release']}" if epoch
+           else f"{pkg['version']}-{pkg['release']}")
+    target_nevra = f"{name}-{evr}.{pkg['arch']}"
+
+    from ...core.files_xml import parse_files_xml
+    for nevra, files in parse_files_xml(files_xml):
+        if nevra == target_nevra:
+            _emit_file_section(files, colors)
+            return
+    print("\n" + colors.dim(_(
+        "Files: NEVRA '{nevra}' not found in '{name}'.files.xml.lzma "
+        "(metadata drift; try 'urpm media update {name}')").format(
+        nevra=target_nevra, name=media['name'])))
+
+
+def _emit_file_section(files: list, colors) -> None:
+    """Common ``Files (N):`` header + line-per-file body."""
+    n = len(files)
+    print("\n" + colors.bold(_("Files ({count}):").format(count=n)))
+    for f in files:
+        print(f"  {f}")
+
+
+def _show_package_changelog(pkg: dict, colors) -> None:
+    """Emit the changelog for an installed package.
+
+    ``rpm -q --changelog <name>`` is the only cheap source; available
+    packages would require downloading and unpacking the RPM header.
+    We stop at the installed case for now and print a hint for the
+    available case.
+    """
+    import subprocess
+
+    if not pkg.get('installed'):
+        print("\n" + colors.dim(_(
+            "Changelog: available only for installed packages (would "
+            "need to fetch the RPM header otherwise).")))
+        return
+
+    result = subprocess.run(
+        ['rpm', '-q', '--changelog', pkg['name']],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print("\n" + colors.dim(_("Changelog: rpm query failed")))
+        return
+
+    print("\n" + colors.bold(_("Changelog:")))
+    for line in result.stdout.splitlines():
+        print(f"  {line}")
 
 
 # Media commands moved to urpm/cli/commands/media.py

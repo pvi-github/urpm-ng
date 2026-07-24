@@ -88,6 +88,7 @@ def install_urpm_ng_core(
     host_db: Optional["PackageDatabase"] = None,
     source: str = SOURCE_AUTO,
     explicit_rpm: Optional[str] = None,
+    allow_disttag_mismatch: bool = False,
     log: callable = print,
 ) -> int:
     """Install ``urpm-ng-core`` into a fresh chroot at ``chroot_dir``.
@@ -124,7 +125,15 @@ def install_urpm_ng_core(
         host_db = PackageDatabase()
 
     # Signal detection.
-    local_rpm = _detect_local_match(arch, mageia_release)
+    # ``system-numeric`` was set by ``cmd_init`` (either from an
+    # explicit ``cauldron:N`` or a media.cfg probe).  Falling back to
+    # the raw release covers the numeric-target case where identity
+    # and numeric coincide.
+    target_numeric = (chroot_db.get_config('system-numeric')
+                      or (mageia_release if mageia_release.isdigit()
+                          else None))
+    local_rpm = _detect_local_match(
+        arch, mageia_release, target_numeric, allow_disttag_mismatch)
     chroot_media_version = _chroot_media_version(chroot_db)
     host_media = _detect_host_source(host_db, mageia_release, arch)
     non_interactive = not sys.stdin.isatty()
@@ -173,6 +182,7 @@ def ensure_urpm_ng_in_container(
     *,
     source: str = SOURCE_AUTO,
     explicit_rpm: Optional[str] = None,
+    allow_disttag_mismatch: bool = False,
     log: callable = print,
 ) -> int:
     """Install / upgrade urpm-ng-core inside a running image container.
@@ -209,7 +219,17 @@ def ensure_urpm_ng_in_container(
         from .database import PackageDatabase
         host_db = PackageDatabase()
 
-    local_rpm = _detect_local_match(arch, release)
+    # The image's ``/etc/mageia-release`` was seeded by mkimage phase
+    # 1 with the target numeric, so ``release`` here is already the
+    # numeric (``'11'`` for a cauldron image, not ``'cauldron'``).
+    # That means the plain N-only branch of _accepted_disttags fires
+    # and rejects RPMs built on a mga{N-1} host.  Ask urpm inside the
+    # container for its ``mageia-version`` config to recover the
+    # symbolic identity when there is one.
+    identity = _container_identity(container, cid) or release
+    target_numeric = release if release.isdigit() else None
+    local_rpm = _detect_local_match(
+        arch, identity, target_numeric, allow_disttag_mismatch)
     image_media_version = _container_media_version(container, cid)
     installed_version = _container_installed_version(container, cid)
     host_media = _detect_host_source(host_db, release, arch)
@@ -336,18 +356,57 @@ def _check_source(source: str) -> None:
 #  Signal detection -- side-agnostic
 # ══════════════════════════════════════════════════════════════════════
 
+def _accepted_disttags(
+    mageia_release: str,
+    target_numeric: Optional[str],
+    allow_disttag_mismatch: bool,
+) -> Optional[set]:
+    """Compute the set of disttag substrings a local RPM name may
+    carry to be considered a match for this target.
+
+    * ``allow_disttag_mismatch=True`` — packager assumed responsibility;
+      returns ``None``, callers treat that as "accept any ``.mga…``".
+    * Numeric release (``10``, ``11``, …) — accepts only ``.mgaN.``;
+      an RPM built for a different N is almost always the wrong file
+      to inject into an image tree.
+    * Cauldron — accepts ``.mgaN.`` for cauldron's current numeric
+      *and* ``.mga{N-1}.`` for the previous stable.  Rationale: the
+      packager typically rebuilds ``urpm-ng`` on their current stable
+      host (``mga{N-1}``) to test its behaviour in a cauldron image
+      (``mga{N}``).  urpm-ng-core is noarch pure Python, so the disttag
+      is cosmetic; letting the stable RPM in unblocks that workflow
+      without opening the door to arbitrary crossings.  When
+      ``target_numeric`` is unknown we fall back to accepting any
+      ``.mga…`` and note it in the caller so the choice is visible.
+    """
+    if allow_disttag_mismatch:
+        return None
+    if mageia_release == 'cauldron':
+        if target_numeric and target_numeric.isdigit():
+            n = int(target_numeric)
+            return {f".mga{n}.", f".mga{n - 1}."}
+        # Unknown numeric — behave as if the packager passed
+        # ``--allow-disttag-mismatch`` but let the caller print a
+        # note (this branch is uncommon: cauldron init failed to
+        # probe media.cfg AND no explicit ``cauldron:N`` was passed).
+        return None
+    return {f".mga{mageia_release}."}
+
+
 def _detect_local_match(
     arch: str,
     mageia_release: str,
+    target_numeric: Optional[str] = None,
+    allow_disttag_mismatch: bool = False,
 ) -> Optional[Path]:
     """Return the fresh urpm-ng-core RPM matching VERSION+RELEASE+arch+disttag.
 
     Looks first at ``$URPM_NG_SOURCE_DIR``, then walks up from CWD to
     find a checkout that carries ``VERSION``, ``RELEASE`` and
     ``rpmbuild/SPECS/urpm-ng.spec``.  Returns the RPM matching the
-    checkout's current NVR + the target arch + the target Mageia
-    release disttag (``.mgaN.``).  Returns None if any of those
-    doesn't line up.
+    checkout's current NVR + the target arch + an acceptable disttag
+    (see :func:`_accepted_disttags`).  Returns ``None`` if any of
+    those doesn't line up.
     """
     candidates: list[Path] = []
     env_src = os.environ.get("URPM_NG_SOURCE_DIR")
@@ -363,7 +422,8 @@ def _detect_local_match(
             candidates.append(p)
             break
 
-    disttag = f".mga{mageia_release}."
+    accepted = _accepted_disttags(
+        mageia_release, target_numeric, allow_disttag_mismatch)
     for src in candidates:
         try:
             version = (src / "VERSION").read_text().strip()
@@ -376,7 +436,8 @@ def _detect_local_match(
             ):
                 if "-debuginfo-" in rpm.name or "-debugsource-" in rpm.name:
                     continue
-                if disttag not in rpm.name:
+                if accepted is not None and not any(
+                        tag in rpm.name for tag in accepted):
                     continue
                 return rpm
     return None
@@ -518,6 +579,23 @@ def _container_mageia_release(container: "Container", cid: str) -> Optional[str]
     if len(parts) >= 3 and parts[0] == "Mageia" and parts[1] == "release":
         return parts[2]
     return None
+
+
+def _container_identity(container: "Container", cid: str) -> Optional[str]:
+    """Read ``config.mageia-version`` from inside a container's urpm DB.
+
+    Returns the symbolic release identity (``'cauldron'``) when the
+    image was built from a cauldron chroot, ``'10'`` / ``'11'`` when
+    it was built from a numeric release, ``None`` when the container
+    doesn't have urpm-ng installed yet or the query fails.
+    """
+    result = container.exec(
+        cid, ["urpm", "config", "get", "mageia-version"],
+    )
+    if result.returncode != 0:
+        return None
+    text = (result.stdout or "").strip()
+    return text or None
 
 
 def _container_arch(container: "Container", cid: str) -> Optional[str]:

@@ -177,6 +177,49 @@ class ServerMixin:
         """, (server_id, media_id, int(time.time())))
         self.conn.commit()
 
+    def link_official_mesh(self) -> int:
+        """Ensure every official server is linked to every official media.
+
+        Mageia's mirror convention is that any mirror carrying
+        ``/distrib/<release>/<arch>/media/`` also carries the full set
+        of sub-media at the same relative paths.  Discovery, however,
+        walks each server's catalogue one at a time and only creates
+        the ``server_media`` rows for media that server's catalogue
+        actively advertised.  A catalogue timeout, a partial mirror
+        that dropped one sub-tree, or a race with a syncing mirror all
+        leave holes in the mesh — and any package sitting in an
+        under-linked media falls back to whatever narrow subset of
+        servers *did* advertise it.  In the field this shows up as
+        "All servers failed" on a single hard 404 from one clone of a
+        CDN even though other perfectly good mirrors were configured.
+
+        Filling the mesh restores the assumption the download failover
+        already implicitly relies on.  Custom media (user-added
+        third-party repos, private mirrors) and their servers keep
+        their explicit link topology — the mesh only pairs
+        ``is_official=1`` rows on both sides.
+
+        Returns:
+            Number of link rows newly inserted.  ``0`` when the mesh
+            was already complete.
+        """
+        added_at = int(time.time())
+        cursor = self.conn.execute("""
+            INSERT OR IGNORE INTO server_media (server_id, media_id, added_timestamp)
+            SELECT s.id, m.id, ?
+            FROM server s
+            CROSS JOIN media m
+            WHERE s.is_official = 1
+              AND m.is_official = 1
+              AND NOT EXISTS (
+                  SELECT 1 FROM server_media sm
+                  WHERE sm.server_id = s.id AND sm.media_id = m.id
+              )
+        """, (added_at,))
+        added = cursor.rowcount or 0
+        self.conn.commit()
+        return added
+
     def unlink_server_media(self, server_id: int, media_id: int):
         """Remove a link between a server and a media."""
         self.conn.execute(

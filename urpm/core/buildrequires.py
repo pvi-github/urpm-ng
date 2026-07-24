@@ -79,67 +79,66 @@ def list_specs_in_workdir(workdir: Path = None) -> List[Path]:
 
 
 def parse_buildrequires_from_spec(spec_path: Path) -> List[str]:
-    """Parse BuildRequires from a .spec file.
+    """Return the build requirements of a spec file as rpmbuild sees them.
 
-    Parses the spec file directly to extract BuildRequires lines.
+    Delegated to ``rpmspec -q --buildrequires`` because that is the
+    only implementation that honours ``%if`` / ``%{?flag:…}`` /
+    ``%{expand:…}`` and macro-time comments the way rpmbuild will at
+    build time.  The regex-based scanner this function used to run
+    silently pulled every literal ``BuildRequires:`` line regardless
+    of the surrounding conditional block, dragging packages the spec
+    author had explicitly guarded away (typical case: a
+    ``BuildRequires: selinux-policy-devel`` inside ``%if 0`` on a
+    machine where selinux was intentionally opted out).
 
     Args:
         spec_path: Path to the .spec file.
 
     Returns:
-        List of build requirements with version constraints (e.g., "pkg >= 1.0").
+        List of build requirements with version constraints already
+        rendered by rpmspec (e.g. ``"perl(Foo) >= 1.0"``).  Duplicates
+        preserved-order deduped in case the spec lists the same BR
+        twice.  Empty list is a valid result — a spec with no
+        BuildRequires, or one whose BRs all live inside falsy
+        conditionals.
 
     Raises:
         FileNotFoundError: If spec file doesn't exist.
+        RuntimeError: If ``rpmspec`` is not installed on the host or
+            fails to parse the spec.  The caller should surface this
+            to the user with a hint to install ``rpm-build`` — a
+            regex fallback would silently regress to the pre-fix
+            behaviour, so we don't offer one.
     """
-    import re
-
     spec_path = Path(spec_path)
     if not spec_path.exists():
         raise FileNotFoundError(f"Spec file not found: {spec_path}")
 
-    requirements = []
+    try:
+        result = subprocess.run(
+            ["rpmspec", "-q", "--buildrequires", str(spec_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "rpmspec not found — install the 'rpm-build' package "
+            "so BuildRequires can be parsed with macros and %if "
+            "evaluated the way rpmbuild will at build time."
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"rpmspec timed out parsing {spec_path.name}"
+        ) from e
 
-    # Regex to parse a single dependency with optional version constraint
-    # Matches: name, name >= version, name(arch) >= version, etc.
-    dep_pattern = re.compile(
-        r'^([a-zA-Z0-9_+.-]+(?:\([^)]+\))?)'  # Package name (with optional arch like (x86-64))
-        r'(?:\s*(>=|<=|>|<|=)\s*([^\s,#]+))?'  # Optional: operator and version
-    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"rpmspec -q --buildrequires {spec_path.name} failed: "
+            f"{result.stderr.strip() or 'unknown error'}"
+        )
 
-    with open(spec_path, 'r', encoding='utf-8', errors='replace') as f:
-        for line in f:
-            line = line.strip()
-            # Match BuildRequires: (case insensitive)
-            if line.lower().startswith('buildrequires:'):
-                # Extract the part after BuildRequires:
-                deps_part = line.split(':', 1)[1].strip()
-                # Remove comments
-                if '#' in deps_part:
-                    deps_part = deps_part.split('#')[0].strip()
-
-                # Split by comma for multiple deps on one line
-                for dep_str in re.split(r'\s*,\s*', deps_part):
-                    dep_str = dep_str.strip()
-                    if not dep_str:
-                        continue
-                    # Skip macros we can't resolve
-                    if dep_str.startswith('%'):
-                        continue
-
-                    # Parse the dependency
-                    match = dep_pattern.match(dep_str)
-                    if match:
-                        name, op, version = match.groups()
-                        if op and version:
-                            # Normalize operator (= -> ==)
-                            if op == '=':
-                                op = '=='
-                            requirements.append(f"{name} {op} {version}")
-                        else:
-                            requirements.append(name)
-
-    return list(dict.fromkeys(requirements))  # Remove duplicates, preserve order
+    requirements = [line.strip() for line in result.stdout.splitlines()
+                    if line.strip()]
+    return list(dict.fromkeys(requirements))
 
 
 def rpm_dep_to_solver_format(dep: str) -> str:

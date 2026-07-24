@@ -91,7 +91,7 @@ from .commands.mirror import (
     cmd_mirror_clean, cmd_mirror_sync, cmd_mirror_ratelimit,
 )
 from .commands.media import (
-    cmd_media_list, cmd_init, cmd_media_add, cmd_media_remove,
+    cmd_media_list, cmd_init, cmd_distro_switch, cmd_media_add, cmd_media_remove,
     cmd_media_enable, cmd_media_disable, cmd_media_update,
     cmd_media_import, cmd_media_set, cmd_media_seed_info,
     cmd_media_link, cmd_media_autoconfig, cmd_media_discover,
@@ -719,6 +719,14 @@ Examples:
                'overriding --urpm-ng-source and every waterfall rule.'),
     )
     image_make.add_argument(
+        '--allow-disttag-mismatch',
+        action='store_true',
+        help=_('With --urpm-ng-source=local, accept a local RPM whose '
+               'disttag doesn\'t match the target release/cauldron\'s '
+               'N-1 window.  Use when you know what you\'re doing '
+               '(cross-release Python noarch, etc.).'),
+    )
+    image_make.add_argument(
         '--exclude', '-x',
         action='append',
         default=[],
@@ -770,6 +778,13 @@ Examples:
         metavar='RPM_PATH',
         help=_('Install urpm-ng-core from this specific RPM file, '
                'overriding --urpm-ng-source and every waterfall rule.'),
+    )
+    image_update.add_argument(
+        '--allow-disttag-mismatch',
+        action='store_true',
+        help=_('With --urpm-ng-source=local, accept a local RPM whose '
+               'disttag doesn\'t match the image\'s release/cauldron '
+               'N-1 window.'),
     )
 
     # image list / l / ls
@@ -1123,6 +1138,31 @@ Examples:
     erase_parser.add_argument(
         '--sync', action='store_true', default=False,
         help=_('Wait for full completion including post-install triggers')
+    )
+
+    # =========================================================================
+    # distro-switch — change the machine's release identity
+    # =========================================================================
+    distro_switch_parser = subparsers.add_parser(
+        'distro-switch',
+        help=_('Change the machine\'s release identity (cauldron ↔ N)'),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_('''Change this machine's release-level identity.
+
+The machine has a single identity at a time (``cauldron`` or a numeric
+like ``10`` / ``11``) that pins which media the resolver considers.
+Switching is a deliberate act — a dist-upgrade in filigree — so it
+lives in its own verb rather than in ``urpm config``.
+
+Examples:
+  urpm distro-switch cauldron
+  urpm distro-switch 11
+  urpm distro-switch cauldron:12
+'''),
+    )
+    distro_switch_parser.add_argument(
+        'target',
+        help=_('New identity: <cauldron|N|cauldron:N>'),
     )
 
     # =========================================================================
@@ -2745,6 +2785,8 @@ def main(argv=None) -> int:
         elif args.command in ('list', 'l'):
             return cmd_list(args, db)
 
+        elif args.command == 'distro-switch':
+            return cmd_distro_switch(args, db)
         elif args.command in ('search', 's', 'query', 'q'):
             return cmd_search(args, db)
 

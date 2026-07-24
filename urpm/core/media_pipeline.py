@@ -240,16 +240,32 @@ def _resolve_version(
     hint: Optional[dict],
     url: str,
 ) -> str:
-    """Resolve mageia_version following the manifest > catalogue >
-    hint > URL > /etc/mageia-release cascade.
+    """Resolve the release-level identity of a media row.
 
-    The first non-placeholder value wins.  Returns ``''`` only when
-    every source is exhausted; the caller then raises
-    :class:`MediaTreeAttributeError`.
+    ``mageia_version`` on the ``media`` table is the release-directory
+    identity (``'cauldron'`` or a numeric like ``'10'``, ``'11'``, …)
+    that anchors filtering in :meth:`_get_accepted_versions`.  It must
+    match the ``mageia-version`` config pin so a machine set to
+    ``cauldron`` sees its cauldron media and only those.
+
+    URL wins because it carries this identity unambiguously — the
+    ``/distrib/<release>/`` segment is what Mageia's infra actually
+    uses to partition the archive.  ``media.cfg`` is authored by the
+    server side to describe the *target* numeric of cauldron (e.g.
+    ``version=11`` while cauldron is baking mga11), which is a
+    different concept than tree identity; consuming it here silently
+    reprints cauldron media as ``'11'`` and breaks the filter.  We
+    consume it separately as ``system-numeric`` at config time (see
+    :func:`cmd_init`).
+
+    The catalogue path stays as a fallback for URLs that don't carry
+    the release segment (custom media, mirror shims, in-house repos).
     """
-    # 1. Manifest (per-media) — not yet probed unless mode='deep',
-    #    deferred for now.
-    # 2. Catalogue
+    # 1. URL — authoritative for Mageia's standard mirror layout.
+    via_url = _extract_version_from_url(url)
+    if not _is_placeholder(via_url):
+        return via_url
+    # 2. Catalogue (media.cfg) — fallback for non-standard URLs.
     if media is not None and not _is_placeholder(media.version):
         return media.version
     if info is not None and not _is_placeholder(info.version):
@@ -257,11 +273,7 @@ def _resolve_version(
     # 3. Hint
     if hint and not _is_placeholder(hint.get("version")):
         return hint["version"]
-    # 4. URL regex
-    via_url = _extract_version_from_url(url)
-    if not _is_placeholder(via_url):
-        return via_url
-    # 5. System fallback
+    # 4. System fallback
     return _system_version_fallback()
 
 

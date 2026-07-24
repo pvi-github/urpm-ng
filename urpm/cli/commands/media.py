@@ -30,6 +30,196 @@ from ..helpers.media import (
 from ..helpers.package import resolve_target_arch, system_arch
 
 
+def _parse_release_arg(release_arg: str) -> tuple:
+    """Split a ``--release`` argument into (identity, explicit_numeric).
+
+    Three syntaxes:
+
+    * ``'10'`` (or any digit sequence) — a numeric stable release.
+      Identity and numeric are the same value.
+    * ``'cauldron'`` — the moving development tree.  Identity is
+      ``'cauldron'``; the numeric is left ``None`` so the caller
+      triggers a ``media.cfg`` probe (or falls back).
+    * ``'cauldron:11'`` — cauldron with an explicit numeric target.
+      Identity is ``'cauldron'``; the numeric is what the user
+      declared, no probe needed.  Useful offline and as an override
+      when the ``media.cfg`` on the mirror lies (typical during a
+      flip window where infra hasn't caught up).
+
+    Returns:
+        A tuple ``(identity, numeric_or_None)``.
+    """
+    if not release_arg:
+        return (None, None)
+    if ':' in release_arg:
+        identity, numeric = release_arg.split(':', 1)
+        return (identity.strip().lower() or None,
+                numeric.strip() or None)
+    return (release_arg.strip().lower(), None)
+
+
+def _probe_cauldron_numeric(base_url: str, timeout: int = 5) -> str:
+    """Fetch cauldron's top-level ``media.cfg`` and return the
+    ``[media_info].version=`` value.
+
+    Best-effort: any failure (network, HTTP error, missing key,
+    malformed content) returns ``""`` so the caller can degrade
+    gracefully rather than blocking a bootstrap that would otherwise
+    run fine offline once the numeric has been cached elsewhere.
+
+    Args:
+        base_url: URL of the cauldron ``<arch>/media/`` root that
+            hosts ``media_info/media.cfg``.  Usually derived from the
+            first mirror picked at init time.
+        timeout: Per-connection timeout (seconds).
+
+    Returns:
+        The numeric string (``"11"``) on success, ``""`` on any
+        failure — never raises.
+    """
+    try:
+        from ...core.media_cfg import fetch_media_cfg, parse_media_cfg
+        raw = fetch_media_cfg(base_url, timeout=timeout)
+        info, _medias = parse_media_cfg(raw, base_url)
+        if info and info.version and info.version.isdigit():
+            return info.version
+    except Exception:
+        # Offline, DNS lookup, HTTP 5xx, malformed cfg — all fine to
+        # swallow: the numeric is optional metadata, we fall back to
+        # explicit ``cauldron:N`` or ``/etc/mageia-release`` at read
+        # time.  The caller warns; we don't want to spam here.
+        pass
+    return ""
+
+
+def cmd_distro_switch(args, db: 'PackageDatabase') -> int:
+    """Change the machine's release-level identity.
+
+    A machine has a single identity at a time — ``cauldron`` or a
+    numeric like ``10`` / ``11`` — that pins which media the resolver
+    considers.  Switching is a deliberate act (dist-upgrade in
+    filigree), so it lives in a dedicated verb rather than hidden
+    behind a bare ``urpm config set``.
+
+    Accepts the same syntaxes as ``--release``:
+    ``11``, ``cauldron``, ``cauldron:11``.
+
+    Preflight checks:
+      * At least one enabled media must already carry the new
+        identity — otherwise the switch would leave the machine with
+        an empty candidate pool.  Diagnostic points at
+        ``urpm media autoconfig`` when the check fails.
+      * Media of the OLD identity that stay enabled are called out so
+        the user knows they will silently drop out of the resolver's
+        view until re-aligned or disabled.
+
+    Then persists the new ``mageia-version`` (and best-effort refresh
+    of ``system-numeric``) in ``config``.
+    """
+    from .. import colors
+
+    target_arg = getattr(args, 'target', None)
+    identity, explicit_numeric = _parse_release_arg(target_arg)
+    if not identity:
+        print(colors.error(_(
+            "Missing target — pass 'urpm distro-switch <cauldron|N|cauldron:N>'")))
+        return 1
+
+    current = db.get_config('mageia-version') or ''
+
+    # No-op / numeric-only refresh path.
+    if current == identity:
+        if identity == 'cauldron' and explicit_numeric and explicit_numeric.isdigit():
+            db.set_config('system-numeric', explicit_numeric)
+            print(_(
+                "Already on {id}; refreshed system-numeric to {n}").format(
+                id=identity, n=explicit_numeric))
+            return 0
+        print(_("Already on {id} — nothing to do").format(id=identity))
+        return 0
+
+    print(_("Switching release identity: {old} → {new}").format(
+        old=current or _("(unset)"), new=identity))
+
+    # Verify the target has candidate media.
+    media_list = db.list_media()
+    fresh = [m for m in media_list
+             if m.get('enabled') and m.get('mageia_version') == identity]
+    stale = [m for m in media_list
+             if m.get('enabled') and m.get('mageia_version')
+             and m.get('mageia_version') != identity]
+
+    if not fresh:
+        print(colors.error(_(
+            "No enabled media carry identity {id}.  Add them first:").format(
+            id=identity)))
+        print(colors.dim(f"    urpm media autoconfig -r {identity}"))
+        print(colors.dim(_(
+            "  Then re-run: urpm distro-switch {arg}").format(
+            arg=target_arg)))
+        return 2
+
+    if stale:
+        print(colors.warning(_(
+            "{n} enabled media stay tagged {old} and will drop out of "
+            "resolver's view:").format(n=len(stale), old=current or '?')))
+        for m in stale[:10]:
+            print(f"    - {m['name']} ({m.get('mageia_version', '?')})")
+        if len(stale) > 10:
+            print(colors.dim(
+                _("    ... and {n} more").format(n=len(stale) - 10)))
+        print(colors.dim(_(
+            "  Disable them (`urpm media disable NAME`) or rerun `urpm "
+            "media autoconfig` for the new identity if you want them "
+            "aligned.")))
+
+    # Apply the switch.
+    db.set_config('mageia-version', identity)
+
+    # Refresh system-numeric on best-effort basis.  Priority: explicit
+    # override > identity itself when numeric > probe from an enabled
+    # fresh media's first server.  Falls through silently offline.
+    numeric = ''
+    if explicit_numeric and explicit_numeric.isdigit():
+        numeric = explicit_numeric
+    elif identity.isdigit():
+        numeric = identity
+    elif identity == 'cauldron':
+        # Walk one fresh media → its first enabled server → media.cfg
+        # at ``<srv>/<identity>/<arch>/media``.
+        from ...core.config import build_server_url
+        arch = resolve_target_arch(args) if hasattr(args, 'arch') else None
+        for m in fresh:
+            servers = db.get_servers_for_media(m['id'], enabled_only=True)
+            if not servers:
+                continue
+            srv_arch = arch or m.get('architecture') or 'x86_64'
+            base_url = (build_server_url(servers[0]).rstrip('/')
+                        + f"/{identity}/{srv_arch}/media")
+            probed = _probe_cauldron_numeric(base_url)
+            if probed:
+                numeric = probed
+                print(_(
+                    "Target numeric: {n} (probed from {url})").format(
+                    n=numeric, url=base_url))
+                break
+
+    if numeric:
+        db.set_config('system-numeric', numeric)
+    elif identity == 'cauldron':
+        # Keep prior numeric if any; warn if we have nothing.
+        if not db.get_config('system-numeric'):
+            print(colors.warning(_(
+                "Could not determine cauldron's numeric — pass "
+                "'cauldron:N' when online to set it explicitly.")))
+
+    print(colors.success(_("Switched to {id}").format(id=identity)))
+    print(colors.dim(_(
+        "  Next: run 'urpm media update' to sync metadata for the "
+        "new identity.")))
+    return 0
+
+
 def cmd_media_list(args, db: 'PackageDatabase') -> int:
     """Handle media list command."""
     from .. import colors
@@ -113,53 +303,91 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     import re
 
     mirrorlist_url = args.mirrorlist
-    version = getattr(args, 'release', None)
+    release_arg = getattr(args, 'release', None)
+    # Parse `--release cauldron:11` into identity + explicit numeric.
+    identity, explicit_numeric = _parse_release_arg(release_arg)
     arch = resolve_target_arch(args)
 
-    # If no mirrorlist but --release provided, auto-construct URL
+    # If no mirrorlist but --release provided, auto-construct URL.
+    # Only the identity segment matters for the mirrorlist URL —
+    # `cauldron:11` still hits `mageia.cauldron.<arch>.list`.
     if not mirrorlist_url:
-        if version:
-            mirrorlist_url = f"https://mirrors.mageia.org/api/mageia.{version}.{arch}.list"
+        if identity:
+            mirrorlist_url = f"https://mirrors.mageia.org/api/mageia.{identity}.{arch}.list"
             print(_("Using mirrorlist: {url}").format(url=mirrorlist_url))
         else:
             print(colors.error(_("Either --mirrorlist or --release is required")))
             print(colors.dim(_("Examples:")))
             print(colors.dim(_("  urpm init --release 10")))
+            print(colors.dim(_("  urpm init --release cauldron")))
+            print(colors.dim(_("  urpm init --release cauldron:11  (explicit numeric)")))
             print(colors.dim(_("  urpm init --mirrorlist 'https://mirrors.mageia.org/api/mageia.10.x86_64.list'")))
             return 1
-    elif not version or not arch:
-        # Try to extract version and arch from mirrorlist URL if not provided
+    elif not identity or not arch:
+        # Try to extract identity and arch from mirrorlist URL if not provided.
         # URL format: https://mirrors.mageia.org/api/mageia.10.x86_64.list
         match = re.search(r'mageia\.([^.]+)\.([^.]+)\.list', mirrorlist_url)
         if match:
-            if not version:
-                version = match.group(1)
+            if not identity:
+                identity = match.group(1).lower()
             if not arch:
                 arch = match.group(2)
 
     # Fallback to system version if still not determined
-    if not version:
+    if not identity:
         try:
             with open('/etc/os-release') as f:
                 for line in f:
                     if line.startswith('VERSION_ID='):
-                        version = line.strip().split('=')[1].strip('"')
+                        identity = line.strip().split('=')[1].strip('"').lower()
                         break
         except (IOError, OSError):
             pass
 
-    if not version:
+    if not identity:
         print(colors.error(_("Cannot determine Mageia version")))
         print(colors.dim(_("Use --release to specify (e.g., --release 10 or --release cauldron)")))
         return 1
 
-    # Persist the target Mageia version in the DB config.  Without this
-    # marker, every ``get_package`` query falls back to reading the
-    # host's ``/etc/os-release`` (via ``get_system_version()``) to
-    # decide which media to include -- which breaks cross-version
-    # chroots (mga9 init on a mga10 host).  ``_get_accepted_versions``
-    # reads this key before the host fallback.
-    db.set_config('mageia-version', version)
+    # Persist the release-level identity in the DB config.  This is
+    # the ``cauldron`` | ``10`` | ``11`` | … string that anchors
+    # media filtering in ``_get_accepted_versions``.  Without it,
+    # queries fall back to the host's ``/etc/os-release``, which
+    # breaks cross-version chroots (mga9 init on a mga10 host).
+    db.set_config('mageia-version', identity)
+
+    # Retained for callers below that still read ``version`` — the
+    # variable used to double as both identity and numeric before
+    # the split.  Keeping the alias avoids a broader rename here.
+    version = identity
+
+    # Determine the target's effective numeric — the value used to
+    # render ``.mgaN`` release tags, seed ``/etc/mageia-release`` in
+    # generated images, and expose ``%mgaversion`` inside build
+    # containers.  Three sources, in priority order:
+    #
+    #   1. Explicit user syntax ``--release cauldron:N``.  Wins over
+    #      everything so the packager can work offline and override
+    #      infra during a flip window.
+    #   2. Identity itself when numeric (``--release 10`` implies
+    #      numeric = 10).
+    #   3. Best-effort probe of the top-level ``media.cfg`` on the
+    #      first mirror we pick.  Only fires for bare ``cauldron``;
+    #      deferred to after mirror discovery so we have a URL to
+    #      probe.  Any failure is swallowed so offline inits still
+    #      succeed.
+    #
+    # ``system-numeric`` may stay unset if none of the three yields
+    # a value.  Consumers (rpmbuild, mkimage seed) then fall back to
+    # ``/etc/mageia-release`` inside the chroot / container.
+    numeric: str = ''
+    if explicit_numeric and explicit_numeric.isdigit():
+        numeric = explicit_numeric
+        print(_("Target numeric version: {n} (explicit)").format(n=numeric))
+    elif identity.isdigit():
+        numeric = identity
+    if numeric:
+        db.set_config('system-numeric', numeric)
 
     urpm_root = getattr(args, 'urpm_root', None)
     if urpm_root:
@@ -413,6 +641,31 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         print(colors.error(_("No servers could be added")))
         return 1
 
+    # Best-effort cauldron numeric probe — only fires when the user
+    # said ``--release cauldron`` without ``:N`` and neither the
+    # identity itself nor the explicit override yielded a numeric.
+    # We hit the ``media_info/media.cfg`` sitting at the first
+    # mirror's cauldron root; it reliably carries the ``version=N``
+    # Mageia infra advertises for the next release.
+    if not numeric and identity == 'cauldron':
+        # ``build_server_url`` isn't imported at this scope yet —
+        # pulled in locally so the probe stays self-contained.
+        from ...core.config import build_server_url as _build_srv_url
+        base_url = _build_srv_url(servers_added[0]).rstrip('/') + \
+                   f"/{identity}/{arch}/media"
+        probed = _probe_cauldron_numeric(base_url)
+        if probed:
+            numeric = probed
+            db.set_config('system-numeric', numeric)
+            print(_("Target numeric version: {n} (probed from {url})").format(
+                n=numeric, url=base_url))
+        else:
+            print(colors.warning(_(
+                "Could not probe cauldron numeric — build/mkimage will "
+                "fall back to /etc/mageia-release at read time.  Re-run "
+                "with '--release cauldron:N' or 'urpm distro-switch cauldron' "
+                "when online to set it explicitly.")))
+
     # Discover and add media from each mirror's real catalogue.
     #
     # ``upsert_media_tree`` fetches ``<server>/<version>/<arch>/media_info/media.cfg``,
@@ -465,6 +718,21 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
     print(colors.success(_(
         "\nInitialized with {servers} server(s) and {media} media"
     ).format(servers=len(servers_added), media=len(media_added))))
+
+    # Fill the server↔media mesh for the official topology.  Discovery
+    # only linked (server, media) pairs whose catalogue-lookup succeeded
+    # at that specific server, which leaves holes whenever a mirror's
+    # catalogue timed out or dropped a sub-tree.  Downloads then get
+    # stranded on the narrow subset of servers that *did* advertise the
+    # affected media — a single hard 404 from that subset kills the
+    # transaction even though other mirrors would have served the file
+    # fine.  Filling the mesh restores the assumption that any official
+    # mirror carries the full Mageia tree at the same relative path.
+    mesh_added = db.link_official_mesh()
+    if mesh_added:
+        print(colors.dim(_(
+            "  Mesh-linked {n} extra server↔media pairs.").format(
+            n=mesh_added)))
 
     # Two paths depending on the media's ``enabled`` bit:
     #  - ENABLED media get a full sync (metadata download).  Success or

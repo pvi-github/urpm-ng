@@ -278,6 +278,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         container, minimal_tag, tag, addmedia, import_key,
         phase2_packages, buildrequires_src,
         exclude_packages=exclude_packages,
+        workdir=getattr(args, 'workdir', None),
     )
 
 
@@ -290,6 +291,7 @@ def _phase2_container_promote(
     extra_packages: list,
     buildrequires_src: str | None,
     exclude_packages: list | None = None,
+    workdir: str | None = None,
 ) -> int:
     """Promote a minimal bootstrap image into a full build image.
 
@@ -435,7 +437,7 @@ def _phase2_container_promote(
         container.exec(cid, ['sh', '-c', 'kill 1 2>/dev/null || true'])
 
         print(_("  Committing image {tag}...").format(tag=final_tag), end='', flush=True)
-        if not container.commit(cid, final_tag):
+        if not container.commit(cid, final_tag, tmpdir=workdir):
             print()
             print(colors.error(_("Failed to commit image")))
             return 1
@@ -662,6 +664,39 @@ def _phase1_bootstrap_chroot(
             print(colors.error(_("Failed to seed /etc via setup")))
             return 1
 
+        # Pin ``/etc/mageia-release`` to the target's numeric.
+        #
+        # The ``setup`` package ships this file baked at its own build
+        # time, which during a flip window can lag behind the release
+        # cauldron is *actually* aiming at (setup is often re-bumped
+        # last).  We overwrite it with the value ``cmd_init`` stashed
+        # in ``config.system-numeric`` so:
+        #
+        #   * rpmbuild inside the resulting image resolves
+        #     ``%mgaversion`` and ``%dist`` from the intended numeric
+        #     (mga11) rather than setup's stale one (mga10 during the
+        #     transition).
+        #   * urpm inside the image sees a coherent identity when it
+        #     falls back to ``get_system_version()``.
+        #
+        # If ``system-numeric`` isn't set (offline init, bare
+        # ``--release cauldron`` that couldn't probe), we leave the
+        # file exactly as setup shipped it — the fallback still works,
+        # just less accurately during the flip.
+        # ``system-numeric`` was written by ``cmd_init`` on the chroot
+        # DB just above — use *that* one, not the host's outer ``db``.
+        target_numeric = chroot_db.get_config('system-numeric') or ''
+        if target_numeric:
+            release_line = f"Mageia release {target_numeric} (Official) for {arch}\n"
+            mageia_release = Path(tmpdir) / 'etc' / 'mageia-release'
+            try:
+                mageia_release.write_text(release_line, encoding='utf-8')
+                print(colors.dim(_(
+                    "  Pinned /etc/mageia-release → {n}").format(n=target_numeric)))
+            except OSError as e:
+                print(colors.warning(_(
+                    "  Could not rewrite /etc/mageia-release: {e}").format(e=e)))
+
         if _install(['filesystem'], 'filesystem') != 0:
             print(colors.error(_("Failed to install filesystem")))
             return 1
@@ -697,6 +732,7 @@ def _phase1_bootstrap_chroot(
             host_db=db,
             source=getattr(args, 'urpm_ng_source', 'auto'),
             explicit_rpm=getattr(args, 'urpm_ng_core', None),
+            allow_disttag_mismatch=getattr(args, 'allow_disttag_mismatch', False),
             log=print,
         ) != 0:
             print(colors.error(_("Failed to install urpm-ng-core")))
@@ -1574,14 +1610,29 @@ def _diagnose_unsatisfied_buildrequires(
 def _extract_buildrequires(path: str) -> list[str] | None:
     """Extract BuildRequires package names from a .spec or .src.rpm file.
 
-    Uses ``rpmspec --parse`` for .spec files and ``rpm -qp --requires``
-    for .src.rpm files, then strips version constraints to return bare
-    package names.
+    Delegates the actual parsing to
+    :func:`urpm.core.buildrequires.parse_buildrequires_from_spec`
+    (which uses ``rpmspec -q --buildrequires``) for .spec files, and
+    :func:`urpm.core.buildrequires.parse_buildrequires_from_srpm`
+    (which uses ``rpm -qp --requires``) for .src.rpm files.  Both
+    honour ``%if`` / ``%{?flag:…}`` / macros the way rpmbuild does at
+    build time — a previous per\-file regex implementation here
+    silently pulled every literal ``BuildRequires:`` regardless of
+    the surrounding conditional block.
+
+    Post-processes the rpmspec output to what install callers expect:
+    strip version constraints, drop rpmlib(...) meta-provides, keep
+    pkgconfig(...) wrappers verbatim, deduplicate preserving order.
 
     Returns:
-        List of package names, or None on failure.
+        List of package names, or None on failure (unreachable file,
+        rpmspec absent, etc.).
     """
     import re
+    from ...core.buildrequires import (
+        parse_buildrequires_from_spec,
+        parse_buildrequires_from_srpm,
+    )
 
     src = Path(path)
     if not src.exists():
@@ -1589,54 +1640,28 @@ def _extract_buildrequires(path: str) -> list[str] | None:
 
     try:
         if src.suffix == '.spec':
-            # Parse spec to expand macros, then grep BuildRequires
-            result = subprocess.run(
-                ['rpmspec', '--parse', str(src)],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode != 0:
-                return None
-            # Extract BuildRequires lines
-            br_re = re.compile(r'^BuildRequires:\s*(.+)', re.IGNORECASE)
-            raw_deps = []
-            for line in result.stdout.splitlines():
-                m = br_re.match(line.strip())
-                if m:
-                    raw_deps.append(m.group(1))
-
+            raw_deps = parse_buildrequires_from_spec(src)
         elif '.src.rpm' in src.name or src.name.endswith('.src.rpm'):
-            # Query SRPM for build requirements
-            result = subprocess.run(
-                ['rpm', '-qp', '--requires', str(src)],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode != 0:
-                return None
-            raw_deps = result.stdout.strip().splitlines()
-
+            raw_deps = parse_buildrequires_from_srpm(src)
         else:
             return None
-
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (RuntimeError, FileNotFoundError, subprocess.CalledProcessError):
         return None
 
-    # Parse: strip version constraints (>=, <=, =, >, <) and pkgconfig()
-    # "python3-devel >= 3.10" → "python3-devel"
-    # "pkgconfig(libsolv)" → "pkgconfig(libsolv)" (keep as-is, rpm resolves it)
+    # Post-process: strip version constraints, drop rpmlib(...) noise,
+    # keep pkgconfig(...) wrappers (rpm resolves them on its own),
+    # dedupe preserving order.
     packages = []
     ver_re = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
     for raw in raw_deps:
-        # BuildRequires can list multiple deps separated by commas
         for dep in raw.split(','):
             dep = dep.strip()
             if not dep or dep.startswith('#'):
                 continue
-            # Strip version constraint
             dep = ver_re.sub('', dep).strip()
-            if dep and dep != 'rpmlib(CompressedFileNames)':
+            if dep and not dep.startswith('rpmlib('):
                 packages.append(dep)
 
-    # Deduplicate
     return list(dict.fromkeys(packages))
 
 
@@ -1769,6 +1794,7 @@ def cmd_image_update(args, db: 'PackageDatabase') -> int:
             host_db=db,
             source=getattr(args, 'urpm_ng_source', 'auto'),
             explicit_rpm=getattr(args, 'urpm_ng_core', None),
+            allow_disttag_mismatch=getattr(args, 'allow_disttag_mismatch', False),
             log=print,
         )
 
@@ -1823,7 +1849,8 @@ def cmd_image_update(args, db: 'PackageDatabase') -> int:
         # the on-disk footprint (was: 4 layers -> 1.6 GB on a 550 MB
         # rootfs; now: 1 layer, same as ``du -sh /`` inside).
         print(_("  Committing (squashed)..."), end='', flush=True)
-        if not container.commit(cid, tag, squash=True):
+        if not container.commit(cid, tag, squash=True,
+                                tmpdir=getattr(args, 'workdir', None)):
             print()
             print(colors.error(_("Failed to commit image")))
             return 1
