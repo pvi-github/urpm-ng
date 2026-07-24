@@ -45,3 +45,13 @@ packages:
   # it lands in official Mageia repos)
   - rootcerts
   - curl
+  # openssl on mga9 doesn't declare Requires: crypto-policies, so the
+  # /etc/crypto-policies/back-ends/opensslcnf.config file it references
+  # isn't there and every openssl invocation aborts at startup with
+  # "FATAL: Startup failure ... calling stat(.../opensslcnf.config)".
+  # mga10 doesn't have the bug because something upstream of us tugs
+  # crypto-policies in (probably a fixed openssl.spec).  Pull both
+  # packages explicitly so the image is robust across mga versions
+  # regardless of the upstream Requires hygiene.
+  - crypto-policies
+  - crypto-policies-scripts
