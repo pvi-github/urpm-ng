@@ -15,6 +15,28 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.8.6] — 2026-08-01
+
+Bugfix release.  Restores `urpm build` on specs that declare no
+BuildRequires — a legitimate case for trivial noarch packages —
+that had been failing since the recent BuildRequires parser
+refactor with an unhelpful `Aborted.` message.  `urpm install
+--buildrequires` and `urpm download --buildrequires` now
+short-circuit cleanly with a clear informational message on an
+empty BR list.
+
+### Bug Fixes
+
+- **`urpm build` on specs without BuildRequires no longer aborts.**
+  Internal `urpm install --buildrequires <spec>` now returns
+  cleanly with "Spec has no BuildRequires — nothing to install."
+  and exit 0 when the parser returns an empty list, instead of
+  falling through to the generic install path that would print
+  `Aborted.` (empty resolved-packages list) and exit 1.  Symmetric
+  fix applied to `urpm download --buildrequires`.
+
+---
+
 ## [0.8.5] — 2026-07-24
 
 Cauldron release.  urpm-ng gains a proper release-identity model
