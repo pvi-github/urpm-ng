@@ -203,6 +203,10 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             print(colors.info(_("Build dependencies from: {source}").format(source=source)))
             print("  " + _("Found {count} BuildRequires").format(count=len(reqs)))
 
+            if not reqs:
+                print(colors.info(_("Spec has no BuildRequires — nothing to install.")))
+                return 0
+
             # Replace packages list with build requirements (convert to solver format)
             args.packages = [rpm_dep_to_solver_format(req) for req in reqs]
 
@@ -1058,6 +1062,11 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
             reqs, source = get_buildrequires(target)
             print(colors.info(_("Build dependencies from: {source}").format(source=source)))
             print("  " + _("Found {count} BuildRequires").format(count=len(reqs)))
+
+            if not reqs and not packages:
+                print(colors.info(_("Spec has no BuildRequires — nothing to download.")))
+                return 0
+
             # Convert to solver format and add to packages
             packages.extend(rpm_dep_to_solver_format(req) for req in reqs)
 
