@@ -15,6 +15,35 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.8.7] — 2026-08-02
+
+Bugfix release.  Fixes malformed URL construction when the mirrorlist
+API returns freeze-era paths (e.g. `.../distrib/cauldron/x86_64/` for
+`--release 11`), which had `urpm mkimage --release 11` 404-ing on
+every mirror because the reconstructed discover URL doubled the arch
+segment.
+
+### Bug Fixes
+
+- **`urpm mkimage --release 11` no longer builds a malformed URL.**
+  During a freeze the mirrorlist API returns URLs pointing to
+  `.../distrib/cauldron/x86_64/` for `--release 11`.  The previous
+  code appended `/{release}/{arch}/media/` on top of the mirror's own
+  path, producing `.../distrib/cauldron/x86_64/11/x86_64/media/` and
+  failing every reachability check.  The mirror-side URL segment is
+  now detected at server-add time (regardless of whether it matches
+  the target identity) and persisted per server; URL reconstruction
+  uses that segment and falls back to the release identity for legacy
+  rows.
+
+### Packaging & Distribution
+
+- **Schema migration v31 → v32.**  Adds `server.url_version` (nullable
+  TEXT).  Fully backward-compatible: existing rows keep working via a
+  fallback to the release identity when the column is NULL.
+
+---
+
 ## [0.8.6] — 2026-08-01
 
 Bugfix release.  Restores `urpm build` on specs that declare no
