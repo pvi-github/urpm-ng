@@ -687,11 +687,16 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
 
     for server in servers_added:
         srv_url = build_server_url(server)
-        # The real Mageia catalogue lives at ``<srv>/<version>/<arch>/media/``
+        # The real Mageia catalogue lives at ``<srv>/<url_segment>/<arch>/media/``
         # (with the trailing ``/media/`` — the manifest ``media.cfg`` sits
         # in ``media/media_info/media.cfg``).  Dropping that segment probes
-        # the wrong path and every mirror 404s.
-        catalogue_url = f"{srv_url.rstrip('/')}/{version}/{arch}/media/"
+        # the wrong path and every mirror 404s.  The URL segment is the
+        # mirror-specific ``url_version`` when known (e.g. ``cauldron``
+        # for a mirror asked for release ``11`` during freeze); we fall
+        # back to the release identity for pre-v32 rows and custom
+        # servers with no detected Mageia layout.
+        url_segment = server.get('url_version') or version
+        catalogue_url = f"{srv_url.rstrip('/')}/{url_segment}/{arch}/media/"
         try:
             result = upsert_media_tree(db, catalogue_url, mode='reconcile')
         except MediaTreeError as exc:

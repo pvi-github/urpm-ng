@@ -473,7 +473,7 @@ def _detect_host_source(
         return None
 
     # The URL that ``cmd_media_discover`` needs is the *discovery
-    # point* (``<mirror>/<release>/<arch>/media/media_info/media.cfg``),
+    # point* (``<mirror>/<url_segment>/<arch>/media/media_info/media.cfg``),
     # not the sub-repo the host happens to have configured.  Mageia
     # layouts pack the sub-repo tail after ``media/`` (e.g.
     # ``10/x86_64/media/urpm/release``); a naive reconstruction that
@@ -483,9 +483,16 @@ def _detect_host_source(
     # ``.../media/media_info/media.cfg``.  Rebuild from scratch using
     # the target release + arch; the host's own ``relative_path``
     # sub-repo suffix is irrelevant here.
+    #
+    # The URL segment is the mirror-specific ``url_version`` when
+    # known (e.g. ``cauldron`` when the mirror was configured for a
+    # release that is still baking in cauldron).  Fallback to
+    # ``target_release`` handles pre-v32 rows and custom servers
+    # with no detected Mageia layout.
+    url_segment = srv.get("url_version") or target_release
     media = dict(media)
     media["discover_url"] = (
-        f"{protocol}://{host}{base_path}/{target_release}/{target_arch}/media/"
+        f"{protocol}://{host}{base_path}/{url_segment}/{target_arch}/media/"
     )
     return media
 

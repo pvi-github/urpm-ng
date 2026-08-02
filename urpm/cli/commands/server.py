@@ -622,6 +622,14 @@ def autoconfig_servers(
         count=len(mirrors)))
 
     # ── Dedup and build candidate list ────────────────────────────────
+    # The mirror's URL tail is authoritative: during a freeze the API
+    # asked ``version=11`` returns URLs pointing to ``.../cauldron/x86_64/``,
+    # so we detect the tail dynamically rather than string-strip a
+    # suffix derived from the caller's identity.  The detected version
+    # segment is preserved as ``url_version`` and persisted on the
+    # server row so URL reconstruction stays truthful across a freeze.
+    from ...core.media_pipeline import split_release_arch_tail
+
     suffix = f"/{version}/{arch}"
     mirrors = dedup_mirrors(mirrors, strip_suffix=suffix)
     total_mirrors = len(mirrors)
@@ -633,15 +641,13 @@ def autoconfig_servers(
             continue
         seen_hosts.add(m.host)
 
-        base_path = m.base_path
-        if base_path.endswith(suffix):
-            base_path = base_path[: -len(suffix)]
-        base_path = base_path.rstrip("/")
+        base_path, url_version = split_release_arch_tail(m.base_path, arch)
 
         candidates.append({
             "scheme": m.scheme,
             "host": m.host,
             "base_path": base_path,
+            "url_version": url_version,
             "full_url": m.url.rstrip("/") + "/media/core/release/",
             "country": m.country or None,
         })
@@ -696,6 +702,7 @@ def autoconfig_servers(
                 "protocol": c['scheme'],
                 "host": c['host'],
                 "base_path": c['base_path'],
+                "url_version": c.get('url_version'),
                 "country": c.get('country'),
                 "latency_ms": latency,
             }
@@ -719,6 +726,7 @@ def autoconfig_servers(
             server_id = db.add_server(
                 shortname, candidate['scheme'], candidate['host'],
                 candidate['base_path'], country=candidate.get('country'),
+                url_version=candidate.get('url_version'),
             )
             # Persist latency + seed bandwidth with the average of existing
             # servers so the download planner gives new mirrors a fair share
@@ -734,6 +742,7 @@ def autoconfig_servers(
                 "protocol": candidate['scheme'],
                 "host": candidate['host'],
                 "base_path": candidate['base_path'],
+                "url_version": candidate.get('url_version'),
                 "country": candidate.get('country'),
                 "latency_ms": latency,
             })

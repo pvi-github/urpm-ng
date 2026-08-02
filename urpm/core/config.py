@@ -288,22 +288,36 @@ def build_server_url(server: dict) -> str:
 def build_media_url(server: dict, media: dict) -> str:
     """Build full URL/path to access a media on a server.
 
+    ``media['relative_path']`` is stored as ``<identity>/<arch>/media/…``
+    where ``<identity>`` is the release identity urpm-ng tracks
+    (``10``, ``11``, ``cauldron``…).  When the mirror serves that
+    identity under a different URL segment (typically ``cauldron``
+    for a mirror configured for release ``11`` during freeze), the
+    server row carries the mirror-specific ``url_version`` and we
+    substitute it into the URL.  Pre-v32 rows and custom servers
+    with no detected Mageia layout leave ``url_version`` NULL —
+    the relative_path is then used as-is, matching the historical
+    behaviour.
+
     Args:
-        server: Server dict with 'protocol', 'host', 'base_path'
-        media: Media dict with 'relative_path'
+        server: Server dict with 'protocol', 'host', 'base_path',
+            'url_version'.
+        media: Media dict with 'relative_path'.
 
     Returns:
-        Full URL or local path to the media
+        Full URL or local path to the media.
     """
     base_url = build_server_url(server)
     relative_path = media['relative_path'].strip('/')
 
-    if server['protocol'] == 'file':
-        # Local filesystem path
-        return f"{base_url}/{relative_path}"
-    else:
-        # Remote URL
-        return f"{base_url}/{relative_path}"
+    url_version = server.get('url_version')
+    if url_version:
+        segments = relative_path.split('/', 1)
+        if segments and segments[0] != url_version:
+            tail = segments[1] if len(segments) > 1 else ''
+            relative_path = f"{url_version}/{tail}" if tail else url_version
+
+    return f"{base_url}/{relative_path}"
 
 
 def is_local_server(server: dict) -> bool:

@@ -486,3 +486,123 @@ def parse_pre_loaded(raw):
     """
     from urpm.core.media_cfg import parse_media_cfg
     return parse_media_cfg(raw, "9/x86_64/media")
+
+
+class TestSplitReleaseArchTail:
+    """The helper that detects ``.../<version>/<arch>`` at the tail
+    of a mirror URL path and returns ``(server_root, url_version)``.
+
+    Regression coverage for the ``urpm mkimage --release 11`` bug:
+    during a freeze the mirrorlist API returns URLs like
+    ``.../distrib/cauldron/x86_64/`` even for release ``11``, and
+    the old naive suffix-strip left the tail in place so downstream
+    URL reconstruction doubled the arch.
+    """
+
+    def test_numeric_release_tail_is_stripped(self):
+        from urpm.core.media_pipeline import split_release_arch_tail
+        root, ver = split_release_arch_tail("/distrib/10/x86_64", "x86_64")
+        assert root == "/distrib"
+        assert ver == "10"
+
+    def test_cauldron_release_tail_is_stripped(self):
+        """The freeze case: mirror URL exposes the release under
+        ``cauldron`` even when we asked for a numeric release."""
+        from urpm.core.media_pipeline import split_release_arch_tail
+        root, ver = split_release_arch_tail(
+            "/distrib/cauldron/x86_64", "x86_64",
+        )
+        assert root == "/distrib"
+        assert ver == "cauldron"
+
+    def test_trailing_slash_tolerated(self):
+        from urpm.core.media_pipeline import split_release_arch_tail
+        root, ver = split_release_arch_tail("/distrib/10/x86_64/", "x86_64")
+        assert root == "/distrib"
+        assert ver == "10"
+
+    def test_arch_mismatch_leaves_path_intact(self):
+        """URL tail arch doesn't match target arch → no strip,
+        no url_version.  Caller falls back to release identity."""
+        from urpm.core.media_pipeline import split_release_arch_tail
+        root, ver = split_release_arch_tail(
+            "/distrib/10/i586", "x86_64",
+        )
+        assert root == "/distrib/10/i586"
+        assert ver is None
+
+    def test_custom_layout_no_version_returns_intact(self):
+        """A third-party repo that doesn't follow the Mageia layout
+        yields ``(path, None)`` — reconstruction stays untouched."""
+        from urpm.core.media_pipeline import split_release_arch_tail
+        root, ver = split_release_arch_tail(
+            "/repo/myrepo/x86_64", "x86_64",
+        )
+        # 'myrepo' doesn't match ``\\d+`` or ``cauldron`` → not a
+        # Mageia version segment; leave the path as-is.
+        assert root == "/repo/myrepo/x86_64"
+        assert ver is None
+
+    def test_deep_nested_base_path(self):
+        """Real-world case: mirrors expose Mageia under nested paths
+        like ``/pub/linux/Mageia/distrib/10/x86_64``."""
+        from urpm.core.media_pipeline import split_release_arch_tail
+        root, ver = split_release_arch_tail(
+            "/pub/linux/Mageia/distrib/10/x86_64", "x86_64",
+        )
+        assert root == "/pub/linux/Mageia/distrib"
+        assert ver == "10"
+
+    def test_bare_arch_at_root_returns_intact(self):
+        """A path that's only the arch without any prefix → no
+        recognisable Mageia pair, leave as-is."""
+        from urpm.core.media_pipeline import split_release_arch_tail
+        root, ver = split_release_arch_tail("/x86_64", "x86_64")
+        assert root == "/x86_64"
+        assert ver is None
+
+
+class TestBuildMediaUrlUrlVersion:
+    """``build_media_url`` substitutes the mirror-specific URL segment
+    when the server row carries a ``url_version`` that differs from
+    the media's stored identity.  Covers the freeze case where a
+    release ``11`` media lives on a mirror that exposes it under
+    ``cauldron``."""
+
+    def _srv(self, **overrides):
+        base = {
+            "protocol": "https", "host": "mirror.example.org",
+            "base_path": "/distrib", "url_version": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_no_url_version_preserves_relative_path(self):
+        """Pre-v32 row: url_version NULL → relative_path used as-is."""
+        from urpm.core.config import build_media_url
+        srv = self._srv()
+        media = {"relative_path": "10/x86_64/media/core/release"}
+        assert build_media_url(srv, media) == (
+            "https://mirror.example.org/distrib/10/x86_64/media/core/release"
+        )
+
+    def test_matching_url_version_is_a_noop(self):
+        """url_version equals the first segment → no substitution."""
+        from urpm.core.config import build_media_url
+        srv = self._srv(url_version="10")
+        media = {"relative_path": "10/x86_64/media/core/release"}
+        assert build_media_url(srv, media) == (
+            "https://mirror.example.org/distrib/10/x86_64/media/core/release"
+        )
+
+    def test_freeze_case_substitutes_cauldron_for_identity(self):
+        """The bug this whole migration fixes: media stored under
+        identity ``11`` served by a mirror that uses ``cauldron`` →
+        URL must use ``cauldron`` in place of ``11``."""
+        from urpm.core.config import build_media_url
+        srv = self._srv(url_version="cauldron")
+        media = {"relative_path": "11/x86_64/media/core/release"}
+        assert build_media_url(srv, media) == (
+            "https://mirror.example.org/distrib/cauldron/x86_64/"
+            "media/core/release"
+        )

@@ -29,7 +29,8 @@ class ServerMixin:
 
     def add_server(self, name: str, protocol: str, host: str, base_path: str = '',
                    is_official: bool = True, enabled: bool = True,
-                   priority: int = 50, country: Optional[str] = None) -> int:
+                   priority: int = 50, country: Optional[str] = None,
+                   url_version: Optional[str] = None) -> int:
         """Add a new server.
 
         Args:
@@ -42,16 +43,23 @@ class ServerMixin:
             priority: Manual priority (higher = preferred)
             country: ISO 3166 two-letter country code (e.g. 'FR'),
                 or None if unknown.
+            url_version: URL path segment this mirror uses for the
+                target release (e.g. ``'cauldron'`` when the release
+                identity is ``'11'`` during freeze).  ``None`` when
+                unknown — URL reconstruction then falls back to the
+                release identity, matching pre-v32 behaviour.
 
         Returns:
             Server ID
         """
         cursor = self.conn.execute("""
             INSERT INTO server (name, protocol, host, base_path, is_official,
-                               enabled, priority, country, added_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               enabled, priority, country, url_version,
+                               added_timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (name, protocol, host, base_path, int(is_official),
-              int(enabled), priority, country, int(time.time())))
+              int(enabled), priority, country, url_version,
+              int(time.time())))
         self.conn.commit()
         return cursor.lastrowid
 

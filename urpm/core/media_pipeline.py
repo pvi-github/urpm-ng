@@ -209,6 +209,34 @@ def _extract_version_from_url(url: str) -> str:
     return ""
 
 
+def split_release_arch_tail(path: str, arch: str) -> tuple[str, Optional[str]]:
+    """Split a URL path into ``(server_root, url_version)``.
+
+    Detects the trailing ``.../<version>/<arch>`` pair — where
+    ``<version>`` matches :data:`_VERSION_RE` (a numeric or
+    ``cauldron``) — and returns:
+
+    * ``server_root``: the path with that trailing pair removed
+      (leading slash preserved, no trailing slash).
+    * ``url_version``: the matched version segment as served by
+      this mirror.  May differ from the release identity the
+      caller is targeting — most notably during a freeze, where
+      a mirror asked for release ``11`` serves it under
+      ``cauldron``.
+
+    Returns ``(path.rstrip("/"), None)`` when the tail does not
+    end with a recognised ``<version>/<arch>`` pair (custom
+    layouts, third-party repos).  Callers must fall back to the
+    release identity in that case.
+    """
+    stripped = path.rstrip("/")
+    parts = [p for p in stripped.split("/") if p]
+    if len(parts) >= 2 and parts[-1] == arch and _VERSION_RE.fullmatch(parts[-2]):
+        server_root = "/" + "/".join(parts[:-2]) if parts[:-2] else ""
+        return server_root, parts[-2].lower()
+    return stripped, None
+
+
 def _extract_arch_from_url(url: str) -> str:
     """Pull a known architecture segment from URL path, if any."""
     parsed = urlparse(url.rstrip("/"))

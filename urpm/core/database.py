@@ -87,7 +87,7 @@ def _register_rpm_collation(conn: sqlite3.Connection) -> None:
     conn.create_collation('rpm_version_compare', _rpm_version_collation)
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -247,6 +247,10 @@ CREATE TABLE IF NOT EXISTS server (
     protocol TEXT NOT NULL DEFAULT 'https', -- 'http', 'https', 'file'
     host TEXT NOT NULL,                     -- FQDN: 'mirrors.mageia.org', 'localhost' for file
     base_path TEXT NOT NULL DEFAULT '',     -- '/mageia', '/pub/linux/Mageia', '/mirrors/mageia'
+    url_version TEXT,                       -- URL segment used by this mirror for the target release
+                                            -- (e.g. 'cauldron' when identity is '11' during freeze,
+                                            -- '10' when identity is '10').  NULL = legacy / custom;
+                                            -- reconstruction falls back to the release identity.
     is_official INTEGER DEFAULT 1,          -- 0 = custom server
     enabled INTEGER DEFAULT 1,
     priority INTEGER DEFAULT 50,            -- Manual preference (V1: only sort criteria)
@@ -863,6 +867,20 @@ MIGRATIONS = {
             scanned_at INTEGER NOT NULL,
             FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
         );
+    """),
+    31: (32, """
+        -- Migration v31 -> v32: Track the URL-side version segment
+        -- per server.  A Mageia mirror can serve release N under a
+        -- different path segment than N itself — most notably during
+        -- a freeze, when the mirrorlist API for ``--release 11``
+        -- returns URLs pointing to ``.../distrib/cauldron/x86_64/``.
+        -- Storing this segment separately from the release identity
+        -- lets URL reconstruction stay truthful ("what does the
+        -- mirror actually serve?") while on-disk paths and DB
+        -- filters keep using the stable identity ("11", "10", …).
+        -- NULL means "legacy row" — reconstruction falls back to
+        -- the identity, preserving the pre-migration behaviour.
+        ALTER TABLE server ADD COLUMN url_version TEXT;
     """),
 }
 
