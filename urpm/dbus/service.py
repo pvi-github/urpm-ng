@@ -33,6 +33,48 @@ BUS_NAME = "org.mageia.Urpm.v1"
 OBJECT_PATH = "/org/mageia/Urpm/v1"
 INTERFACE_NAME = "org.mageia.Urpm.v1"
 
+# D-Bus error names emitted by the service.  Kept as module-level
+# constants so the C shim (`pk-backend-urpm.c`) can match them via
+# `g_dbus_error_get_remote_error` + strcmp.
+ERROR_DISTUPGRADE_IN_PROGRESS = "org.mageia.Urpm.v1.Error.DistupgradeInProgress"
+ERROR_GENERIC = "org.mageia.Urpm.v1.Error"
+
+class DistupgradeInProgressError(Exception):
+    """Raised when a D-Bus write method is invoked while a distupgrade
+    is in progress or interrupted (SPEC_DISTUPGRADE §2).
+
+    The outer dispatcher maps this exception onto
+    ``ERROR_DISTUPGRADE_IN_PROGRESS`` D-Bus error so the C shim can
+    remap it to ``PK_ERROR_ENUM_CANNOT_GET_LOCK``.
+    """
+
+
+def _refuse_if_distupgrade_in_progress(db) -> None:
+    """Raise :class:`DistupgradeInProgressError` when a distupgrade
+    is in progress or paused.
+
+    Called by every D-Bus write handler as the very first action —
+    before the polkit round-trip so a distupgrade in progress does
+    not fire a spurious pkexec dialog to the user (SPEC_DISTUPGRADE
+    §2 G1 ordering rule).
+
+    ``db`` — the shared :class:`PackageDatabase` the service holds
+    (``self._db``).  A single instance across the whole process is
+    a hard rule : SQLite WAL serialises writers per file, so
+    spinning up a second connection here would fight the CLI's / the
+    daemon's / PackageKit's writers under contention.
+    """
+    from ..core.distupgrade.state import read_state
+    try:
+        state = read_state(db)
+    except Exception:  # noqa: BLE001 — do not crash a D-Bus method
+        return
+    if state is not None:
+        raise DistupgradeInProgressError(
+            "distupgrade Mageia en cours ou interrompu ; "
+            "utilisez `urpm distupgrade --resume`/`--abort`."
+        )
+
 
 class UrpmDBusService:
     """D-Bus service exposing urpm operations.
@@ -283,6 +325,7 @@ class UrpmDBusService:
         Install local RPM files.
         Requires INSTALL permission via PolicyKit.
         """
+        _refuse_if_distupgrade_in_progress(self._db)
         from ..auth.context import Permission
         self._init_core()
         import json
@@ -766,6 +809,7 @@ class UrpmDBusService:
     def handle_install_packages(self, bus, sender, package_names, options,
                                 invocation):
         """InstallPackages - async via thread."""
+        _refuse_if_distupgrade_in_progress(self._db)
         from ..auth.context import Permission
 
         self._init_core()
@@ -789,6 +833,7 @@ class UrpmDBusService:
     def handle_remove_packages(self, bus, sender, package_names, options,
                                invocation):
         """RemovePackages - async via thread."""
+        _refuse_if_distupgrade_in_progress(self._db)
         from ..auth.context import Permission
 
         self._init_core()
@@ -811,6 +856,7 @@ class UrpmDBusService:
 
     def handle_upgrade_packages(self, bus, sender, options, invocation):
         """UpgradePackages - async via thread."""
+        _refuse_if_distupgrade_in_progress(self._db)
         from ..auth.context import Permission
 
         self._init_core()
@@ -833,6 +879,7 @@ class UrpmDBusService:
 
     def handle_refresh_metadata(self, bus, sender, invocation):
         """RefreshMetadata - async via thread."""
+        _refuse_if_distupgrade_in_progress(self._db)
         from ..auth.context import Permission
 
         self._init_core()
@@ -1114,10 +1161,18 @@ class UrpmDBusService:
                     f'Unknown method: {method_name}'
                 )
 
+        except DistupgradeInProgressError as e:
+            # Distupgrade in progress — signal the specific error name
+            # so the C shim can remap to PK_ERROR_ENUM_CANNOT_GET_LOCK
+            # (SPEC_DISTUPGRADE §2 TDBUS.1/TDBUS.2).
+            invocation.return_dbus_error(
+                ERROR_DISTUPGRADE_IN_PROGRESS,
+                str(e),
+            )
         except Exception as e:
             logger.exception(f"Error handling {method_name}")
             invocation.return_dbus_error(
-                'org.mageia.Urpm.v1.Error',
+                ERROR_GENERIC,
                 str(e)
             )
 
