@@ -519,7 +519,12 @@ class AppStreamManager:
             else:
                 logger.warning(f"HTTP error fetching AppStream for {media_name}: {e}")
         except URLError as e:
-            logger.warning(f"Network error fetching AppStream for {media_name}: {e}")
+            # Demoted to debug : we fall back to generating AppStream
+            # from synthesis just below, so this is a « heads-up »
+            # not a user-actionable warning.  Typical case is a
+            # file:// media whose overlay simply has no appstream
+            # blob (FileNotFoundError wrapped in URLError).
+            logger.debug(f"Network error fetching AppStream for {media_name}: {e}")
         except lzma.LZMAError as e:
             logger.warning(f"Failed to decompress AppStream for {media_name}: {e}")
         except Exception as e:

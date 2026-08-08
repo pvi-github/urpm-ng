@@ -1930,6 +1930,144 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             skipped=skipped,
         )
 
+    def resolve_distupgrade(self, target_version: str,
+                            *, atomic: bool = False) -> Resolution:
+        """Resolve a full-system distupgrade (SPEC_DISTUPGRADE §4.2).
+
+        Args:
+            target_version: The ``mageia_version`` string of the media
+                pool the solver should draw upgrades from — typically
+                ``'10'``, ``'11'``, or ``'cauldron'``.  Threaded into
+                :meth:`_create_pool` via
+                ``_accepted_versions_override`` so target-release
+                media get loaded even while the system is still on
+                the source release (``get_system_version`` returns
+                the older value).
+            atomic: If True, atomic-solve semantics per libsolv.
+
+        Uses ``SOLVER_DISTUPGRADE | SOLVER_SOLVABLE_ALL`` for the whole
+        installed set with ``SOLVER_FLAG_DUP_ALLOW_NAMECHANGE`` so
+        obsoletes-driven replacements land.  ``DUP_ALLOW_ARCHCHANGE``
+        and ``DUP_ALLOW_VENDORCHANGE`` are deliberately left OFF — a
+        Mageia N → N+1 migration should not silently change arch or
+        vendor.
+
+        Returns a standard :class:`Resolution` (identical shape as
+        :meth:`resolve_upgrade`) so downstream primitives —
+        :meth:`PackageOperations.build_download_items`,
+        :meth:`download_packages`, :meth:`begin_transaction`,
+        :meth:`execute_install` — accept the actions unchanged.
+        """
+        debug = get_solver_debug()
+        debug.log("=== resolve_distupgrade() ===")
+
+        # Rebuild the pool from current media state.  The override on
+        # accepted_versions makes ``_create_pool`` load target-release
+        # synthesis even while the machine is still on the source
+        # release (``get_system_version`` returns the older value).
+        # Distupgrade does not accept @LocalRPMs — the target side
+        # must come from an audited catalogue, not a local file the
+        # user dropped in.
+        self._solvable_to_pkg = {}
+        self._localrpm_nevra_to_id = {}
+        self._accepted_versions_override = frozenset({target_version})
+        try:
+            self.pool = self._create_pool()
+        finally:
+            self._accepted_versions_override = None
+        debug.log_pool_stats(self.pool)
+
+        jobs = [self.pool.Job(
+            solv.Job.SOLVER_DISTUPGRADE | solv.Job.SOLVER_SOLVABLE_ALL, 0
+        )]
+
+        solver = self.pool.Solver()
+        solver.set_flag(solv.Solver.SOLVER_FLAG_DUP_ALLOW_NAMECHANGE, 1)
+        solver.set_flag(solv.Solver.SOLVER_FLAG_ALLOW_UNINSTALL, 1)
+        if not self.install_recommends:
+            solver.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)
+
+        job_origins = self._classify_jobs(
+            jobs, default_kind="implicit_upgrade",
+        )
+        problems, _skipped = self._solve(
+            solver, jobs, job_origins, atomic=atomic, debug=debug,
+        )
+        if problems:
+            debug.log_problems(problems)
+            return Resolution(
+                success=False,
+                actions=[],
+                problems=self._format_problems(problems),
+            )
+
+        trans = solver.transaction()
+        debug.log_transaction(trans)
+        if trans.isempty():
+            return Resolution(success=True, actions=[], problems=[])
+        trans.order()
+
+        actions: List[PackageAction] = []
+        install_size = 0
+        remove_size = 0
+        for s in trans.steps():
+            pkg_info = self._solvable_to_pkg.get(s.id, {})
+            step_type = trans.steptype(
+                s, solv.Transaction.SOLVER_TRANSACTION_SHOW_ACTIVE,
+            )
+            if step_type == solv.Transaction.SOLVER_TRANSACTION_IGNORE:
+                continue
+            elif step_type == solv.Transaction.SOLVER_TRANSACTION_INSTALL:
+                action = TransactionType.INSTALL
+            elif step_type == solv.Transaction.SOLVER_TRANSACTION_ERASE:
+                action = TransactionType.REMOVE
+            elif step_type == solv.Transaction.SOLVER_TRANSACTION_UPGRADE:
+                action = TransactionType.UPGRADE
+            elif step_type == solv.Transaction.SOLVER_TRANSACTION_DOWNGRADE:
+                action = TransactionType.DOWNGRADE
+            elif step_type == solv.Transaction.SOLVER_TRANSACTION_REINSTALL:
+                action = TransactionType.REINSTALL
+            else:
+                continue
+
+            size = pkg_info.get('size', 0)
+            if action in (TransactionType.INSTALL, TransactionType.UPGRADE):
+                install_size += size
+            elif action == TransactionType.REMOVE:
+                remove_size += size
+
+            from_evr = ""
+            if action in (
+                TransactionType.UPGRADE,
+                TransactionType.DOWNGRADE,
+                TransactionType.REINSTALL,
+            ):
+                old = trans.othersolvable(s)
+                if old:
+                    from_evr = old.evr
+
+            actions.append(PackageAction(
+                action=action,
+                name=s.name,
+                evr=s.evr,
+                arch=s.arch,
+                nevra=f"{s.name}-{s.evr}.{s.arch}",
+                size=size,
+                filesize=pkg_info.get('filesize', 0),
+                media_name=pkg_info.get('media_name', ''),
+                reason=InstallReason.DEPENDENCY,
+                from_evr=from_evr,
+                solvable_id=s.id,
+            ))
+
+        return Resolution(
+            success=True,
+            actions=actions,
+            problems=[],
+            install_size=install_size,
+            remove_size=remove_size,
+        )
+
     def resolve_remove(self, package_names: List[str], clean_deps: bool = True) -> Resolution:
         """Resolve packages to remove.
 

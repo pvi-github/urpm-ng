@@ -18,6 +18,40 @@
 #define URPM_OBJECT_PATH   "/org/mageia/Urpm/v1"
 #define URPM_INTERFACE     "org.mageia.Urpm.v1"
 
+/*
+ * D-Bus error name emitted by the urpm-dbus Python service when a
+ * distupgrade is in progress or interrupted.  Matches the constant
+ * `ERROR_DISTUPGRADE_IN_PROGRESS` in `urpm/dbus/service.py`.  This
+ * shim remaps the incoming error to `PK_ERROR_ENUM_CANNOT_GET_LOCK`
+ * so Discover / GNOME Software surface the right "another
+ * transaction holds the lock" UI rather than a generic error toast
+ * (SPEC_DISTUPGRADE §2 TDBUS.2).
+ */
+#define URPM_ERR_DISTUPGRADE_IN_PROGRESS \
+    "org.mageia.Urpm.v1.Error.DistupgradeInProgress"
+
+/*
+ * Extract the PackageKit error enum best matching the given GError
+ * originating from a `g_dbus_proxy_call_sync` failure.  A
+ * distupgrade-in-progress remote error maps to `CANNOT_GET_LOCK` ;
+ * anything else falls back to `TRANSACTION_ERROR`.  The message text
+ * is stripped of the remote-error prefix so the user sees just the
+ * server-side message.
+ */
+static PkErrorEnum
+urpm_pk_error_from_dbus(GError *error)
+{
+    PkErrorEnum pk_err = PK_ERROR_ENUM_TRANSACTION_ERROR;
+    gchar *remote = g_dbus_error_get_remote_error(error);
+    if (remote != NULL) {
+        if (g_strcmp0(remote, URPM_ERR_DISTUPGRADE_IN_PROGRESS) == 0)
+            pk_err = PK_ERROR_ENUM_CANNOT_GET_LOCK;
+        g_free(remote);
+    }
+    g_dbus_error_strip_remote_error(error);
+    return pk_err;
+}
+
 typedef struct {
     GDBusConnection *connection;
     GDBusProxy *proxy;
@@ -422,7 +456,7 @@ pk_backend_refresh_cache_thread(PkBackendJob *job, GVariant *params, gpointer us
     );
 
     if (result == NULL) {
-        pk_backend_job_error_code(job, PK_ERROR_ENUM_INTERNAL_ERROR,
+        pk_backend_job_error_code(job, urpm_pk_error_from_dbus(error),
                                   "Refresh failed: %s", error->message);
         g_error_free(error);
         return;
@@ -656,7 +690,7 @@ pk_backend_install_packages_thread(PkBackendJob *job, GVariant *params, gpointer
 
     if (ctx.result == NULL) {
         g_warning("pk_backend_install_packages_thread: D-Bus call failed: %s", ctx.error->message);
-        pk_backend_job_error_code(job, PK_ERROR_ENUM_INTERNAL_ERROR,
+        pk_backend_job_error_code(job, urpm_pk_error_from_dbus(ctx.error),
                                   "Install failed: %s", ctx.error->message);
         g_error_free(ctx.error);
         return;
@@ -805,7 +839,7 @@ pk_backend_remove_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
     g_ptr_array_free(names, TRUE);
 
     if (result == NULL) {
-        pk_backend_job_error_code(job, PK_ERROR_ENUM_INTERNAL_ERROR,
+        pk_backend_job_error_code(job, urpm_pk_error_from_dbus(error),
                                   "Remove failed: %s", error->message);
         g_error_free(error);
         return;
@@ -901,7 +935,7 @@ pk_backend_update_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
     );
 
     if (result == NULL) {
-        pk_backend_job_error_code(job, PK_ERROR_ENUM_INTERNAL_ERROR,
+        pk_backend_job_error_code(job, urpm_pk_error_from_dbus(error),
                                   "Upgrade failed: %s", error->message);
         g_error_free(error);
         return;
@@ -1845,7 +1879,8 @@ pk_backend_install_files_thread(PkBackendJob *job, GVariant *params, gpointer us
     );
 
     if (result == NULL) {
-        pk_backend_job_error_code(job, PK_ERROR_ENUM_TRANSACTION_ERROR,
+        pk_backend_job_error_code(job,
+                                  urpm_pk_error_from_dbus(error),
                                   "Install failed: %s", error->message);
         g_error_free(error);
         pk_backend_job_finished(job);

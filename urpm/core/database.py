@@ -9,8 +9,16 @@ import sqlite3
 import hashlib
 import threading
 import time
+import weakref
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
+
+# Weak registry of every ``PackageDatabase`` instance in the current
+# process.  Populated by ``PackageDatabase.__init__``.  Consumed by
+# fork-aware code paths (see ``transaction_queue._child_process``)
+# that must invalidate parent-inherited connections in the child
+# — SQLite forbids sharing an open connection across ``os.fork``.
+_all_forkable_dbs: "weakref.WeakSet[PackageDatabase]" = weakref.WeakSet()
 
 from .db import (
     MediaMixin, ServerMixin, ConstraintsMixin,
@@ -87,7 +95,7 @@ def _register_rpm_collation(conn: sqlite3.Connection) -> None:
     conn.create_collation('rpm_version_compare', _rpm_version_collation)
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 35
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -237,6 +245,16 @@ CREATE TABLE IF NOT EXISTS media (
     url TEXT,
     mirrorlist TEXT,
 
+    -- distupgrade Stage 1 media swap (SPEC_DISTUPGRADE §4.1)
+    -- NULL when the media is enabled normally.  Non-NULL values:
+    --   'user'                — admin disabled via `urpm media set`
+    --   'distupgrade'         — bascule Stage 1 nominale, media
+    --                            équivalent en version cible existe
+    --   'distupgrade_orphan'  — media tier sans équivalent version
+    --                            cible, désactivé Stage 1, rapport
+    --                            §4.4 le liste séparément
+    disabled_by TEXT,
+
     UNIQUE(mageia_version, architecture, short_name)
 );
 
@@ -315,6 +333,7 @@ CREATE TABLE IF NOT EXISTS history (
     user TEXT,
     return_code INTEGER,
     undone_by INTEGER,         -- transaction ID that undid this one (NULL if not undone)
+    pid_running INTEGER,       -- PID of the running transaction; NULL when status != 'running'
     FOREIGN KEY (undone_by) REFERENCES history(id)
 );
 
@@ -326,6 +345,10 @@ CREATE TABLE IF NOT EXISTS history_packages (
     action TEXT NOT NULL,      -- 'install', 'remove', 'upgrade', 'downgrade'
     reason TEXT NOT NULL,      -- 'explicit', 'dependency'
     previous_nevra TEXT,       -- for upgrade/downgrade: what was there before
+    status TEXT NOT NULL DEFAULT 'planned',  -- 'planned', 'done', 'failed', 'skipped'
+    started_at INTEGER,        -- epoch seconds, filled at rpm callback START
+    finished_at INTEGER,       -- epoch seconds, filled at rpm callback STOP/ERROR
+    error_message TEXT,        -- populated on 'failed' rows, NULL otherwise
     FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
 );
 
@@ -333,7 +356,9 @@ CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp);
 CREATE INDEX IF NOT EXISTS idx_history_status ON history(status);
 CREATE INDEX IF NOT EXISTS idx_history_pkg_name ON history_packages(pkg_name);
 
--- Scriptlet output captured during transactions
+-- Scriptlet output captured during transactions (legacy pre-v34).
+-- Kept read-only for existing rows; new writes go to history_scriptlets.
+-- Migrated on demand via `urpm cleanup --legacy-scriptlets`.
 CREATE TABLE IF NOT EXISTS history_scriptlet_output (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     history_id INTEGER NOT NULL,
@@ -342,6 +367,27 @@ CREATE TABLE IF NOT EXISTS history_scriptlet_output (
     output TEXT NOT NULL,
     FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
 );
+
+-- Scriptlet events with type + timing + exit code (v34+).
+-- Populated by rpm callbacks SCRIPT_START/STOP/ERROR (§3.C
+-- SPEC_DISTUPGRADE).  script_type follows the RPMTAG mapping
+-- verified empirically in mga10-64 (§3.C spike): 'pre' (1023),
+-- 'post' (1024), 'preun' (1025), 'postun' (1026), 'pretrans' (1151),
+-- 'posttrans' (1152), 'preuntrans' (5103), 'postuntrans' (5104),
+-- 'trigger' (1065).
+CREATE TABLE IF NOT EXISTS history_scriptlets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    history_id INTEGER NOT NULL,
+    pkg_name TEXT NOT NULL,
+    script_type TEXT NOT NULL,   -- 'pre' | 'post' | 'pretrans' | 'posttrans' | 'preun' | 'postun' | 'preuntrans' | 'postuntrans' | 'trigger'
+    status TEXT NOT NULL,        -- 'started' | 'ok' | 'failed'
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER,
+    exit_code INTEGER,
+    output TEXT,                 -- sanitized via sanitize_scriptlet_output() before insert
+    FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_hs_history ON history_scriptlets(history_id);
 
 -- Configuration
 CREATE TABLE IF NOT EXISTS config (
@@ -882,6 +928,59 @@ MIGRATIONS = {
         -- the identity, preserving the pre-migration behaviour.
         ALTER TABLE server ADD COLUMN url_version TEXT;
     """),
+    32: (33, """
+        -- Migration v32 -> v33: Per-action history + running PID.
+        -- Foundation for Phase B of SPEC_DISTUPGRADE §3.B (history
+        -- écrit per-action) and Phase D (§3.D recovery détection
+        -- des transactions orphelines via `history.pid_running`
+        -- confronté à _pid_alive()).
+        --
+        -- history_packages gains lifecycle columns so each planned
+        -- action is written before rpm's callback fires (`planned`),
+        -- flipped to `done` / `failed` / `skipped` on completion,
+        -- with started_at / finished_at epoch timestamps and an
+        -- optional error_message on failure rows.  Consumers:
+        -- `urpm history --details` and `urpm recover` (§3.D).
+        --
+        -- history.pid_running lets `check_orphaned_transactions()`
+        -- (§3.D `urpm/core/recovery.py`) detect crashes: a row in
+        -- status='running' with a dead PID is orphaned.  NULL on
+        -- non-running rows to preserve today's behaviour.
+        ALTER TABLE history_packages ADD COLUMN status TEXT NOT NULL DEFAULT 'planned';
+        ALTER TABLE history_packages ADD COLUMN started_at INTEGER;
+        ALTER TABLE history_packages ADD COLUMN finished_at INTEGER;
+        ALTER TABLE history_packages ADD COLUMN error_message TEXT;
+        ALTER TABLE history ADD COLUMN pid_running INTEGER;
+    """),
+    33: (34, """
+        -- Migration v33 -> v34: history_scriptlets table.
+        -- SPEC_DISTUPGRADE §3.C Phase C — scriptlets tracés avec
+        -- type / status / timing / exit_code / sanitized output.
+        -- L'ancienne history_scriptlet_output reste en lecture seule
+        -- pour les rows antérieures ; migration explicite via
+        -- `urpm cleanup --legacy-scriptlets` (§3.C).
+        CREATE TABLE IF NOT EXISTS history_scriptlets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id INTEGER NOT NULL,
+            pkg_name TEXT NOT NULL,
+            script_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            started_at INTEGER NOT NULL,
+            finished_at INTEGER,
+            exit_code INTEGER,
+            output TEXT,
+            FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_hs_history ON history_scriptlets(history_id);
+    """),
+    34: (35, """
+        -- Migration v34 -> v35: media.disabled_by.
+        -- SPEC_DISTUPGRADE §4.1 Stage 1 — bascule des media.
+        -- Enum values: 'user' | 'distupgrade' | 'distupgrade_orphan'.
+        -- NULL preserves current 'enabled' semantics pour les rows
+        -- existantes.
+        ALTER TABLE media ADD COLUMN disabled_by TEXT;
+    """),
 }
 
 
@@ -967,6 +1066,13 @@ class PackageDatabase(
         self._all_conns: list = []
         self._all_conns_lock = threading.Lock()
 
+        # Register in the module-level weak set so ``os.fork``ing
+        # code paths (see ``transaction_queue._child_process``) can
+        # invalidate every live instance post-fork without needing an
+        # explicit hand-off.  WeakSet stores weak refs internally so
+        # this doesn't extend the lifetime of ``self``.
+        _all_forkable_dbs.add(self)
+
         # Main thread connection (also stored in _local for consistency)
         self._main_thread_id = threading.get_ident()
         self.conn = self._create_connection()
@@ -974,6 +1080,37 @@ class PackageDatabase(
 
         if not self.read_only:
             self._init_schema()
+
+        # SPEC_DISTUPGRADE §3.D TD.2 : warn the operator at startup
+        # when a previous transaction died mid-flight.  Silently no-op
+        # when the DB is read-only, the schema doesn't have
+        # ``pid_running`` yet (pre-v33 DB currently being migrated),
+        # or the check itself fails — the warning is a nicety, never
+        # a reason to fail :meth:`__init__`.
+        if not self.read_only:
+            try:
+                self._warn_orphaned_transactions()
+            except Exception:
+                pass
+
+    def _warn_orphaned_transactions(self) -> None:
+        """Emit a stderr warning for each orphaned ``running`` row."""
+        import sys
+        try:
+            from .recovery import check_orphaned_transactions
+        except ImportError:
+            return
+        orphans = check_orphaned_transactions(self)
+        if not orphans:
+            return
+        for row in orphans:
+            action = row.get("action") or "?"
+            pid = row.get("pid_running")
+            print(
+                f"[urpm] transaction #{row['id']} ({action}) "
+                f"interrupted (pid={pid}). Run `urpm recover` to reconcile.",
+                file=sys.stderr,
+            )
 
     def _create_connection(self) -> sqlite3.Connection:
         """Create a new SQLite connection with proper settings.
@@ -1544,6 +1681,35 @@ class PackageDatabase(
                     aux.chmod(0o644)
             except OSError:
                 pass
+
+    def reset_after_fork(self) -> None:
+        """Discard connections inherited from a pre-fork parent.
+
+        SQLite's upstream guidance is unambiguous : « Do not carry
+        an open database connection across a fork ».  A forked child
+        that keeps its parent's connection risks WAL journal
+        corruption because both processes share the ``-shm`` memory
+        map for coordination.
+
+        This method invalidates the tracked ``_all_conns`` and clears
+        the thread-local pointer WITHOUT closing the underlying fds
+        (the parent still needs them).  A subsequent
+        :meth:`_get_connection` will open a fresh connection with a
+        brand-new WAL setup, safe from the parent's activity.
+
+        Call sites : any code that :func:`os.fork` s and expects the
+        child to use the database.  See :func:`transaction_queue.
+        _child_process` for the canonical example (SPEC_DISTUPGRADE
+        §3.B TB.3).
+        """
+        with self._all_conns_lock:
+            # Drop references without closing — the parent still owns
+            # these fds and would notice a close in the middle of its
+            # own operation.
+            self._all_conns.clear()
+        self.conn = None
+        if hasattr(self._local, "conn"):
+            self._local.conn = None
 
     def close(self):
         """Close database connection.

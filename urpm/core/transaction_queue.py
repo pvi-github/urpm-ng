@@ -187,6 +187,75 @@ def _send_desktop_notification(total: int, meta: dict = None):
         pass
 
 
+# Empirical mapping of the ``amount`` value carried by
+# ``RPMCALLBACK_SCRIPT_START/STOP/ERROR`` callbacks to a readable
+# scriptlet type.  Values verified in mga10-64 podman container
+# against rpm-4.20.1 (SPEC_DISTUPGRADE §3.C spike).  Enum is
+# ABI-stable in ``rpmtag.h`` (append-only), so the mapping holds
+# across rpm minor bumps.
+SCRIPT_TYPE_LABELS = {
+    1023: "pre",           # RPMTAG_PREIN
+    1024: "post",          # RPMTAG_POSTIN
+    1025: "preun",         # RPMTAG_PREUN
+    1026: "postun",        # RPMTAG_POSTUN
+    1151: "pretrans",      # RPMTAG_PRETRANS
+    1152: "posttrans",     # RPMTAG_POSTTRANS
+    5103: "preuntrans",    # RPMTAG_PREUNTRANS
+    5104: "postuntrans",   # RPMTAG_POSTUNTRANS
+    1065: "trigger",       # RPMTAG_TRIGGERSCRIPTS
+}
+
+
+def script_type_label(script_type: int) -> str:
+    """Map the raw RPMTAG_* int to a readable scriptlet name.
+
+    Returns ``''`` for 0 (no scriptlet) or an unknown tag — callers
+    should treat that as « unknown » and log the raw int for
+    forensics.
+    """
+    return SCRIPT_TYPE_LABELS.get(script_type, "")
+
+
+def _apply_transaction_niceness() -> None:
+    """Lower the running transaction's CPU + I/O priority.
+
+    Called by the child process right after fork so the RPM commit +
+    scriptlets don't monopolize the machine while an user is typing
+    in their desktop.  Minimal implementation (SPEC_DISTUPGRADE
+    §3.E0) — apt/dpkg-style :
+
+    - ``ionice -c3`` (Idle class) via subprocess, invoked with the
+      caller's own PID.  ``check=False`` so a missing ``ionice``
+      binary (rare on Mageia — util-linux ships it) is silently
+      tolerated, we don't want to fail the transaction over UX
+      niceness.
+    - ``os.nice(5)`` for CPU niceness — pure Python syscall, no
+      external dependency, effect immediate on the child and
+      inherited by scriptlets.
+
+    Cross-init compatible (no cgroup, no systemd), no session
+    monitor.  The complete « Phase E » with cgroup v2 slice, session
+    idle tracker and ``urpm boost`` escape hatch is planned for
+    ``SPEC_TX_RESOURCE_CONTROL`` post-v1.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("ionice"):
+        subprocess.run(
+            ["ionice", "-c3", "-p", str(os.getpid())],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    try:
+        os.nice(5)
+    except OSError:
+        # nice(5) can fail on ancient / restricted kernels — no reason
+        # to abort a legitimate transaction over that.
+        pass
+
+
 def _list_rpmnew_files(root: str = "/") -> set:
     """List all .rpmnew files in /etc under the given root.
 
@@ -332,6 +401,7 @@ class QueueProgressMessage:
     bytes_done: int = 0      # Bytes processed for current package
     bytes_total: int = 0     # Total bytes for current package
     script: str = ""         # Scriptlet phase (e.g. 'post-install')
+    script_type: int = 0     # RPMTAG_* of the current scriptlet (0 = none)
     scriptlet_output: str = ""  # Captured stdout from RPM scriptlets
     script_errors: List[str] = field(default_factory=list)  # Packages with scriptlet errors
 
@@ -352,6 +422,7 @@ class QueueProgressMessage:
             'bytes_done': self.bytes_done,
             'bytes_total': self.bytes_total,
             'script': self.script,
+            'script_type': self.script_type,
         }
         if self.scriptlet_output:
             d['scriptlet_output'] = self.scriptlet_output
@@ -378,6 +449,7 @@ class QueueProgressMessage:
             bytes_done=d.get('bytes_done', 0),
             bytes_total=d.get('bytes_total', 0),
             script=d.get('script', ''),
+            script_type=d.get('script_type', 0),
             scriptlet_output=d.get('scriptlet_output', ''),
             script_errors=d.get('script_errors', []),
         )
@@ -405,6 +477,7 @@ def _msg_to_progress(msg: QueueProgressMessage) -> TransactionProgress:
         bytes_done=msg.bytes_done,
         bytes_total=msg.bytes_total,
         script_name=msg.script,
+        script_type=msg.script_type,
         operation_id=msg.operation_id,
     )
 
@@ -1096,6 +1169,26 @@ class TransactionQueue:
         # Detach from parent's process group so we survive parent exit
         os.setsid()
 
+        # Keep the UI responsive during long transactions
+        # (SPEC_DISTUPGRADE §3.E0 minimal — apt/dpkg-style, pas de
+        # cgroup ni monitor session en v1, voir SPEC_TX_RESOURCE_CONTROL
+        # pour la version complète post-v1).
+        _apply_transaction_niceness()
+
+        # Any PackageDatabase instance the parent had open is now
+        # unusable in this child — SQLite forbids sharing a
+        # connection across fork (WAL -shm mmap coordination).  The
+        # child re-opens on demand via `PackageDatabase()` (see the
+        # site at line ~1370 for `transaction_readmes` INSERT).  The
+        # reset here defense-in-depths any inherited references
+        # (SPEC_DISTUPGRADE §3.B TB.3).
+        try:
+            from .database import _all_forkable_dbs
+            for db_inst in list(_all_forkable_dbs):
+                db_inst.reset_after_fork()
+        except ImportError:
+            pass
+
         # Redirect stdout to a temp file so RPM scriptlet output (ldconfig,
         # update-mime-database, etc.) doesn't leak to the terminal and
         # corrupt the parent's progress bar.  The captured output is sent
@@ -1765,7 +1858,41 @@ class TransactionQueue:
                 _log_background(f"Transaction preparation complete: {total} packages")
                 return
 
+            # ── UNINST_START/STOP/PROGRESS: obsolete packages removed
+            # inline during an install transaction (upgrade → old
+            # version erased after the new one lands).  Mirror the
+            # pattern from ``_execute_erase`` so the display + async
+            # progress track the removal in real time
+            # (SPEC_DISTUPGRADE §3.A TA.1).
+            if reason == rpm.RPMCALLBACK_UNINST_START:
+                erase_name = key if isinstance(key, str) else str(key)
+                current_pkg_name[0] = erase_name
+                _send_progress(name=erase_name,
+                               current=packages_done[0], total=total,
+                               phase='erase')
+                return
+
+            if reason == rpm.RPMCALLBACK_UNINST_STOP:
+                _send_progress(name=current_pkg_name[0],
+                               current=packages_done[0], total=total,
+                               phase='erase')
+                return
+
+            if reason == rpm.RPMCALLBACK_UNINST_PROGRESS:
+                _send_progress(name=current_pkg_name[0],
+                               current=packages_done[0], total=total,
+                               phase='erase',
+                               bytes_done=amount,
+                               bytes_total=total_pkg)
+                return
+
             # ── SCRIPT_START/STOP: scriptlets and file triggers ──
+            # ``amount`` carries the RPMTAG_* of the current scriptlet
+            # (empirically verified in mga10-64 : 1023=%pre, 1024=%post,
+            # 1025=%preun, 1026=%postun, 1151=%pretrans, 1152=%posttrans,
+            # 5103=%preuntrans, 5104=%postuntrans, 1065=%trigger*).
+            # Propagated to the parent via ``script_type`` so §3.C
+            # sanitizer + Phase C DB writes can label the row correctly.
             if reason == rpm.RPMCALLBACK_SCRIPT_START:
                 script_name = _clean_script_key(key)
                 # Inject marker for per-package output grouping (direct fd write,
@@ -1777,14 +1904,16 @@ class TransactionQueue:
                     pass
                 _send_progress(name=script_name,
                                current=packages_done[0], total=total,
-                               phase='script', script=script_name)
+                               phase='script', script=script_name,
+                               script_type=int(amount or 0))
                 return
 
             if reason == rpm.RPMCALLBACK_SCRIPT_STOP:
                 script_name = _clean_script_key(key)
                 _send_progress(name=script_name,
                                current=packages_done[0], total=total,
-                               phase='script_done', script=script_name)
+                               phase='script_done', script=script_name,
+                               script_type=int(amount or 0))
                 return
 
             if reason == rpm.RPMCALLBACK_SCRIPT_ERROR:
@@ -1972,6 +2101,8 @@ class TransactionQueue:
                                            phase='erase')
 
             elif reason == rpm.RPMCALLBACK_SCRIPT_START:
+                # ``amount`` = RPMTAG_* of the scriptlet, cf. install
+                # branch for the full mapping (SPEC_DISTUPGRADE §3.C).
                 script_name = _clean_script_key(key)
                 try:
                     os.write(self._capture_fd,
@@ -1986,6 +2117,7 @@ class TransactionQueue:
                     total=total,
                     phase='script',
                     script=script_name,
+                    script_type=int(amount or 0),
                 ).to_json())
                 if async_progress:
                     _update_async_progress(async_progress,
@@ -2004,6 +2136,7 @@ class TransactionQueue:
                     total=total,
                     phase='script_done',
                     script=script_name,
+                    script_type=int(amount or 0),
                 ).to_json())
                 if async_progress:
                     _update_async_progress(async_progress,

@@ -104,19 +104,32 @@ class PoolMixin:
         system_version = get_system_version(self.root)
         debug.log(f"System version: {system_version}")
 
-        # Determine which versions to accept (handles cauldron vs numeric)
-        from ..config import get_accepted_versions
-        accepted_versions, needs_choice, conflict_info = get_accepted_versions(self.db, system_version)
+        # Distupgrade override : when the caller sets
+        # ``_accepted_versions_override`` on the Resolver instance, we
+        # bypass the config-driven detection and accept exactly that
+        # set.  Needed by :meth:`Resolver.resolve_distupgrade` — the
+        # mga N+1 media are tagged ``mageia_version=N+1`` and would
+        # otherwise be filtered out when the machine's own version is
+        # still N.
+        override = getattr(self, "_accepted_versions_override", None)
+        if override is not None:
+            accepted_versions = frozenset(override)
+            debug.log(
+                f"Accepted versions (override): {accepted_versions}")
+        else:
+            # Determine which versions to accept (handles cauldron vs numeric)
+            from ..config import get_accepted_versions
+            accepted_versions, needs_choice, conflict_info = \
+                get_accepted_versions(self.db, system_version)
 
-        if needs_choice:
-            # User needs to choose between system version and cauldron
-            raise VersionConflictError(
-                f"Ambiguous media configuration: both {system_version} and cauldron media are enabled. "
-                f"Use 'urpm config version-mode <system|cauldron>' to choose.",
-                conflict_info
-            )
-
-        debug.log(f"Accepted versions: {accepted_versions}")
+            if needs_choice:
+                # User needs to choose between system version and cauldron
+                raise VersionConflictError(
+                    f"Ambiguous media configuration: both {system_version} and cauldron media are enabled. "
+                    f"Use 'urpm config version-mode <system|cauldron>' to choose.",
+                    conflict_info
+                )
+            debug.log(f"Accepted versions: {accepted_versions}")
 
         media_list = self.db.list_media()
         debug.log(f"Found {len(media_list)} media in database")

@@ -62,15 +62,10 @@ def main():
             print(ret.stderr)
             sys.exit(1)
 
-    if Path.cwd().name == "tests":
-        base_dir = Path.cwd()
-    elif Path.cwd().name == "urpm":
-        base_dir = Path.cwd() / "tests"
-    elif Path.cwd().name == "urpm-ng":
-        base_dir = Path.cwd() / "urpm/tests"
-    else:
-        print("Must be run from 'urpm/tests' directory")
-        sys.exit(0)
+    # Anchor on __file__: this script lives in urpm/tests/, so its
+    # parent IS the test data directory regardless of where the
+    # caller invoked us from (repo root, worktree, urpm/, tests/).
+    base_dir = Path(__file__).resolve().parent
 
     # Look for gendistrib executable (optional, only needed for media_info tests)
     gendistrib_cmd = ''

@@ -1044,10 +1044,12 @@ class TestSchemaV32Migration:
             "candidates_json", "scanned_at",
         ]
 
-    def test_fresh_db_bootstraps_to_v32(self, db):
+    def test_fresh_db_reaches_at_least_v32(self, db):
         from urpm.core.database import SCHEMA_VERSION
-        assert SCHEMA_VERSION == 32
-        # Bootstrap path through CREATE TABLE IF NOT EXISTS:
+        # v32 tests only assert that its own invariants are still
+        # satisfied after any later bump; the concrete SCHEMA_VERSION
+        # equality check lives in TestSchemaV{N}Migration below.
+        assert SCHEMA_VERSION >= 32
         self._expected_v32_shape(db)
 
     def test_v29_db_is_upgraded_to_v32(self, monkeypatch):
@@ -1075,6 +1077,25 @@ class TestSchemaV32Migration:
                 base_path TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE media (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT DEFAULT 'running',
+                command TEXT,
+                user TEXT,
+                return_code INTEGER,
+                undone_by INTEGER
+            );
+            CREATE TABLE history_packages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                history_id INTEGER NOT NULL,
+                pkg_nevra TEXT NOT NULL,
+                pkg_name TEXT NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                previous_nevra TEXT
+            );
             CREATE TABLE cache_files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL,
@@ -1128,6 +1149,25 @@ class TestSchemaV32Migration:
                 blacklist_reason TEXT
             );
             CREATE TABLE media (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT DEFAULT 'running',
+                command TEXT,
+                user TEXT,
+                return_code INTEGER,
+                undone_by INTEGER
+            );
+            CREATE TABLE history_packages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                history_id INTEGER NOT NULL,
+                pkg_nevra TEXT NOT NULL,
+                pkg_name TEXT NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                previous_nevra TEXT
+            );
             CREATE TABLE cache_files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL,
@@ -1194,6 +1234,25 @@ class TestSchemaV32Migration:
                 blacklist_reason TEXT
             );
             CREATE TABLE media (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT DEFAULT 'running',
+                command TEXT,
+                user TEXT,
+                return_code INTEGER,
+                undone_by INTEGER
+            );
+            CREATE TABLE history_packages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                history_id INTEGER NOT NULL,
+                pkg_nevra TEXT NOT NULL,
+                pkg_name TEXT NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                previous_nevra TEXT
+            );
             CREATE TABLE cache_files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL,
@@ -1235,6 +1294,319 @@ class TestSchemaV32Migration:
         db = PackageDatabase(db_path)
         try:
             self._expected_v32_shape(db)
+        finally:
+            db.close()
+            db_path.unlink(missing_ok=True)
+
+
+class TestSchemaV33Migration:
+    """Per-action history lifecycle + running PID.
+
+    v33 lays the foundation for SPEC_DISTUPGRADE Phase B (history per
+    action) and Phase D (recovery — detecting orphaned transactions
+    via ``history.pid_running`` cross-checked with ``_pid_alive``).
+
+    Adds to ``history_packages``: ``status`` (default ``'planned'``),
+    ``started_at``, ``finished_at``, ``error_message``.  Adds to
+    ``history``: ``pid_running`` (NULL when status != ``'running'``).
+    """
+
+    def _expected_v33_shape(self, db):
+        conn = db._get_connection()
+
+        # All v32 invariants still hold.
+        # Re-checking the new columns keeps this class self-contained.
+        server_cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(server)").fetchall()}
+        assert "url_version" in server_cols
+
+        # v33: history_packages gains four lifecycle columns
+        hp_cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(history_packages)").fetchall()}
+        assert {"status", "started_at", "finished_at",
+                "error_message"} <= hp_cols
+
+        # v33: history gains pid_running
+        h_cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(history)").fetchall()}
+        assert "pid_running" in h_cols
+
+        # v33: default 'planned' visible via a smoke insert
+        conn.execute(
+            "INSERT INTO history (timestamp, action) VALUES (0, 'install')"
+        )
+        hid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO history_packages (history_id, pkg_nevra, "
+            "pkg_name, action, reason) "
+            "VALUES (?, 'foo-1-1.x86_64', 'foo', 'install', 'explicit')",
+            (hid,),
+        )
+        row = conn.execute(
+            "SELECT status, started_at, finished_at, error_message "
+            "FROM history_packages WHERE history_id = ?", (hid,),
+        ).fetchone()
+        assert row["status"] == "planned"
+        assert row["started_at"] is None
+        assert row["finished_at"] is None
+        assert row["error_message"] is None
+
+    def test_fresh_db_reaches_at_least_v33(self, db):
+        from urpm.core.database import SCHEMA_VERSION
+        assert SCHEMA_VERSION >= 33
+        self._expected_v33_shape(db)
+
+    def test_v32_db_is_upgraded_to_v33(self, monkeypatch):
+        """A pre-existing v32 database walks only the v32→v33 leg."""
+        import tempfile
+        import sqlite3
+        from pathlib import Path
+        from urpm.core.database import PackageDatabase
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = Path(f.name)
+
+        # v32 shape: server + cache_files + server_failure_events at
+        # v30-shape, appstream_scan_cache at v31, url_version at v32,
+        # history + history_packages at pre-v33 shape.
+        raw = sqlite3.connect(str(db_path))
+        raw.executescript("""
+            CREATE TABLE server (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                protocol TEXT,
+                host TEXT NOT NULL,
+                base_path TEXT NOT NULL DEFAULT '',
+                blacklisted_at INTEGER,
+                blacklist_reason TEXT,
+                url_version TEXT
+            );
+            CREATE TABLE media (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE cache_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                media_id INTEGER,
+                file_path TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                added_time INTEGER NOT NULL,
+                served_by_server_id INTEGER,
+                UNIQUE(filename, media_id)
+            );
+            CREATE TABLE server_failure_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER NOT NULL,
+                ts INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                weight INTEGER NOT NULL,
+                detail TEXT
+            );
+            CREATE INDEX idx_sfe_server_ts
+                ON server_failure_events(server_id, ts);
+            CREATE TABLE appstream_scan_cache (
+                media_id INTEGER PRIMARY KEY,
+                files_xml_mtime INTEGER NOT NULL,
+                files_xml_size INTEGER NOT NULL,
+                candidates_json TEXT NOT NULL,
+                scanned_at INTEGER NOT NULL
+            );
+            CREATE TABLE history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT DEFAULT 'running',
+                command TEXT,
+                user TEXT,
+                return_code INTEGER,
+                undone_by INTEGER
+            );
+            CREATE TABLE history_packages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                history_id INTEGER NOT NULL,
+                pkg_nevra TEXT NOT NULL,
+                pkg_name TEXT NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                previous_nevra TEXT
+            );
+            CREATE TABLE schema_info (
+                version INTEGER PRIMARY KEY
+            );
+            INSERT INTO schema_info (version) VALUES (32);
+        """)
+        raw.commit()
+        raw.close()
+
+        monkeypatch.setattr(
+            'urpm.core.config.get_system_version', lambda: '10',
+        )
+        db = PackageDatabase(db_path)
+        try:
+            self._expected_v33_shape(db)
+        finally:
+            db.close()
+            db_path.unlink(missing_ok=True)
+
+
+class TestSchemaV34Migration:
+    """history_scriptlets table (Phase C).
+
+    Adds ``history_scriptlets`` alongside the legacy
+    ``history_scriptlet_output``.  New scriptlet callbacks (§3.C
+    SPEC_DISTUPGRADE) write here; the legacy table stays read-only
+    until an explicit ``urpm cleanup --legacy-scriptlets``.
+    """
+
+    def _expected_v34_shape(self, db):
+        conn = db._get_connection()
+
+        # v34: history_scriptlets exists with the documented shape
+        hs_cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(history_scriptlets)").fetchall()]
+        assert hs_cols == [
+            "id", "history_id", "pkg_name", "script_type", "status",
+            "started_at", "finished_at", "exit_code", "output",
+        ]
+
+        # Index used by history lookups
+        idx = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND name='idx_hs_history'"
+        ).fetchone()
+        assert idx is not None
+
+        # Legacy table still present (read-only for existing rows)
+        legacy = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='history_scriptlet_output'"
+        ).fetchone()
+        assert legacy is not None
+
+    def test_fresh_db_reaches_at_least_v34(self, db):
+        from urpm.core.database import SCHEMA_VERSION
+        assert SCHEMA_VERSION >= 34
+        self._expected_v34_shape(db)
+
+    def test_v33_db_is_upgraded_to_v34(self, monkeypatch):
+        """A pre-existing v33 database walks only the v33→v34 leg."""
+        import tempfile
+        import sqlite3
+        from pathlib import Path
+        from urpm.core.database import PackageDatabase
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = Path(f.name)
+
+        # v33 shape: v32 + v33 lifecycle columns on history_packages
+        # and pid_running on history. Legacy history_scriptlet_output
+        # already present since v7-ish. history_scriptlets missing.
+        # Add media stub for later migrations that ALTER it.
+        raw = sqlite3.connect(str(db_path))
+        raw.executescript("""
+            CREATE TABLE media (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT DEFAULT 'running',
+                command TEXT,
+                user TEXT,
+                return_code INTEGER,
+                undone_by INTEGER,
+                pid_running INTEGER
+            );
+            CREATE TABLE history_packages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                history_id INTEGER NOT NULL,
+                pkg_nevra TEXT NOT NULL,
+                pkg_name TEXT NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                previous_nevra TEXT,
+                status TEXT NOT NULL DEFAULT 'planned',
+                started_at INTEGER,
+                finished_at INTEGER,
+                error_message TEXT
+            );
+            CREATE TABLE history_scriptlet_output (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                history_id INTEGER NOT NULL,
+                pkg_name TEXT NOT NULL,
+                is_error INTEGER DEFAULT 0,
+                output TEXT NOT NULL
+            );
+            CREATE TABLE schema_info (
+                version INTEGER PRIMARY KEY
+            );
+            INSERT INTO schema_info (version) VALUES (33);
+        """)
+        raw.commit()
+        raw.close()
+
+        monkeypatch.setattr(
+            'urpm.core.config.get_system_version', lambda: '10',
+        )
+        db = PackageDatabase(db_path)
+        try:
+            self._expected_v34_shape(db)
+        finally:
+            db.close()
+            db_path.unlink(missing_ok=True)
+
+class TestSchemaV35Migration:
+    """media.disabled_by (Stage 1 media swap).
+
+    Adds enum column to track why a media is disabled during
+    distupgrade: `'user'` (admin action), `'distupgrade'` (nominal
+    swap, target-release equivalent exists), `'distupgrade_orphan'`
+    (tier media with no target equivalent).  NULL = enabled normally.
+    """
+
+    def _expected_v35_shape(self, db):
+        conn = db._get_connection()
+        media_cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(media)").fetchall()}
+        assert "disabled_by" in media_cols
+
+    def test_fresh_db_reaches_at_least_v35(self, db):
+        from urpm.core.database import SCHEMA_VERSION
+        assert SCHEMA_VERSION == 35  # v35 is the current head
+        self._expected_v35_shape(db)
+
+    def test_v34_db_is_upgraded_to_v35(self, monkeypatch):
+        """A pre-existing v34 database walks only the v34→v35 leg."""
+        import tempfile
+        import sqlite3
+        from pathlib import Path
+        from urpm.core.database import PackageDatabase
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = Path(f.name)
+
+        raw = sqlite3.connect(str(db_path))
+        raw.executescript("""
+            CREATE TABLE media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                short_name TEXT,
+                mageia_version TEXT,
+                architecture TEXT,
+                relative_path TEXT,
+                enabled INTEGER DEFAULT 1
+            );
+            CREATE TABLE schema_info (
+                version INTEGER PRIMARY KEY
+            );
+            INSERT INTO schema_info (version) VALUES (34);
+        """)
+        raw.commit()
+        raw.close()
+
+        monkeypatch.setattr(
+            'urpm.core.config.get_system_version', lambda: '10',
+        )
+        db = PackageDatabase(db_path)
+        try:
+            self._expected_v35_shape(db)
         finally:
             db.close()
             db_path.unlink(missing_ok=True)
