@@ -240,8 +240,26 @@ def make_progress_callback(
             if done >= pkg_total and not _state['all_extracted']:
                 _state['all_extracted'] = True
 
+            # ── ERASE phase ──
+            # Fires when rpm removes an obsolete package inline during
+            # an install/upgrade transaction (SPEC_DISTUPGRADE §3.A
+            # TA.3).  Displays the same main bar + a « removing X »
+            # sub-line so the user sees what disappeared.
+            if progress.phase == TransactionPhase.ERASE:
+                _state['in_script'] = False
+                header_text = _state['header']
+                info_text = progress.package_name or ""
+                pct = int(done * 100 / pkg_total) if pkg_total else 100
+                _state['header_line'] = _build_header_line(
+                    header_text, info_text)
+                _state['bar_line'] = _build_main_bar(done, pkg_total, pct)
+                _state['sub_line'] = _progress_sub_bar(
+                    progress.bytes_done, progress.bytes_total,
+                    _("removing"))
+                _render()
+
             # ── SCRIPT phase ──
-            if progress.phase == TransactionPhase.SCRIPT:
+            elif progress.phase == TransactionPhase.SCRIPT:
                 _state['trigger_count'] += 1
                 _state['in_script'] = True
 

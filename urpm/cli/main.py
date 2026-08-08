@@ -97,6 +97,8 @@ from .commands.media import (
     cmd_media_link, cmd_media_autoconfig, cmd_media_discover,
     parse_urpmi_cfg,
 )
+from .commands.distupgrade import cmd_distupgrade
+from .commands.recover import cmd_recover
 from .commands.query import (
     cmd_search, cmd_show, cmd_list, cmd_provides, cmd_whatprovides, cmd_find,
 )
@@ -427,13 +429,31 @@ Examples:
     # =========================================================================
     cleanup_parser = subparsers.add_parser(
         'cleanup',
-        help=_('Unmount chroot filesystems (/dev, /proc)'),
+        help=_('Unmount chroot filesystems or migrate legacy scriptlet rows'),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=_('''Unmount filesystems mounted by 'urpm init' in a chroot.
+        description=_('''Cleanup tasks.
+
+Without a flag, unmounts filesystems mounted by 'urpm init' in a
+chroot (--urpm-root required).
+
+With --legacy-scriptlets, migrates every row from the pre-v34
+`history_scriptlet_output` table into `history_scriptlets`, applying
+the sanitizer to their output on the way.  Idempotent.
 
 Examples:
   urpm --urpm-root /tmp/rootfs cleanup
+  urpm cleanup --legacy-scriptlets
+  urpm cleanup --legacy-scriptlets --dry-run
 ''')
+    )
+    cleanup_parser.add_argument(
+        '--legacy-scriptlets', action='store_true',
+        help=_('Migrate history_scriptlet_output → history_scriptlets '
+               '(SPEC_DISTUPGRADE §3.C)'),
+    )
+    cleanup_parser.add_argument(
+        '--dry-run', action='store_true',
+        help=_('Print what would be migrated without touching the DB'),
     )
 
     # =========================================================================
@@ -573,6 +593,15 @@ Examples:
     download_parser.add_argument(
         'packages', nargs='*',
         help=_('Package names to download (optional with --buildrequires)')
+    )
+    download_parser.add_argument(
+        '--from-file',
+        dest='from_file',
+        metavar='FILE',
+        help=_('Read package identifiers from FILE (one per line, blanks '
+               'and lines starting with # ignored) and merge them with '
+               'the positional arguments. Pair with `urpm distupgrade '
+               '--export-plan` to preload a neighbour peer.'),
     )
     download_parser.add_argument(
         '--release', '-r',
@@ -1166,6 +1195,65 @@ Examples:
     )
 
     # =========================================================================
+    # distupgrade — full release-to-release migration (N → N+1)
+    # =========================================================================
+    distupgrade_parser = subparsers.add_parser(
+        'distupgrade',
+        help=_('Full release migration N → N+1 (Mageia dist-upgrade)'),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_('''Migrate the whole system from Mageia N to N+1.
+
+Fire-and-forget : lance, sors, reviens quelques minutes / dizaines de
+minutes plus tard.  Le système est passé ou s'est arrêté sur un point
+bloquant clair.
+
+Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.
+'''),
+    )
+    distupgrade_parser.add_argument(
+        '--resume', action='store_true',
+        help=_('Resume a previously interrupted distupgrade'),
+    )
+    distupgrade_parser.add_argument(
+        '--continue', dest='continue_', action='store_true',
+        help=argparse.SUPPRESS,  # hidden : internal post-execvp handoff
+    )
+    distupgrade_parser.add_argument(
+        '--abort', action='store_true',
+        help=_('Abandon a running or interrupted distupgrade'),
+    )
+    distupgrade_parser.add_argument(
+        '--to',
+        help=_('Target release identity (e.g. 11, cauldron, cauldron:12)'),
+    )
+    distupgrade_parser.add_argument(
+        '--dry-run', action='store_true',
+        help=_('Run Stage 0 checks + refresh but skip Phase A upgrade '
+               'and downstream mutations'),
+    )
+    distupgrade_parser.add_argument(
+        '-y', '--yes', '--auto', dest='auto', action='store_true',
+        help=_('Skip the Stage 2 confirmation prompt and proceed '
+               'straight to download/install'),
+    )
+    distupgrade_parser.add_argument(
+        '--export-plan',
+        metavar='FILE',
+        help=_('Solve the target-release plan and write the NEVRAs to '
+               'FILE (one per line), without downloading or mutating '
+               'the system. Useful to preload a neighbour peer with '
+               '`urpm download --from-file FILE`.'),
+    )
+
+    # =========================================================================
+    # recover — reprise après crash / SIGKILL / coupure secteur
+    # =========================================================================
+    recover_parser = subparsers.add_parser(
+        'recover',
+        help=_('Reconcile transactions interrupted by crash/SIGKILL'),
+    )
+
+    # =========================================================================
     # search / s / query / q
     # =========================================================================
     search_parser = subparsers.add_parser(
@@ -1505,6 +1593,10 @@ Examples:
         help=_('Skip GPG signature verification (not recommended)')
     )
     upgrade_parser.add_argument(
+        '--resume', action='store_true',
+        help=_('Resume a previously interrupted upgrade (Phase D)'),
+    )
+    upgrade_parser.add_argument(
         '--with-recommends',
         action='store_true',
         help=_('Install recommended packages (not installed by default for upgrades)')
@@ -1761,6 +1853,13 @@ For legacy mode (non-Mageia URL with explicit name):
         '--all',
         action='store_true',
         help=_('Remove every configured media source (asks for confirmation)'),
+    )
+    media_remove.add_argument(
+        '--distupgraded',
+        action='store_true',
+        help=_('Remove every mga N media that distupgrade replaced by its '
+               'mga N+1 counterpart (rows with disabled_by=distupgrade).  '
+               'Orphan rows without a target counterpart are left alone.'),
     )
     media_remove.add_argument(
         '--auto', '-y',
@@ -2724,6 +2823,78 @@ def main(argv=None) -> int:
     # Open database for command execution
     db = PackageDatabase(db_path=db_path)
 
+    # SPEC_DISTUPGRADE §4.5 : universal Stage 5 post-boot fallback.
+    # A distupgrade that reached Stage 4 leaves a marker.  On the
+    # next `urpm` invocation post-reboot we execute any pending
+    # post-boot script and clear the marker + ``.state``.  Silent if
+    # the marker is absent — cheap check.  Runs *after* the DB is
+    # open so ``.state`` (in the config table) is reachable.
+    try:
+        from ..core.distupgrade import run_stage5_if_pending
+        run_stage5_if_pending(db)
+    except Exception:  # noqa: BLE001
+        # Never let a Stage 5 fallback failure block ordinary urpm
+        # invocations.  Errors are logged inside the helper.
+        pass
+
+    # =========================================================================
+    # Distupgrade mesh — refuse write commands while a distupgrade is
+    # in progress or interrupted.  See SPEC_DISTUPGRADE §2.
+    # The `urpm distupgrade` / `urpm recover` verbs and read-only
+    # queries are exempt (they need to inspect state or resume).
+    # =========================================================================
+    from .helpers.distupgrade_mesh import (
+        check_distupgrade_mesh, DistupgradeMeshRefusal,
+    )
+    _read_only_commands = {
+        'search', 's', 'query', 'q',
+        'show', 'sh', 'info',
+        'list', 'l',
+        'depends', 'deps',
+        'whatrequires', 'wr',
+        'whatrecommends', 'whatsuggests', 'whatprovides',
+        'history', 'h',
+        'rdepends', 'rdeps',
+        'holds', 'hold',
+        'config', 'cfg',
+        'server', 'srv',
+        'peer',
+        'mirror', 'proxy',
+        'cache', 'c',
+        'readme',
+    }
+    _exempt_commands = {
+        'distupgrade', 'recover',
+        'init',
+    }
+    _escape_hatch_commands = {'install', 'i', 'erase', 'e', 'remove', 'rm'}
+
+    def _is_escape_hatch_call(args) -> bool:
+        """`install <one-pkg>` / `remove <one-pkg>` = ponctuel dépannage.
+
+        Multi-package or `--auto` / `--all` flags disqualify.
+        """
+        packages = getattr(args, 'packages', None) or []
+        if len(packages) != 1:
+            return False
+        if getattr(args, 'auto', False) or getattr(args, 'all', False):
+            return False
+        return True
+
+    try:
+        cmd = args.command
+        if cmd in _exempt_commands:
+            pass  # always allowed
+        elif cmd in _read_only_commands:
+            check_distupgrade_mesh(cmd, db, is_read_only=True)
+        elif cmd in _escape_hatch_commands and _is_escape_hatch_call(args):
+            check_distupgrade_mesh(cmd, db, is_escape_hatch=True)
+        else:
+            check_distupgrade_mesh(cmd, db)
+    except DistupgradeMeshRefusal as refusal:
+        print(colors.error(refusal.message))
+        return 1
+
     try:
         # Route to command handler
         if args.command == 'init':
@@ -2780,6 +2951,11 @@ def main(argv=None) -> int:
             return cmd_media_update(args, db)
 
         elif args.command in ('upgrade', 'u'):
+            # SPEC_DISTUPGRADE §3.D TD.4 : `urpm upgrade --resume`
+            # delegates to the shared recovery engine ; user-visible
+            # verb stays the one they originally invoked.
+            if getattr(args, 'resume', False):
+                return cmd_recover(args, db)
             return cmd_upgrade(args, db)
 
         elif args.command in ('list', 'l'):
@@ -2787,6 +2963,10 @@ def main(argv=None) -> int:
 
         elif args.command == 'distro-switch':
             return cmd_distro_switch(args, db)
+        elif args.command == 'distupgrade':
+            return cmd_distupgrade(args, db)
+        elif args.command == 'recover':
+            return cmd_recover(args, db)
         elif args.command in ('search', 's', 'query', 'q'):
             return cmd_search(args, db)
 

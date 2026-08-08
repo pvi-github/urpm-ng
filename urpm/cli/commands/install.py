@@ -1021,6 +1021,24 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     # Collect packages to download
     packages = list(args.packages) if args.packages else []
 
+    # --from-file : append identifiers from a plain-text file.  Blank
+    # lines and lines starting with ``#`` are ignored (comments +
+    # readable list files).  Paired with ``urpm distupgrade
+    # --export-plan`` for preloading a neighbour peer.
+    from_file = getattr(args, 'from_file', None)
+    if from_file:
+        try:
+            with open(from_file, 'r', encoding='utf-8') as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        packages.append(line)
+        except OSError as exc:
+            print(colors.error(_(
+                "Cannot read --from-file {path}: {err}").format(
+                    path=from_file, err=exc)))
+            return 1
+
     # Handle --buildrequires option
     builddeps = getattr(args, 'buildrequires', None)
     if builddeps:

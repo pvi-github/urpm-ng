@@ -282,12 +282,28 @@ def parse_custom_media_url(url: str) -> dict | None:
     except ValueError:
         pass  # No 'media' in path, that's fine for custom URLs
 
-    if protocol == 'file':
-        relative_path = path.lstrip('/')
-        base_path = ''
+    # ── base_path / relative_path split ─────────────────────────────
+    # Keep in lockstep with :func:`urpm.core.media_pipeline._split_url`
+    # — when a Mageia-style ``<version>/<arch>`` segment pair is
+    # present, everything BEFORE it belongs to the server's base_path
+    # and everything at/after it belongs to the media's relative_path.
+    # Divergence between the two would double-count the pre-version
+    # segments when the URL is reconstructed downstream (server issue
+    # observed on file:///home/... paths where the server heuristic
+    # matched but this parser left base_path='').
+    split_idx = None
+    for i in range(len(parts) - 1):
+        if (parts[i] in KNOWN_VERSIONS
+                and parts[i + 1] in KNOWN_ARCHES):
+            split_idx = i
+            break
+
+    if split_idx is not None:
+        base_path = '/' + '/'.join(parts[:split_idx]) if split_idx > 0 else ''
+        relative_path = '/'.join(parts[split_idx:])
     else:
-        relative_path = path.lstrip('/')
         base_path = ''
+        relative_path = path.lstrip('/')
 
     return {
         'protocol': protocol,

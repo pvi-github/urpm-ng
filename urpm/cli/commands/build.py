@@ -94,8 +94,25 @@ def get_profile_names() -> list:
 
 
 def cmd_cleanup(args, db: 'PackageDatabase') -> int:
-    """Handle cleanup command - unmount chroot filesystems."""
+    """Handle cleanup command.
+
+    Two independent responsibilities depending on the flag :
+
+    - ``--legacy-scriptlets``  (SPEC_DISTUPGRADE §3.C TC.4) : migrate
+      pre-v34 rows from ``history_scriptlet_output`` into the typed
+      ``history_scriptlets`` table, sanitizing each ``output`` with
+      :func:`sanitize_scriptlet_output` en route.  Idempotent —
+      re-running once the source table is gone is a no-op.
+    - No flag / ``--urpm-root`` : unmount chroot filesystems (the
+      historical build-chain use case).
+    """
     from .. import colors
+
+    if getattr(args, 'legacy_scriptlets', False):
+        return _cleanup_legacy_scriptlets(
+            db,
+            dry_run=getattr(args, 'dry_run', False),
+        )
 
     urpm_root = getattr(args, 'urpm_root', None)
     if not urpm_root:
@@ -155,6 +172,94 @@ def cmd_cleanup(args, db: 'PackageDatabase') -> int:
             "  {count} filesystems unmounted",
             unmounted).format(count=unmounted)))
 
+    return 0
+
+
+def _cleanup_legacy_scriptlets(db, *, dry_run: bool) -> int:
+    """Migrate ``history_scriptlet_output`` → ``history_scriptlets``.
+
+    SPEC_DISTUPGRADE §3.C TC.4.  Sanitizes each ``output`` with
+    :func:`sanitize_scriptlet_output` before insertion so pre-Phase-C
+    rows can never smuggle a bidi / control-char payload into the new
+    table.  Runs in a single SQLite transaction — a mid-way crash
+    leaves the DB either fully migrated or untouched, never in the
+    middle.  Idempotent : after the source table is dropped, further
+    invocations return with a discreet message.
+    """
+    from .. import colors
+    from ...core.security import sanitize_scriptlet_output
+    import sqlite3
+    import time
+
+    conn = db._get_connection()
+
+    # Detect legacy table presence — idempotent short-circuit.
+    exists = conn.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='history_scriptlet_output'"
+    ).fetchone()
+    if exists is None:
+        print(colors.info(_(
+            "history_scriptlet_output already migrated — nothing to do.")))
+        return 0
+
+    rows = conn.execute(
+        "SELECT id, history_id, pkg_name, is_error, output "
+        "FROM history_scriptlet_output "
+        "ORDER BY id"
+    ).fetchall()
+
+    if not rows:
+        print(colors.info(_(
+            "history_scriptlet_output is empty — dropping the legacy "
+            "table.")))
+        if not dry_run:
+            conn.execute("DROP TABLE history_scriptlet_output")
+            conn.commit()
+        return 0
+
+    print(_("Migrating {n} legacy scriptlet row(s) → history_scriptlets"
+            "{suffix}...").format(
+                n=len(rows),
+                suffix=_(" (dry-run)") if dry_run else ""))
+
+    if dry_run:
+        for r in rows[:5]:
+            preview = (r["output"] or "")[:60].replace("\n", " ")
+            print(f"  #{r['id']} pkg={r['pkg_name']!r} "
+                  f"is_error={bool(r['is_error'])} "
+                  f"output={preview!r}")
+        if len(rows) > 5:
+            print(_("  … and {n} more").format(n=len(rows) - 5))
+        print(colors.info(_(
+            "dry-run : source table would be dropped after successful "
+            "migration.")))
+        return 0
+
+    now = int(time.time())
+    try:
+        with conn:  # atomic transaction — either all migrated or none
+            for r in rows:
+                clean = sanitize_scriptlet_output(r["output"])
+                status = "failed" if r["is_error"] else "ok"
+                conn.execute(
+                    "INSERT INTO history_scriptlets "
+                    "(history_id, pkg_name, script_type, status, "
+                    " started_at, finished_at, exit_code, output) "
+                    "VALUES (?, ?, '', ?, ?, ?, ?, ?)",
+                    (r["history_id"], r["pkg_name"], status,
+                     now, now,
+                     1 if r["is_error"] else 0,
+                     clean),
+                )
+            conn.execute("DROP TABLE history_scriptlet_output")
+    except sqlite3.Error as exc:
+        print(colors.error(_(
+            "Migration failed (rolled back): {error}").format(error=exc)))
+        return 1
+
+    print(colors.success(_(
+        "Migrated {n} row(s); legacy table dropped.").format(n=len(rows))))
     return 0
 
 

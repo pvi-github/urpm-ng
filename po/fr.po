@@ -8326,3 +8326,431 @@ msgstr "Essayez l'une des commandes :"
 #~ msgctxt "server"
 #~ msgid "Media"
 #~ msgstr "Médias"
+
+# distupgrade i18n restore (idempotent)
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "  Bringing the source release up to date first (applies pending mga N updates ; can take a few minutes on a stale system)..."
+msgstr "  Mise à niveau préalable de la release source (applique les mises à jour mga N en attente ; peut prendre plusieurs minutes sur un système peu à jour)..."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Refreshing target-release metadata..."
+msgstr "Rafraîchissement des métadonnées de la version cible..."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "  synced {n_ok}/{n_total} media ({n_ko} failed)"
+msgstr "  {n_ok}/{n_total} média synchronisés ({n_ko} en échec)"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "  {n} server(s) failed target-catalogue upsert : {names}"
+msgstr "  {n} serveur(s) en échec sur l'upsert du catalogue cible : {names}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Distupgrade summary : Mageia {src} → {tgt}"
+msgstr "Récapitulatif du distupgrade : Mageia {src} → {tgt}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Remove ({count}) - obsoleted / dropped in mga {tgt}:"
+msgstr "À supprimer ({count}) - obsolètes / abandonnés en mga {tgt} :"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Total : {n} package(s), download {dl}, installed footprint {inst}."
+msgstr "Total : {n} paquet(s), téléchargement {dl}, empreinte installée {inst}."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "  --yes / --auto : skipping confirmation."
+msgstr "  --yes / --auto : confirmation sautée."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "\nProceed with distupgrade? [y/N] "
+msgstr "\nProcéder au distupgrade ? [o/N] "
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "distupgrade cancelled at the Stage 2 prompt — nothing downloaded, state not persisted.  Re-run to re-solve."
+msgstr "distupgrade annulé à la confirmation Stage 2 — rien de téléchargé, aucun état persisté.  Relancez pour re-résoudre."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "\nDownloading {count} package(s)..."
+msgstr "\nTéléchargement de {count} paquet(s)..."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "{n_dl} downloaded, {n_cached} from cache in {time}"
+msgstr "{n_dl} téléchargé(s), {n_cached} depuis le cache en {time}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "All {n_req} package(s) already in cache — no download."
+msgstr "Les {n_req} paquet(s) sont déjà en cache — aucun téléchargement."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Cannot sync target-release metadata: {err}"
+msgstr "Impossible de synchroniser les métadonnées de la release cible : {err}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Distupgrade Mageia {src} → {tgt} complete."
+msgstr "Distupgrade Mageia {src} → {tgt} terminé."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Failed scriptlets ({n}) - review carefully:"
+msgstr "Scriptlets échoués ({n}) - à examiner :"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "    (+ {n} more — see `urpm history --scriptlets`)"
+msgstr "    (+ {n} de plus — voir `urpm history --scriptlets`)"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid ".rpmnew files ({n}) - config files where mga {tgt} ships a new default:"
+msgstr "Fichiers .rpmnew ({n}) - fichiers de config où mga {tgt} embarque un nouveau défaut :"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "    Review each with :  vimdiff <file> <file>.rpmnew"
+msgstr "    Comparer chacun avec :  vimdiff <fichier> <fichier>.rpmnew"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Residual mga{src} packages still installed ({n}):"
+msgstr "Paquets mga{src} résiduels encore installés ({n}) :"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "    Most are SONAME-versioned libs waiting for a mga{tgt} rebuild — kept intentionally."
+msgstr "    La plupart sont des libs à SONAME versionné en attente d'une reconstruction pour mga{tgt} — conservées intentionnellement."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "    Review orphan candidates with :  urpm autoremove --show-all"
+msgstr "    Examiner les candidats orphelins avec :  urpm autoremove --show-all"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Third-party media without a mga{tgt} equivalent ({n}) - disabled:"
+msgstr "Média tiers sans équivalent mga{tgt} ({n}) - désactivés :"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "    (+ {n} more)"
+msgstr "    (+ {n} de plus)"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "    Wait for a maintainer rebuild, or `urpm media remove <short_name>`."
+msgstr "    Attendre une reconstruction par le mainteneur, ou `urpm media remove <short_name>`."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "No .rpmnew, no failed scriptlet, no residual, no orphan media — clean upgrade."
+msgstr "Aucun .rpmnew, aucun scriptlet échoué, aucun résiduel, aucun média orphelin — upgrade propre."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Backing up packages.db to {path}..."
+msgstr "Sauvegarde de packages.db vers {path}..."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Stage 1 complete : {n_new} target catalogue(s) inserted (ephemeral — DB will be restored)."
+msgstr "Stage 1 terminée : {n_new} catalogue(s) cible insérés (éphémère — la DB sera restaurée)."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "  synced {n_ok}/{n_total} media"
+msgstr "  {n_ok}/{n_total} média synchronisés"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Plan exported : {n} NEVRA(s) written to {path}"
+msgstr "Plan exporté : {n} NEVRA écrit(s) dans {path}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Preload a neighbour peer with :\n  urpm download --from-file {path}"
+msgstr "Précharger un peer voisin avec :\n  urpm download --from-file {path}"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Restoring packages.db from backup..."
+msgstr "Restauration de packages.db depuis la sauvegarde..."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "packages.db restored — nothing persisted on your system."
+msgstr "packages.db restaurée — rien de persisté sur votre système."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Cannot read --from-file {path}: {err}"
+msgstr "Impossible de lire --from-file {path} : {err}"
+
+
+# distupgrade i18n restore (idempotent)
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "  Source release already up to date — nothing to install before the distupgrade."
+msgstr "  Release source déjà à jour — rien à installer avant le distupgrade."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "  Phase A : {n} pending mga N update(s) to install first (download {dl}, installed footprint {inst})."
+msgstr "  Phase A : {n} mise(s) à jour mga N à installer d'abord (téléchargement {dl}, empreinte installée {inst})."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Phase A upgrade ({count} packages)"
+msgstr "Mise à jour Phase A ({count} paquets)"
+
+
+# distupgrade i18n restore (idempotent)
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Preliminary checks (release detection, network, DB integrity)..."
+msgstr "Vérifications préalables (détection de version, réseau, intégrité DB)..."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Preliminary checks OK — current version : {cur}, target : {tgt}."
+msgstr "Vérifications préalables OK — version actuelle : {cur}, cible : {tgt}."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Switching repositories (mga{src} → mga{tgt})..."
+msgstr "Bascule des dépôts (mga{src} → mga{tgt})..."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Repository switchover done : {n_src} source repositories disabled, {n_orph} third-party repositories with no target counterpart flagged, {n_new} target catalogue(s) added."
+msgstr "Bascule des dépôts terminée : {n_src} dépôt(s) source désactivé(s), {n_orph} dépôt(s) tiers sans équivalent cible marqué(s), {n_new} catalogue(s) cible ajouté(s)."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Resolving the target-release package plan..."
+msgstr "Résolution du plan de paquets de la version cible..."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Install plan : {n_a} critical system component(s) first, then {n_b} remaining component(s), with {n_rm} package(s) to remove."
+msgstr "Plan d'installation : {n_a} composant(s) critique(s) du système d'abord, puis {n_b} composant(s) restant(s), avec {n_rm} paquet(s) à supprimer."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Installing critical system components ({count} packages)"
+msgstr "Installation des composants critiques du système ({count} paquets)"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Installing remaining components ({count} packages)"
+msgstr "Installation des composants restants ({count} paquets)"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Critical system components installed — handing off to the new urpm for the remaining components..."
+msgstr "Composants critiques du système installés — passage au nouveau urpm pour les composants restants..."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Remaining components installed : {n}."
+msgstr "Composants restants installés : {n}."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Installation of critical system components failed : {err}"
+msgstr "Échec de l'installation des composants critiques du système : {err}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Installation of remaining components failed : {err}"
+msgstr "Échec de l'installation des composants restants : {err}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Post-transaction report failed : {err}"
+msgstr "Rapport post-transaction en échec : {err}"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Interrupted at the last failure boundary — run `urpm recover` once the underlying issue is fixed."
+msgstr "Interrompu à la dernière frontière d'échec — lancez `urpm recover` une fois le problème sous-jacent réglé."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Handoff to new urpm failed : {err}.  Critical system components are installed ; run `urpm distupgrade --continue` manually."
+msgstr "Le passage au nouveau urpm a échoué : {err}.  Les composants critiques du système sont installés ; lancez `urpm distupgrade --continue` manuellement."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Cannot proceed to install : {n} package(s) failed to download.  First failures : {head}"
+msgstr "Impossible de passer à l'installation : {n} paquet(s) n'ont pas pu être téléchargés.  Premiers échecs : {head}"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Next :  reboot so the post-boot adjustments run on next startup."
+msgstr "Ensuite :  redémarrez pour que les correctifs post-démarrage s'exécutent au prochain démarrage."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Old mga{src} repositories replaced by their mga{tgt} counterpart ({n}) - now obsolete:"
+msgstr "Anciens dépôts mga{src} remplacés par leur équivalent mga{tgt} ({n}) - désormais obsolètes :"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "  Drop these old repositories now ? [y/N] "
+msgstr "  Supprimer ces anciens dépôts maintenant ? [o/N] "
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "    Drop them later with :  urpm distupgrade --drop-migrated-medias"
+msgstr "    Les supprimer plus tard avec :  urpm distupgrade --drop-migrated-medias"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "    Kept ; drop later with :  urpm distupgrade --drop-migrated-medias"
+msgstr "    Conservés ; supprimer plus tard avec :  urpm distupgrade --drop-migrated-medias"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "    could not drop {name} : {err}"
+msgstr "    impossible de supprimer {name} : {err}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Dropped {n} old repositor(y|ies)."
+msgstr "{n} ancien(s) dépôt(s) supprimé(s)."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "No migrated media to drop."
+msgstr "Aucun média migré à supprimer."
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "{n} migrated mga N repository(ies) to drop :"
+msgstr "{n} dépôt(s) mga N migré(s) à supprimer :"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Drop these {n} repository(ies) ? [y/N] "
+msgstr "Supprimer ces {n} dépôt(s) ? [o/N] "
+
+
+# distupgrade i18n restore (idempotent)
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "WARNING : you are on Mageia {cur}, the target is Mageia {tgt} — you will skip {k} intermediate release(s).  Cross-release upgrades stack cumulative packaging changes and scriptlets that assume every intermediate release was crossed ; you may hit conflicts or breakage a stepwise upgrade would avoid."
+msgstr "ATTENTION : vous êtes en Mageia {cur}, la cible est Mageia {tgt} — vous allez sauter {k} version(s) intermédiaire(s).  Les upgrades cross-release cumulent les changements de packaging et les scriptlets qui présument que chaque version intermédiaire a été traversée ; vous risquez des conflits ou de la casse qu'un upgrade pas-à-pas éviterait."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Proceed with this multi-version jump ? [y/N] "
+msgstr "Procéder à ce saut multi-version ? [o/N] "
+
+
+# distupgrade i18n restore (idempotent)
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "  Target : mga{tgt} (source : mga{cur})"
+msgstr "  Cible : mga{tgt} (source : mga{cur})"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "Could not verify target release maturity : {err}. Cannot tell if mga{tgt} is stable or still in Alpha / Beta / RC."
+msgstr "Impossible de vérifier la maturité de la version cible : {err}. On ne sait pas si mga{tgt} est stable ou encore en Alpha / Beta / RC."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Proceed without maturity verification ? [y/N] "
+msgstr "Procéder sans vérification de maturité ? [o/N] "
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "WARNING : target mga{tgt} advertises `branch={br}` on its mirror — not `Official`.  This release is not yet stable (Cauldron / Alpha / Beta / RC) ; distupgrading now may hit breakage a final release would fix."
+msgstr "ATTENTION : la cible mga{tgt} annonce `branch={br}` sur son miroir — pas `Official`.  Cette version n'est pas encore stable (Cauldron / Alpha / Beta / RC) ; distupgrader maintenant peut casser des choses qu'une version finale corrigerait."
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "Proceed with a pre-release target ? [y/N] "
+msgstr "Procéder avec une cible pré-release ? [o/N] "
+
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "    Kept ; drop later with :  urpm media remove --distupgraded"
+msgstr "    Conservés ; supprimer plus tard avec :  urpm media remove --distupgraded"
+
+
+#: urpm/cli/commands/distupgrade.py
+msgid "    Drop them later with :  urpm media remove --distupgraded"
+msgstr "    Les supprimer plus tard avec :  urpm media remove --distupgraded"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "  --yes / --auto : dropping the {n} old repositories without prompting."
+msgstr "  --yes / --auto : suppression des {n} anciens dépôts sans confirmation."
+

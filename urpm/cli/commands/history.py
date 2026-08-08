@@ -59,12 +59,22 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
         return action
 
     def _color_status(status):
-        """Color a status string."""
+        """Color a status string.
+
+        Values match the enum written by ``db/history.py`` :
+        ``'running'``, ``'complete'``, ``'interrupted'``, plus the
+        prefix ``'undone-by-N'`` for rolled-back rows.  Historical
+        code compared to ``'completed'`` / ``'aborted'`` which never
+        matched — every transaction rendered uncolored (Phase A TA.4
+        SPEC_DISTUPGRADE §3.B).
+        """
         status_stripped = status.strip()
-        if status_stripped == 'completed':
+        if status_stripped == 'complete':
             return colors.success(status)
-        elif status_stripped == 'aborted':
+        elif status_stripped == 'interrupted':
             return colors.error(status)
+        elif status_stripped == 'running':
+            return colors.info(status)
         elif status_stripped.startswith('undone'):
             return colors.dim(status)
         return status

@@ -1177,11 +1177,14 @@ def cmd_media_remove(args, db: 'PackageDatabase') -> int:
     require_privileges(action_id="org.mageia.urpm.media-manage")
 
     remove_all = getattr(args, 'all', False)
+    distupgraded = getattr(args, 'distupgraded', False)
     auto = getattr(args, 'auto', False)
     names_arg = list(args.name or [])
 
-    if remove_all and names_arg:
-        print(colors.error(_("--all conflicts with an explicit list of names")))
+    if sum(bool(x) for x in (remove_all, distupgraded, names_arg)) > 1:
+        print(colors.error(_(
+            "--all, --distupgraded and an explicit list of names are "
+            "mutually exclusive")))
         return 1
 
     if remove_all:
@@ -1201,12 +1204,44 @@ def cmd_media_remove(args, db: 'PackageDatabase') -> int:
                 print(_("Aborted"))
                 return 1
         targets = [m['name'] for m in all_media]
+    elif distupgraded:
+        # Rows Stage 1 disabled as ``distupgrade`` — the mga N originals
+        # replaced by their mga N+1 counterpart.  Orphans
+        # (``distupgrade_orphan``) are LEFT alone by design : the user
+        # still needs to see them.
+        conn = db._get_connection()
+        rows = conn.execute(
+            "SELECT name FROM media WHERE disabled_by = 'distupgrade' "
+            "ORDER BY name"
+        ).fetchall()
+        if not rows:
+            print(_("No distupgrade-migrated media to remove"))
+            return 0
+        targets = [r['name'] for r in rows]
+        if not auto:
+            print(colors.warning(_(
+                "About to remove {n} distupgrade-migrated media").format(
+                    n=len(targets))))
+            for t in targets[:15]:
+                print(f"  {colors.dim(t)}")
+            if len(targets) > 15:
+                print(colors.dim(_(
+                    "  (+ {n} more)").format(n=len(targets) - 15)))
+            try:
+                resp = input(_("Proceed? [y/N] ")).strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print(_("\nAborted"))
+                return 1
+            if not confirm_yes(resp):
+                print(_("Aborted"))
+                return 1
     elif names_arg:
         targets = names_arg
     else:
         print(colors.error(_(
             "Missing media name; pass one or more names, or --all to "
-            "remove everything")))
+            "remove everything, or --distupgraded to remove migrated "
+            "media only")))
         return 1
 
     rc = 0
