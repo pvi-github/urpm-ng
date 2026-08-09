@@ -222,6 +222,50 @@ Tous les sélecteurs ci-dessus.
 .BR \-y ", " \-\-auto
 Pas de confirmation.
 .RE
+.TP
+.B distupgrade \fR[\fB\-\-to \fIversion\fR]
+Migre le système entier de Mageia N vers N+1. Auto-détecte la
+version cible (actuelle + 1) quand
+.B \-\-to
+est omis.
+S'exécute par étapes : vérifications préalables (détection de
+version, réseau, intégrité DB, maturité de la cible, prompt saut
+multi-version), bascule des dépôts (mga N → mga N+1), résolution
+du plan de la version cible avec prompt de confirmation,
+téléchargement, installation des composants critiques du système
+(rpm / python / glibc) d'abord, puis le reste, et un rapport
+post-transaction (fichiers \fB.rpmnew\fR, paquets mga N résiduels,
+médias tiers orphelins). Redémarrez pour que les correctifs
+post-démarrage s'exécutent au prochain démarrage.
+.RS
+.TP
+.B \-\-to \fIversion\fR
+Identité explicite de la version cible (p. ex.
+.BR 11 ", " cauldron ", ou " cauldron:12
+pendant un freeze). Auto = actuelle + 1 quand omis.
+.TP
+.BR \-y ", " \-\-yes ", " \-\-auto
+Ignorer tous les prompts de confirmation.
+.TP
+.B \-\-dry-run
+Seulement les vérifs Stage 0 et le refresh des métadonnées, aucune
+mutation en aval.
+.TP
+.B \-\-export\-plan \fIfichier\fR
+Résoudre le plan de la version cible et écrire les NEVRAs dans
+.I fichier
+(aucun téléchargement, aucune installation).
+.TP
+.B \-\-resume
+Reprendre un distupgrade interrompu.
+.TP
+.B \-\-abort
+Abandonner un distupgrade en cours ou interrompu.
+.RE
+.TP
+.B recover
+Réconcilie les transactions interrompues par crash / SIGKILL /
+coupure secteur.
 .SS Métadonnées et mises à jour
 .TP
 .B update \fR[\fImedia\fR]

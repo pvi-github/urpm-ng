@@ -367,6 +367,38 @@ urpm ar                       # Short alias
 --auto, -y                    # Non-interactive mode
 ```
 
+### Distribution upgrade (mga N → N+1)
+
+```bash
+urpm distupgrade                        # Auto-detect target = current + 1
+urpm distupgrade --to 11                # Explicit target release
+urpm distupgrade --to cauldron          # Target Cauldron (rolling)
+urpm distupgrade --to cauldron:12       # Cauldron pointing at 12 (during freeze)
+
+# Options
+--to <version>                # Explicit target ; auto = current + 1
+--yes / -y / --auto           # Skip confirmation prompts, auto-drop old
+                              # media at Stage 4
+--dry-run                     # Stage 0 checks + metadata refresh only
+--export-plan <file>          # Solve, write NEVRAs to <file>, restore DB
+                              # (no download, no install) — pair with
+                              # `urpm download --from-file` on a neighbour
+                              # peer to preload cache before the real run
+--resume                      # Resume a previously interrupted distupgrade
+--abort                       # Abandon a running or interrupted distupgrade
+
+# Post-upgrade cleanup
+urpm media remove --distupgraded   # Drop the mga N repositories replaced
+                                    # by their mga N+1 counterpart
+```
+
+Runs in stages : preliminary checks (release detection, target maturity,
+multi-version-jump prompt) → repository switchover → target-release solve
++ confirmation prompt → download → install of critical system components
+(rpm / python / glibc) first, then the rest → post-transaction report
+(`.rpmnew` files, residual mga N packages, orphan third-party media). Reboot
+so post-boot adjustments run at next startup.
+
 ## Search and Query
 
 ### Search packages

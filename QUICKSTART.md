@@ -40,6 +40,26 @@ $ su -c 'urpm e firefox'
 
 # Clean orphans
 $ su -c 'urpm autoremove'
+
+# Migrate to the next Mageia release (mga N → N+1)
+$ su -c 'urpm distupgrade'
+```
+
+`urpm distupgrade` auto-detects the target release (current + 1), applies pending mga N updates first, switches the repositories, downloads every mga N+1 package (with a summary + confirmation prompt), installs critical system components then the rest, and prints a post-transaction report (`.rpmnew` files, residual mga N packages, orphan third-party media). Reboot when it's done.
+
+Add `-y` / `--yes` only when you already know what you're doing — it skips every confirmation prompt including the plan review.
+
+Bandwidth-limited? Preload a neighbour peer first:
+
+```bash
+# On the source (mga N) machine
+$ su -c 'urpm distupgrade --export-plan /tmp/plan.txt'
+
+# Copy /tmp/plan.txt to a mga N+1 neighbour on the same LAN and:
+$ su -c 'urpm download --from-file /tmp/plan.txt'
+
+# Back on the source machine, the actual upgrade taps into the peer via P2P:
+$ su -c 'urpm distupgrade'
 ```
 
 That's it! Machines with urpmd on the same LAN auto-discover each other and share cached packages.

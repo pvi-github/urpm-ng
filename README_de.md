@@ -191,6 +191,35 @@ urpm search firefox --json          # JSON-Ausgabe
 urpm i task-plasma --show-all       # Alle Abhängigkeiten anzeigen
 ```
 
+### Distributionsupgrade (mga N → N+1)
+
+```bash
+urpm distupgrade                        # Ziel automatisch erkennen = aktuell + 1
+urpm distupgrade --to 11                # Explizites Ziel-Release
+urpm distupgrade --to cauldron          # Ziel Cauldron (rolling)
+urpm distupgrade --to cauldron:12       # Cauldron mit Ziel 12 (während Freeze)
+
+# Optionen
+--to <version>                # Explizites Ziel ; auto = aktuell + 1
+--yes / -y / --auto           # Bestätigungen überspringen, alte Medien
+                              # in Stage 4 automatisch verwerfen
+--dry-run                     # Nur Stage-0-Prüfungen + Metadaten-Refresh
+--export-plan <file>          # Auflösen, NEVRAs in <file> schreiben, DB
+                              # wiederherstellen (kein Download, keine
+                              # Installation) — kombiniere mit `urpm
+                              # download --from-file` auf einem Nachbar-
+                              # Peer, um Cache vor dem echten Lauf vorzuladen
+--resume                      # Unterbrochenes Distupgrade fortsetzen
+--abort                       # Laufendes oder unterbrochenes Distupgrade abbrechen
+
+# Nachbereinigung
+urpm media remove --distupgraded   # Verwirft mga-N-Repositories, die durch
+                                    # ihr mga-N+1-Gegenstück ersetzt wurden
+```
+
+Läuft in Stages : Vorabprüfungen (Release-Erkennung, Zielrelease-Reife, Mehrfach-Versionssprung-Prompt) → Repository-Wechsel → Ziel-Release-Auflösung + Bestätigungs-Prompt → Download → Installation der kritischen Systemkomponenten (rpm / python / glibc) zuerst, dann der Rest → Post-Transaktions-Bericht (`.rpmnew`-Dateien, verbliebene mga-N-Pakete, verwaiste Drittanbieter-Medien). Neu starten, damit die Post-Boot-Anpassungen beim nächsten Start ausgeführt werden.
+
+
 ## Atomare vs. Best-Effort-Transaktionen
 
 Seit 0.7.9 läuft `urpm upgrade` standardmäßig im **Best-Effort**-Modus: Pakete, deren Abhängigkeiten nicht erfüllt werden können, werden aus der Transaktion gestrichen und am Ende mit ihrem Grund gemeldet (fehlende Abhängigkeit, Versionsmismatch, SRPM-Geschwisterkaskade, …). Die Transaktion wird für alles Übrige committet. Übergib `--atomic`, um in den Strict-Modus zu wechseln (empfohlen auf Servern): Jedes unlösbare Paket bricht die gesamte Transaktion ab.

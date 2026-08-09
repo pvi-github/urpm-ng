@@ -819,7 +819,7 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
         elapsed = _display.format_duration(time.monotonic() - _dp["start"])
         print("  " + colors.success(_(
             "{n_dl} downloaded ({n_peers} from peers, {n_up} from "
-            "mirrors), {n_cached} from cache in {time}").format(
+            "mirrors, {n_cached} from cache) in {time}").format(
                 n_dl=dl["downloaded"],
                 n_peers=dl.get("from_peers", 0),
                 n_up=dl.get("from_upstream", 0),
@@ -1250,16 +1250,40 @@ def _prompt_drop_transposed(db, transposed_media, *, auto: bool) -> None:
 
 
 def _drop_transposed_media(db, transposed_media) -> int:
-    """Delete each transposed-old row.  Returns the count dropped."""
+    """Delete every transposed-old row in one transaction.
+
+    ``db.remove_media()`` commits per-row (one fsync each) ; on a VM
+    with 50+ rows and cascades to ``packages`` / ``cache_files`` /
+    ``server_media`` / etc., that's minutes of disk stalls.  Batching
+    into a single ``BEGIN...COMMIT`` collapses it to one fsync at the
+    end.  FK cascades still fire per row inside the transaction —
+    same rows deleted, just no per-row commit overhead.
+
+    Returns the count dropped.
+    """
+    if not transposed_media:
+        return 0
+    conn = db._get_connection()
     dropped = 0
-    for m in transposed_media:
+    failures: list = []
+    with db._lock:
         try:
-            db.remove_media(m['name'])
-            dropped += 1
-        except Exception as exc:  # noqa: BLE001
-            print(colors.warning(_(
-                "    could not drop {name} : {err}").format(
-                    name=m['name'], err=exc)))
+            conn.execute("BEGIN")
+            for m in transposed_media:
+                try:
+                    conn.execute(
+                        "DELETE FROM media WHERE name = ?", (m['name'],))
+                    dropped += 1
+                except Exception as exc:  # noqa: BLE001
+                    failures.append((m['name'], exc))
+            conn.commit()
+        except Exception:  # noqa: BLE001
+            conn.rollback()
+            raise
+    for name, exc in failures:
+        print(colors.warning(_(
+            "    could not drop {name} : {err}").format(
+                name=name, err=exc)))
     print("  " + colors.success(_(
         "Dropped {n} old repositor(y|ies).").format(n=dropped)))
     return dropped

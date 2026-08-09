@@ -144,6 +144,49 @@ Todos los selectores anteriores.
 .BR \-y ", " \-\-auto
 Sin confirmación.
 .RE
+.TP
+.B distupgrade \fR[\fB\-\-to \fIversion\fR]
+Migra todo el sistema de Mageia N a N+1. Detecta automáticamente
+la versión de destino (actual + 1) cuando se omite
+.BR \-\-to .
+Se ejecuta en fases : comprobaciones previas (detección de versión,
+red, integridad de la BD, madurez del destino, aviso de salto
+multi-versión), cambio de repositorios (mga N → mga N+1),
+resolución del plan de la versión destino con confirmación,
+descarga, instalación de los componentes críticos del sistema
+(rpm / python / glibc) primero, luego el resto, e informe
+post-transacción (archivos \fB.rpmnew\fR, paquetes mga N residuales,
+medios de terceros huérfanos). Reinicie para que los ajustes
+post-arranque se ejecuten en el siguiente inicio.
+.RS
+.TP
+.B \-\-to \fIversion\fR
+Identidad de la versión de destino explícita (p. ej.
+.BR 11 ", " cauldron ", o " cauldron:12
+durante un freeze). Auto = actual + 1 cuando se omite.
+.TP
+.BR \-y ", " \-\-yes ", " \-\-auto
+Omitir todas las confirmaciones.
+.TP
+.B \-\-dry-run
+Solo comprobaciones Stage 0 y refresh de metadatos, sin mutaciones
+posteriores.
+.TP
+.B \-\-export\-plan \fIfile\fR
+Resolver el plan de la versión destino y escribir los NEVRAs en
+.IR file
+(sin descarga, sin instalación).
+.TP
+.B \-\-resume
+Reanudar un distupgrade interrumpido.
+.TP
+.B \-\-abort
+Abandonar un distupgrade en curso o interrumpido.
+.RE
+.TP
+.B recover
+Reconcilia transacciones interrumpidas por crash / SIGKILL / corte
+de corriente.
 .SS Metadatos y actualizaciónes de paquetes
 .TP
 .B update \fR[\fImedio\fR]

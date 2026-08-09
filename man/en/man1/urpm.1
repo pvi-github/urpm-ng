@@ -216,6 +216,59 @@ All of the above.
 .BR \-y ", " \-\-auto
 No confirmation prompt.
 .RE
+.TP
+.B distupgrade \fR[\fB\-\-to \fIversion\fR]
+Migrate the whole system from Mageia N to N+1.
+Auto-detects the target release (current + 1) when
+.B \-\-to
+is omitted.
+Runs in stages: preliminary checks (release detection, network,
+DB integrity, target maturity gate, multi-version-jump prompt),
+repository switchover (mga N → mga N+1), target-release solve
+with confirmation prompt, download, install of critical system
+components (rpm / python / glibc) first, then the rest, and a
+post-transaction report (\fB.rpmnew\fR files, residual mga N
+packages, orphan third-party media). Reboot so post-boot
+adjustments run at next startup.
+.RS
+.TP
+.B \-\-to \fIversion\fR
+Explicit target release identity (e.g.
+.BR 11 ", " cauldron ", or " cauldron:12
+during a freeze). Auto = current + 1 when omitted.
+.TP
+.BR \-y ", " \-\-yes ", " \-\-auto
+Skip every confirmation prompt (Stage 2 plan review, migrated-media
+drop at Stage 4, maturity gate, multi-version-jump).
+.TP
+.B \-\-dry-run
+Run Stage 0 checks and metadata refresh only; skip the Phase A
+upgrade and every downstream mutation.
+.TP
+.B \-\-export\-plan \fIfile\fR
+Solve the target-release plan and write the list of NEVRAs to
+.IR file
+(one per line). Restores the DB unchanged (no download, no install).
+Pair with
+.B urpm download \-\-from\-file
+on a neighbour peer to preload its cache before the real distupgrade.
+.TP
+.B \-\-resume
+Resume a previously interrupted distupgrade at the exact stage
+boundary recorded in
+.BR .state .
+.TP
+.B \-\-abort
+Abandon a running or interrupted distupgrade. Restores every
+Stage 1 media mutation verbatim from the undo journal.
+.RE
+.TP
+.B recover
+Reconcile transactions interrupted by crash / SIGKILL / power cut.
+Reads
+.B history.pid_running
+to detect processes that no longer exist and marks their transactions
+as interrupted so the next commit doesn't inherit inconsistent state.
 .SS Metadata and Package Updates
 .TP
 .B update \fR[\fImedia\fR]
@@ -407,9 +460,19 @@ Remove every configured media source. Prompts for confirmation unless
 \fB\-y\fR / \fB\-\-auto\fR is passed. Conflicts with an explicit list
 of names.
 .TP
+.B \-\-distupgraded
+Remove every mga N media that
+.B distupgrade
+replaced by its mga N+1 counterpart (rows with
+.BR disabled_by=distupgrade ).
+Orphan third-party rows without a target counterpart are left alone.
+Conflicts with
+.B \-\-all
+and with an explicit list of names.
+.TP
 .BR \-y ", " \-\-auto
-Skip the confirmation prompt (applies to both the named and the
-\fB\-\-all\fR forms).
+Skip the confirmation prompt (applies to
+.BR \-\-all ", " \-\-distupgraded " and the named forms).
 .RE
 .TP
 .B enable \fIname\fR
@@ -936,6 +999,15 @@ Only download from LAN peers, no upstream mirrors.
 .TP
 .B \-\-allow\-arch " " \fIarch\fR
 Allow additional architectures (e.g., \fB\-\-allow\-arch i686\fR).
+.TP
+.B \-\-from\-file \fIfile\fR
+Read package identifiers from
+.I file
+(one per line, blanks and lines starting with
+.B #
+ignored) and merge them with the positional arguments. Pair with
+.B urpm distupgrade \-\-export\-plan
+to preload a neighbour peer's cache.
 .RE
 .SS Container Build System
 .TP

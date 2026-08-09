@@ -191,6 +191,35 @@ urpm search firefox --json          # JSON-uitvoer
 urpm i task-plasma --show-all       # Alle afhankelijkheden tonen
 ```
 
+### Distributie-upgrade (mga N → N+1)
+
+```bash
+urpm distupgrade                        # Auto-detectie van doel = huidige + 1
+urpm distupgrade --to 11                # Expliciete doelrelease
+urpm distupgrade --to cauldron          # Doel Cauldron (rolling)
+urpm distupgrade --to cauldron:12       # Cauldron gericht op 12 (tijdens freeze)
+
+# Opties
+--to <version>                # Expliciet doel ; auto = huidige + 1
+--yes / -y / --auto           # Bevestigingsprompts overslaan, oude media
+                              # automatisch verwijderen in Stage 4
+--dry-run                     # Alleen Stage-0-controles + metadata-refresh
+--export-plan <file>          # Oplossen, NEVRAs naar <file> schrijven, DB
+                              # herstellen (geen download, geen installatie)
+                              # — combineer met `urpm download --from-file` op
+                              # een buur-peer om de cache voor te laden vóór
+                              # de eigenlijke distupgrade
+--resume                      # Hervat een onderbroken distupgrade
+--abort                       # Afbreken van een lopende of onderbroken distupgrade
+
+# Opruiming na de upgrade
+urpm media remove --distupgraded   # Verwijdert de mga-N-repositories vervangen
+                                    # door hun mga-N+1-tegenhanger
+```
+
+Werkt in fasen : voorafcontroles (versiedetectie, rijpheid van het doel, multi-versiesprong-prompt) → repository-omschakeling → oplossing van het target-release-plan + bevestigingsprompt → download → installatie van kritieke systeemcomponenten (rpm / python / glibc) eerst, daarna de rest → post-transactierapport (`.rpmnew`-bestanden, overgebleven mga-N-pakketten, weesmedia van derden). Herstart zodat de post-boot-aanpassingen bij de volgende opstart worden uitgevoerd.
+
+
 ## Atomische vs best-effort-transacties
 
 Sinds 0.7.9 draait `urpm upgrade` standaard in **best-effort**-modus:

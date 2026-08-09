@@ -144,6 +144,7 @@ _URPM_DEBUG_FLAGS="--debug --watched"
 # blacklist, redlist, seed) have been removed: they are sub-subcommands
 # of `config` / `media`, never real top-level commands.
 _URPM_COMMANDS="install i erase e upgrade u update up \
+    distupgrade recover \
     search s query q show sh info list l find f \
     provides p whatprovides wp \
     depends d requires req rdepends rd whatrequires wr \
@@ -295,10 +296,14 @@ _urpm_download() {
             _filedir '@(spec|src.rpm)'
             return
             ;;
+        --from-file)
+            _filedir
+            return
+            ;;
     esac
 
     local download_opts="--release -r --arch --auto -y --without-recommends
-        --no-peers --only-peers --nodeps --allow-arch
+        --no-peers --only-peers --nodeps --allow-arch --from-file
         --buildrequires --builddeps --br -b"
 
     if [[ "$cur" == -* ]]; then
@@ -306,6 +311,33 @@ _urpm_download() {
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
+}
+
+# distupgrade — mga N → mga N+1 migration.  Target auto-detected
+# (current + 1) when --to is omitted ; flags cover the whole life-
+# cycle (dry-run, export-plan, resume, abort).
+_urpm_distupgrade() {
+    case "$prev" in
+        --to)
+            COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
+            return
+            ;;
+        --export-plan)
+            _filedir
+            return
+            ;;
+    esac
+    local distupgrade_opts="--to --yes -y --auto --dry-run
+        --export-plan --resume --continue --abort"
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$distupgrade_opts $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
+    fi
+}
+
+# recover — reconcile transactions interrupted by crash / SIGKILL.
+# No positional args, no options.
+_urpm_recover() {
+    COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
 }
 
 _urpm_init() {
@@ -702,7 +734,15 @@ set s import discover disc autoconfig auto ac seed-info link"
 --auto -y --import-key --allow-unsigned --version $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
-        remove|r|enable|e|disable|d|seed-info)
+        remove|r)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--all --distupgraded --auto -y \
+$_URPM_DISPLAY_FLAGS" -- "$cur"))
+            else
+                _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            fi
+            ;;
+        enable|e|disable|d|seed-info)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
             else
@@ -1088,6 +1128,8 @@ _urpm() {
         erase|e)                                _urpm_erase ;;
         upgrade|u)                              _urpm_upgrade ;;
         update|up)                              _urpm_update ;;
+        distupgrade)                            _urpm_distupgrade ;;
+        recover)                                _urpm_recover ;;
         download|dl)                            _urpm_download ;;
         init)                                   _urpm_init ;;
         cleanup)                                _urpm_cleanup ;;

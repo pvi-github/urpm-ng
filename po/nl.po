@@ -8679,14 +8679,18 @@ msgstr "  --yes / --auto : de {n} oude repositories worden zonder bevestiging ve
 # distupgrade i18n restore (idempotent)
 
 
-#: urpm/cli/commands/distupgrade.py
-#, python-brace-format
-msgid "{n_dl} downloaded ({n_peers} from peers, {n_up} from mirrors), {n_cached} from cache in {time}"
-msgstr "{n_dl} gedownload ({n_peers} van peers, {n_up} van mirrors), {n_cached} uit cache in {time}"
-
 
 #: urpm/cli/commands/distupgrade.py
 #, python-brace-format
 msgid "  Third-party repositories with no mga{tgt} counterpart (will be unavailable after the upgrade) :"
 msgstr "  Externe repositories zonder mga{tgt}-equivalent (niet meer beschikbaar na de upgrade) :"
+
+
+# distupgrade i18n restore (idempotent)
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "{n_dl} downloaded ({n_peers} from peers, {n_up} from mirrors, {n_cached} from cache) in {time}"
+msgstr "{n_dl} gedownload ({n_peers} van peers, {n_up} van mirrors, {n_cached} uit cache) in {time}"
 

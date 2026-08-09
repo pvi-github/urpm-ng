@@ -225,6 +225,51 @@ Tutto quanto sopra.
 .BR \-y ", " \-\-auto
 Nessuna richiesta di conferma.
 .RE
+.TP
+.B distupgrade \fR[\fB\-\-to \fIversion\fR]
+Migra l'intero sistema da Mageia N a N+1. Rileva automaticamente
+la release di destinazione (corrente + 1) quando
+.B \-\-to
+è omesso.
+Si esegue in fasi : verifiche preliminari (rilevamento versione,
+rete, integrità del DB, maturità della destinazione, prompt salto
+multi-versione), cambio dei repository (mga N → mga N+1),
+risoluzione del piano della release di destinazione con conferma,
+download, installazione dei componenti critici del sistema
+(rpm / python / glibc) prima, poi il resto, e un rapporto
+post-transazione (file \fB.rpmnew\fR, pacchetti mga N residui,
+media di terze parti orfani). Riavviare per eseguire gli
+aggiustamenti post-avvio al prossimo avvio.
+.RS
+.TP
+.B \-\-to \fIversion\fR
+Identità esplicita della release di destinazione (es.
+.BR 11 ", " cauldron ", o " cauldron:12
+durante un freeze). Auto = corrente + 1 quando omesso.
+.TP
+.BR \-y ", " \-\-yes ", " \-\-auto
+Salta tutte le conferme.
+.TP
+.B \-\-dry-run
+Solo controlli Stage 0 e refresh dei metadati, nessuna mutazione
+successiva.
+.TP
+.B \-\-export\-plan \fIfile\fR
+Risolvere il piano della release di destinazione e scrivere i NEVRA
+in
+.IR file
+(nessun download, nessuna installazione).
+.TP
+.B \-\-resume
+Riprendere un distupgrade interrotto.
+.TP
+.B \-\-abort
+Abbandonare un distupgrade in corso o interrotto.
+.RE
+.TP
+.B recover
+Riconcilia le transazioni interrotte da crash / SIGKILL / interruzione
+di corrente.
 .SS Aggiornamento dei metadati e dei pacchetti
 .TP
 .B update \fR[\fImedia\fR]

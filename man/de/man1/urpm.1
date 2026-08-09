@@ -145,6 +145,49 @@ Alle oben genannten Selektoren.
 .BR \-y ", " \-\-auto
 Keine Bestätigung erforderlich.
 .RE
+.TP
+.B distupgrade \fR[\fB\-\-to \fIversion\fR]
+Migriert das gesamte System von Mageia N nach N+1. Erkennt das
+Ziel-Release (aktuell + 1) automatisch, wenn
+.B \-\-to
+weggelassen wird.
+Läuft in Stages : Vorabprüfungen (Release-Erkennung, Netzwerk,
+DB-Integrität, Zielrelease-Reife, Mehrfach-Versionssprung-Prompt),
+Repository-Wechsel (mga N → mga N+1), Ziel-Release-Auflösung mit
+Bestätigungs-Prompt, Download, Installation der kritischen
+Systemkomponenten (rpm / python / glibc) zuerst, dann der Rest, und
+ein Post-Transaktions-Bericht (\fB.rpmnew\fR-Dateien, verbliebene
+mga-N-Pakete, verwaiste Drittanbieter-Medien). Neustart, damit die
+Post-Boot-Anpassungen beim nächsten Start ausgeführt werden.
+.RS
+.TP
+.B \-\-to \fIversion\fR
+Explizite Ziel-Release-Identität (z. B.
+.BR 11 ", " cauldron ", oder " cauldron:12
+während eines Freeze). Auto = aktuell + 1 wenn weggelassen.
+.TP
+.BR \-y ", " \-\-yes ", " \-\-auto
+Alle Bestätigungs-Prompts überspringen.
+.TP
+.B \-\-dry-run
+Nur Stage-0-Prüfungen und Metadaten-Refresh, keine nachgelagerten
+Mutationen.
+.TP
+.B \-\-export\-plan \fIfile\fR
+Ziel-Release-Plan auflösen und NEVRAs in
+.I file
+schreiben (kein Download, keine Installation).
+.TP
+.B \-\-resume
+Ein unterbrochenes Distupgrade fortsetzen.
+.TP
+.B \-\-abort
+Ein laufendes oder unterbrochenes Distupgrade abbrechen.
+.RE
+.TP
+.B recover
+Transaktionen abgleichen, die durch Absturz / SIGKILL / Stromausfall
+unterbrochen wurden.
 .SS Metadaten und Paketaktualisierungen
 .TP
 .B update \fR[\fIMedium\fR]

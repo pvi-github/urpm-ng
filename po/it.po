@@ -8420,14 +8420,18 @@ msgstr "  --yes / --auto : rimozione dei {n} vecchi repository senza chiedere."
 # distupgrade i18n restore (idempotent)
 
 
-#: urpm/cli/commands/distupgrade.py
-#, python-brace-format
-msgid "{n_dl} downloaded ({n_peers} from peers, {n_up} from mirrors), {n_cached} from cache in {time}"
-msgstr "{n_dl} scaricato/i ({n_peers} da peer, {n_up} da mirror), {n_cached} dalla cache in {time}"
-
 
 #: urpm/cli/commands/distupgrade.py
 #, python-brace-format
 msgid "  Third-party repositories with no mga{tgt} counterpart (will be unavailable after the upgrade) :"
 msgstr "  Repository di terze parti senza equivalente mga{tgt} (non disponibili dopo l'upgrade) :"
+
+
+# distupgrade i18n restore (idempotent)
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "{n_dl} downloaded ({n_peers} from peers, {n_up} from mirrors, {n_cached} from cache) in {time}"
+msgstr "{n_dl} scaricati ({n_peers} da peer, {n_up} da mirror, {n_cached} dalla cache) in {time}"
 

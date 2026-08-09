@@ -193,6 +193,35 @@ urpm search firefox --json          # Salida JSON
 urpm i task-plasma --show-all       # Mostrar todas las dependencias
 ```
 
+### Actualización de distribución (mga N → N+1)
+
+```bash
+urpm distupgrade                        # Detección automática del destino = actual + 1
+urpm distupgrade --to 11                # Versión de destino explícita
+urpm distupgrade --to cauldron          # Destino Cauldron (rolling)
+urpm distupgrade --to cauldron:12       # Cauldron apuntando a 12 (durante freeze)
+
+# Opciones
+--to <version>                # Destino explícito ; auto = actual + 1
+--yes / -y / --auto           # Omitir confirmaciones, eliminar los
+                              # medios antiguos automáticamente en Stage 4
+--dry-run                     # Solo verificaciones Stage 0 + refresh de metadatos
+--export-plan <file>          # Resolver, escribir NEVRAs en <file>, restaurar
+                              # la BD (sin descarga, sin instalación) — usar
+                              # con `urpm download --from-file` en un peer
+                              # vecino para precargar la caché antes del
+                              # distupgrade real
+--resume                      # Reanudar un distupgrade interrumpido
+--abort                       # Abandonar un distupgrade en curso o interrumpido
+
+# Limpieza post-actualización
+urpm media remove --distupgraded   # Elimina los repositorios mga N reemplazados
+                                    # por su contraparte mga N+1
+```
+
+Se ejecuta en fases : comprobaciones previas (detección de versión, madurez del destino, aviso de salto multi-versión) → cambio de repositorios → resolución del plan de la versión destino + confirmación → descarga → instalación de los componentes críticos del sistema (rpm / python / glibc) primero, luego el resto → informe post-transacción (archivos `.rpmnew`, paquetes mga N residuales, medios de terceros huérfanos). Reinicie para que los ajustes post-arranque se ejecuten en el siguiente inicio.
+
+
 ## Transacciones atómicas vs best-effort
 
 Desde 0.7.9, `urpm upgrade` corre en modo **best-effort** por defecto: los paquetes cuyas dependencias no pueden satisfacerse se retiran de la transacción y se reportan al final con su motivo (dependencia ausente, mismatch de versión, cascada SRPM hermana, …). La transacción se aplica para todo lo demás. Pasa `--atomic` para cambiar a modo estricto (recomendado en servidores): cualquier paquete no resoluble aborta toda la transacción.

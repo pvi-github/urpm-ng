@@ -145,6 +145,50 @@ Alle bovenstaande selectoren.
 .BR \-y ", " \-\-auto
 Geen bevestigingsvraag.
 .RE
+.TP
+.B distupgrade \fR[\fB\-\-to \fIversion\fR]
+Migreert het hele systeem van Mageia N naar N+1. Detecteert het
+doelrelease automatisch (huidige + 1) wanneer
+.B \-\-to
+weggelaten wordt.
+Werkt in fasen : voorafcontroles (versiedetectie, netwerk,
+DB-integriteit, rijpheid van het doel, multi-versiesprong-prompt),
+repository-omschakeling (mga N → mga N+1), oplossing van het
+doelrelease-plan met bevestigingsprompt, download, installatie van
+kritieke systeemcomponenten (rpm / python / glibc) eerst, daarna
+de rest, en een post-transactierapport (\fB.rpmnew\fR-bestanden,
+overgebleven mga-N-pakketten, weesmedia van derden). Herstart
+zodat de post-boot-aanpassingen bij de volgende opstart worden
+uitgevoerd.
+.RS
+.TP
+.B \-\-to \fIversion\fR
+Expliciete doelrelease-identiteit (bijv.
+.BR 11 ", " cauldron ", of " cauldron:12
+tijdens een freeze). Auto = huidige + 1 wanneer weggelaten.
+.TP
+.BR \-y ", " \-\-yes ", " \-\-auto
+Sla alle bevestigingen over.
+.TP
+.B \-\-dry-run
+Alleen Stage-0-controles en metadata-refresh, geen verdere
+mutaties.
+.TP
+.B \-\-export\-plan \fIfile\fR
+Los het doelrelease-plan op en schrijf de NEVRAs naar
+.I file
+(geen download, geen installatie).
+.TP
+.B \-\-resume
+Hervat een onderbroken distupgrade.
+.TP
+.B \-\-abort
+Breek een lopende of onderbroken distupgrade af.
+.RE
+.TP
+.B recover
+Verzoent transacties die zijn onderbroken door crash / SIGKILL /
+stroomuitval.
 .SS Metadata en pakketupdates
 .TP
 .B update \fR[\fImedia\fR]

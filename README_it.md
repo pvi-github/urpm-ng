@@ -193,6 +193,35 @@ urpm search firefox --json          # Output JSON
 urpm i task-plasma --show-all       # Mostra tutte le dipendenze
 ```
 
+### Aggiornamento di distribuzione (mga N → N+1)
+
+```bash
+urpm distupgrade                        # Rilevamento automatico della destinazione = corrente + 1
+urpm distupgrade --to 11                # Release di destinazione esplicita
+urpm distupgrade --to cauldron          # Destinazione Cauldron (rolling)
+urpm distupgrade --to cauldron:12       # Cauldron che punta a 12 (durante freeze)
+
+# Opzioni
+--to <version>                # Destinazione esplicita ; auto = corrente + 1
+--yes / -y / --auto           # Salta le conferme, rimuovi automaticamente
+                              # i vecchi media in Stage 4
+--dry-run                     # Solo controlli Stage 0 + refresh dei metadati
+--export-plan <file>          # Risolvi, scrivi i NEVRA in <file>, ripristina
+                              # il DB (nessun download, nessuna installazione)
+                              # — combina con `urpm download --from-file` su
+                              # un peer vicino per precaricare la cache prima
+                              # del distupgrade reale
+--resume                      # Riprende un distupgrade interrotto
+--abort                       # Abbandona un distupgrade in corso o interrotto
+
+# Pulizia post-upgrade
+urpm media remove --distupgraded   # Rimuove i repository mga N sostituiti dalla
+                                    # loro controparte mga N+1
+```
+
+Si esegue in fasi : verifiche preliminari (rilevamento versione, maturità della destinazione, prompt salto multi-versione) → cambio dei repository → risoluzione del piano della release di destinazione + prompt di conferma → download → installazione dei componenti critici del sistema (rpm / python / glibc) prima, poi il resto → rapporto post-transazione (file `.rpmnew`, pacchetti mga N residui, media di terze parti orfani). Riavviare per eseguire gli aggiustamenti post-avvio al prossimo avvio.
+
+
 ## Transazioni atomiche vs best-effort
 
 Dalla 0.7.9, `urpm upgrade` gira in modalità **best-effort** di default:
