@@ -139,7 +139,7 @@ def download_plan(
     if not download_items:
         return summary
 
-    dl_results, downloaded, cached, _peer = ops.download_packages(
+    dl_results, downloaded, cached, peer_stats = ops.download_packages(
         download_items,
         options=InstallOptions(),
         progress_callback=progress_callback,
@@ -147,6 +147,10 @@ def download_plan(
     )
     summary["downloaded"] = downloaded
     summary["already_present"] = cached
+    # P2P split so the CLI can render « X from peers, Y from mirrors »
+    # like ``urpm i``/``urpm u`` do.
+    summary["from_peers"] = peer_stats.get("from_peers", 0) if peer_stats else 0
+    summary["from_upstream"] = peer_stats.get("from_upstream", 0) if peer_stats else 0
     for r in dl_results:
         if r.success and r.path is not None:
             nevra = f"{r.item.name}-{r.item.version}-{r.item.release}.{r.item.arch}"

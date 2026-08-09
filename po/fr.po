@@ -8754,3 +8754,18 @@ msgstr "    Les supprimer plus tard avec :  urpm media remove --distupgraded"
 msgid "  --yes / --auto : dropping the {n} old repositories without prompting."
 msgstr "  --yes / --auto : suppression des {n} anciens dépôts sans confirmation."
 
+
+# distupgrade i18n restore (idempotent)
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "{n_dl} downloaded ({n_peers} from peers, {n_up} from mirrors), {n_cached} from cache in {time}"
+msgstr "{n_dl} téléchargé(s) ({n_peers} depuis peers, {n_up} depuis miroirs), {n_cached} depuis le cache en {time}"
+
+
+#: urpm/cli/commands/distupgrade.py
+#, python-brace-format
+msgid "  Third-party repositories with no mga{tgt} counterpart (will be unavailable after the upgrade) :"
+msgstr "  Dépôts tiers sans équivalent mga{tgt} (indisponibles après l'upgrade) :"
+

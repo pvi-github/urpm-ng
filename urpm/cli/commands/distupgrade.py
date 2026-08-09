@@ -715,6 +715,23 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
                 n=n_failed,
                 names=", ".join(stage1_summary["failed_servers"]))))
 
+    # List the third-party repositories that couldn't be transposed
+    # to a mga N+1 counterpart, upfront — the user needs to know
+    # BEFORE the Stage 2 prompt what they're losing, so they can
+    # abort and re-run once the maintainer publishes the target
+    # tree, or accept the loss knowingly.
+    if stage1_summary["disabled_orphan"]:
+        print(colors.warning(_(
+            "  Third-party repositories with no mga{tgt} counterpart "
+            "(will be unavailable after the upgrade) :").format(
+                tgt=stage0.target.display())))
+        for orph in stage1_summary["disabled_orphan"][:15]:
+            print(f"    {colors.dim(orph['name'])}")
+        if len(stage1_summary["disabled_orphan"]) > 15:
+            print(colors.dim(_(
+                "    (+ {n} more)").format(
+                    n=len(stage1_summary["disabled_orphan"]) - 15)))
+
     # After Stage 1 the target-release media rows exist in the DB but
     # their synthesis metadata isn't on disk yet.  The libsolv pool
     # Stage 2 builds would then be empty on the target side and
@@ -801,8 +818,11 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
     if _dp["shown"] and _dp["start"] is not None:
         elapsed = _display.format_duration(time.monotonic() - _dp["start"])
         print("  " + colors.success(_(
-            "{n_dl} downloaded, {n_cached} from cache in {time}").format(
+            "{n_dl} downloaded ({n_peers} from peers, {n_up} from "
+            "mirrors), {n_cached} from cache in {time}").format(
                 n_dl=dl["downloaded"],
+                n_peers=dl.get("from_peers", 0),
+                n_up=dl.get("from_upstream", 0),
                 n_cached=dl["already_present"],
                 time=elapsed)))
     else:

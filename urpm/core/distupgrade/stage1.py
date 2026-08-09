@@ -193,13 +193,16 @@ def _transpose_third_party_media(
     # Third-party (is_official=0) rows tagged with the source release.
     # Accept both storage formats : the documented ``"9"`` and the
     # legacy ``"mga9"`` produced by older auto-discovery paths.
+    # No ``enabled=1`` filter : disabled third-party rows go through
+    # the same transposition logic (probe, insert mga N+1 preserving
+    # source enabled state, tag mga N with ``distupgrade``) — user's
+    # on/off preferences carry across the migration.
     rows = conn.execute("""
         SELECT id, name, short_name, mageia_version, architecture,
                relative_path, url, mirrorlist, priority, is_official,
                allow_unsigned, update_media, enabled, disabled_by
         FROM media
-        WHERE enabled = 1
-          AND is_official = 0
+        WHERE is_official = 0
           AND mageia_version IN (?, ?)
     """, (source_identity, f"mga{source_identity}")).fetchall()
 
@@ -278,7 +281,10 @@ def _transpose_third_party_media(
                 relative_path=new_relpath,
                 is_official=False,
                 allow_unsigned=bool(row.get("allow_unsigned")),
-                enabled=True,
+                # Preserve source enabled state so the user's on/off
+                # preference carries across the migration — a disabled
+                # mga N third-party stays disabled on mga N+1.
+                enabled=bool(row.get("enabled")),
                 update_media=bool(row.get("update_media")),
                 priority=row.get("priority", 50),
                 url=None,          # modern rows carry no legacy url
@@ -350,11 +356,22 @@ def _disable_source_media(db: "PackageDatabase",
     restore each field verbatim.
     """
     conn = db._get_connection()
+    # Official (is_official=1) only : third-party rows are entirely
+    # the domain of ``_transpose_third_party_media`` which correctly
+    # tags them ``distupgrade`` (transposition succeeded) or
+    # ``distupgrade_orphan`` (no target counterpart).  Overriding
+    # them here would erase the ``_orphan`` distinction and prevent
+    # Stage 4 from reporting the tier-media without a mga N+1 tree.
+    # No ``enabled=1`` filter : disabled mga N officials (debug,
+    # backports, testing, 32bit variants that ``urpm media autoconfig``
+    # slurped in but the user never enabled) get the same treatment
+    # as enabled ones — tagged ``distupgrade``, suffixed ``[dg:N]``,
+    # so ``urpm media remove --distupgraded`` cleans them up.
     rows = conn.execute("""
         SELECT id, name, mageia_version, is_official,
                enabled, disabled_by
         FROM media
-        WHERE enabled = 1
+        WHERE is_official = 1
           AND mageia_version = ?
     """, (source_identity,)).fetchall()
 

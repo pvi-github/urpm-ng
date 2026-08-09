@@ -166,7 +166,10 @@ class TestRunStage4:
         assert marker.exists()
 
         from urpm.core.distupgrade.state import read_state
-        assert read_state(state_db)["stage"] == "stage4_running"
+        # Stage 4 clears .state on success so the distupgrade mesh
+        # reopens between Stage 4 and reboot ; the postboot marker
+        # file alone signals « Stage 5 pending ».
+        assert read_state(state_db) is None
 
     def test_state_without_tx_ids_returns_empty(self, state_db,
                                                 tmp_path):

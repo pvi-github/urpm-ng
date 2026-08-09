@@ -111,18 +111,22 @@ class TestTransposeString:
 
 class TestTransposeThirdPartyMedia:
     def test_transposes_and_disables_source(self, db, tmp_path):
-        overlay_path = tmp_path / "overlay-mga10"
-        overlay_path.mkdir()
-        # Custom source-tagged media with mga9→mga10 transposable URL
-        db.add_media(
+        # Modern layout : server.base_path + media.relative_path.
+        # Both mga9 and mga10 overlay dirs exist locally so the
+        # file:// reachability probe succeeds for the transposed URL.
+        (tmp_path / "9" / "x86_64" / "media" / "urpm").mkdir(parents=True)
+        (tmp_path / "10" / "x86_64" / "media" / "urpm").mkdir(parents=True)
+        srv_id = db.add_server(
+            name="local-overlay", protocol="file", host="",
+            base_path=str(tmp_path), is_official=False, enabled=True,
+        )
+        media_id = db.add_media(
             name="mga9-overlay", short_name="mga9_overlay",
             mageia_version="9", architecture="x86_64",
-            relative_path="", is_official=False, enabled=True,
-            priority=100,
-            url=f"file://{tmp_path}/overlay-mga9",
+            relative_path="9/x86_64/media/urpm",
+            is_official=False, enabled=True, priority=100,
         )
-        # Sibling path exists so the probe returns True
-        (tmp_path / "overlay-mga9").mkdir()
+        db.link_server_media(srv_id, media_id)
 
         activated, orphaned = _transpose_third_party_media(
             db, "9", "10")
@@ -133,11 +137,14 @@ class TestTransposeThirdPartyMedia:
         media = {r["name"]: dict(r) for r in db.list_media()}
         assert media["mga9-overlay [dg:9]"]["enabled"] == 0
         assert media["mga9-overlay [dg:9]"]["disabled_by"] == "distupgrade"
-        # Target row was inserted with the plain (freed) name
+        # Target row was inserted with the plain (freed) name +
+        # bumped relative_path.
         assert "mga10-overlay" in media
         assert media["mga10-overlay"]["enabled"] == 1
         assert media["mga10-overlay"]["mageia_version"] == "10"
         assert media["mga10-overlay"]["is_official"] == 0
+        assert media["mga10-overlay"]["relative_path"] == \
+            "10/x86_64/media/urpm"
 
     def test_no_transposition_pattern_orphans(self, db, tmp_path):
         db.add_media(
