@@ -609,6 +609,125 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 rendered.append(str(p))
         return rendered
 
+    def _diagnose_distupgrade_holdback(self) -> List["SkippedJob"]:
+        """Explain why every candidate was silently held in a distupgrade.
+
+        Called when :meth:`resolve_distupgrade` produced an empty
+        transaction with no reported problems (rare but real, cf. the
+        beta-test report on kernel-desktop).  For each installed
+        package that has a strictly newer target-repo candidate not
+        chosen by the distupgrade solve, we run a fresh **targeted**
+        ``SOLVER_INSTALL`` solve on that candidate and surface the
+        resulting :samp:`Problem` list — that's the concrete reason
+        the DUP solve wouldn't take it (Conflicts against an installed
+        package, unsat require, etc.).
+
+        The cost is one solver run per held name.  In the vast majority
+        of empty-plan cases only a handful of holds trigger the whole
+        chain, so total overhead is bounded.  Skipped entirely on the
+        happy path (called only when trans.isempty()).
+        """
+        from ..i18n import _
+
+        result: List[SkippedJob] = []
+        seen_names = set()
+
+        try:
+            installed_repo = self.pool.installed
+        except Exception:
+            return result
+        if installed_repo is None:
+            return result
+
+        for inst in installed_repo.solvables:
+            name = (inst.name or "").strip()
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
+
+            # Look up every candidate for this name in the pool.  The
+            # installed one is in @System ; DUP candidates live in the
+            # target synth repos.  ``pool.select`` collapses the search
+            # to the exact name.
+            try:
+                sel = self.pool.select(
+                    name, solv.Selection.SELECTION_NAME
+                    | solv.Selection.SELECTION_CANON,
+                )
+                candidates = list(sel.solvables())
+            except Exception:
+                continue
+
+            # Retain non-installed candidates strictly newer than the
+            # installed EVR (libsolv is right to refuse older ones).
+            newer = []
+            for c in candidates:
+                try:
+                    if c.repo == installed_repo:
+                        continue
+                    if self.pool.evrcmp(c.evr, inst.evr,
+                                        solv.Pool.EVRCMP_COMPARE) > 0:
+                        newer.append(c)
+                except Exception:
+                    continue
+            if not newer:
+                continue
+
+            # Pick the highest EVR to explain — typically the one the
+            # DUP would have taken.  Run a targeted install solve on
+            # it and capture the problems.
+            def _evr_key(c):
+                try:
+                    return c.evr
+                except Exception:
+                    return ""
+            best = max(newer, key=_evr_key)
+
+            reason_lines: List[str] = []
+            try:
+                probe_solver = self.pool.Solver()
+                probe_solver.set_flag(
+                    solv.Solver.SOLVER_FLAG_ALLOW_UNINSTALL, 0)
+                job = self.pool.Job(
+                    solv.Job.SOLVER_INSTALL
+                    | solv.Job.SOLVER_SOLVABLE
+                    | solv.Job.SOLVER_TARGETED,
+                    best.id,
+                )
+                probs = probe_solver.solve([job])
+                for p in probs or []:
+                    try:
+                        reason_lines.append(str(p))
+                    except Exception:
+                        pass
+            except Exception as exc:  # noqa: BLE001
+                reason_lines.append(
+                    _("probe solve failed: {err}").format(err=exc))
+
+            if not reason_lines:
+                # The candidate solves fine in isolation but DUP still
+                # refused it — this points at a broader interaction we
+                # can't isolate cheaply.  Report what we know.
+                reason_lines.append(_(
+                    "candidate {name}-{evr} from {repo} installs fine "
+                    "in isolation but the distupgrade solve refused it "
+                    "(likely a package priority / obsoletes chain — "
+                    "please attach `urpm distupgrade --to N --dry-run "
+                    "--verbose` output to the bug report)."
+                ).format(name=best.name,
+                         evr=best.evr,
+                         repo=(best.repo.name if best.repo else "?")))
+
+            result.append(SkippedJob(
+                name=name,
+                evr=inst.evr or "",
+                reason="\n".join(reason_lines),
+                kind="held_silently_by_libsolv",
+                request_id="",
+            ))
+
+        return result
+
     def _diagnose_silent_holdback(
         self,
         requested_solvables: Dict[str, object],
@@ -2004,7 +2123,15 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         trans = solver.transaction()
         debug.log_transaction(trans)
         if trans.isempty():
-            return Resolution(success=True, actions=[], problems=[])
+            # SPEC_DISTUPGRADE §4.2 : an empty distupgrade transaction
+            # is never a legitimate outcome — the CLI treats it as a
+            # hard fail and rolls back Stage 1.  Attach the silent-hold
+            # diagnosis so the caller can surface *why* every candidate
+            # was held (kernel-desktop hold, Conflicts chain, etc.).
+            held = self._diagnose_distupgrade_holdback()
+            return Resolution(
+                success=True, actions=[], problems=[], skipped=held,
+            )
         trans.order()
 
         actions: List[PackageAction] = []
