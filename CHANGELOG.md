@@ -15,6 +15,117 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.0] — 2026-08-10
+
+> **⚠️ WARNING — the `distupgrade` feature is very young.**  Only use
+> it on a machine you can afford to lose and reinstall, or on a machine
+> you can snapshot and restore (Virtual Machine, Clonezilla,
+> btrfs/LVM snapshot…).  Do **not** run it on your daily driver without
+> a fresh backup.  Every failure report makes the next version safer.
+
+First release of the `urpm distupgrade` pipeline (mga N → N+1), full
+Stage 0 → Stage 5 implementation with target auto-detection, maturity
+gate, media transposition, Tx A / Tx B split, execvp handoff,
+structured Stage 4 report, and post-reboot deferred cleanup.
+Cross-cuts: history vocabulary overhaul, six-language i18n, docs +
+man pages + bash completion refresh.
+
+### Major Features
+
+- **`urpm distupgrade` — mga N → N+1 migration.**
+  End-to-end pipeline: Stage 0 pre-checks (clock, `--to` auto-detect,
+  §591 refuse-downgrade, §592 multi-jump prompt, target maturity
+  gate, Phase A live progress) → Stage 1 media swap and third-party
+  transposition → Stage 2 solve + download with peer-cache splits and
+  `--export-plan` for bandwidth-limited peer preload → Stage 3
+  Tx A / Tx B via libsolv transitive closure + `os.execvp` handoff
+  (`--yes` propagated across argv) → Stage 4 structured report (rpmnew,
+  `.mga<old>` residuals, orphan media, failed scriptlets) → Stage 5
+  post-boot fire-and-forget scripts.  New verbs: `urpm distupgrade`
+  (with `--to`, `--yes`, `--dry-run`, `--export-plan`, `--resume`,
+  `--abort`, `--continue`), `urpm recover`.  New `--distupgraded` on
+  `urpm media remove` for post-hoc cleanup ; new `--from-file` on
+  `urpm download` to consume a peer-preloaded plan.
+
+- **Deferred post-reboot cleanup of old media.**  Stage 4 no longer
+  synchronously purges the transposed old media rows (which on a 40k-
+  package DB with 50 media cost 30+ s while the user was about to
+  reboot).  Stage 4 just flips `media.disabled_by` to `pending_drop`
+  and returns instantly.  A new `urpm/core/deferred_cleanup.py`
+  module owns the physical purge, fcntl-serialized on
+  `/run/urpm/deferred_cleanup.lock`, fired once at urpmd startup and
+  on every subsequent `urpm` CLI invocation.  Post-reboot the daemon
+  absorbs the wait during boot ; users don't notice.
+
+### Improvements
+
+- **Six-language i18n first pass** for the distupgrade user-facing
+  flow — 60+ new msgids covering phase markers, Stage 2 summary +
+  prompt, download callbacks, Tx A/B headers, Stage 4 report,
+  maturity gate, multi-jump prompt, cleanup — translated in
+  de / es / fr / it / nl / pt per project convention.
+- **History status vocabulary alignment.**  New
+  `history_packages.status` column with `planned` / `done` / `failed`
+  / `skipped` values ; `urpm history` colours realigned to what the
+  DB actually writes back (previous mismatch showed everything grey).
+- **PackageAction carries `solvable_id`** for O(1) local-RPM lookup
+  during resolve, replacing an O(N) per-package scan.
+- **P2P download stats surfaced.**  Stage 2 forwards `peer_stats`
+  (from_peers / from_upstream) into the summary dict, CLI renders
+  the split like `urpm i` does.
+- **AppStream: `URLError` demoted to debug** so `file://` media
+  without an appstream blob fall back cleanly.
+- **`urpm show` gains `--files` and `--changelog`.**
+- **Container-based build chain** : shared container for multi-spec
+  `urpm build`, `--exclude PKG` on `urpm image make`, CPU / mem /
+  swap flags plumbed through, TMPDIR routed via workdir for large
+  `podman commit`.
+
+### Bug Fixes
+
+- **Stage 1 : stale media survived migration.**
+  `_disable_source_media` scoped to `is_official=1` so it stops
+  overriding the `distupgrade_orphan` tag ; both stage-1 helpers
+  dropped the `enabled=1` filter so mga N variants slurped in by
+  `urpm media autoconfig` but never activated (debug, backports,
+  testing, 32bit) get tagged `distupgrade` and become cleanup-eligible.
+- **BuildRequires parser** now uses `rpmspec` and honours `%if`
+  guards, matching the resolved deps of an actual build.
+- **`urpm build` container** now propagates LANG / LC_ALL for
+  correctly-translated `%description` and error messages.
+- **`_resolve_version`** : URL wins for release identity (fixes edge
+  case where the mirrorlist API and the media URL disagree).
+- **`autoconfig_servers`** strip logic corrected — no more duplicated
+  arch segments in constructed catalogue URLs.
+
+### Packaging & Distribution
+
+- **Schema migrations v33 → v36.**  v33 : `history.pid_running` for
+  orphan-transaction detection ; v34 : `history_scriptlets` (Phase C
+  scriptlet capture) ; v35 : `media.disabled_by` (Stage 1 tagging) ;
+  v36 : `pkg_id` indexes on `recommends`, `suggests`, `supplements`,
+  `enhances` — without them a `DELETE FROM packages` full-scans
+  these tables for FK integrity.
+- **`urpm-ng-packagekit-backend`** DBus JSON enriched with
+  `media_name` ; RPM Group → PK Group enum mapping ; progress
+  emission on install / update paths ; refresh signals for Discover
+  cache invalidation.
+
+### Documentation
+
+- **README (EN) + six translations** : new « Distribution upgrade
+  (mga N → N+1) » section covering every flag and cleanup verb.
+- **QUICKSTART.md** : distupgrade quickstart with interactive default
+  + `--export-plan` / `--from-file` bandwidth-friendly workflow.
+- **man/{en,de,es,fr,it,nl,pt}/man1/urpm.1** : `distupgrade` and
+  `recover` sub-commands ; `--distupgraded` on `media remove` ;
+  `--from-file` on `download`.
+- **`completion/urpm.bash`** : `distupgrade` + `recover` verbs,
+  per-verb handlers (release completion on `--to`, file completion
+  on `--export-plan` and `--from-file`).
+
+---
+
 ## [0.8.7] — 2026-08-02
 
 Bugfix release.  Fixes malformed URL construction when the mirrorlist
