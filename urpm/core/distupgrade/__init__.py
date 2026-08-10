@@ -30,6 +30,7 @@ from .stage1 import (
 )
 from .stage2 import (
     Stage2Aborted,
+    Stage2EmptyPlanError,
     Stage2Error,
     download_plan,
     run_stage2,
@@ -101,6 +102,7 @@ __all__ = [
     "BOOT_CRITICAL_LOCKS_UEFI",
     "SmokeTestFailure",
     "Stage2Aborted",
+    "Stage2EmptyPlanError",
     "Stage2Error",
     "Stage3Error",
     "Stage4Error",

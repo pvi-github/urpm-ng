@@ -47,6 +47,34 @@ class Stage2Aborted(Exception):
     """
 
 
+class Stage2EmptyPlanError(Stage2Error):
+    """Raised when the resolver returns zero actions.
+
+    A distupgrade that reaches Stage 2 with an empty plan is *never*
+    a legitimate outcome — Stage 0 already gated on the source ≠
+    target release identity, and Stage 1 has just transposed the
+    media rows.  An empty plan therefore means the resolver held
+    every candidate (typically a broken require or a Conflicts/
+    Obsoletes chain against a critical package like kernel).
+
+    Proceeding would let Stage 4 flag the mga N media for deferred
+    deletion while the machine is still entirely on mga N — the
+    reboot-time cleanup would then brick the system.  The CLI
+    catches this and auto-rolls back Stage 1 so the user is left in
+    exactly the pre-distupgrade state.
+
+    Carries the ``Resolution`` for the caller to render the
+    ``skipped`` jobs (which package was held, why).
+    """
+
+    def __init__(self, result):
+        self.result = result
+        super().__init__(
+            "distupgrade solve returned zero actions — every candidate "
+            "was held.  See ``result.skipped`` for the diagnosis."
+        )
+
+
 def solve_distupgrade(
     db: "PackageDatabase",
     target: "ReleaseIdentity",
@@ -201,6 +229,14 @@ def run_stage2(
         raise
     except Exception as exc:  # noqa: BLE001
         raise Stage2Error(f"distupgrade solve failed: {exc}") from exc
+
+    # SAFETY GUARD (SPEC_DISTUPGRADE §4.2 / 0.9.1 hotfix) : an empty
+    # plan means libsolv held every candidate.  Never proceed — that
+    # would carry us to Stage 4 where the mga N media get flagged
+    # for deferred deletion, bricking the still-on-mga-N machine at
+    # reboot.  Caller catches this and rolls back Stage 1.
+    if not result.actions:
+        raise Stage2EmptyPlanError(result)
 
     if confirm_callback is not None and not confirm_callback(result):
         raise Stage2Aborted()

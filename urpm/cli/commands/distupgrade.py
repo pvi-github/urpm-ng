@@ -176,25 +176,27 @@ def _resume_from_stage4(db) -> int:
     return 0
 
 
-def _cmd_abort(db: 'PackageDatabase') -> int:
-    """Undo Stage 1 side-effects verbatim from ``.state.stage1_undo``.
+def _rollback_stage1(db: 'PackageDatabase') -> tuple:
+    """Undo Stage 1 side-effects verbatim.
 
-    Two reversal passes so the DB after ``--abort`` is bit-for-bit
-    the state the user had before ``urpm distupgrade`` :
+    Two reversal passes so the DB after rollback is bit-for-bit the
+    state the user had before ``urpm distupgrade`` :
 
     1. **Delete every row Stage 1 created** — ``created_media_ids``
        and ``created_server_ids``.  ``server_media`` links cascade
-       automatically via the schema's ``ON DELETE CASCADE``.
+       via the schema's ``ON DELETE CASCADE``.
     2. **Restore every row Stage 1 modified** — ``modified_media``
        snapshots carry the pre-mutation ``(enabled, disabled_by,
-       name)`` tuple.  We write each back verbatim.
+       name)`` tuple, restored verbatim.
 
-    Fallback for state files written before the undo journal existed
-    (pre-v0.9 stub attempts) : behave like the earlier abort — find
-    rows with ``disabled_by IN ('distupgrade', 'distupgrade_orphan')``
-    and re-enable them.
+    Fallback for state files without an undo journal (pre-v0.9 stub
+    attempts) : find rows tagged ``distupgrade`` /
+    ``distupgrade_orphan`` and re-enable them.
+
+    Returns ``(n_deleted_media, n_deleted_servers, n_restored)``.
+    Caller is responsible for ``delete_state(db)`` afterwards.
     """
-    from ...core.distupgrade import delete_state, read_state
+    from ...core.distupgrade import read_state
     from ...core.distupgrade.stage1 import _stripped_name
 
     state = read_state(db) or {}
@@ -229,8 +231,6 @@ def _cmd_abort(db: 'PackageDatabase') -> int:
                 n_restored += cur.rowcount
             conn.commit()
     else:
-        # Fallback : legacy abort path — find distupgrade-tagged rows
-        # by disabled_by and re-enable them, stripping the suffix.
         rows = conn.execute("""
             SELECT id, name FROM media
             WHERE disabled_by IN ('distupgrade', 'distupgrade_orphan')
@@ -247,14 +247,64 @@ def _cmd_abort(db: 'PackageDatabase') -> int:
             conn.commit()
         n_restored = len(rows)
 
+    return n_deleted_media, n_deleted_servers, n_restored
+
+
+def _cmd_abort(db: 'PackageDatabase') -> int:
+    """Undo Stage 1 side-effects from ``.state.stage1_undo`` and clear
+    state.  Thin wrapper around :func:`_rollback_stage1`."""
+    from ...core.distupgrade import delete_state
+
+    n_del_m, n_del_s, n_up = _rollback_stage1(db)
     delete_state(db)
     print(colors.success(_(
         "distupgrade state cleared : {n_del_m} target media + "
         "{n_del_s} server(s) removed, {n_up} row(s) restored.").format(
-            n_del_m=n_deleted_media,
-            n_del_s=n_deleted_servers,
-            n_up=n_restored)))
+            n_del_m=n_del_m,
+            n_del_s=n_del_s,
+            n_up=n_up)))
     return 0
+
+
+def _render_empty_plan_diagnosis(result) -> None:
+    """Explain to the user why Stage 2 returned zero actions.
+
+    Iterates ``result.skipped`` (populated by
+    :meth:`Resolver.resolve_upgrade` and its distupgrade cousin) and
+    prints each held package with its reason — the same info the
+    ``urpm upgrade`` skipped-jobs report shows, minus the pretty
+    tabulator (empty-plan is already a hard fail, not a live TTY
+    moment).
+
+    Called from the ``Stage2EmptyPlanError`` handler in
+    :func:`cmd_distupgrade` before rollback.
+    """
+    from .. import colors
+
+    print("\n" + colors.error(_(
+        "distupgrade solve returned ZERO actions — every candidate "
+        "was held by libsolv.  The system was NOT upgraded.")))
+    skipped = getattr(result, "skipped", None) or []
+    if not skipped:
+        print(colors.warning(_(
+            "  No skipped-jobs record either — this is a resolver "
+            "anomaly.  Please report with the output of :")))
+        print(colors.dim(
+            "    urpm distupgrade --to <N+1> --dry-run 2>&1 | tee dg.log"))
+        return
+    print(colors.warning(_(
+        "  {n} candidate(s) held :").format(n=len(skipped))))
+    for sj in skipped[:20]:
+        header = f"    {colors.error(sj.name)}"
+        if getattr(sj, "evr", ""):
+            header += f" {colors.dim(sj.evr)}"
+        print(header)
+        for line in (sj.reason or "").splitlines():
+            if line.strip():
+                print(f"      {colors.dim(line)}")
+    if len(skipped) > 20:
+        print(colors.dim(_(
+            "    (+ {n} more)").format(n=len(skipped) - 20)))
 
 
 def _render_plan_and_confirm(result, *, source: str, target: str,
@@ -497,6 +547,7 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
         Stage0Error,
         Stage1Error,
         Stage2Aborted,
+        Stage2EmptyPlanError,
         Stage2Error,
         release_distupgrade_lock,
         run_stage0,
@@ -804,6 +855,37 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
             "distupgrade cancelled at the Stage 2 prompt — nothing "
             "downloaded, state not persisted.  Re-run to re-solve.")))
         return 0
+    except Stage2EmptyPlanError as exc:
+        # SAFETY : an empty plan means libsolv held every candidate.
+        # We MUST NOT proceed to Stage 3 / Stage 4 — the transposed
+        # mga N media would get flagged for deferred deletion while
+        # the machine is still entirely on mga N, bricking it at
+        # reboot.  Auto-rollback Stage 1 so the DB matches the
+        # pre-distupgrade state.  User is left with a clear diagnosis
+        # of the skipped packages, no cleanup needed on their side.
+        if _dp["display"] is not None:
+            _dp["display"].finish()
+        _render_empty_plan_diagnosis(exc.result)
+        print(colors.info(_(
+            "Rolling back Stage 1 media changes so the DB matches the "
+            "pre-distupgrade state...")))
+        from ...core.distupgrade import (
+            delete_state, release_distupgrade_lock,
+        )
+        try:
+            n_del_m, n_del_s, n_up = _rollback_stage1(db)
+            delete_state(db)
+            release_distupgrade_lock()
+            print(colors.success(_(
+                "Rolled back : {n_del_m} target media + "
+                "{n_del_s} server(s) removed, {n_up} row(s) restored."
+            ).format(n_del_m=n_del_m, n_del_s=n_del_s, n_up=n_up)))
+        except Exception as rb_exc:  # noqa: BLE001
+            print(colors.error(_(
+                "Rollback failed: {err}.  Run `urpm distupgrade --abort` "
+                "manually to restore the pre-distupgrade state."
+            ).format(err=rb_exc)))
+        return 1
     except Stage2Error as exc:
         if _dp["display"] is not None:
             _dp["display"].finish()

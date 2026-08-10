@@ -186,3 +186,43 @@ class TestRunStage2:
                    side_effect=RuntimeError("pool blew up")):
             with pytest.raises(Stage2Error, match="solve failed"):
                 run_stage2(state_db, target=target)
+
+    def test_empty_plan_raises_before_confirm(self, state_db):
+        """SAFETY : a solve returning zero actions must raise
+        Stage2EmptyPlanError, NOT call the confirm callback, and NOT
+        touch the download stage.  Proceeding past Stage 2 with a
+        no-op plan would take us to Stage 4, flag mga N media for
+        deferred deletion, and brick the still-on-mga-N machine at
+        reboot."""
+        from urpm.core.distupgrade.state import write_state
+        from urpm.core.distupgrade.stage2 import Stage2EmptyPlanError
+        write_state({
+            "version_from": "10", "version_to": "11",
+            "stage": "media_swapped",
+        }, state_db)
+        target = ReleaseIdentity(identity="11", numeric="11")
+
+        empty = _mock_resolution([])
+        empty._resolver = MagicMock()
+        confirm_called = {"n": 0}
+        download_called = {"n": 0}
+
+        def _confirm(_r):
+            confirm_called["n"] += 1
+            return True
+
+        def _dp(*_a, **_kw):
+            download_called["n"] += 1
+            return {}
+
+        with patch("urpm.core.distupgrade.stage2.solve_distupgrade",
+                   return_value=empty), \
+             patch("urpm.core.distupgrade.stage2.download_plan",
+                   side_effect=_dp):
+            with pytest.raises(Stage2EmptyPlanError) as excinfo:
+                run_stage2(state_db, target=target,
+                           confirm_callback=_confirm)
+
+        assert excinfo.value.result is empty
+        assert confirm_called["n"] == 0, "confirm must not fire on empty plan"
+        assert download_called["n"] == 0, "download must not fire on empty plan"
