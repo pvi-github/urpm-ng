@@ -69,6 +69,21 @@ class UrpmDaemon:
         logger.info(f"Opening database: {self.db_path}")
         self.db = PackageDatabase(self.db_path)
 
+        # SPEC_DISTUPGRADE §4.4 : purge media flagged
+        # ``disabled_by='pending_drop'`` (Stage 4 deferred the physical
+        # DELETE to avoid blocking the pre-reboot wait).  Once per
+        # daemon startup — no periodic re-check.  fcntl-serialized
+        # with any concurrent urpm CLI invocation.
+        try:
+            from ..core.deferred_cleanup import sweep_pending_drop
+            dropped = sweep_pending_drop(self.db)
+            if dropped:
+                logger.info(f"deferred cleanup: purged {dropped} old media")
+        except Exception as exc:  # noqa: BLE001
+            # Never let the sweep block daemon startup — worst case
+            # the pending rows sit around until the next attempt.
+            logger.warning(f"deferred cleanup skipped: {exc}")
+
         # Ensure base directory exists
         self.base_dir.mkdir(parents=True, exist_ok=True)
 

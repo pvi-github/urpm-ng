@@ -95,7 +95,7 @@ def _register_rpm_collation(conn: sqlite3.Connection) -> None:
     conn.create_collation('rpm_version_compare', _rpm_version_collation)
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 35
+SCHEMA_VERSION = 36
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -490,6 +490,15 @@ CREATE INDEX IF NOT EXISTS idx_conflicts_cap ON conflicts(capability);
 CREATE INDEX IF NOT EXISTS idx_conflicts_pkg ON conflicts(pkg_id);
 CREATE INDEX IF NOT EXISTS idx_obsoletes_cap ON obsoletes(capability);
 CREATE INDEX IF NOT EXISTS idx_obsoletes_pkg ON obsoletes(pkg_id);
+-- Weak-dependency tables : without an index on pkg_id, every
+-- ``DELETE FROM packages`` triggers a full-table scan on each of
+-- these tables for FK integrity checking.  On a 40k-package DB
+-- this turned a 50-media distupgrade cleanup into a 30s freeze
+-- (measured : 31.84s on DELETE packages alone).  See v36 migration.
+CREATE INDEX IF NOT EXISTS idx_recommends_pkg ON recommends(pkg_id);
+CREATE INDEX IF NOT EXISTS idx_suggests_pkg ON suggests(pkg_id);
+CREATE INDEX IF NOT EXISTS idx_supplements_pkg ON supplements(pkg_id);
+CREATE INDEX IF NOT EXISTS idx_enhances_pkg ON enhances(pkg_id);
 
 -- (package_files / files_xml_state were removed in schema v28: ``urpm
 -- f`` now streams the on-disk ``files.xml.lzma`` of each enabled
@@ -981,6 +990,14 @@ MIGRATIONS = {
         -- existantes.
         ALTER TABLE media ADD COLUMN disabled_by TEXT;
     """),
+    # v35 -> v36 : index pkg_id on the four weak-dependency tables
+    # that were missing one.  Executed by
+    # :meth:`PackageDatabase._migrate_v35_to_v36_indexes` after the
+    # (empty) SQL leg, because we need to skip tables that older test
+    # fixtures may not have created.  Real DBs always carry all four
+    # tables (schema v22 introduced them), so the check is a no-op
+    # there.
+    35: (36, ""),
 }
 
 
@@ -1332,6 +1349,8 @@ class PackageDatabase(
                     self._migrate_v9_to_v10_test_servers(logger)
                 elif version == 18 and to_version == 19:
                     print("A new column 'filesize' has been added in database. To populate it, launch the command:\n   'urpm media update'")
+                elif version == 35 and to_version == 36:
+                    self._migrate_v35_to_v36_indexes(logger)
                 version = to_version
             except sqlite3.Error as e:
                 logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
@@ -1343,6 +1362,34 @@ class PackageDatabase(
                 raise RuntimeError(f"Database migration failed: {e}")
 
         logger.info(f"Database schema is now at version {SCHEMA_VERSION}")
+
+    def _migrate_v35_to_v36_indexes(self, logger):
+        """Back-fill pkg_id indexes on the four weak-dependency tables.
+
+        Without an index on ``pkg_id`` each ``DELETE FROM packages``
+        forces SQLite to full-scan each of these tables for FK
+        integrity — on a 40k-package DB, dropping 50 media took
+        31.84 s.  With the indexes the same operation is sub-second.
+
+        Skips any table that doesn't exist in this DB (older test
+        fixtures create only a subset of the schema).  Real DBs
+        always carry all four tables since v22, so this is a no-op
+        on production upgrades besides the desired index creation.
+        """
+        WEAK_DEP_TABLES = ("recommends", "suggests", "supplements", "enhances")
+        existing = {
+            r[0] for r in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        for tbl in WEAK_DEP_TABLES:
+            if tbl not in existing:
+                logger.debug(f"v36: table {tbl} absent, skipping index")
+                continue
+            self.conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{tbl}_pkg ON {tbl}(pkg_id)"
+            )
+        self.conn.commit()
 
     def _migrate_v7_to_v8_data(self, logger):
         """Migrate v7 media data to v8 format.

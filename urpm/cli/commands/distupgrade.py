@@ -1250,40 +1250,30 @@ def _prompt_drop_transposed(db, transposed_media, *, auto: bool) -> None:
 
 
 def _drop_transposed_media(db, transposed_media) -> int:
-    """Delete every transposed-old row in one transaction.
+    """Mark transposed old media for deferred deletion (SPEC_DISTUPGRADE §4.4).
 
-    ``db.remove_media()`` commits per-row (one fsync each) ; on a VM
-    with 50+ rows and cascades to ``packages`` / ``cache_files`` /
-    ``server_media`` / etc., that's minutes of disk stalls.  Batching
-    into a single ``BEGIN...COMMIT`` collapses it to one fsync at the
-    end.  FK cascades still fire per row inside the transaction —
-    same rows deleted, just no per-row commit overhead.
+    Physical purge of these rows (and their thousands of packages /
+    requires / provides deps) is deferred to urpmd startup or the
+    next ``urpm`` CLI invocation — see
+    :mod:`urpm.core.deferred_cleanup`.  Doing the ~10 s of DELETE
+    work at Stage 4 blocks a user who is about to reboot anyway, for
+    no user benefit ; deferring it moves the wait behind the reboot.
 
-    Returns the count dropped.
+    Returns the number of media rows flagged.
     """
     if not transposed_media:
         return 0
+    ids = [int(m['id']) for m in transposed_media if m.get('id') is not None]
+    if not ids:
+        return 0
     conn = db._get_connection()
-    dropped = 0
-    failures: list = []
+    placeholders = ",".join("?" * len(ids))
     with db._lock:
-        try:
-            conn.execute("BEGIN")
-            for m in transposed_media:
-                try:
-                    conn.execute(
-                        "DELETE FROM media WHERE name = ?", (m['name'],))
-                    dropped += 1
-                except Exception as exc:  # noqa: BLE001
-                    failures.append((m['name'], exc))
-            conn.commit()
-        except Exception:  # noqa: BLE001
-            conn.rollback()
-            raise
-    for name, exc in failures:
-        print(colors.warning(_(
-            "    could not drop {name} : {err}").format(
-                name=name, err=exc)))
+        conn.execute(
+            f"UPDATE media SET disabled_by = 'pending_drop' "
+            f"WHERE id IN ({placeholders})", ids)
+        conn.commit()
     print("  " + colors.success(_(
-        "Dropped {n} old repositor(y|ies).").format(n=dropped)))
-    return dropped
+        "Flagged {n} old repositor(y|ies) for post-reboot cleanup.").format(
+            n=len(ids))))
+    return len(ids)

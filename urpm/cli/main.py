@@ -2837,6 +2837,18 @@ def main(argv=None) -> int:
         # invocations.  Errors are logged inside the helper.
         pass
 
+    # SPEC_DISTUPGRADE §4.4 : deferred cleanup of transposed old
+    # media flagged ``disabled_by='pending_drop'`` at Stage 4.  Hot
+    # path is a single indexed SELECT — no-op when nothing pending.
+    # fcntl-serialized with urpmd's startup sweep so we don't collide.
+    try:
+        from ..core.deferred_cleanup import sweep_pending_drop
+        sweep_pending_drop(db)
+    except Exception:  # noqa: BLE001
+        # Never block a normal urpm invocation on cleanup failure —
+        # the pending rows stay flagged, retried at next trigger.
+        pass
+
     # =========================================================================
     # Distupgrade mesh — refuse write commands while a distupgrade is
     # in progress or interrupted.  See SPEC_DISTUPGRADE §2.

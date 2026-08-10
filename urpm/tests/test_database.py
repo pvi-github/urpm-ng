@@ -1569,7 +1569,7 @@ class TestSchemaV35Migration:
 
     def test_fresh_db_reaches_at_least_v35(self, db):
         from urpm.core.database import SCHEMA_VERSION
-        assert SCHEMA_VERSION == 35  # v35 is the current head
+        assert SCHEMA_VERSION >= 35
         self._expected_v35_shape(db)
 
     def test_v34_db_is_upgraded_to_v35(self, monkeypatch):
@@ -1607,6 +1607,89 @@ class TestSchemaV35Migration:
         db = PackageDatabase(db_path)
         try:
             self._expected_v35_shape(db)
+        finally:
+            db.close()
+            db_path.unlink(missing_ok=True)
+
+
+class TestSchemaV36WeakDepIndexes:
+    """Schema v36 adds pkg_id indexes on the four weak-dependency tables
+    (recommends, suggests, supplements, enhances).  Without them, every
+    ``DELETE FROM packages`` triggers a full-scan of each table for FK
+    integrity — measured 31.84s to drop 50 medias on a 40k-package DB.
+    With the indexes the same operation is sub-second.
+    """
+
+    _EXPECTED_INDEXES = (
+        "idx_recommends_pkg",
+        "idx_suggests_pkg",
+        "idx_supplements_pkg",
+        "idx_enhances_pkg",
+    )
+
+    def _assert_indexes_present(self, db):
+        conn = db._get_connection()
+        indexes = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        ).fetchall()}
+        for expected in self._EXPECTED_INDEXES:
+            assert expected in indexes, f"missing {expected}"
+
+    def test_fresh_db_has_weak_dep_indexes(self, db):
+        from urpm.core.database import SCHEMA_VERSION
+        assert SCHEMA_VERSION >= 36
+        self._assert_indexes_present(db)
+
+    def test_v35_db_gets_indexes_via_v36_migration(self, monkeypatch):
+        """A pre-existing v35 database walks only the v35→v36 leg."""
+        import tempfile
+        import sqlite3
+        from pathlib import Path
+        from urpm.core.database import PackageDatabase
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = Path(f.name)
+
+        raw = sqlite3.connect(str(db_path))
+        raw.executescript("""
+            CREATE TABLE packages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT
+            );
+            CREATE TABLE recommends (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pkg_id INTEGER NOT NULL,
+                capability TEXT NOT NULL
+            );
+            CREATE TABLE suggests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pkg_id INTEGER NOT NULL,
+                capability TEXT NOT NULL
+            );
+            CREATE TABLE supplements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pkg_id INTEGER NOT NULL,
+                capability TEXT NOT NULL
+            );
+            CREATE TABLE enhances (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pkg_id INTEGER NOT NULL,
+                capability TEXT NOT NULL
+            );
+            CREATE TABLE schema_info (
+                version INTEGER PRIMARY KEY
+            );
+            INSERT INTO schema_info (version) VALUES (35);
+        """)
+        raw.commit()
+        raw.close()
+
+        monkeypatch.setattr(
+            'urpm.core.config.get_system_version', lambda: '10',
+        )
+        db = PackageDatabase(db_path)
+        try:
+            self._assert_indexes_present(db)
         finally:
             db.close()
             db_path.unlink(missing_ok=True)
