@@ -15,6 +15,42 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.1] — 2026-08-11
+
+Bugfix release addressing two safety issues surfaced by the first
+`urpm distupgrade` beta reports.
+
+### Bug Fixes
+
+- **Stage 2 refuses to proceed on an empty plan.**  When libsolv
+  silently held every candidate (real beta case : a kernel-desktop
+  hold that produced a Resolution with zero actions), Stage 4
+  previously ran to completion and flagged the mga N media for
+  deferred deletion — with the machine still entirely on mga N.  A
+  reboot-time cleanup would then have removed every mga N repo while
+  the system still needed them, bricking the machine.  A new
+  `Stage2EmptyPlanError` now aborts the pipeline before Stage 3,
+  prints the resolver's skipped-jobs diagnosis, and **auto-rolls back
+  Stage 1** via the shared `_rollback_stage1` helper (extracted from
+  `_cmd_abort` for reuse).  The DB is left bit-for-bit in the
+  pre-distupgrade state ; no manual recovery step for the user.
+
+- **libsolv silent-hold diagnostic in distupgrade solve.**
+  `resolve_distupgrade` used to return `Resolution(actions=[],
+  skipped=None)` on a silent hold, leaving the CLI with the useless
+  `"resolver anomaly; see log for details"` message.  New
+  `_diagnose_distupgrade_holdback` runs when the DUP transaction
+  comes out empty : walks installed packages, finds strictly-newer
+  target-repo candidates, runs a fresh targeted `SOLVER_INSTALL` solve
+  on the best candidate, and captures libsolv's `Problem` list — the
+  concrete reason the DUP wouldn't take it (Conflicts against an
+  installed package, unsatisfied requires, etc.).  Wired to
+  `Resolution.skipped` so the CLI's existing empty-plan renderer
+  surfaces it verbatim.  Zero cost on the happy path (only fires when
+  the transaction is empty).
+
+---
+
 ## [0.9.0] — 2026-08-10
 
 > **⚠️ WARNING — the `distupgrade` feature is very young.**  Only use
