@@ -2560,6 +2560,57 @@ Set auto_add = false to disable all automatic server addition.
     key_remove.add_argument('keyid', help=_('Key ID to remove (e.g., 80420f66)'))
 
     # =========================================================================
+    # system - export/import a machine's package + media/server profile
+    # =========================================================================
+    system_parser = subparsers.add_parser(
+        'system',
+        help=_('Export / import a machine profile (packages + media + servers)'),
+        parents=[display_parent]
+    )
+    system_subparsers = system_parser.add_subparsers(
+        dest='system_command',
+        metavar='<subcommand>'
+    )
+
+    # system export
+    system_export = system_subparsers.add_parser(
+        'export',
+        help=_('Write current system state to JSON')
+    )
+    system_export.add_argument(
+        '--to', metavar='PATH',
+        help=_('Destination file (default: '
+               '~/system-<hostname>-<UTC-timestamp>.json)')
+    )
+
+    # system import
+    system_import = system_subparsers.add_parser(
+        'import',
+        help=_('Reconcile this system against a profile JSON')
+    )
+    system_import.add_argument(
+        '--from', dest='from_', metavar='PATH', required=True,
+        help=_('Profile file to import')
+    )
+    system_import.add_argument(
+        '--yes', '-y', dest='auto', action='store_true',
+        help=_('Skip the confirmation prompt')
+    )
+    system_import.add_argument(
+        '--no-backup', action='store_true',
+        help=_('Skip the automatic backup of the current state')
+    )
+    system_import.add_argument(
+        '--dry-run', action='store_true',
+        help=_('Show the plan but do not apply anything')
+    )
+    system_import.add_argument(
+        '--merge-media', action='store_true',
+        help=_('Keep local media/servers not in the profile '
+               '(default: replace — remove local extras)')
+    )
+
+    # =========================================================================
     # peer - P2P peer management
     # =========================================================================
     peer_parser = subparsers.add_parser(
@@ -3141,6 +3192,15 @@ def main(argv=None) -> int:
 
         elif args.command in ('key', 'k'):
             return cmd_key(args)
+
+        elif args.command == 'system':
+            from .commands.system import cmd_system_export, cmd_system_import
+            if args.system_command == 'export':
+                return cmd_system_export(args, db)
+            elif args.system_command == 'import':
+                return cmd_system_import(args, db)
+            else:
+                return cmd_not_implemented(args, db)
 
         elif args.command == 'peer':
             return cmd_peer(args, db)
