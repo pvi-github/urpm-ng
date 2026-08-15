@@ -434,3 +434,158 @@ def test_seen_state_guard_terminates():
 def test_orphans_consistent_with_skipped():
     """Orphan detection must agree with the partial-skip outcome."""
     pass  # pragma: no cover
+
+
+# ---------------------------------------------------------------------------
+# _disambiguate_dup_rename — kernel-desktop mga9→mga10 pattern
+# ---------------------------------------------------------------------------
+
+
+class TestDisambiguateDupRename:
+    """The pre-solve pass that pins a target candidate when a DUP rename
+    would otherwise be ambiguous.
+
+    Real-world trigger : mga9 kernel-desktop has ``Name=kernel-desktop``
+    (short) ; mga10 has ``Name=kernel-desktop-<version>-1.mga10`` (long).
+    Several mga10 candidates provide the unversioned ``kernel-desktop``
+    capability — libsolv can't pick one and silently holds them all.
+    The pass emits a ``SOLVER_INSTALL`` on the highest-EVR candidate to
+    disambiguate.
+    """
+
+    def test_ambiguous_rename_pins_highest_evr(self):
+        """Two mga10 candidates provide ``kernel-desktop`` — the highest
+        EVR must be pinned."""
+        pool, sys_repo, avail_repo, idx = make_pool(
+            installed=[{
+                "name": "kernel-desktop",
+                "evr": "6.6.141-1.mga9",
+                "provides": ["kernel-desktop"],
+            }],
+            available=[
+                {
+                    "name": "kernel-desktop-6.18.35-1.mga10",
+                    "evr": "1-1.mga10",
+                    "provides": ["kernel-desktop"],
+                },
+                {
+                    "name": "kernel-desktop-6.18.39-1.mga10",
+                    "evr": "1-1.mga10",
+                    "provides": ["kernel-desktop"],
+                },
+            ],
+        )
+        r = make_resolver(pool)
+
+        jobs = r._disambiguate_dup_rename()
+
+        assert len(jobs) == 1, \
+            f"expected exactly one pin, got {len(jobs)}"
+        pinned = jobs[0].solvables()[0]
+        # Both candidates share EVR here — pinning either is correct.
+        # What matters is that ONE is picked, breaking the ambiguity.
+        assert pinned.name in (
+            "kernel-desktop-6.18.35-1.mga10",
+            "kernel-desktop-6.18.39-1.mga10",
+        )
+
+    def test_ambiguous_rename_prefers_higher_evr(self):
+        """When candidates have distinct EVR, the highest must win."""
+        pool, sys_repo, avail_repo, idx = make_pool(
+            installed=[{
+                "name": "old-name",
+                "evr": "1.0-1",
+                "provides": ["myapp"],
+            }],
+            available=[
+                {
+                    "name": "new-name-a",
+                    "evr": "2.0-1",
+                    "provides": ["myapp"],
+                },
+                {
+                    "name": "new-name-b",
+                    "evr": "3.0-1",
+                    "provides": ["myapp"],
+                },
+            ],
+        )
+        r = make_resolver(pool)
+
+        jobs = r._disambiguate_dup_rename()
+
+        assert len(jobs) == 1
+        assert jobs[0].solvables()[0].name == "new-name-b"
+
+    def test_same_name_target_skips_disambig(self):
+        """When the installed Name has a same-Name target candidate, DUP
+        handles it — no pin needed."""
+        pool, sys_repo, avail_repo, idx = make_pool(
+            installed=[{
+                "name": "firefox",
+                "evr": "128.0-1.mga9",
+                "provides": ["firefox"],
+            }],
+            available=[
+                {
+                    "name": "firefox",
+                    "evr": "140.0-1.mga10",
+                    "provides": ["firefox"],
+                },
+                # A random other pkg also provides "firefox" as a virtual
+                # cap — irrelevant because the same-Name candidate exists.
+                {
+                    "name": "firefox-esr",
+                    "evr": "128.0-1.mga10",
+                    "provides": ["firefox"],
+                },
+            ],
+        )
+        r = make_resolver(pool)
+
+        jobs = r._disambiguate_dup_rename()
+
+        assert jobs == []
+
+    def test_single_candidate_skips_disambig(self):
+        """When only one candidate provides the capability, no ambiguity
+        to disambiguate — DUP_ALLOW_NAMECHANGE picks it directly."""
+        pool, sys_repo, avail_repo, idx = make_pool(
+            installed=[{
+                "name": "old-name",
+                "evr": "1.0-1",
+                "provides": ["myapp"],
+            }],
+            available=[{
+                "name": "new-name",
+                "evr": "2.0-1",
+                "provides": ["myapp"],
+            }],
+        )
+        r = make_resolver(pool)
+
+        jobs = r._disambiguate_dup_rename()
+
+        assert jobs == []
+
+    def test_no_target_candidate_skips_disambig(self):
+        """When nothing in target repos provides any of the installed's
+        Provides, nothing to pin — libsolv uninstalls via
+        ALLOW_UNINSTALL."""
+        pool, sys_repo, avail_repo, idx = make_pool(
+            installed=[{
+                "name": "orphan",
+                "evr": "1.0-1",
+                "provides": ["orphan"],
+            }],
+            available=[{
+                "name": "unrelated",
+                "evr": "1.0-1",
+                "provides": ["unrelated"],
+            }],
+        )
+        r = make_resolver(pool)
+
+        jobs = r._disambiguate_dup_rename()
+
+        assert jobs == []

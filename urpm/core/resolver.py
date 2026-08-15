@@ -609,6 +609,129 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 rendered.append(str(p))
         return rendered
 
+    def _disambiguate_dup_rename(self) -> list:
+        """Pre-solve pass for :meth:`resolve_distupgrade` : pin a target
+        candidate when the rename target would otherwise be ambiguous.
+
+        Real-world trigger : Mageia flipped the kernel packaging
+        convention between mga9 and mga10.  mga9 kernels had
+        ``Name=kernel-desktop`` with the kernel version in ``Version``
+        (installonly coexistence via distinct EVR).  mga10 kernels have
+        ``Name=kernel-desktop-<version>-1.mga10`` (version-in-name,
+        coexistence via distinct Name), each still providing the
+        unversioned capability ``kernel-desktop``.
+
+        DUP on such an installed pkg :
+
+        * finds no candidate with the exact ``Name`` (mga10 has no bare
+          ``kernel-desktop``) ;
+        * falls back to ``DUP_ALLOW_NAMECHANGE`` — matches N+ candidates
+          via the shared capability ;
+        * silently holds every one, because libsolv can't pick.
+
+        The result is an empty transaction with zero diagnostic — the
+        exact failure mode reported by the first mga9→mga10 beta tester
+        on urpm-ng 0.9.0.
+
+        This pass makes the decision explicit : for each installed
+        solvable that (a) has no same-Name target candidate and (b) has
+        at least one Provides capability satisfied by two or more target
+        candidates, we emit an explicit ``SOLVER_INSTALL`` job on the
+        highest-EVR candidate.  libsolv then treats the rename as
+        deterministic and moves on.
+
+        Returns the list of extra jobs — appended by the caller to the
+        base ``SOLVER_DISTUPGRADE | SOLVER_SOLVABLE_ALL`` job list.
+        """
+        jobs: list = []
+        if self.pool.installed is None:
+            return jobs
+
+        seen_names: set[str] = set()
+
+        for inst in self.pool.installed.solvables:
+            if not inst.name or inst.name in seen_names:
+                continue
+            seen_names.add(inst.name)
+
+            # (a) Same-Name candidate in a target repo ?
+            try:
+                same_name_sel = self.pool.select(
+                    inst.name, solv.Selection.SELECTION_NAME)
+                has_same_name_target = any(
+                    s.repo != self.pool.installed
+                    for s in same_name_sel.solvables())
+            except Exception:  # noqa: BLE001
+                continue
+            if has_same_name_target:
+                # Regular DUP path handles this — nothing to disambiguate.
+                continue
+
+            # (b) A Provides capability with multiple target candidates ?
+            try:
+                provides = inst.lookup_deparray(
+                    solv.SOLVABLE_PROVIDES) or []
+            except Exception:  # noqa: BLE001
+                continue
+
+            for cap in provides:
+                # Strip the ``= version`` and ``(arch)`` suffixes to get
+                # the bare capability name — that's what we probe.  A
+                # versioned Provides on the installed side never matches
+                # a differently-versioned target side, so probing the
+                # bare form is what surfaces rename opportunities.
+                cap_str = str(cap)
+                bare = cap_str.split(" ", 1)[0].split("(", 1)[0]
+                if not bare:
+                    continue
+                # NB: we do NOT skip bare == inst.name.  For the kernel
+                # rename case, the installed pkg's own Name IS the shared
+                # capability that target renamers provide (mga9 gdm's
+                # ``kernel-desktop`` matches N mga10 ``Provides:
+                # kernel-desktop``).  The same-Name check above already
+                # ensured no target has this Name, so probing that
+                # capability here surfaces the rename targets, not self.
+
+                try:
+                    providers = list(self.pool.whatprovides(
+                        self.pool.Dep(bare)))
+                except Exception:  # noqa: BLE001
+                    continue
+
+                candidates = [
+                    p for p in providers
+                    if p.repo != self.pool.installed
+                    and p.arch in (inst.arch, "noarch")
+                ]
+                if len(candidates) < 2:
+                    # Zero → nothing to disambiguate (uninstall via
+                    # ALLOW_UNINSTALL or DUP handles it).  One → no
+                    # ambiguity, DUP picks it directly.
+                    continue
+
+                # Pick the highest-EVR candidate.  ``evrcmp`` gives the
+                # RPM-semantic ordering libsolv itself would apply, so
+                # we stay consistent with any later solver decision on
+                # this cap.
+                best = candidates[0]
+                for c in candidates[1:]:
+                    if c.evrcmp(best) > 0:
+                        best = c
+
+                jobs.append(self.pool.Job(
+                    solv.Job.SOLVER_INSTALL | solv.Job.SOLVER_SOLVABLE,
+                    best.id))
+                LOGGER.info(
+                    "distupgrade: rename disambiguation — pinned %s → "
+                    "%s-%s (via capability '%s', %d candidates)",
+                    inst.name, best.name, best.evr, bare,
+                    len(candidates))
+                break  # One pin per installed pkg is enough
+
+        # ``inst.name`` filter — same bare capability match should not
+        # need to be probed twice for the fall-through case.
+        return jobs
+
     def _diagnose_distupgrade_holdback(self) -> List["SkippedJob"]:
         """Explain why every candidate was silently held in a distupgrade.
 
@@ -2099,6 +2222,13 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         jobs = [self.pool.Job(
             solv.Job.SOLVER_DISTUPGRADE | solv.Job.SOLVER_SOLVABLE_ALL, 0
         )]
+
+        # Pre-solve pass: pin a target candidate whenever a rename would
+        # otherwise be ambiguous (kernel-desktop mga9→mga10 case).  See
+        # :meth:`_disambiguate_dup_rename` for the full rationale.
+        # Extra jobs are additive : they narrow libsolv's search rather
+        # than override SOLVER_DISTUPGRADE for the rest of the pool.
+        jobs.extend(self._disambiguate_dup_rename())
 
         solver = self.pool.Solver()
         solver.set_flag(solv.Solver.SOLVER_FLAG_DUP_ALLOW_NAMECHANGE, 1)
