@@ -15,6 +15,59 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.2] — 2026-08-15
+
+> **⚠️ WARNING — the `distupgrade` feature is very young.**  Only use
+> it on a machine you can afford to lose and reinstall, or on a machine
+> you can snapshot and restore (Virtual Machine, Clonezilla,
+> btrfs/LVM snapshot…).  Every failure report makes the next version
+> safer.
+
+Bugfix + one new feature.  The distupgrade pipeline now handles the
+mga9→mga10 kernel-desktop rename ambiguity that silently emptied the
+plan in 0.9.1.  New `urpm system export` / `urpm system import` verbs
+snapshot and restore a machine's package selection + media/server
+catalogue via JSON.
+
+### Major Features
+
+- **`urpm system export` and `urpm system import`.**  Clone one
+  machine's package selection + media/server catalogue onto another
+  via a JSON snapshot.  Export dumps installed pkgs classified into
+  explicit / dependency / buildrequires (source of truth = the flat
+  files that already drive `urpm autoremove`) + a slimmed media/server
+  DB dump.  Import validates the profile, backs up the current state
+  to `/var/lib/urpm/system-backup-<timestamp>.json` (skippable via
+  `--no-backup`), computes a three-section diff (replace by default,
+  `--merge-media` to keep local extras), prompts unless `--yes`, then
+  applies : servers → media → sync → install missing → remove local
+  explicit extras → rewrite the reason files so future `autoremove`
+  behaves the same on the target as on the source.  Names-only
+  matching (no NEVRA pinning) — the importer resolves each requested
+  name to the best available in its freshly-imported media set.
+  `--dry-run` inspects the plan without applying.
+
+### Bug Fixes
+
+- **DUP rename disambiguation for kernel-desktop mga9→mga10.**
+  Mageia flipped the kernel packaging convention between mga9 and
+  mga10 : mga9 kernels have `Name=kernel-desktop` (short, with the
+  kernel version in `Version`), mga10 kernels have
+  `Name=kernel-desktop-<version>-1.mga10` (long, version-in-name).
+  Each mga10 candidate still provides the unversioned capability
+  `kernel-desktop`.  A mga9→mga10 distupgrade thus found no target
+  with the same Name ; `DUP_ALLOW_NAMECHANGE` fell back to Provides
+  matching but found N+ candidates for the same capability, and
+  libsolv silently held every one — Stage 2 returned zero actions
+  with no diagnostic (reported by the first beta tester).  New
+  pre-solve pass in `resolve_distupgrade` scans installed pkgs and,
+  when no same-Name target exists but a Provides capability is
+  satisfied by two or more target candidates, pins the highest-EVR
+  candidate via `SOLVER_INSTALL`.  libsolv then treats the rename as
+  deterministic and the plan comes out non-empty.
+
+---
+
 ## [0.9.1] — 2026-08-11
 
 Bugfix release addressing two safety issues surfaced by the first
