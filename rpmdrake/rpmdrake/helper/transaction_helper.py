@@ -320,7 +320,8 @@ class TransactionHelper:
             self._status(f"Downloading {len(download_items)} package(s)...")
 
             def progress_callback(name, pkg_num, pkg_total, bytes_done, bytes_total,
-                                  item_bytes=None, item_total=None, slots_status=None):
+                                  item_bytes=None, item_total=None, slots_status=None,
+                                  coordinator_speed=0.0):
                 if self.cancelled:
                     return False
 
