@@ -64,9 +64,14 @@ class PackageDiff:
     install_explicit: List[str] = field(default_factory=list)
     install_dependency: List[str] = field(default_factory=list)
     install_buildrequires: List[str] = field(default_factory=list)
-    # Names currently installed on the target as EXPLICIT that don't
-    # appear as explicit in the source profile.  Removed to match.
-    remove_explicit: List[str] = field(default_factory=list)
+    # Names currently installed on this machine (any bucket : explicit,
+    # dep or BR) that do NOT appear in the target profile at all.
+    # Clone semantic — end state must match the profile ; a local dep
+    # whose provider is being removed but that isn't in the target
+    # would otherwise leave broken deps and block the whole erase
+    # transaction.  Every local pkg not in the profile is destined to
+    # go so libsolv can plan the removal in one coherent pass.
+    remove: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
 
@@ -110,55 +115,91 @@ def _read_deps_set(path: Path) -> set:
 
 
 def _enumerate_installed_names(root: str = "/") -> List[str]:
-    """Return lowercase names of every package in the rpmdb at ``root``.
+    """Return names of every package in the rpmdb at ``root``, **case
+    preserved** — RPM package names are case-sensitive.
 
-    ``rpm.TransactionSet`` with an empty ``dbMatch()`` yields every
-    header in the database.  We reuse the same pattern as
-    :mod:`urpm.core.recovery` for consistency.
+    Case-preservation is critical for the import path : ``urpm install``
+    / ``urpm erase`` look up packages by exact name, and Perl module
+    packages on Mageia are mixed-case (``perl-Git``, ``perl-Digest-HMAC``,
+    ``perl-Crypt-OpenSSL-X509``, …) mirroring the CPAN module identity.
+    Lowercasing at export time makes every mixed-case name look like an
+    unknown package to the importer.
+
+    Delegates to :func:`urpm.core.rpmdb.list_installed_names` — never
+    opens a librpm handle in the parent process (see rpmdb module
+    docstring : mga9 BDB env caching would silently freeze the rpmdb
+    view for every subprocess ``rpm`` that follows, breaking the
+    post-install re-filter in ``urpm system import``).
     """
-    import rpm
-    ts = rpm.TransactionSet(root)
-    try:
-        return sorted({str(h["name"]).lower() for h in ts.dbMatch()})
-    finally:
-        del ts
+    from . import rpmdb
+    return rpmdb.list_installed_names(root=root)
 
 
 def _classify_packages(root: str = "/") -> Dict[str, Any]:
-    """Return the three package buckets ready for JSON serialisation."""
-    installed = set(_enumerate_installed_names(root))
-    root_path = Path(root)
-    deps = _read_deps_set(root_path / DEPS_LIST_REL)
-    br = _read_name_list_file(root_path / BUILDDEPS_LIST_REL)
+    """Return the three package buckets ready for JSON serialisation.
 
-    br_names = set(br.keys())
-    explicit_names = sorted(installed - deps - br_names)
-    dependency_names = sorted(installed & deps)
-    # Keep buildrequires as {name: spec_source} — the spec source is
-    # useful post-import to know which pkg pulled it in.
-    buildrequires = {n: br[n] for n in sorted(installed & br_names)}
+    Classification (dep / BR / explicit) is decided by lowercased set
+    membership because the ``installed-through-{deps,builddeps}.list``
+    flat files that own the reason data are lowercased by
+    :class:`OrphansMixin` on write.  The emitted lists themselves keep
+    the **original-case** RPM Name so the importer can pass them
+    verbatim to ``urpm install`` / ``urpm erase`` without breaking
+    Perl-style mixed-case packages.
+    """
+    installed = _enumerate_installed_names(root)   # original case, sorted
+    root_path = Path(root)
+    deps_lower = _read_deps_set(root_path / DEPS_LIST_REL)
+    br_lower = _read_name_list_file(root_path / BUILDDEPS_LIST_REL)
+
+    explicit: List[str] = []
+    dependency: List[str] = []
+    buildrequires: Dict[str, str] = {}
+    for name in installed:
+        low = name.lower()
+        if low in br_lower:
+            buildrequires[name] = br_lower[low]
+        elif low in deps_lower:
+            dependency.append(name)
+        else:
+            explicit.append(name)
 
     return {
-        "explicit": explicit_names,
-        "dependency": dependency_names,
+        "explicit": explicit,
+        "dependency": dependency,
         "buildrequires": buildrequires,
     }
 
 
 def _serialize_media(db) -> List[Dict]:
-    """Return one JSON-serialisable dict per media row.  Only the
-    fields the importer needs — internal counters (last_sync, MD5s,
-    reputation) are dropped."""
+    """Return one JSON-serialisable dict per media row.
+
+    Fields kept : identity, addressing (url / mirrorlist /
+    relative_path), the display / update flags.  Internal counters
+    (last_sync, MD5s, reputation) are dropped.
+
+    Also emits ``server_links`` : the list of server names the media
+    is currently linked to via ``server_media``.  Without this the
+    importer would recreate the media row but leave it orphaned —
+    ``urpm media update`` then fails with « No server available ».
+    """
     keep = (
         "name", "short_name", "mageia_version", "architecture",
         "relative_path", "url", "mirrorlist", "is_official",
         "allow_unsigned", "enabled", "update_media", "priority",
         "disabled_by",
     )
-    return [
-        {k: row.get(k) for k in keep if k in row}
-        for row in db.list_media()
-    ]
+    out = []
+    for row in db.list_media():
+        entry = {k: row.get(k) for k in keep if k in row}
+        try:
+            servers = db.get_servers_for_media(
+                row["id"], enabled_only=False,
+                include_blacklisted=True)
+            entry["server_links"] = [s["name"] for s in servers]
+        except Exception:  # noqa: BLE001
+            entry["server_links"] = []
+        out.append(entry)
+    return out
 
 
 def _serialize_servers(db) -> List[Dict]:
@@ -345,28 +386,64 @@ def diff_packages(current: Dict[str, Any],
 
     * ``install_*`` : names present in the target's explicit /
       dependency / buildrequires but absent locally.
-    * ``remove_explicit`` : names present locally as explicit but
-      absent from the target (any bucket).
+    * ``remove`` : names present locally in **any** bucket (explicit,
+      dep or BR) but absent from the target profile entirely.
 
-    Dependencies + buildrequires present locally but missing from the
-    target are NOT forcibly removed — libsolv autoremove is the right
-    tool for that, not us.
+    Clone semantic : the target profile is the desired end state,
+    everything on this machine outside it is destined to go.  Not
+    limiting the remove list to explicit-only avoids the trap where
+    a local dep would keep sitting on the system with broken deps
+    (its provider being removed via an explicit erase) and blocking
+    the whole libsolv erase transaction.  With the full delta,
+    libsolv sees the coherent picture and orders the removal
+    correctly.
+
+    **Case handling** : set membership is compared case-insensitively
+    so a target profile carrying ``perl-git`` matches a locally
+    installed ``perl-Git``.  The emitted install lists keep the
+    **target** casing (that's what the source machine had, most likely
+    the real RPM Name), and the remove list keeps the **current**
+    casing (matches what's actually in rpmdb here).  Passing the wrong
+    case to ``urpm install`` / ``urpm erase`` would spuriously fail :
+    Perl module packages in Mageia are mixed-case.
     """
-    cur_explicit = set(current.get("explicit") or [])
-    cur_dep = set(current.get("dependency") or [])
-    cur_br = set((current.get("buildrequires") or {}).keys())
-    cur_all = cur_explicit | cur_dep | cur_br
+    def _to_lowered_map(names) -> Dict[str, str]:
+        """Return ``{lowered: original}`` — later duplicates win, so
+        the last seen case is preserved (harmless if all are same)."""
+        return {n.lower(): n for n in (names or [])}
 
-    tgt_explicit = set(target.get("explicit") or [])
-    tgt_dep = set(target.get("dependency") or [])
-    tgt_br = set((target.get("buildrequires") or {}).keys())
-    tgt_all = tgt_explicit | tgt_dep | tgt_br
+    cur_expl = _to_lowered_map(current.get("explicit"))
+    cur_dep = _to_lowered_map(current.get("dependency"))
+    cur_br = _to_lowered_map(
+        (current.get("buildrequires") or {}).keys())
+    # Merged map for the remove list — explicit wins the casing race
+    # when the same name shows up in multiple buckets (order matters :
+    # later inserts overwrite).
+    cur_all_map: Dict[str, str] = {}
+    cur_all_map.update(cur_br)
+    cur_all_map.update(cur_dep)
+    cur_all_map.update(cur_expl)
+    cur_all = set(cur_all_map)
+
+    tgt_expl = _to_lowered_map(target.get("explicit"))
+    tgt_dep = _to_lowered_map(target.get("dependency"))
+    tgt_br = _to_lowered_map(
+        (target.get("buildrequires") or {}).keys())
+    tgt_all = set(tgt_expl) | set(tgt_dep) | set(tgt_br)
 
     diff = PackageDiff()
-    diff.install_explicit = sorted(tgt_explicit - cur_all)
-    diff.install_dependency = sorted(tgt_dep - cur_all)
-    diff.install_buildrequires = sorted(tgt_br - cur_all)
-    diff.remove_explicit = sorted(cur_explicit - tgt_all)
+    diff.install_explicit = sorted(
+        tgt_expl[k] for k in set(tgt_expl) - cur_all)
+    diff.install_dependency = sorted(
+        tgt_dep[k] for k in set(tgt_dep) - cur_all)
+    diff.install_buildrequires = sorted(
+        tgt_br[k] for k in set(tgt_br) - cur_all)
+    # Clone semantic : every local pkg missing from the target profile
+    # is destined to go — explicit, dep or BR alike.  A local dep whose
+    # provider is being removed but that isn't in the target would
+    # otherwise leave broken deps and block the whole erase transaction.
+    diff.remove = sorted(
+        cur_all_map[k] for k in cur_all - tgt_all)
     return diff
 
 

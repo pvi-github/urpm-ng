@@ -367,14 +367,14 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
         already_manual = []
         not_installed = []
 
-        # Check which packages are installed
+        # Check which packages are installed.  rpmdb access via
+        # urpm.core.rpmdb — never open a librpm handle in the parent
+        # (module contract).  Comparison is case-insensitive because
+        # the ``unrequested`` table stores lowercased names.
         try:
-            import rpm
-            ts = rpm.TransactionSet()
-            installed = set()
-            for hdr in ts.dbMatch():
-                installed.add(hdr[rpm.RPMTAG_NAME].lower())
-        except ImportError:
+            from ...core import rpmdb
+            installed = {n.lower() for n in rpmdb.list_installed_names()}
+        except Exception:
             print(colors.error(_("Error: rpm module not available")))
             return 1
 
@@ -409,14 +409,12 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
         already_auto = []
         not_installed = []
 
-        # Check which packages are installed
+        # rpmdb access via urpm.core.rpmdb — never open a librpm
+        # handle in the parent (module contract).
         try:
-            import rpm
-            ts = rpm.TransactionSet()
-            installed = set()
-            for hdr in ts.dbMatch():
-                installed.add(hdr[rpm.RPMTAG_NAME].lower())
-        except ImportError:
+            from ...core import rpmdb
+            installed = {n.lower() for n in rpmdb.list_installed_names()}
+        except Exception:
             print(colors.error(_("Error: rpm module not available")))
             return 1
 
@@ -446,14 +444,15 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
         # Show install reason for packages
         unrequested = resolver._get_unrequested_packages()
 
+        # rpmdb access via urpm.core.rpmdb — never open a librpm
+        # handle in the parent (module contract).  We need both the
+        # lowercased key (for the ``unrequested`` lookup) and the
+        # original case (to display back to the user — Perl module
+        # packages are mixed-case).
         try:
-            import rpm
-            ts = rpm.TransactionSet()
-            installed = {}
-            for hdr in ts.dbMatch():
-                name = hdr[rpm.RPMTAG_NAME]
-                installed[name.lower()] = name
-        except ImportError:
+            from ...core import rpmdb
+            installed = {n.lower(): n for n in rpmdb.list_installed_names()}
+        except Exception:
             print(colors.error(_("Error: rpm module not available")))
             return 1
 

@@ -93,6 +93,16 @@ def read_rpm_header(rpm_path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
 
+    # ``rpm.TransactionSet()`` opens rpmdb env even though we only
+    # use it to route ``hdrFromFdno`` through librpm.  We MUST close
+    # it explicitly in ``finally`` : a lingering handle keeps the
+    # rpmdb SQLite connection attached and hides subsequent
+    # mutations done through an intervening subprocess (see
+    # :mod:`urpm.core.rpmdb` for the full rationale).  This file
+    # stays out of :mod:`urpm.core.rpmdb` because .rpm on-disk
+    # parsing is signature-adjacent territory that belongs with the
+    # security stack.
+    ts = None
     try:
         ts = rpm.TransactionSet()
         ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES | rpm._RPMVSF_NODIGESTS)
@@ -176,6 +186,12 @@ def read_rpm_header(rpm_path: Path) -> Optional[Dict[str, Any]]:
         }
     except Exception:
         return None
+    finally:
+        if ts is not None:
+            try:
+                ts.closeDB()
+            except Exception:
+                pass
 
 
 def split_version(v: str) -> List[Tuple[int, Any]]:

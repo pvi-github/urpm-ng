@@ -138,19 +138,33 @@ def verify_rpm_signature(rpm_path: Path) -> tuple:
     """
     import rpm
 
+    # ``rpm.TransactionSet()`` opens rpmdb env even though we only
+    # use it to route ``hdrFromFdno`` through librpm.  We close it
+    # explicitly in ``finally`` so the SQLite connection is released
+    # before we hand back control — see :mod:`urpm.core.rpmdb` for
+    # the full rationale.  This function stays out of that central
+    # module because signature verification is security-critical
+    # territory that belongs with the download / install stack for
+    # auditability.
     ts = rpm.TransactionSet()
-    # Enable all signature/digest verification
-    ts.setVSFlags(0)
-
     try:
-        with open(rpm_path, 'rb') as f:
-            # hdrFromFdno verifies signature when VSFlags allows it
-            hdr = ts.hdrFromFdno(f.fileno())
-            return (True, None)
-    except rpm.error as e:
-        return (False, str(e))
-    except Exception as e:
-        return (False, f"Verification error: {e}")
+        # Enable all signature/digest verification
+        ts.setVSFlags(0)
+
+        try:
+            with open(rpm_path, 'rb') as f:
+                # hdrFromFdno verifies signature when VSFlags allows it
+                hdr = ts.hdrFromFdno(f.fileno())
+                return (True, None)
+        except rpm.error as e:
+            return (False, str(e))
+        except Exception as e:
+            return (False, f"Verification error: {e}")
+    finally:
+        try:
+            ts.closeDB()
+        except Exception:
+            pass
 
 
 def get_hostname_from_url(url: str) -> str:

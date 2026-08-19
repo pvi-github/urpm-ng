@@ -42,14 +42,14 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
 
     # Lazily build the installed-name set only when the caller asked
     # to filter on it -- cheap enough (one rpmdb pass) but skipping
-    # it in the default case keeps the fast path fast.
+    # it in the default case keeps the fast path fast.  rpmdb access
+    # via urpm.core.rpmdb — never open a librpm handle in the parent
+    # (module contract, see :mod:`urpm.core.rpmdb`).
     installed_pkgs = set()
     if hide_uninstalled:
         try:
-            import rpm as _rpm
-            _ts = _rpm.TransactionSet()
-            for _hdr in _ts.dbMatch():
-                installed_pkgs.add(_hdr[_rpm.RPMTAG_NAME])
+            from ...core import rpmdb
+            installed_pkgs = set(rpmdb.list_installed_names())
         except ImportError:
             pass
 
@@ -61,16 +61,21 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
         requires = resolver.get_package_requires(pkg_name)
 
         if not requires:
-            # Fallback: try installed package via rpm
+            # Fallback: try installed package via rpm.  rpmdb access via
+            # urpm.core.rpmdb — never open a librpm handle in the parent
+            # (module contract, see :mod:`urpm.core.rpmdb`).  The typed
+            # helper already strips ``rpmlib(...)``; the file-path filter
+            # stays here because it's a legacy-mode display choice.
             try:
-                import rpm
-                ts = rpm.TransactionSet()
-                mi = ts.dbMatch('name', pkg_name)
-                for hdr in mi:
-                    req_names = hdr[rpm.RPMTAG_REQUIRENAME] or []
-                    requires = [r for r in req_names
-                               if not r.startswith('/') and not r.startswith('rpmlib(')]
-                    break
+                from ...core import rpmdb
+                deps_map = rpmdb.get_provides_and_requires()
+                pkg_deps = deps_map.get(pkg_name)
+                if pkg_deps is not None:
+                    # rpmdb.PkgDep exposes ``.name`` (capability name)
+                    # + ``.flags`` / ``.version`` (constraint) — this
+                    # display path only needs the name.
+                    requires = [r.name for r in pkg_deps.requires
+                                if not r.name.startswith('/')]
             except Exception:
                 pass
 
@@ -219,13 +224,13 @@ def _print_depends_tree(pkg_name: str, graph: dict, colors,
         hide_uninstalled: If True, drop packages not present in rpmdb
             (and their whole subtree, since they wouldn't be reachable anyway).
     """
-    # Build installed set for coloring
+    # Build installed set for coloring.  rpmdb access via
+    # urpm.core.rpmdb — never open a librpm handle in the parent
+    # (module contract, see :mod:`urpm.core.rpmdb`).
     installed_pkgs = set()
     try:
-        import rpm
-        ts = rpm.TransactionSet()
-        for hdr in ts.dbMatch():
-            installed_pkgs.add(hdr[rpm.RPMTAG_NAME])
+        from ...core import rpmdb
+        installed_pkgs = set(rpmdb.list_installed_names())
     except ImportError:
         pass
 
@@ -351,7 +356,9 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
     if cache is not None and cache_key in cache:
         return cache[cache_key]
 
-    import rpm
+    # rpmdb access via urpm.core.rpmdb — never open a librpm handle in
+    # the parent (module contract, see :mod:`urpm.core.rpmdb`).
+    from ...core import rpmdb
 
     # Get what this package provides - from both RPM and database
     provides = [pkg_name]
@@ -365,18 +372,23 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
     # queries.
     inst_arch = None
 
-    # From RPM database (installed)
+    # From RPM database (installed).  ``query_by_name`` gives us the
+    # installed arch; ``get_provides_and_requires`` gives us the
+    # rpmlib-filtered provides list — combined they cover what the
+    # legacy dbMatch header walk extracted.
     try:
-        ts = rpm.TransactionSet()
-        mi = ts.dbMatch('name', pkg_name)
-        for hdr in mi:
-            inst_arch = hdr[rpm.RPMTAG_ARCH]
-            rpm_provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
-            for prov in rpm_provides:
-                if prov not in provides and not _is_virtual_provide(prov):
-                    provides.append(prov)
-            break
-    except:
+        inst_pkgs = rpmdb.query_by_name(pkg_name)
+        if inst_pkgs:
+            inst_arch = inst_pkgs[0].arch
+            deps_map = rpmdb.get_provides_and_requires()
+            pkg_deps = deps_map.get(pkg_name)
+            if pkg_deps is not None:
+                # ``.name`` on a :class:`rpmdb.PkgDep` — display path,
+                # constraint version irrelevant here.
+                for prov in (p.name for p in pkg_deps.provides):
+                    if prov not in provides and not _is_virtual_provide(prov):
+                        provides.append(prov)
+    except Exception:
         pass
 
     # Also from urpmi database
@@ -406,11 +418,12 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
         req_base = req.split('(')[0]
         return req_base in provides or req in provides
 
-    # Check installed packages (like cmd_rdepends does)
+    # Check installed packages (like cmd_rdepends does).  Uses the
+    # typed rpmdb helper which returns one PkgDeps per installed name;
+    # the cache means repeated calls in the same command cost nothing.
     try:
-        ts = rpm.TransactionSet()
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
+        deps_map = rpmdb.get_provides_and_requires()
+        for name, pkg_deps in deps_map.items():
             if name == pkg_name or name == 'gpg-pubkey':
                 continue
             # Filter by installed_pkgs if provided
@@ -419,29 +432,29 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
                     continue
 
             # Check Requires
+            # rpmdb.PkgDep : ``.name`` extracts the capability name ;
+            # matches_provides() takes a string.  Version constraints
+            # on the require are irrelevant for reverse-dep enumeration.
             if 'R' in dep_types:
-                requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
-                for req in requires:
+                for req in (r.name for r in pkg_deps.requires):
                     if matches_provides(req):
                         add_rdep(name, 'R')
                         break
 
             # Check Recommends
             if 'r' in dep_types:
-                recommends = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
-                for rec in recommends:
+                for rec in (r.name for r in pkg_deps.recommends):
                     if matches_provides(rec):
                         add_rdep(name, 'r')
                         break
 
             # Check Suggests
             if 's' in dep_types:
-                suggests = hdr[rpm.RPMTAG_SUGGESTNAME] or []
-                for sug in suggests:
+                for sug in (s.name for s in pkg_deps.suggests):
                     if matches_provides(sug):
                         add_rdep(name, 's')
                         break
-    except:
+    except Exception:
         pass
 
     # Also query urpmi database for non-installed packages
@@ -705,38 +718,38 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
 def _build_rdeps_graph(db: 'PackageDatabase') -> dict:
     """Build complete reverse dependency graph in one pass.
 
+    rpmdb access via urpm.core.rpmdb — never open a librpm handle in
+    the parent (module contract, see :mod:`urpm.core.rpmdb`).
+
     Returns:
         dict: {pkg_name: set of packages that depend on it}
     """
-    import rpm
+    from ...core import rpmdb
+
+    deps_map = rpmdb.get_provides_and_requires()
 
     # Build provides map: capability -> package name
     provides_map = {}  # {capability: pkg_name}
 
-    ts = rpm.TransactionSet()
-    all_headers = list(ts.dbMatch())  # Cache headers
-
-    for hdr in all_headers:
-        name = hdr[rpm.RPMTAG_NAME]
+    for name, pkg_deps in deps_map.items():
         if name == 'gpg-pubkey':
             continue
         # This package provides itself
         provides_map[name] = name
-        # And its explicit provides
-        rpm_provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
-        for prov in rpm_provides:
+        # And its explicit provides — ``.name`` on rpmdb.PkgDep gives
+        # the capability name (version constraint is ignored for the
+        # reverse-dep graph, only the capability identity matters).
+        for prov in (p.name for p in pkg_deps.provides):
             if not _is_virtual_provide(prov):
                 provides_map[prov] = name
 
     # Build reverse deps: who depends on whom
     rdeps_graph = {}  # {pkg_name: set of rdeps}
 
-    for hdr in all_headers:
-        name = hdr[rpm.RPMTAG_NAME]
+    for name, pkg_deps in deps_map.items():
         if name == 'gpg-pubkey':
             continue
-        requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
-        for req in requires:
+        for req in (r.name for r in pkg_deps.requires):
             req_base = req.split('(')[0]
             # Check both the full req and base name
             provider = provides_map.get(req) or provides_map.get(req_base)
@@ -915,16 +928,16 @@ def cmd_whatrecommends(args, db: 'PackageDatabase') -> int:
         for r in db.whatrecommends(cap, limit=200):
             results.add(r['name'])
 
-    # Also check installed packages via rpm
+    # Also check installed packages via rpm.  rpmdb access via
+    # urpm.core.rpmdb — never open a librpm handle in the parent
+    # (module contract, see :mod:`urpm.core.rpmdb`).
     try:
-        import rpm
-        ts = rpm.TransactionSet()
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
+        from ...core import rpmdb
+        deps_map = rpmdb.get_provides_and_requires()
+        for name, pkg_deps in deps_map.items():
             if name == pkg_name or name == 'gpg-pubkey':
                 continue
-            recs = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
-            for rec in recs:
+            for rec in (r.name for r in pkg_deps.recommends):
                 rec_base = rec.split('(')[0].split()[0]
                 if rec_base in provides or rec in provides:
                     results.add(name)
@@ -995,16 +1008,16 @@ def cmd_whatsuggests(args, db: 'PackageDatabase') -> int:
         for r in db.whatsuggests(cap, limit=200):
             results.add(r['name'])
 
-    # Also check installed packages via rpm
+    # Also check installed packages via rpm.  rpmdb access via
+    # urpm.core.rpmdb — never open a librpm handle in the parent
+    # (module contract, see :mod:`urpm.core.rpmdb`).
     try:
-        import rpm
-        ts = rpm.TransactionSet()
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
+        from ...core import rpmdb
+        deps_map = rpmdb.get_provides_and_requires()
+        for name, pkg_deps in deps_map.items():
             if name == pkg_name or name == 'gpg-pubkey':
                 continue
-            sugs = hdr[rpm.RPMTAG_SUGGESTNAME] or []
-            for sug in sugs:
+            for sug in (s.name for s in pkg_deps.suggests):
                 sug_base = sug.split('(')[0].split()[0]
                 if sug_base in provides or sug in provides:
                     results.add(name)
@@ -1031,13 +1044,13 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
 
     package = args.package
 
-    # Get set of installed packages
+    # Get set of installed packages.  rpmdb access via urpm.core.rpmdb
+    # — never open a librpm handle in the parent (module contract, see
+    # :mod:`urpm.core.rpmdb`).
     installed_pkgs = set()
     try:
-        import rpm
-        ts = rpm.TransactionSet()
-        for hdr in ts.dbMatch():
-            installed_pkgs.add(hdr[rpm.RPMTAG_NAME])
+        from ...core import rpmdb
+        installed_pkgs = set(rpmdb.list_installed_names())
     except ImportError:
         print(_("rpm module not available"))
         return 1

@@ -267,9 +267,10 @@ def find_old_kernels(keep_count: int = None) -> list:
     Returns:
         List of (name, nevra, size) tuples for kernels to remove
     """
-    import rpm
     from collections import defaultdict
     from functools import cmp_to_key
+
+    from ...core import rpmdb
 
     if keep_count is None:
         keep_count = get_kernel_keep()
@@ -277,54 +278,27 @@ def find_old_kernels(keep_count: int = None) -> list:
     # Get running kernel version
     running_kernel = os.uname().release  # e.g., "6.12.57+deb13-amd64"
 
-    ts = rpm.TransactionSet()
     kernels = []
 
-    # Find all installed kernel packages
-    for hdr in ts.dbMatch('name', 'kernel'):
-        name = hdr[rpm.RPMTAG_NAME]
-        version = hdr[rpm.RPMTAG_VERSION]
-        release = hdr[rpm.RPMTAG_RELEASE]
-        arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-        size = hdr[rpm.RPMTAG_SIZE] or 0
-
-        # Build kernel version string to compare with running
-        kernel_ver = f"{version}-{release}.{arch}"
-
-        nevra = f"{name}-{version}-{release}.{arch}"
-        kernels.append({
-            'name': name,
-            'nevra': nevra,
-            'version': version,
-            'release': release,
-            'arch': arch,
-            'size': size,
-            'kernel_ver': kernel_ver,
-            'is_running': running_kernel.startswith(f"{version}-{release}"),
-        })
-
-    # Also find kernel-desktop, kernel-server, etc.
-    for variant in ['kernel-desktop', 'kernel-server', 'kernel-laptop',
-                    'kernel-desktop-devel', 'kernel-server-devel']:
-        for hdr in ts.dbMatch('name', variant):
-            name = hdr[rpm.RPMTAG_NAME]
-            version = hdr[rpm.RPMTAG_VERSION]
-            release = hdr[rpm.RPMTAG_RELEASE]
-            arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-            size = hdr[rpm.RPMTAG_SIZE] or 0
-
-            kernel_ver = f"{version}-{release}.{arch}"
-            nevra = f"{name}-{version}-{release}.{arch}"
-
+    # Query the base ``kernel`` plus the well-known variants
+    # separately — rpmdb access via urpm.core.rpmdb (module contract,
+    # never open a librpm handle in the parent).
+    _kernel_names = ['kernel', 'kernel-desktop', 'kernel-server',
+                     'kernel-laptop', 'kernel-desktop-devel',
+                     'kernel-server-devel']
+    for kname in _kernel_names:
+        for pkg in rpmdb.query_by_name(kname):
+            kernel_ver = f"{pkg.version}-{pkg.release}.{pkg.arch}"
             kernels.append({
-                'name': name,
-                'nevra': nevra,
-                'version': version,
-                'release': release,
-                'arch': arch,
-                'size': size,
+                'name': pkg.name,
+                'nevra': pkg.nevra,
+                'version': pkg.version,
+                'release': pkg.release,
+                'arch': pkg.arch or 'noarch',
+                'size': pkg.size,
                 'kernel_ver': kernel_ver,
-                'is_running': running_kernel.startswith(f"{version}-{release}"),
+                'is_running': running_kernel.startswith(
+                    f"{pkg.version}-{pkg.release}"),
             })
 
     if not kernels:

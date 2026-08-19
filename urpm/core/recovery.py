@@ -108,29 +108,20 @@ def check_orphaned_transactions(db: "PackageDatabase") -> List[Dict]:
 def _pkg_installed_at_nevra(rpmdb_root: str, nevra: str) -> bool:
     """Return True if ``nevra`` is currently installed in the rpmdb.
 
-    Uses the ``rpm`` bindings so we honour the exact same rpmdb the
-    parent transaction was writing to.  ``nevra`` is matched by the
-    rpm-provided ``Package.dbMatch`` filter, which handles epoch
-    normalization and arch matching without any regex.
+    Delegates to :func:`urpm.core.rpmdb.query_by_name` — the recovery
+    path runs right after a crashed transaction, so opening a librpm
+    handle in this parent process would cache the pre-crash rpmdb env
+    and mask any partial mutation the child may have committed before
+    dying (see :mod:`urpm.core.rpmdb` docstring for the BDB env trap).
+    Subprocess `rpm` always reads the current rpmdb.
     """
-    import rpm
+    from . import rpmdb as _rpmdb
 
-    ts = rpm.TransactionSet(rpmdb_root)
-    try:
-        # rpm.MATCH_NEVRA doesn't exist as a public tag ; iterate
-        # candidates by name and compare the full NEVRA string
-        # produced by the header's own formatter to avoid substring
-        # ambiguity on epochs.
-        name = nevra.split("-", 1)[0]
-        for hdr in ts.dbMatch("name", name):
-            hdr_nevra = hdr.format("%{NEVRA}")
-            if hdr_nevra == nevra:
-                return True
-        return False
-    finally:
-        # rpm.TransactionSet has no explicit close ; deleting the
-        # ref lets rpm release the rpmdb lock promptly.
-        del ts
+    name = nevra.split("-", 1)[0]
+    for pkg in _rpmdb.query_by_name(name, root=rpmdb_root):
+        if pkg.nevra == nevra:
+            return True
+    return False
 
 
 def reconcile_running_transactions(db: "PackageDatabase",

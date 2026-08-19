@@ -431,35 +431,40 @@ def detect_installed_categories() -> InstalledCategories:
     """
     import platform
     import re
-    import rpm
+
+    from . import rpmdb
 
     result = InstalledCategories()
     is_64bit = platform.machine() in ('x86_64', 'aarch64')
 
-    ts = rpm.TransactionSet()
-    ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES | rpm._RPMVSF_NODIGESTS)
-    mi = ts.dbMatch()
-
-    for hdr in mi:
-        if result.nonfree and result.tainted and result.has_32bit:
-            break  # all detected, stop early
-        rel = hdr[rpm.RPMTAG_RELEASE]
-        if not rel:
-            continue
-        if isinstance(rel, bytes):
-            rel = rel.decode('utf-8', errors='replace')
-        if not result.nonfree and rel.endswith('nonfree'):
-            result.nonfree = True
-        if not result.tainted and rel.endswith('tainted'):
-            result.tainted = True
-        if is_64bit and not result.has_32bit:
-            arch = hdr[rpm.RPMTAG_ARCH]
-            if not arch:
+    # rpmdb access via urpm.core.rpmdb — never open a librpm handle in
+    # the parent (module contract, see :mod:`urpm.core.rpmdb`).  We
+    # use the raw context manager instead of a typed helper here
+    # because we want a single walk with condition-based early break
+    # (three category signals, we stop as soon as all three are set),
+    # and no typed helper exposes both ARCH and RELEASE together.
+    import rpm
+    with rpmdb.open_ts() as ts:
+        for hdr in ts.dbMatch():
+            if result.nonfree and result.tainted and result.has_32bit:
+                break  # all detected, stop early
+            rel = hdr[rpm.RPMTAG_RELEASE]
+            if not rel:
                 continue
-            if isinstance(arch, bytes):
-                arch = arch.decode('utf-8', errors='replace')
-            if re.match(r'i[3-6]86', arch):
-                result.has_32bit = True
+            if isinstance(rel, bytes):
+                rel = rel.decode('utf-8', errors='replace')
+            if not result.nonfree and rel.endswith('nonfree'):
+                result.nonfree = True
+            if not result.tainted and rel.endswith('tainted'):
+                result.tainted = True
+            if is_64bit and not result.has_32bit:
+                arch = hdr[rpm.RPMTAG_ARCH]
+                if not arch:
+                    continue
+                if isinstance(arch, bytes):
+                    arch = arch.decode('utf-8', errors='replace')
+                if re.match(r'i[3-6]86', arch):
+                    result.has_32bit = True
 
     return result
 

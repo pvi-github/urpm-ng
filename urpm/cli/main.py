@@ -2609,6 +2609,22 @@ Set auto_add = false to disable all automatic server addition.
         help=_('Keep local media/servers not in the profile '
                '(default: replace — remove local extras)')
     )
+    system_import.add_argument(
+        '--force', action='store_true',
+        help=_('Skip pre-flight gaps without interactive confirmation '
+               '(packages in the profile that are not in the pool or '
+               'not currently installed are silently dropped from the '
+               'install / erase lists)')
+    )
+    system_import.add_argument(
+        '--allow-incoherent', action='store_true',
+        help=_('Reproduce the source profile literally even when it '
+               'leaves kept packages with unmet deps.  Skips the '
+               'dep-rescue safety net AND pushes the erase through '
+               "with ``urpm erase --force`` (bypasses RPM's pre-check).  "
+               'Intended for faithful bug reproduction ; the resulting '
+               'system will have broken dependencies.')
+    )
 
     # =========================================================================
     # peer - P2P peer management

@@ -78,8 +78,19 @@ def _disable_rpmdb_scan(monkeypatch):
         # in the code under test handles it natively — nothing to do.
         return
 
-    fake_ts = types.SimpleNamespace(dbMatch=lambda *a, **k: iter([]))
+    # ``urpm.core.rpmdb.open_ts`` calls setVSFlags / closeDB on the TS
+    # it yields, so the fake needs those no-op attributes too.
+    fake_ts = types.SimpleNamespace(
+        dbMatch=lambda *a, **k: iter([]),
+        setVSFlags=lambda *a, **k: None,
+        closeDB=lambda *a, **k: None,
+    )
     monkeypatch.setattr('rpm.TransactionSet', lambda *a, **k: fake_ts)
+    # ``get_provides_and_requires`` is mtime-cached — invalidate so
+    # this test sees the empty fake instead of a previously-cached
+    # real-rpmdb payload from an earlier test in the run.
+    from urpm.core import rpmdb as _rpmdb
+    _rpmdb.invalidate_cache()
 
 
 def _import_multiarch_lib64fuse2(db):

@@ -54,6 +54,14 @@ class RpmScanner:
 
         RPMs are yielded in sorted filename order for reproducibility.
 
+        ``rpm.TransactionSet()`` opens rpmdb env even though we only
+        use it to route ``hdrFromFdno`` for on-disk .rpm parsing.  A
+        single TS is reused across the whole scan (never N in
+        parallel) and closed explicitly in ``finally`` — see
+        :mod:`urpm.core.rpmdb` for the rationale ; this file stays
+        out of that module because signature/header-adjacent .rpm
+        parsing belongs with the genmedia stack for auditability.
+
         Raises:
             FileNotFoundError: If *rpms_dir* does not exist.
             RuntimeError: If a bad RPM is encountered and *no_bad_rpm* is False.
@@ -64,21 +72,25 @@ class RpmScanner:
 
         rpms_todo = {os.path.basename(f): None for f in rpms}
 
-        for pkg in rpms_todo:
-            rpm_path = rpms_dir / pkg
-            if rpm_path.exists():
-                with rpm_path.open("rb") as rpm_file:
-                    rpm_header = self._get_rpm_info(rpm_file)
-
-                    # create hdlist entry
-                    yield self.rpm_data(rpm_header, rpm_file)
-
-    def _get_rpm_info(self, rpm_file):
-        # Initialize the RPM transaction set
         ts = rpm.TransactionSet()
+        try:
+            for pkg in rpms_todo:
+                rpm_path = rpms_dir / pkg
+                if rpm_path.exists():
+                    with rpm_path.open("rb") as rpm_file:
+                        rpm_header = self._get_rpm_info(rpm_file, ts)
 
-        # Open the RPM file
-        # Extract the RPM package header
+                        # create hdlist entry
+                        yield self.rpm_data(rpm_header, rpm_file)
+        finally:
+            try:
+                ts.closeDB()
+            except Exception:
+                pass
+
+    def _get_rpm_info(self, rpm_file, ts):
+        # Extract the RPM package header from an already-open TS
+        # (see :meth:`scan` for lifecycle).
         hdr = ts.hdrFromFdno(rpm_file)
         return hdr
 

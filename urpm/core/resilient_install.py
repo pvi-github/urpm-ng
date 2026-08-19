@@ -127,25 +127,37 @@ def pre_verify_signatures(
     # body past the lead, malformed header…), never a sig issue we
     # would have to disambiguate by string-match.
     if header_pending:
+        # ``rpm.TransactionSet(root)`` opens rpmdb env even though we
+        # only use it to route ``hdrFromFdno`` through librpm.  Close
+        # it explicitly in ``finally`` — see :mod:`urpm.core.rpmdb`
+        # for the leak rationale ; this file stays out of the central
+        # module because it is signature-adjacent territory that
+        # belongs with the install stack for auditability.
         ts = rpm.TransactionSet(root)
-        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
-        for path in header_pending:
+        try:
+            ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
+            for path in header_pending:
+                try:
+                    with open(path, "rb") as fd:
+                        ts.hdrFromFdno(fd.fileno())
+                    valid.append(path)
+                except rpm.error as exc:
+                    err_msg = str(exc)
+                    logger.warning(
+                        "Header check failed for %s: %s", path.name, err_msg,
+                    )
+                    failed.append(FailedRpm(path, "structural", err_msg))
+                except (IOError, OSError) as exc:
+                    err_msg = str(exc)
+                    logger.warning(
+                        "Cannot read RPM %s: %s", path.name, err_msg,
+                    )
+                    failed.append(FailedRpm(path, "structural", err_msg))
+        finally:
             try:
-                with open(path, "rb") as fd:
-                    ts.hdrFromFdno(fd.fileno())
-                valid.append(path)
-            except rpm.error as exc:
-                err_msg = str(exc)
-                logger.warning(
-                    "Header check failed for %s: %s", path.name, err_msg,
-                )
-                failed.append(FailedRpm(path, "structural", err_msg))
-            except (IOError, OSError) as exc:
-                err_msg = str(exc)
-                logger.warning(
-                    "Cannot read RPM %s: %s", path.name, err_msg,
-                )
-                failed.append(FailedRpm(path, "structural", err_msg))
+                ts.closeDB()
+            except Exception:
+                pass
 
     if failed:
         logger.info(
@@ -277,34 +289,46 @@ def find_dependents(
     pkg_requires: Dict[str, Set[str]] = {}
     cap_providers: Dict[str, Set[str]] = {}
 
+    # ``rpm.TransactionSet(root)`` opens rpmdb env even though we
+    # only need it to route ``hdrFromFdno`` for on-disk RPMs.  Close
+    # it explicitly in ``finally`` — see :mod:`urpm.core.rpmdb` for
+    # the rationale ; this file stays out of that module because
+    # signature-adjacent .rpm parsing belongs with the install stack
+    # for auditability.
     ts = rpm.TransactionSet(root)
-    # We only need headers; skip expensive signature checks.
-    ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES | rpm._RPMVSF_NODIGESTS)
+    try:
+        # We only need headers; skip expensive signature checks.
+        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES | rpm._RPMVSF_NODIGESTS)
 
-    for path in rpm_paths:
+        for path in rpm_paths:
+            try:
+                with open(path, "rb") as fd:
+                    hdr = ts.hdrFromFdno(fd.fileno())
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Cannot read header from %s: %s", path.name, exc)
+                continue
+
+            name = hdr[rpm.RPMTAG_NAME]
+
+            # Collect meaningful requires (skip rpmlib/config internals)
+            requires: Set[str] = set()
+            for req in hdr[rpm.RPMTAG_REQUIRENAME] or []:
+                if not req.startswith(("rpmlib(", "config(")):
+                    requires.add(req)
+            pkg_requires[name] = requires
+
+            # Collect provides (the package name is an implicit provide)
+            provides: Set[str] = {name}
+            for prov in hdr[rpm.RPMTAG_PROVIDENAME] or []:
+                provides.add(prov)
+
+            for cap in provides:
+                cap_providers.setdefault(cap, set()).add(name)
+    finally:
         try:
-            with open(path, "rb") as fd:
-                hdr = ts.hdrFromFdno(fd.fileno())
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("Cannot read header from %s: %s", path.name, exc)
-            continue
-
-        name = hdr[rpm.RPMTAG_NAME]
-
-        # Collect meaningful requires (skip rpmlib/config internals)
-        requires: Set[str] = set()
-        for req in hdr[rpm.RPMTAG_REQUIRENAME] or []:
-            if not req.startswith(("rpmlib(", "config(")):
-                requires.add(req)
-        pkg_requires[name] = requires
-
-        # Collect provides (the package name is an implicit provide)
-        provides: Set[str] = {name}
-        for prov in hdr[rpm.RPMTAG_PROVIDENAME] or []:
-            provides.add(prov)
-
-        for cap in provides:
-            cap_providers.setdefault(cap, set()).add(name)
+            ts.closeDB()
+        except Exception:
+            pass
 
     # ── Build reverse dependency graph ──
     # reverse_deps: provider_name → set of names that need it

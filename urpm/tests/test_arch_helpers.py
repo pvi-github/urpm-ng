@@ -16,15 +16,28 @@ from urpm.cli.helpers.package import resolve_target_arch, system_arch
 
 @pytest.fixture(autouse=True)
 def _reset_system_arch_cache():
-    """Drop the ``lru_cache`` between tests.
+    """Drop the caches between tests.
 
-    ``system_arch()`` caches its first answer for the lifetime of
-    the process — perfect in production, lethal in a test suite
-    where each scenario mocks the underlying source differently.
+    ``system_arch()`` caches its first answer at TWO layers :
+
+    * ``urpm.cli.helpers.package.system_arch`` — ``lru_cache`` on the
+      thin wrapper (holds the previous test's answer verbatim).
+    * ``urpm.core.rpmdb.system_arch`` — mtime-based cache in the
+      centralised rpmdb module (holds the librpm-driven lookup
+      indexed on rpmdb file mtimes ; unchanged when a test monkey-
+      patches the ``rpm`` module but leaves rpmdb.sqlite untouched).
+
+    Both must be cleared between scenarios so each test sees its
+    own monkey-patched ``rpm`` module — perfect in production,
+    lethal in a test suite where each scenario mocks the
+    underlying source differently.
     """
+    from urpm.core import rpmdb
     system_arch.cache_clear()
+    rpmdb.invalidate_cache()
     yield
     system_arch.cache_clear()
+    rpmdb.invalidate_cache()
 
 
 def _fake_rpm_with(probe_arches):
@@ -33,7 +46,21 @@ def _fake_rpm_with(probe_arches):
     ``probe_arches`` is a mapping of probe-package name (``filesystem``,
     ``glibc``) to the arch string the fake rpmdb should report.  A
     missing entry models a not-installed package (empty match).
+
+    The fake covers every symbol :mod:`urpm.core.rpmdb` touches when
+    it opens a ``TransactionSet`` and reads a header via
+    :func:`urpm.core.rpmdb._pkg_from_hdr` — see the module contract
+    there.  Missing tag values in the fake header default to ``None``
+    (real ``rpm.hdr`` behaviour) via :func:`urpm.core.rpmdb._tag`.
     """
+    # Real rpm tag numbers used by ``urpm.core.rpmdb._pkg_from_hdr``.
+    _NAME = 1000
+    _ARCH = 1022
+    _VERSION = 1001
+    _RELEASE = 1002
+    _EPOCH = 1003
+    _SIZE = 1009
+
     class _Header(dict):
         pass
 
@@ -42,23 +69,38 @@ def _fake_rpm_with(probe_arches):
             self._headers = []
             if name in arches:
                 h = _Header()
-                h[42] = arches[name]  # 42 stands in for RPMTAG_ARCH
+                h[_NAME] = name
+                h[_ARCH] = arches[name]
+                h[_VERSION] = "1.0"
+                h[_RELEASE] = "1.mga10"
                 self._headers.append(h)
 
         def __iter__(self):
             return iter(self._headers)
 
     class _TransactionSet:
-        def __init__(self):
+        def __init__(self, *_args, **_kwargs):
             self._arches = probe_arches
 
         def dbMatch(self, _tag, name):
             return _MatchIterator(name, self._arches)
 
+        def setVSFlags(self, _flags):
+            return None
+
+        def closeDB(self):
+            return None
+
     rpm = SimpleNamespace(
         TransactionSet=_TransactionSet,
-        RPMTAG_NAME=1000,
-        RPMTAG_ARCH=42,
+        RPMTAG_NAME=_NAME,
+        RPMTAG_ARCH=_ARCH,
+        RPMTAG_VERSION=_VERSION,
+        RPMTAG_RELEASE=_RELEASE,
+        RPMTAG_EPOCH=_EPOCH,
+        RPMTAG_SIZE=_SIZE,
+        _RPMVSF_NOSIGNATURES=0x2,
+        _RPMVSF_NODIGESTS=0x4,
     )
     return rpm
 

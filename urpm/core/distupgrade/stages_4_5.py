@@ -170,20 +170,25 @@ def _residual_source_packages(source_version: str) -> List[str]:
     """
     if not source_version:
         return []
+    marker = f".mga{source_version}"
+    residuals: List[str] = []
+    # rpmdb access via urpm.core.rpmdb — never open a librpm handle in
+    # the parent (module contract, see :mod:`urpm.core.rpmdb`).  We
+    # use the raw context manager because we filter on a substring of
+    # RELEASE which no typed helper exposes.
     try:
+        from .. import rpmdb
         import rpm
     except ImportError:
         return []
-    marker = f".mga{source_version}"
-    residuals: List[str] = []
-    ts = rpm.TransactionSet('/')
-    for hdr in ts.dbMatch():
-        release = hdr[rpm.RPMTAG_RELEASE] or ""
-        if marker in release:
-            name = hdr[rpm.RPMTAG_NAME] or ""
-            evr = hdr[rpm.RPMTAG_EVR] or ""
-            arch = hdr[rpm.RPMTAG_ARCH] or "noarch"
-            residuals.append(f"{name}-{evr}.{arch}")
+    with rpmdb.open_ts('/') as ts:
+        for hdr in ts.dbMatch():
+            release = hdr[rpm.RPMTAG_RELEASE] or ""
+            if marker in release:
+                name = hdr[rpm.RPMTAG_NAME] or ""
+                evr = hdr[rpm.RPMTAG_EVR] or ""
+                arch = hdr[rpm.RPMTAG_ARCH] or "noarch"
+                residuals.append(f"{name}-{evr}.{arch}")
     residuals.sort()
     return residuals
 

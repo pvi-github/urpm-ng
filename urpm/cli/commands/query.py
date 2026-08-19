@@ -9,9 +9,13 @@ if TYPE_CHECKING:
 
 
 def _cmd_search_unavailable(args, db: 'PackageDatabase') -> int:
-    """List installed packages not available in any media (urpmq --unavailable)."""
-    import rpm
+    """List installed packages not available in any media (urpmq --unavailable).
+
+    rpmdb access via urpm.core.rpmdb — never open a librpm handle in the
+    parent (module contract, see :mod:`urpm.core.rpmdb`).
+    """
     from .. import colors
+    from ...core import rpmdb
 
     # Build set of available package names from all medias
     available_names = set()
@@ -26,27 +30,29 @@ def _cmd_search_unavailable(args, db: 'PackageDatabase') -> int:
         for row in cursor:
             available_names.add(row[0])
 
-    # Get all installed packages
-    ts = rpm.TransactionSet()
+    # Get all installed packages.  Full NEVRA needed for display, so
+    # open a scoped TS via ``rpmdb.open_ts`` instead of using the
+    # name-only helper.
     unavailable = []
+    with rpmdb.open_ts() as ts:
+        import rpm as _rpm
+        for hdr in ts.dbMatch():
+            name = hdr[_rpm.RPMTAG_NAME]
+            # Skip gpg-pubkey pseudo-packages
+            if name == 'gpg-pubkey':
+                continue
 
-    for hdr in ts.dbMatch():
-        name = hdr[rpm.RPMTAG_NAME]
-        # Skip gpg-pubkey pseudo-packages
-        if name == 'gpg-pubkey':
-            continue
-
-        if name.lower() not in available_names:
-            version = hdr[rpm.RPMTAG_VERSION]
-            release = hdr[rpm.RPMTAG_RELEASE]
-            arch = hdr[rpm.RPMTAG_ARCH]
-            unavailable.append({
-                'name': name,
-                'version': version,
-                'release': release,
-                'arch': arch,
-                'nevra': f"{name}-{version}-{release}.{arch}"
-            })
+            if name.lower() not in available_names:
+                version = hdr[_rpm.RPMTAG_VERSION]
+                release = hdr[_rpm.RPMTAG_RELEASE]
+                arch = hdr[_rpm.RPMTAG_ARCH]
+                unavailable.append({
+                    'name': name,
+                    'version': version,
+                    'release': release,
+                    'arch': arch,
+                    'nevra': f"{name}-{version}-{release}.{arch}"
+                })
 
     if not unavailable:
         print(colors.success(_("All installed packages are available in configured media")))
@@ -407,19 +413,22 @@ def cmd_list(args, db: 'PackageDatabase') -> int:
     filter_type = getattr(args, 'filter', 'installed')
 
     if filter_type == 'installed':
-        # List installed packages from rpmdb
+        # List installed packages from rpmdb.  rpmdb access via
+        # urpm.core.rpmdb — never open a librpm handle in the parent
+        # (module contract, see :mod:`urpm.core.rpmdb`).
         try:
-            import rpm
-            ts = rpm.TransactionSet()
+            from ...core import rpmdb
+            import rpm as _rpm
             packages = []
-            for hdr in ts.dbMatch():
-                name = hdr[rpm.RPMTAG_NAME]
-                if name == 'gpg-pubkey':
-                    continue
-                version = hdr[rpm.RPMTAG_VERSION]
-                release = hdr[rpm.RPMTAG_RELEASE]
-                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                packages.append((name, version, release, arch))
+            with rpmdb.open_ts() as ts:
+                for hdr in ts.dbMatch():
+                    name = hdr[_rpm.RPMTAG_NAME]
+                    if name == 'gpg-pubkey':
+                        continue
+                    version = hdr[_rpm.RPMTAG_VERSION]
+                    release = hdr[_rpm.RPMTAG_RELEASE]
+                    arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
+                    packages.append((name, version, release, arch))
 
             packages.sort(key=lambda x: x[0].lower())
             for name, version, release, arch in packages:
@@ -476,15 +485,13 @@ def cmd_list(args, db: 'PackageDatabase') -> int:
             len(upgrades)).format(count=len(upgrades)))
 
     elif filter_type == 'all':
-        # List all packages (installed + available)
+        # List all packages (installed + available).  rpmdb access via
+        # urpm.core.rpmdb — never open a librpm handle in the parent
+        # (module contract, see :mod:`urpm.core.rpmdb`).
         try:
-            import rpm
-            installed = set()
-            ts = rpm.TransactionSet()
-            for hdr in ts.dbMatch():
-                name = hdr[rpm.RPMTAG_NAME]
-                if name != 'gpg-pubkey':
-                    installed.add(name)
+            from ...core import rpmdb
+            installed = {n for n in rpmdb.list_installed_names()
+                         if n != 'gpg-pubkey'}
         except ImportError:
             installed = set()
 
@@ -514,35 +521,37 @@ def cmd_provides(args, db: 'PackageDatabase') -> int:
     provides = []
     found_name = package
 
-    # Check installed packages first
+    # Check installed packages first.  rpmdb access via urpm.core.rpmdb
+    # — never open a librpm handle in the parent (module contract, see
+    # :mod:`urpm.core.rpmdb`).  Raw header access is needed here for the
+    # PROVIDEVERSION array (typed helpers surface names only).
     try:
-        import rpm
-        ts = rpm.TransactionSet()
+        from ...core import rpmdb
+        import rpm as _rpm
 
-        # Try exact name first
-        found = False
-        for hdr in ts.dbMatch('name', pkg_name):
-            # If NEVRA was given, check it matches
-            version = hdr[rpm.RPMTAG_VERSION]
-            release = hdr[rpm.RPMTAG_RELEASE]
-            arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-            nevra = f"{pkg_name}-{version}-{release}.{arch}"
+        with rpmdb.open_ts() as ts:
+            # Try exact name first
+            for hdr in ts.dbMatch('name', pkg_name):
+                # If NEVRA was given, check it matches
+                version = hdr[_rpm.RPMTAG_VERSION]
+                release = hdr[_rpm.RPMTAG_RELEASE]
+                arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
+                nevra = f"{pkg_name}-{version}-{release}.{arch}"
 
-            if package != pkg_name and nevra != package:
-                continue  # NEVRA doesn't match
+                if package != pkg_name and nevra != package:
+                    continue  # NEVRA doesn't match
 
-            found_name = nevra
-            prov_names = hdr[rpm.RPMTAG_PROVIDENAME] or []
-            prov_versions = hdr[rpm.RPMTAG_PROVIDEVERSION] or []
+                found_name = nevra
+                prov_names = hdr[_rpm.RPMTAG_PROVIDENAME] or []
+                prov_versions = hdr[_rpm.RPMTAG_PROVIDEVERSION] or []
 
-            for i, prov in enumerate(prov_names):
-                ver = prov_versions[i] if i < len(prov_versions) else ''
-                if ver:
-                    provides.append(f"{prov} = {ver}")
-                else:
-                    provides.append(prov)
-            found = True
-            break
+                for i, prov in enumerate(prov_names):
+                    ver = prov_versions[i] if i < len(prov_versions) else ''
+                    if ver:
+                        provides.append(f"{prov} = {ver}")
+                    else:
+                        provides.append(prov)
+                break
 
     except ImportError:
         pass
@@ -607,60 +616,65 @@ def cmd_whatprovides(args, db: 'PackageDatabase') -> int:
             """, (capability, f'{capability}[%'))
             results = [dict(row) for row in cursor]
 
-    # Also check installed packages via rpm
+    # Also check installed packages via rpm.  rpmdb access via
+    # urpm.core.rpmdb — never open a librpm handle in the parent
+    # (module contract, see :mod:`urpm.core.rpmdb`).  The three
+    # dbMatch shapes (full walk / providename index / basenames
+    # index) share a single scoped TS.
     installed_matches = []
     try:
-        import rpm
-        ts = rpm.TransactionSet()
+        from ...core import rpmdb
+        import rpm as _rpm
 
-        if use_glob:
-            # For glob, iterate all packages (slower but necessary)
-            import fnmatch
-            for hdr in ts.dbMatch():
-                name = hdr[rpm.RPMTAG_NAME]
-                if name == 'gpg-pubkey':
-                    continue
-                provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
-                for prov in provides:
-                    if fnmatch.fnmatch(prov, capability):
-                        version = hdr[rpm.RPMTAG_VERSION]
-                        release = hdr[rpm.RPMTAG_RELEASE]
-                        arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                        nevra = f"{name}-{version}-{release}.{arch}"
-                        if not any(m['nevra'] == nevra for m in installed_matches):
-                            installed_matches.append({
-                                'name': name,
-                                'nevra': nevra,
-                                'installed': True
-                            })
-                        break
-        else:
-            # Exact match - use rpm index
-            for hdr in ts.dbMatch('providename', capability):
-                name = hdr[rpm.RPMTAG_NAME]
-                version = hdr[rpm.RPMTAG_VERSION]
-                release = hdr[rpm.RPMTAG_RELEASE]
-                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                installed_matches.append({
-                    'name': name,
-                    'nevra': f"{name}-{version}-{release}.{arch}",
-                    'installed': True
-                })
-
-        # If capability looks like a file path, also search files
-        if capability.startswith('/'):
-            for hdr in ts.dbMatch('basenames', capability):
-                name = hdr[rpm.RPMTAG_NAME]
-                version = hdr[rpm.RPMTAG_VERSION]
-                release = hdr[rpm.RPMTAG_RELEASE]
-                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                nevra = f"{name}-{version}-{release}.{arch}"
-                if not any(m['nevra'] == nevra for m in installed_matches):
+        with rpmdb.open_ts() as ts:
+            if use_glob:
+                # For glob, iterate all packages (slower but necessary)
+                import fnmatch
+                for hdr in ts.dbMatch():
+                    name = hdr[_rpm.RPMTAG_NAME]
+                    if name == 'gpg-pubkey':
+                        continue
+                    provides = hdr[_rpm.RPMTAG_PROVIDENAME] or []
+                    for prov in provides:
+                        if fnmatch.fnmatch(prov, capability):
+                            version = hdr[_rpm.RPMTAG_VERSION]
+                            release = hdr[_rpm.RPMTAG_RELEASE]
+                            arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
+                            nevra = f"{name}-{version}-{release}.{arch}"
+                            if not any(m['nevra'] == nevra for m in installed_matches):
+                                installed_matches.append({
+                                    'name': name,
+                                    'nevra': nevra,
+                                    'installed': True
+                                })
+                            break
+            else:
+                # Exact match - use rpm index
+                for hdr in ts.dbMatch('providename', capability):
+                    name = hdr[_rpm.RPMTAG_NAME]
+                    version = hdr[_rpm.RPMTAG_VERSION]
+                    release = hdr[_rpm.RPMTAG_RELEASE]
+                    arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
                     installed_matches.append({
                         'name': name,
-                        'nevra': nevra,
+                        'nevra': f"{name}-{version}-{release}.{arch}",
                         'installed': True
                     })
+
+            # If capability looks like a file path, also search files
+            if capability.startswith('/'):
+                for hdr in ts.dbMatch('basenames', capability):
+                    name = hdr[_rpm.RPMTAG_NAME]
+                    version = hdr[_rpm.RPMTAG_VERSION]
+                    release = hdr[_rpm.RPMTAG_RELEASE]
+                    arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
+                    nevra = f"{name}-{version}-{release}.{arch}"
+                    if not any(m['nevra'] == nevra for m in installed_matches):
+                        installed_matches.append({
+                            'name': name,
+                            'nevra': nevra,
+                            'installed': True
+                        })
     except ImportError:
         pass
 
@@ -733,64 +747,70 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
     #   * anything with wildcards → no usable index, fall back to
     #     iterating every installed header.
     if search_installed or search_both:
+        # rpmdb access via urpm.core.rpmdb — never open a librpm handle
+        # in the parent (module contract, see :mod:`urpm.core.rpmdb`).
+        # The three regimes (RPMMIRE_STRCMP MI, exact basenames dbMatch,
+        # full-walk wildcard) all need raw header shape, so we take a
+        # scoped TS via ``rpmdb.open_ts``.
         try:
-            import rpm
+            from ...core import rpmdb
+            import rpm as _rpm
             import os.path
-            ts = rpm.TransactionSet()
 
             has_wildcards = '*' in pattern or '?' in pattern
 
             def _hdr_to_nevra(hdr):
-                name = hdr[rpm.RPMTAG_NAME]
+                name = hdr[_rpm.RPMTAG_NAME]
                 if name == 'gpg-pubkey':
                     return None
-                version = hdr[rpm.RPMTAG_VERSION]
-                release = hdr[rpm.RPMTAG_RELEASE]
-                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                version = hdr[_rpm.RPMTAG_VERSION]
+                release = hdr[_rpm.RPMTAG_RELEASE]
+                arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
                 return name, f"{name}-{version}-{release}.{arch}"
 
-            if not has_wildcards and pattern.startswith('/'):
-                # Exact full-path lookup — rpm's ``basenames`` index is
-                # keyed by full file path despite its misleading name.
-                for hdr in ts.dbMatch('basenames', pattern):
-                    info = _hdr_to_nevra(hdr)
-                    if info is None:
-                        continue
-                    installed_found.append({'nevra': info[1], 'file': pattern})
+            with rpmdb.open_ts() as ts:
+                if not has_wildcards and pattern.startswith('/'):
+                    # Exact full-path lookup — rpm's ``basenames`` index is
+                    # keyed by full file path despite its misleading name.
+                    for hdr in ts.dbMatch('basenames', pattern):
+                        info = _hdr_to_nevra(hdr)
+                        if info is None:
+                            continue
+                        installed_found.append({'nevra': info[1], 'file': pattern})
 
-            elif not has_wildcards:
-                # Bare basename — query the basenames index by
-                # exact-string compare, then report which path(s) of
-                # each matching package carry that basename.
-                basename_lower = pattern.lower()
-                mi = ts.dbMatch()
-                mi.pattern('basenames', rpm.RPMMIRE_STRCMP, pattern)
-                for hdr in mi:
-                    info = _hdr_to_nevra(hdr)
-                    if info is None:
-                        continue
-                    nevra = info[1]
-                    for f in (hdr[rpm.RPMTAG_FILENAMES] or []):
-                        if os.path.basename(f).lower() == basename_lower:
-                            installed_found.append({'nevra': nevra, 'file': f})
+                elif not has_wildcards:
+                    # Bare basename — query the basenames index by
+                    # exact-string compare, then report which path(s) of
+                    # each matching package carry that basename.
+                    basename_lower = pattern.lower()
+                    mi = ts.dbMatch()
+                    mi.pattern('basenames', _rpm.RPMMIRE_STRCMP, pattern)
+                    for hdr in mi:
+                        info = _hdr_to_nevra(hdr)
+                        if info is None:
+                            continue
+                        nevra = info[1]
+                        for f in (hdr[_rpm.RPMTAG_FILENAMES] or []):
+                            if os.path.basename(f).lower() == basename_lower:
+                                installed_found.append({'nevra': nevra, 'file': f})
 
-            else:
-                # Wildcard pattern — no usable index, iterate
-                # everything.  Mirrors the historical semantics of the
-                # SQLite fallback in ``search_files``.
-                import fnmatch, re as _re
-                fnmatch_pattern = pattern.replace('%', '*').replace('_', '?')
-                _pat_re = _re.compile(
-                    fnmatch.translate(fnmatch_pattern), _re.IGNORECASE
-                )
-                for hdr in ts.dbMatch():
-                    info = _hdr_to_nevra(hdr)
-                    if info is None:
-                        continue
-                    nevra = info[1]
-                    for f in (hdr[rpm.RPMTAG_FILENAMES] or []):
-                        if _pat_re.match(f):
-                            installed_found.append({'nevra': nevra, 'file': f})
+                else:
+                    # Wildcard pattern — no usable index, iterate
+                    # everything.  Mirrors the historical semantics of the
+                    # SQLite fallback in ``search_files``.
+                    import fnmatch, re as _re
+                    fnmatch_pattern = pattern.replace('%', '*').replace('_', '?')
+                    _pat_re = _re.compile(
+                        fnmatch.translate(fnmatch_pattern), _re.IGNORECASE
+                    )
+                    for hdr in ts.dbMatch():
+                        info = _hdr_to_nevra(hdr)
+                        if info is None:
+                            continue
+                        nevra = info[1]
+                        for f in (hdr[_rpm.RPMTAG_FILENAMES] or []):
+                            if _pat_re.match(f):
+                                installed_found.append({'nevra': nevra, 'file': f})
         except ImportError:
             pass
 

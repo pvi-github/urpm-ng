@@ -266,7 +266,6 @@ def _cmd_auto_upgrade_policy(args, target: str) -> int:
 
 def cmd_key(args) -> int:
     """Handle key command - manage GPG keys for package verification."""
-    import rpm
     from ...auth.privileges import require_privileges
 
     if not hasattr(args, 'key_cmd') or not args.key_cmd:
@@ -277,16 +276,21 @@ def cmd_key(args) -> int:
         print(_("  remove <keyid>  Remove GPG key"))
         return 1
 
-    # List keys
+    # List keys.  rpmdb access via urpm.core.rpmdb — never open a
+    # librpm handle in the parent (module contract, see
+    # :mod:`urpm.core.rpmdb`).  Raw header access is needed for the
+    # SUMMARY tag (typed helpers don't surface it).
     if args.key_cmd in ('list', 'ls', 'l'):
-        ts = rpm.TransactionSet()
+        from ...core import rpmdb
+        import rpm as _rpm
         keys = []
 
-        for hdr in ts.dbMatch('name', 'gpg-pubkey'):
-            version = hdr[rpm.RPMTAG_VERSION]
-            release = hdr[rpm.RPMTAG_RELEASE]
-            summary = hdr[rpm.RPMTAG_SUMMARY]
-            keys.append((version, release, summary))
+        with rpmdb.open_ts() as ts:
+            for hdr in ts.dbMatch('name', 'gpg-pubkey'):
+                version = hdr[_rpm.RPMTAG_VERSION]
+                release = hdr[_rpm.RPMTAG_RELEASE]
+                summary = hdr[_rpm.RPMTAG_SUMMARY]
+                keys.append((version, release, summary))
 
         if not keys:
             print(_("No GPG keys installed"))
@@ -369,18 +373,20 @@ def cmd_key(args) -> int:
 
     # Remove key
     elif args.key_cmd in ('remove', 'rm', 'del'):
-        import rpm
         require_privileges(action_id="org.mageia.urpm.media-manage")
 
         keyid = args.keyid.lower()
 
-        # Find the key
-        ts = rpm.TransactionSet()
+        # Find the key.  gpg-pubkey packages carry the short key id
+        # in their VERSION and the fingerprint hash in their RELEASE ;
+        # match VERSION case-insensitively to accept both cases from
+        # the user.  rpmdb access via urpm.core.rpmdb — never open a
+        # librpm handle in the parent (module contract).
+        from ...core import rpmdb
         found = None
-        for hdr in ts.dbMatch('name', 'gpg-pubkey'):
-            version = hdr[rpm.RPMTAG_VERSION]
-            if version.lower() == keyid:
-                found = f"gpg-pubkey-{version}-{hdr[rpm.RPMTAG_RELEASE]}"
+        for pkg in rpmdb.query_by_name('gpg-pubkey'):
+            if pkg.version.lower() == keyid:
+                found = f"gpg-pubkey-{pkg.version}-{pkg.release}"
                 break
 
         if not found:

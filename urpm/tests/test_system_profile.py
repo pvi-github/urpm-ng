@@ -198,11 +198,13 @@ class TestDiffPackages:
         assert d.install_explicit == ["c"]
         assert d.install_dependency == ["liby"]
         assert d.install_buildrequires == ["make"]
-        assert d.remove_explicit == ["a"]
+        assert d.remove == ["a"]
 
-    def test_removes_only_explicit_no_deps(self):
-        """Deps + BR that vanish from target aren't force-removed —
-        libsolv autoremove owns that call."""
+    def test_remove_spans_all_local_buckets(self):
+        """Clone semantic : any local pkg absent from the target — be
+        it explicit, dep, or BR — lands in the remove list.  Otherwise
+        a local dep whose provider is being removed would leave broken
+        deps and block the whole erase transaction."""
         current = {
             "explicit": ["a"],
             "dependency": ["orphan-dep"],
@@ -210,8 +212,34 @@ class TestDiffPackages:
         }
         target = {"explicit": ["a"], "dependency": [], "buildrequires": {}}
         d = sp.diff_packages(current, target)
-        assert d.remove_explicit == []
+        assert d.remove == ["orphan-dep", "stale-br"]
         assert d.install_explicit == []
+
+    def test_case_insensitive_membership_case_preserving_output(self):
+        """Perl module packages in Mageia are mixed-case
+        (``perl-Git``, ``perl-Digest-HMAC``).  A profile carrying the
+        lowercased form must still match a locally installed mixed-case
+        pkg — and vice versa.  The emitted lists preserve whichever
+        side owned the name."""
+        current = {
+            "explicit": ["perl-Git", "perl-Local-Only"],
+            "dependency": [],
+            "buildrequires": {},
+        }
+        target = {
+            "explicit": ["perl-git", "perl-New"],   # perl-git lowercased
+            "dependency": [],
+            "buildrequires": {},
+        }
+        d = sp.diff_packages(current, target)
+        # perl-git ⇔ perl-Git : same package, no install and no removal.
+        assert "perl-git" not in d.install_explicit
+        assert "perl-Git" not in d.install_explicit
+        assert "perl-Git" not in d.remove
+        # perl-New : target-only → install, keep target casing.
+        assert d.install_explicit == ["perl-New"]
+        # perl-Local-Only : current-only → remove, keep current casing.
+        assert d.remove == ["perl-Local-Only"]
 
     def test_already_installed_in_any_bucket_is_not_reinstalled(self):
         """If ``foo`` is a dep locally but appears as explicit in the
@@ -223,7 +251,7 @@ class TestDiffPackages:
         assert d.install_explicit == []
         assert d.install_dependency == []
         # No removal either — 'foo' isn't in current.explicit.
-        assert d.remove_explicit == []
+        assert d.remove == []
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +280,7 @@ class TestComputeDiff:
         assert [m["name"] for m in d.media.to_add] == ["New"]
         assert [m["name"] for m in d.media.to_remove] == ["Old"]
         assert d.packages.install_explicit == ["bar"]
-        assert d.packages.remove_explicit == ["foo"]
+        assert d.packages.remove == ["foo"]
 
     def test_merge_mode_keeps_local_extras(self):
         current = {"servers": [_srv("Local")], "media": [_med("Local")],

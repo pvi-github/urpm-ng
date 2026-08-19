@@ -3,7 +3,7 @@
 import logging
 import tempfile
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import solv
 
@@ -413,7 +413,27 @@ class PoolMixin:
             return 0
 
         count = 0
-        ts = rpm.TransactionSet(self.root or '/')
+        # rpmdb access via urpm.core.rpmdb ``open_ts`` context
+        # manager — never open a librpm handle in the parent (module
+        # contract, see :mod:`urpm.core.rpmdb`).  We use the raw
+        # context manager here because populating a libsolv Solvable
+        # requires deep header access (versioned deps arrays with
+        # RPMSENSE flags) that no typed helper exposes.
+        from .. import rpmdb as _rpmdb  # noqa: PLC0415
+        with _rpmdb.open_ts(self.root or '/') as ts:
+            count = self._load_rpmdb_ts(pool, repo, ts)
+        return count
+
+    def _load_rpmdb_ts(self, pool: solv.Pool, repo: solv.Repo,
+                       ts: Any) -> int:
+        """Populate ``@System`` from an already-opened ``ts``.
+
+        Split out of :meth:`_load_rpmdb` so the librpm handle
+        lifetime is bounded by the context manager in the caller —
+        the actual header-to-Solvable conversion has no policy
+        opinion on rpmdb lifecycle.
+        """
+        count = 0
 
         # Iterate over all installed packages
         for hdr in ts.dbMatch():

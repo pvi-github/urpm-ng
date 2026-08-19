@@ -252,20 +252,13 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     obsoleted_nevras = []
     if result.obsoleted_names:
         try:
-            import rpm as _rpm
-            _ts = _rpm.TransactionSet()
+            from ...core import rpmdb
             for oname in sorted(result.obsoleted_names):
-                mi = _ts.dbMatch('name', oname)
-                for hdr in mi:
-                    epoch = hdr[_rpm.RPMTAG_EPOCH] or 0
-                    ver = hdr[_rpm.RPMTAG_VERSION] or ''
-                    rel = hdr[_rpm.RPMTAG_RELEASE] or ''
-                    arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
-                    if epoch and epoch > 0:
-                        obsoleted_nevras.append(f"{oname}-{epoch}:{ver}-{rel}.{arch}")
-                    else:
-                        obsoleted_nevras.append(f"{oname}-{ver}-{rel}.{arch}")
-        except ImportError:
+                for pkg in rpmdb.query_by_name(oname):
+                    obsoleted_nevras.append(pkg.nevra)
+        except Exception:
+            # rpmdb unreadable — fall back to the plain name list so
+            # the caller still gets *something* to display.
             obsoleted_nevras = sorted(result.obsoleted_names)
 
     # Show packages by category

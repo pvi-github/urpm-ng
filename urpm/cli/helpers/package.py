@@ -30,44 +30,24 @@ def system_arch() -> str:
     * ``rpm --eval '%{_target_cpu}'`` is also kernel-driven on at
       least Mageia 10's rpm configuration.
 
-    The rpmdb header, by contrast, is fixed at install time and
-    truthfully reflects the binary's own architecture.
+    Delegates to :func:`urpm.core.rpmdb.system_arch` — the CLI
+    parent process must never open a librpm handle outside that
+    module (module contract, see :mod:`urpm.core.rpmdb`).  The
+    ``lru_cache`` on this wrapper is redundant with rpmdb's own
+    mtime-based cache but exposes ``cache_clear()`` for tests that
+    swap the underlying rpm module between scenarios.
 
-    Implemented through ``python3-rpm`` (an existing hard urpm-ng
-    dependency) so we stay in-process — ~1 ms vs ~50 ms for a
-    ``rpm -q`` subprocess fork, with no ``PATH`` dependency to
-    worry about.
-
-    Cached because rpm's view of the platform does not change for
-    the lifetime of a process and ``system_arch()`` is on the hot
-    path of many resolver / pool operations.
-
-    Falls back to ``platform.machine()`` only when neither probe
-    package is installed (very early bootstrap, where urpm-ng
-    explicitly passes ``--arch`` anyway) or when the ``rpm``
-    Python module is unavailable.
+    Falls back to ``platform.machine()`` when the rpmdb query
+    fails (rpm bindings unavailable at bootstrap, corrupted
+    rpmdb).  Both fallbacks return the kernel arch — probably
+    wrong inside a foreign-arch container but better than
+    crashing the CLI on a transient rpm hiccup.
     """
     try:
-        import rpm  # noqa: PLC0415 — keep the import lazy
-    except ImportError:
-        return platform.machine()
-
-    try:
-        ts = rpm.TransactionSet()
-        for probe in ('filesystem', 'glibc'):
-            for hdr in ts.dbMatch(rpm.RPMTAG_NAME, probe):
-                arch = hdr[rpm.RPMTAG_ARCH]
-                if isinstance(arch, bytes):
-                    arch = arch.decode('ascii', 'replace')
-                if arch and arch != 'noarch':
-                    return arch
+        from ...core.rpmdb import system_arch as _system_arch
+        return _system_arch()
     except Exception:
-        # rpmdb unreadable, locked, corrupted — fall through.  We
-        # would rather return the kernel arch (probably wrong in a
-        # foreign-arch container, but at least answers *something*)
-        # than crash a CLI invocation on a transient rpm hiccup.
-        pass
-    return platform.machine()
+        return platform.machine()
 
 
 def resolve_target_arch(args) -> str:

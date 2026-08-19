@@ -54,26 +54,38 @@ def boot_files_size(rpm_path: Path) -> int:
         import rpm  # noqa: PLC0415 — kept local to isolate the import
     except ImportError:
         return 0
+    # ``rpm.TransactionSet()`` opens rpmdb env even though we only
+    # need to route ``hdrFromFdno`` on an on-disk RPM.  Close it
+    # explicitly in ``finally`` — see :mod:`urpm.core.rpmdb` for
+    # the leak rationale ; this file stays out of that central
+    # module because .rpm on-disk parsing is signature-adjacent
+    # territory that belongs with the distupgrade / install stack.
     ts = rpm.TransactionSet()
-    ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
     try:
-        fd = os.open(str(rpm_path), os.O_RDONLY)
-    except OSError:
-        return 0
-    try:
+        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
         try:
-            hdr = ts.hdrFromFdno(fd)
-        except rpm.error:
+            fd = os.open(str(rpm_path), os.O_RDONLY)
+        except OSError:
             return 0
+        try:
+            try:
+                hdr = ts.hdrFromFdno(fd)
+            except rpm.error:
+                return 0
+        finally:
+            os.close(fd)
+        names = hdr[rpm.RPMTAG_FILENAMES] or []
+        sizes = hdr[rpm.RPMTAG_FILESIZES] or []
+        total = 0
+        for name, size in zip(names, sizes):
+            if name.startswith("/boot/"):
+                total += int(size)
+        return total
     finally:
-        os.close(fd)
-    names = hdr[rpm.RPMTAG_FILENAMES] or []
-    sizes = hdr[rpm.RPMTAG_FILESIZES] or []
-    total = 0
-    for name, size in zip(names, sizes):
-        if name.startswith("/boot/"):
-            total += int(size)
-    return total
+        try:
+            ts.closeDB()
+        except Exception:
+            pass
 
 
 def _boot_free_bytes(boot_path: Path = Path("/boot")) -> int:

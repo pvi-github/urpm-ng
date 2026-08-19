@@ -389,12 +389,13 @@ def is_key_in_rpm_keyring(keyid: str) -> bool:
     Returns:
         True if key is installed
     """
-    import rpm
-
-    ts = rpm.TransactionSet()
-    for hdr in ts.dbMatch('name', 'gpg-pubkey'):
-        version = hdr[rpm.RPMTAG_VERSION].lower()
-        if version == keyid:
+    # rpmdb access via urpm.core.rpmdb — never open a librpm handle
+    # in the parent (module contract).  gpg-pubkey pkg VERSION field
+    # holds the short key id, compared case-insensitively.
+    from ...core import rpmdb
+    keyid_lower = keyid.lower()
+    for pkg in rpmdb.query_by_name('gpg-pubkey'):
+        if pkg.version.lower() == keyid_lower:
             return True
     return False
 

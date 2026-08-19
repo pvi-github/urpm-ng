@@ -239,46 +239,59 @@ def collect_readme_from_rpms(
         return []
 
     messages: List[ReadmeMessage] = []
+
+    # ``rpm.TransactionSet()`` opens rpmdb env even though we only use
+    # it to route ``hdrFromFdno`` for on-disk .rpm parsing.  Close it
+    # explicitly in ``finally`` — see :mod:`urpm.core.rpmdb` for the
+    # rationale ; this file stays out of that module because
+    # signature/header-adjacent .rpm parsing belongs with the install
+    # stack for auditability.
     ts = rpmlib.TransactionSet()
-    ts.setVSFlags(rpmlib._RPMVSF_NOSIGNATURES)
+    try:
+        ts.setVSFlags(rpmlib._RPMVSF_NOSIGNATURES)
 
-    for rpm_path in rpm_paths:
-        try:
-            fdno = os.open(rpm_path, os.O_RDONLY)
+        for rpm_path in rpm_paths:
             try:
-                hdr = ts.hdrFromFdno(fdno)
-            finally:
-                os.close(fdno)
-        except Exception:
-            continue
-
-        name = hdr[rpmlib.RPMTAG_NAME]
-        act = action_map.get(name)
-        if not act:
-            continue
-
-        # Check file list for README.urpmi candidates
-        filenames = hdr[rpmlib.RPMTAG_FILENAMES] or []
-        readme_files = [
-            f for f in filenames
-            if f.endswith(".urpmi")
-            and _should_show(Path(f).name, act.action, act.from_evr, act.evr)
-        ]
-
-        # Extract content from RPM via rpm2cpio + cpio
-        for readme_file in readme_files:
-            try:
-                result = subprocess.run(
-                    ["sh", "-c",
-                     f"rpm2cpio '{rpm_path}'"
-                     f" | cpio -i --to-stdout '.{readme_file}' 2>/dev/null"],
-                    capture_output=True, text=True, timeout=10,
-                )
-                content = result.stdout.strip()
-                if content:
-                    messages.append(ReadmeMessage(package=name, content=content))
-            except (subprocess.TimeoutExpired, OSError):
+                fdno = os.open(rpm_path, os.O_RDONLY)
+                try:
+                    hdr = ts.hdrFromFdno(fdno)
+                finally:
+                    os.close(fdno)
+            except Exception:
                 continue
+
+            name = hdr[rpmlib.RPMTAG_NAME]
+            act = action_map.get(name)
+            if not act:
+                continue
+
+            # Check file list for README.urpmi candidates
+            filenames = hdr[rpmlib.RPMTAG_FILENAMES] or []
+            readme_files = [
+                f for f in filenames
+                if f.endswith(".urpmi")
+                and _should_show(Path(f).name, act.action, act.from_evr, act.evr)
+            ]
+
+            # Extract content from RPM via rpm2cpio + cpio
+            for readme_file in readme_files:
+                try:
+                    result = subprocess.run(
+                        ["sh", "-c",
+                         f"rpm2cpio '{rpm_path}'"
+                         f" | cpio -i --to-stdout '.{readme_file}' 2>/dev/null"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    content = result.stdout.strip()
+                    if content:
+                        messages.append(ReadmeMessage(package=name, content=content))
+                except (subprocess.TimeoutExpired, OSError):
+                    continue
+    finally:
+        try:
+            ts.closeDB()
+        except Exception:
+            pass
 
     return messages
 

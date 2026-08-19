@@ -98,7 +98,21 @@ class EraseResult:
 
 
 class Installer:
-    """RPM package installer."""
+    """RPM package installer.
+
+    **Dead code — candidate for removal**.  A ``grep 'Installer('`` on
+    the entire tree finds zero call-site (verified 2026-08-19 during
+    the rpmdb-leak chantier).  The install / erase pipeline the CLI
+    actually uses lives in :mod:`urpm.core.transaction_queue` (forked
+    child, drives the RPM transaction) plus
+    :mod:`urpm.core.resilient_install` (retry / cache logic).
+
+    Deliberately NOT patched with the ``ts.closeDB()`` pattern the
+    rest of the chantier applies — the leak never manifests because
+    the code never runs.  A future cleanup should delete this class
+    and its :class:`EraseResult` companion entirely rather than
+    keeping shadowed drivers around.
+    """
 
     def __init__(self, root: str = "/"):
         """Initialize installer.

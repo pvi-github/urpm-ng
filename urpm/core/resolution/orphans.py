@@ -197,7 +197,9 @@ class OrphansMixin:
     """
 
     def _find_orphans_iterative(self, initial_removes: set) -> list:
-        """Find orphaned dependencies of removed packages iteratively.
+        """rpmdb access via urpm.core.rpmdb.open_ts context manager — never open a librpm handle in the parent (module contract, see urpm.core.rpmdb).
+
+        Find orphaned dependencies of removed packages iteratively.
 
         Strategy:
         1. Find all dependencies (direct and indirect) of packages being removed
@@ -235,131 +237,133 @@ class OrphansMixin:
             'nss-softokn', 'nss-sysinit', 'p11-kit', 'p11-kit-trust',
         }
 
-        ts = rpm.TransactionSet(self.root or '/')
+        from .. import rpmdb
 
-        # Build complete picture of installed packages
-        installed_pkgs = {}  # name -> {provides: set, requires: set, hdr: header}
-        provides_map = {}    # capability -> set of package names that provide it
+        with rpmdb.open_ts(self.root or '/') as ts:
 
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            if name == 'gpg-pubkey':
-                continue
+            # Build complete picture of installed packages
+            installed_pkgs = {}  # name -> {provides: set, requires: set, hdr: header}
+            provides_map = {}    # capability -> set of package names that provide it
 
-            # Collect provides — use the full capability name including
-            # parenthesised qualifiers like devel(libeconf(64bit)).
-            # The parentheses are part of the capability name, NOT version
-            # info (versions are tracked separately via PROVIDEVERSION).
-            provides = set()
-            for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                provides.add(prov)
-                provides_map.setdefault(prov, set()).add(name)
-
-            requires = set()
-            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                if req.startswith('rpmlib(') or req.startswith('/'):
-                    continue
-                requires.add(req)
-
-            installed_pkgs[name] = {
-                'provides': provides,
-                'requires': requires,
-                'hdr': hdr,
-            }
-
-        # Step 1: Find all dependencies of packages being removed
-        to_remove = set(initial_removes)
-        candidate_orphans = set()
-
-        # Collect all direct dependencies of removed packages
-        # Only consider packages that were installed as dependencies (in unrequested)
-        for name in list(to_remove):
-            if name in installed_pkgs:
-                for req in installed_pkgs[name]['requires']:
-                    # Find what provides this requirement
-                    providers = provides_map.get(req, set())
-                    for provider in providers:
-                        # Only consider as orphan candidate if:
-                        # - Not already being removed
-                        # - Not a base package
-                        # - Was installed as a dependency (in unrequested)
-                        if (provider not in to_remove and
-                            provider not in base_packages and
-                            provider.lower() in unrequested):
-                            candidate_orphans.add(provider)
-
-        # Step 2: Iteratively find orphans
-        orphans = []
-        max_iterations = 50
-
-        for _ in range(max_iterations):
-            new_orphans = []
-
-            for name in list(candidate_orphans):
-                if name in to_remove:
-                    continue
-                if name in base_packages:
-                    continue
-                if name not in installed_pkgs:
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                if name == 'gpg-pubkey':
                     continue
 
-                pkg = installed_pkgs[name]
+                # Collect provides — use the full capability name including
+                # parenthesised qualifiers like devel(libeconf(64bit)).
+                # The parentheses are part of the capability name, NOT version
+                # info (versions are tracked separately via PROVIDEVERSION).
+                provides = set()
+                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                    provides.add(prov)
+                    provides_map.setdefault(prov, set()).add(name)
 
-                # Check if any remaining package requires this one
-                is_required = False
-                for prov in pkg['provides']:
-                    for other_name, other_pkg in installed_pkgs.items():
-                        if other_name == name:
-                            continue
-                        if other_name in to_remove:
-                            continue
-                        if prov in other_pkg['requires']:
-                            is_required = True
-                            break
-                    if is_required:
-                        break
+                requires = set()
+                for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
+                    if req.startswith('rpmlib(') or req.startswith('/'):
+                        continue
+                    requires.add(req)
 
-                if not is_required:
-                    # This package is an orphan
-                    hdr = pkg['hdr']
-                    epoch = hdr[rpm.RPMTAG_EPOCH] or 0
-                    version = hdr[rpm.RPMTAG_VERSION]
-                    release = hdr[rpm.RPMTAG_RELEASE]
-                    arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                    size = hdr[rpm.RPMTAG_SIZE] or 0
+                installed_pkgs[name] = {
+                    'provides': provides,
+                    'requires': requires,
+                    'hdr': hdr,
+                }
 
-                    if epoch and epoch > 0:
-                        evr = f"{epoch}:{version}-{release}"
-                    else:
-                        evr = f"{version}-{release}"
+            # Step 1: Find all dependencies of packages being removed
+            to_remove = set(initial_removes)
+            candidate_orphans = set()
 
-                    new_orphans.append(PackageAction(
-                        action=TransactionType.REMOVE,
-                        name=name,
-                        evr=evr,
-                        arch=arch,
-                        nevra=f"{name}-{evr}.{arch}",
-                        size=size,
-                    ))
-                    to_remove.add(name)
-                    candidate_orphans.discard(name)
-
-                    # Add this orphan's dependencies as new candidates
-                    # (only if they were installed as dependencies)
-                    for req in pkg['requires']:
+            # Collect all direct dependencies of removed packages
+            # Only consider packages that were installed as dependencies (in unrequested)
+            for name in list(to_remove):
+                if name in installed_pkgs:
+                    for req in installed_pkgs[name]['requires']:
+                        # Find what provides this requirement
                         providers = provides_map.get(req, set())
                         for provider in providers:
+                            # Only consider as orphan candidate if:
+                            # - Not already being removed
+                            # - Not a base package
+                            # - Was installed as a dependency (in unrequested)
                             if (provider not in to_remove and
                                 provider not in base_packages and
                                 provider.lower() in unrequested):
                                 candidate_orphans.add(provider)
 
-            if not new_orphans:
-                break
+            # Step 2: Iteratively find orphans
+            orphans = []
+            max_iterations = 50
 
-            orphans.extend(new_orphans)
+            for _ in range(max_iterations):
+                new_orphans = []
 
-        return orphans
+                for name in list(candidate_orphans):
+                    if name in to_remove:
+                        continue
+                    if name in base_packages:
+                        continue
+                    if name not in installed_pkgs:
+                        continue
+
+                    pkg = installed_pkgs[name]
+
+                    # Check if any remaining package requires this one
+                    is_required = False
+                    for prov in pkg['provides']:
+                        for other_name, other_pkg in installed_pkgs.items():
+                            if other_name == name:
+                                continue
+                            if other_name in to_remove:
+                                continue
+                            if prov in other_pkg['requires']:
+                                is_required = True
+                                break
+                        if is_required:
+                            break
+
+                    if not is_required:
+                        # This package is an orphan
+                        hdr = pkg['hdr']
+                        epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+                        version = hdr[rpm.RPMTAG_VERSION]
+                        release = hdr[rpm.RPMTAG_RELEASE]
+                        arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                        size = hdr[rpm.RPMTAG_SIZE] or 0
+
+                        if epoch and epoch > 0:
+                            evr = f"{epoch}:{version}-{release}"
+                        else:
+                            evr = f"{version}-{release}"
+
+                        new_orphans.append(PackageAction(
+                            action=TransactionType.REMOVE,
+                            name=name,
+                            evr=evr,
+                            arch=arch,
+                            nevra=f"{name}-{evr}.{arch}",
+                            size=size,
+                        ))
+                        to_remove.add(name)
+                        candidate_orphans.discard(name)
+
+                        # Add this orphan's dependencies as new candidates
+                        # (only if they were installed as dependencies)
+                        for req in pkg['requires']:
+                            providers = provides_map.get(req, set())
+                            for provider in providers:
+                                if (provider not in to_remove and
+                                    provider not in base_packages and
+                                    provider.lower() in unrequested):
+                                    candidate_orphans.add(provider)
+
+                if not new_orphans:
+                    break
+
+                orphans.extend(new_orphans)
+
+            return orphans
 
     def _get_unrequested_file(self) -> Path:
         """Get path to the installed-through-deps.list file."""
@@ -588,7 +592,9 @@ class OrphansMixin:
         )
 
     def find_all_orphans(self) -> list:
-        """Find ALL orphan packages in the system.
+        """rpmdb access via urpm.core.rpmdb.open_ts context manager — never open a librpm handle in the parent (module contract, see urpm.core.rpmdb).
+
+        Find ALL orphan packages in the system.
 
         Algorithm: For each package in unrequested (installed as dependency):
         - Walk UP reverse dependencies (who requires/recommends this package)
@@ -608,145 +614,149 @@ class OrphansMixin:
         if not unrequested:
             return []
 
-        ts = rpm.TransactionSet(self.root or '/')
+        from .. import rpmdb
 
-        # Single-pass: build provides map, reverse deps, and collect headers
-        installed_pkgs = {}   # name -> hdr
-        provides_map = {}     # capability -> set of package names
-        reverse_deps = {}     # name -> set of names that require/recommend/
-                              #         suggest it, plus its supplement triggers
-        pkg_requires = {}     # name -> list of capability names
-        pkg_recommends = {}   # name -> list of capability names
-        pkg_suggests = {}     # name -> list of capability names (weak forward dep)
-        pkg_supplements = {}  # name -> list of capability names (reverse weak dep)
+        with rpmdb.open_ts(self.root or '/') as ts:
 
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            if name == 'gpg-pubkey':
-                continue
+            # Single-pass: build provides map, reverse deps, and collect headers
+            installed_pkgs = {}   # name -> hdr
+            provides_map = {}     # capability -> set of package names
+            reverse_deps = {}     # name -> set of names that require/recommend/
+                                  #         suggest it, plus its supplement triggers
+            pkg_requires = {}     # name -> list of capability names
+            pkg_recommends = {}   # name -> list of capability names
+            pkg_suggests = {}     # name -> list of capability names (weak forward dep)
+            pkg_supplements = {}  # name -> list of capability names (reverse weak dep)
 
-            installed_pkgs[name] = hdr
-            reverse_deps[name] = set()
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                if name == 'gpg-pubkey':
+                    continue
 
-            for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                provides_map.setdefault(prov, set()).add(name)
+                installed_pkgs[name] = hdr
+                reverse_deps[name] = set()
 
-            pkg_requires[name] = [
-                r for r in (hdr[rpm.RPMTAG_REQUIRENAME] or [])
-                if not r.startswith('rpmlib(') and not r.startswith('/')
-            ]
-            pkg_recommends[name] = list(hdr[rpm.RPMTAG_RECOMMENDNAME] or [])
-            pkg_suggests[name] = list(hdr[rpm.RPMTAG_SUGGESTNAME] or [])
-            pkg_supplements[name] = list(hdr[rpm.RPMTAG_SUPPLEMENTNAME] or [])
+                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                    provides_map.setdefault(prov, set()).add(name)
 
-        # Build the reverse-dep graph used for orphan DFS.  ``reverse_deps[X]``
-        # is the set of packages whose presence protects ``X`` from being
-        # classified as orphan — the DFS walks from ``X`` through these
-        # entries until it either reaches a non-unrequested package (``X``
-        # is kept alive) or exhausts the tree (``X`` is orphan).
-        #
-        # * Requires / Recommends: ``name`` depends on ``provider``; if
-        #   ``name`` is explicit the whole chain is kept alive, so we record
-        #   ``reverse_deps[provider].add(name)`` — walking up from
-        #   ``provider`` we find its dependents.
-        # * Supplements: ``name`` supplements a capability that ``provider``
-        #   delivers; semantically ``provider`` is the *trigger* that keeps
-        #   ``name`` alive, so the protective edge points the other way —
-        #   ``reverse_deps[name].add(provider)``.  DFS from ``name`` walks
-        #   to ``provider`` (and, transitively, to whoever keeps
-        #   ``provider`` alive).
-        # * Boolean Supplements (``(A and B)``): rpmdb exposes the operands
-        #   as independent capability names, which we treat as OR
-        #   (conservative: may keep a package that strict AND would drop,
-        #   but never drops one that strict AND would keep).
-        # Per project policy (configured by the user, not negotiated by the
-        # detector): every weak-dep relationship — Recommends and Suggests —
-        # protects from orphan classification by default.  Cleanup of
-        # weak-only-kept packages is opt-in via dedicated commands
-        # (``urpm autoremove --erase-recommends`` etc.), never the default
-        # behaviour of any orphan-classification verb.
-        for name in installed_pkgs:
-            for req in pkg_requires[name]:
-                for provider in provides_map.get(req, set()):
-                    if provider != name:
-                        reverse_deps[provider].add(name)
-            for rec in pkg_recommends[name]:
-                for provider in provides_map.get(rec, set()):
-                    if provider != name:
-                        reverse_deps[provider].add(name)
-            for sug in pkg_suggests[name]:
-                for provider in provides_map.get(sug, set()):
-                    if provider != name:
-                        reverse_deps[provider].add(name)
-            for supp in pkg_supplements[name]:
-                for provider in provides_map.get(supp, set()):
-                    if provider != name:
-                        reverse_deps[name].add(provider)
+                pkg_requires[name] = [
+                    r for r in (hdr[rpm.RPMTAG_REQUIRENAME] or [])
+                    if not r.startswith('rpmlib(') and not r.startswith('/')
+                ]
+                pkg_recommends[name] = list(hdr[rpm.RPMTAG_RECOMMENDNAME] or [])
+                pkg_suggests[name] = list(hdr[rpm.RPMTAG_SUGGESTNAME] or [])
+                pkg_supplements[name] = list(hdr[rpm.RPMTAG_SUPPLEMENTNAME] or [])
 
-        # Builddep packages block orphan detection
-        builddeps_set = set(self._get_builddep_packages().keys())
+            # Build the reverse-dep graph used for orphan DFS.  ``reverse_deps[X]``
+            # is the set of packages whose presence protects ``X`` from being
+            # classified as orphan — the DFS walks from ``X`` through these
+            # entries until it either reaches a non-unrequested package (``X``
+            # is kept alive) or exhausts the tree (``X`` is orphan).
+            #
+            # * Requires / Recommends: ``name`` depends on ``provider``; if
+            #   ``name`` is explicit the whole chain is kept alive, so we record
+            #   ``reverse_deps[provider].add(name)`` — walking up from
+            #   ``provider`` we find its dependents.
+            # * Supplements: ``name`` supplements a capability that ``provider``
+            #   delivers; semantically ``provider`` is the *trigger* that keeps
+            #   ``name`` alive, so the protective edge points the other way —
+            #   ``reverse_deps[name].add(provider)``.  DFS from ``name`` walks
+            #   to ``provider`` (and, transitively, to whoever keeps
+            #   ``provider`` alive).
+            # * Boolean Supplements (``(A and B)``): rpmdb exposes the operands
+            #   as independent capability names, which we treat as OR
+            #   (conservative: may keep a package that strict AND would drop,
+            #   but never drops one that strict AND would keep).
+            # Per project policy (configured by the user, not negotiated by the
+            # detector): every weak-dep relationship — Recommends and Suggests —
+            # protects from orphan classification by default.  Cleanup of
+            # weak-only-kept packages is opt-in via dedicated commands
+            # (``urpm autoremove --erase-recommends`` etc.), never the default
+            # behaviour of any orphan-classification verb.
+            for name in installed_pkgs:
+                for req in pkg_requires[name]:
+                    for provider in provides_map.get(req, set()):
+                        if provider != name:
+                            reverse_deps[provider].add(name)
+                for rec in pkg_recommends[name]:
+                    for provider in provides_map.get(rec, set()):
+                        if provider != name:
+                            reverse_deps[provider].add(name)
+                for sug in pkg_suggests[name]:
+                    for provider in provides_map.get(sug, set()):
+                        if provider != name:
+                            reverse_deps[provider].add(name)
+                for supp in pkg_supplements[name]:
+                    for provider in provides_map.get(supp, set()):
+                        if provider != name:
+                            reverse_deps[name].add(provider)
 
-        # Cached DFS: only True results are cached.  False is never cached
-        # because it may be path-dependent: cycle detection returns False
-        # when a node is already in the current DFS path, but the node may
-        # be reachable via a different path that avoids the cycle.  Since
-        # set iteration order is non-deterministic (Python hash seed), caching
-        # False would produce random false-positive orphans.
-        _cache_true: set = set()
+            # Builddep packages block orphan detection
+            builddeps_set = set(self._get_builddep_packages().keys())
 
-        def has_explicit_ancestor(pkg_name: str, path: set) -> bool:
-            """Walk up reverse deps with memoization (True-only cache)."""
-            if pkg_name in _cache_true:
-                return True
-            if pkg_name in path:
+            # Cached DFS: only True results are cached.  False is never cached
+            # because it may be path-dependent: cycle detection returns False
+            # when a node is already in the current DFS path, but the node may
+            # be reachable via a different path that avoids the cycle.  Since
+            # set iteration order is non-deterministic (Python hash seed), caching
+            # False would produce random false-positive orphans.
+            _cache_true: set = set()
+
+            def has_explicit_ancestor(pkg_name: str, path: set) -> bool:
+                """Walk up reverse deps with memoization (True-only cache)."""
+                if pkg_name in _cache_true:
+                    return True
+                if pkg_name in path:
+                    return False
+                path.add(pkg_name)
+
+                for dep_name in reverse_deps.get(pkg_name, set()):
+                    dep_lower = dep_name.lower()
+                    if dep_lower not in unrequested or dep_lower in builddeps_set:
+                        _cache_true.add(pkg_name)
+                        return True
+                    if has_explicit_ancestor(dep_name, path):
+                        _cache_true.add(pkg_name)
+                        return True
+
                 return False
-            path.add(pkg_name)
 
-            for dep_name in reverse_deps.get(pkg_name, set()):
-                dep_lower = dep_name.lower()
-                if dep_lower not in unrequested or dep_lower in builddeps_set:
-                    _cache_true.add(pkg_name)
-                    return True
-                if has_explicit_ancestor(dep_name, path):
-                    _cache_true.add(pkg_name)
-                    return True
+            # Find orphans
+            orphans = []
+            for name, hdr in installed_pkgs.items():
+                name_lower = name.lower()
+                if name_lower not in unrequested:
+                    continue
+                if name_lower in builddeps_set:
+                    continue
 
-            return False
+                if not has_explicit_ancestor(name, set()):
+                    epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+                    version = hdr[rpm.RPMTAG_VERSION]
+                    release = hdr[rpm.RPMTAG_RELEASE]
+                    arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                    size = hdr[rpm.RPMTAG_SIZE] or 0
 
-        # Find orphans
-        orphans = []
-        for name, hdr in installed_pkgs.items():
-            name_lower = name.lower()
-            if name_lower not in unrequested:
-                continue
-            if name_lower in builddeps_set:
-                continue
+                    if epoch and epoch > 0:
+                        evr = f"{epoch}:{version}-{release}"
+                    else:
+                        evr = f"{version}-{release}"
 
-            if not has_explicit_ancestor(name, set()):
-                epoch = hdr[rpm.RPMTAG_EPOCH] or 0
-                version = hdr[rpm.RPMTAG_VERSION]
-                release = hdr[rpm.RPMTAG_RELEASE]
-                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-                size = hdr[rpm.RPMTAG_SIZE] or 0
+                    orphans.append(PackageAction(
+                        action=TransactionType.REMOVE,
+                        name=name,
+                        evr=evr,
+                        arch=arch,
+                        nevra=f"{name}-{evr}.{arch}",
+                        size=size,
+                    ))
 
-                if epoch and epoch > 0:
-                    evr = f"{epoch}:{version}-{release}"
-                else:
-                    evr = f"{version}-{release}"
-
-                orphans.append(PackageAction(
-                    action=TransactionType.REMOVE,
-                    name=name,
-                    evr=evr,
-                    arch=arch,
-                    nevra=f"{name}-{evr}.{arch}",
-                    size=size,
-                ))
-
-        return orphans
+            return orphans
 
     def find_all_builddep_orphans(self) -> list:
-        """Find builddep packages that can be safely removed.
+        """rpmdb access via urpm.core.rpmdb.open_ts context manager — never open a librpm handle in the parent (module contract, see urpm.core.rpmdb).
+
+        Find builddep packages that can be safely removed.
 
         A builddep is removable if it has no explicit ancestor outside
         the builddeps and unrequested sets (i.e. nothing explicitly
@@ -767,162 +777,79 @@ class OrphansMixin:
         unrequested = self._get_unrequested_packages()
         builddeps_set = set(builddeps.keys())
 
-        ts = rpm.TransactionSet(self.root or '/')
+        from .. import rpmdb
 
-        # Build package info and reverse dependency map
-        installed_pkgs = {}
-        provides_map = {}
-        reverse_deps = {}
+        with rpmdb.open_ts(self.root or '/') as ts:
 
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            if name == 'gpg-pubkey':
-                continue
+            # Build package info and reverse dependency map
+            installed_pkgs = {}
+            provides_map = {}
+            reverse_deps = {}
 
-            provides = set()
-            for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                provides.add(prov)
-                provides_map.setdefault(prov, set()).add(name)
-
-            installed_pkgs[name] = {
-                'provides': provides,
-                'hdr': hdr,
-            }
-            reverse_deps[name] = set()
-
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            if name == 'gpg-pubkey':
-                continue
-
-            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                if req.startswith('rpmlib(') or req.startswith('/'):
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                if name == 'gpg-pubkey':
                     continue
-                for provider in provides_map.get(req, set()):
-                    if provider != name:
-                        reverse_deps[provider].add(name)
 
-            for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
-                for provider in provides_map.get(rec, set()):
-                    if provider != name:
-                        reverse_deps[provider].add(name)
+                provides = set()
+                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                    provides.add(prov)
+                    provides_map.setdefault(prov, set()).add(name)
 
-        name_to_lower = {name: name.lower() for name in installed_pkgs}
+                installed_pkgs[name] = {
+                    'provides': provides,
+                    'hdr': hdr,
+                }
+                reverse_deps[name] = set()
 
-        def has_real_explicit_ancestor(pkg_name: str, visited: set) -> bool:
-            """Check if an explicit package (not builddep, not unrequested) depends on this."""
-            if pkg_name in visited:
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                if name == 'gpg-pubkey':
+                    continue
+
+                for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
+                    if req.startswith('rpmlib(') or req.startswith('/'):
+                        continue
+                    for provider in provides_map.get(req, set()):
+                        if provider != name:
+                            reverse_deps[provider].add(name)
+
+                for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
+                    for provider in provides_map.get(rec, set()):
+                        if provider != name:
+                            reverse_deps[provider].add(name)
+
+            name_to_lower = {name: name.lower() for name in installed_pkgs}
+
+            def has_real_explicit_ancestor(pkg_name: str, visited: set) -> bool:
+                """Check if an explicit package (not builddep, not unrequested) depends on this."""
+                if pkg_name in visited:
+                    return False
+                visited.add(pkg_name)
+
+                for dep_name in reverse_deps.get(pkg_name, set()):
+                    dep_lower = name_to_lower.get(dep_name, dep_name.lower())
+                    # A real explicit package: not in unrequested AND not a builddep
+                    if dep_lower not in unrequested and dep_lower not in builddeps_set:
+                        return True
+                    if has_real_explicit_ancestor(dep_name, visited):
+                        return True
+
                 return False
-            visited.add(pkg_name)
 
-            for dep_name in reverse_deps.get(pkg_name, set()):
-                dep_lower = name_to_lower.get(dep_name, dep_name.lower())
-                # A real explicit package: not in unrequested AND not a builddep
-                if dep_lower not in unrequested and dep_lower not in builddeps_set:
-                    return True
-                if has_real_explicit_ancestor(dep_name, visited):
-                    return True
-
-            return False
-
-        orphans = []
-        for name in installed_pkgs:
-            if name.lower() not in builddeps_set:
-                continue
-
-            if has_real_explicit_ancestor(name, set()):
-                continue
-
-            hdr = installed_pkgs[name]['hdr']
-            epoch = hdr[rpm.RPMTAG_EPOCH] or 0
-            version = hdr[rpm.RPMTAG_VERSION]
-            release = hdr[rpm.RPMTAG_RELEASE]
-            arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-            size = hdr[rpm.RPMTAG_SIZE] or 0
-
-            if epoch and epoch > 0:
-                evr = f"{epoch}:{version}-{release}"
-            else:
-                evr = f"{version}-{release}"
-
-            orphans.append(PackageAction(
-                action=TransactionType.REMOVE,
-                name=name,
-                evr=evr,
-                arch=arch,
-                nevra=f"{name}-{evr}.{arch}",
-                size=size,
-            ))
-
-        return orphans
-
-    def find_orphans(self, exclude_names: List[str] = None) -> list:
-        """Find orphan packages (installed as deps but no longer needed).
-
-        Args:
-            exclude_names: Package names to exclude from orphan check
-
-        Returns:
-            List of PackageAction for orphan packages
-        """
-        from ..resolver import TransactionType, PackageAction
-
-        if not HAS_RPM:
-            return []
-
-        exclude = set(n.lower() for n in (exclude_names or []))
-        orphans = []
-
-        # Get all installed packages and their reverse deps
-        ts = rpm.TransactionSet(self.root or '/')
-
-        # Build a map of what each package requires
-        required_by = {}  # package_name -> set of packages that need it
-
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
-
-            for req in requires:
-                # Skip rpmlib, file deps, and self-requires
-                if req.startswith("rpmlib(") or req.startswith("/"):
+            orphans = []
+            for name in installed_pkgs:
+                if name.lower() not in builddeps_set:
                     continue
-                # Use the full capability name — parentheses are part of
-                # the name (e.g. devel(libeconf(64bit))), not version info.
-                required_by.setdefault(req, set()).add(name)
 
-        # Find packages that nothing requires (potential orphans)
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
+                if has_real_explicit_ancestor(name, set()):
+                    continue
 
-            # Skip excluded packages
-            if name.lower() in exclude:
-                continue
-
-            # Skip base system packages (heuristic: packages starting with these are likely essential)
-            if name in ('glibc', 'bash', 'coreutils', 'filesystem', 'setup', 'basesystem'):
-                continue
-
-            # Check if any installed package requires this one
-            provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
-            is_required = False
-
-            for prov in provides:
-                if prov in required_by:
-                    # Check if any requirer is still installed (not in exclude list)
-                    for req in required_by[prov]:
-                        if req.lower() not in exclude and req != name:
-                            is_required = True
-                            break
-                if is_required:
-                    break
-
-            if not is_required:
-                # This package might be an orphan
+                hdr = installed_pkgs[name]['hdr']
                 epoch = hdr[rpm.RPMTAG_EPOCH] or 0
                 version = hdr[rpm.RPMTAG_VERSION]
                 release = hdr[rpm.RPMTAG_RELEASE]
-                arch = hdr[rpm.RPMTAG_ARCH] or "noarch"
+                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
                 size = hdr[rpm.RPMTAG_SIZE] or 0
 
                 if epoch and epoch > 0:
@@ -939,7 +866,96 @@ class OrphansMixin:
                     size=size,
                 ))
 
-        return orphans
+            return orphans
+
+    def find_orphans(self, exclude_names: List[str] = None) -> list:
+        """rpmdb access via urpm.core.rpmdb.open_ts context manager — never open a librpm handle in the parent (module contract, see urpm.core.rpmdb).
+
+        Find orphan packages (installed as deps but no longer needed).
+
+        Args:
+            exclude_names: Package names to exclude from orphan check
+
+        Returns:
+            List of PackageAction for orphan packages
+        """
+        from ..resolver import TransactionType, PackageAction
+
+        if not HAS_RPM:
+            return []
+
+        exclude = set(n.lower() for n in (exclude_names or []))
+        orphans = []
+
+        # Get all installed packages and their reverse deps
+        from .. import rpmdb
+
+        with rpmdb.open_ts(self.root or '/') as ts:
+
+            # Build a map of what each package requires
+            required_by = {}  # package_name -> set of packages that need it
+
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
+
+                for req in requires:
+                    # Skip rpmlib, file deps, and self-requires
+                    if req.startswith("rpmlib(") or req.startswith("/"):
+                        continue
+                    # Use the full capability name — parentheses are part of
+                    # the name (e.g. devel(libeconf(64bit))), not version info.
+                    required_by.setdefault(req, set()).add(name)
+
+            # Find packages that nothing requires (potential orphans)
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+
+                # Skip excluded packages
+                if name.lower() in exclude:
+                    continue
+
+                # Skip base system packages (heuristic: packages starting with these are likely essential)
+                if name in ('glibc', 'bash', 'coreutils', 'filesystem', 'setup', 'basesystem'):
+                    continue
+
+                # Check if any installed package requires this one
+                provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
+                is_required = False
+
+                for prov in provides:
+                    if prov in required_by:
+                        # Check if any requirer is still installed (not in exclude list)
+                        for req in required_by[prov]:
+                            if req.lower() not in exclude and req != name:
+                                is_required = True
+                                break
+                    if is_required:
+                        break
+
+                if not is_required:
+                    # This package might be an orphan
+                    epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+                    version = hdr[rpm.RPMTAG_VERSION]
+                    release = hdr[rpm.RPMTAG_RELEASE]
+                    arch = hdr[rpm.RPMTAG_ARCH] or "noarch"
+                    size = hdr[rpm.RPMTAG_SIZE] or 0
+
+                    if epoch and epoch > 0:
+                        evr = f"{epoch}:{version}-{release}"
+                    else:
+                        evr = f"{version}-{release}"
+
+                    orphans.append(PackageAction(
+                        action=TransactionType.REMOVE,
+                        name=name,
+                        evr=evr,
+                        arch=arch,
+                        nevra=f"{name}-{evr}.{arch}",
+                        size=size,
+                    ))
+
+            return orphans
 
     def _extract_cap_name(self, cap: str) -> str:
         """Extract base capability name from a versioned capability string.
@@ -956,7 +972,9 @@ class OrphansMixin:
 
     def find_upgrade_orphans(self, all_actions: list,
                              obsoleted_names: set = None) -> "UpgradeOrphanPlan":
-        """Find packages that become newly orphaned by a transaction.
+        """rpmdb access via urpm.core.rpmdb.open_ts context manager — never open a librpm handle in the parent (module contract, see urpm.core.rpmdb).
+
+        Find packages that become newly orphaned by a transaction.
 
         Implements the formal specification::
 
@@ -1025,573 +1043,577 @@ class OrphansMixin:
         builddeps = self._get_builddep_packages()
         unrequested -= set(builddeps.keys())
 
-        ts = rpm.TransactionSet(self.root or '/')
+        from .. import rpmdb
 
-        # ``upgraded_names`` and ``installed_names`` are name → action maps:
-        # the post-state synthesis below needs the **exact NEVRA** that
-        # libsolv selected, not just an arch hint.  Two reasons:
-        #
-        # 1. On a multi-arch system, ``arch`` alone is not enough to
-        #    distinguish the i686 vs x86_64 vs noarch row, but
-        #    :meth:`PackageDatabase.get_package` already accepts the
-        #    arch filter.  The remaining hazard is **version**.
-        # 2. When the DB holds several versions of the same N for the
-        #    same arch (e.g. a mga9 Updates medium that carries both
-        #    ``libreoffice-core-7.6.7.2`` and ``libreoffice-core-24.2.7.2``)
-        #    and libsolv decides on a non-latest one (Hold, Conflict,
-        #    user pin), ``get_package`` returns the *semantically
-        #    latest* row, which is **not** what libsolv is installing.
-        #    Reading the requires of the wrong row produces a stale
-        #    reverse-dep graph and flags surviving providers as orphans.
-        #
-        # The fix is to pin the post-state lookup to the action's exact
-        # ``(name, version, release, arch, epoch)`` via
-        # :meth:`PackageDatabase.get_package_exact` (with a defensive
-        # fallback on :meth:`get_package` for the rare case where the
-        # DB no longer holds the row libsolv saw — e.g. a media refresh
-        # mid-transaction).  Keeping the full action object also lets
-        # the helper log which fallback fired under ``--debug orphans``.
-        #
-        # ``in`` and iteration semantics on a dict mirror those on a
-        # set of names, so other usages downstream are unaffected.
-        upgraded_names: dict = {}
-        installed_names: dict = {}
-        removed_names = set()
+        with rpmdb.open_ts(self.root or '/') as ts:
 
-        for action in all_actions:
-            if action.action == TransactionType.UPGRADE:
-                upgraded_names[action.name] = action
-            elif action.action == TransactionType.INSTALL:
-                installed_names[action.name] = action
-            elif action.action == TransactionType.REMOVE:
-                removed_names.add(action.name)
+            # ``upgraded_names`` and ``installed_names`` are name → action maps:
+            # the post-state synthesis below needs the **exact NEVRA** that
+            # libsolv selected, not just an arch hint.  Two reasons:
+            #
+            # 1. On a multi-arch system, ``arch`` alone is not enough to
+            #    distinguish the i686 vs x86_64 vs noarch row, but
+            #    :meth:`PackageDatabase.get_package` already accepts the
+            #    arch filter.  The remaining hazard is **version**.
+            # 2. When the DB holds several versions of the same N for the
+            #    same arch (e.g. a mga9 Updates medium that carries both
+            #    ``libreoffice-core-7.6.7.2`` and ``libreoffice-core-24.2.7.2``)
+            #    and libsolv decides on a non-latest one (Hold, Conflict,
+            #    user pin), ``get_package`` returns the *semantically
+            #    latest* row, which is **not** what libsolv is installing.
+            #    Reading the requires of the wrong row produces a stale
+            #    reverse-dep graph and flags surviving providers as orphans.
+            #
+            # The fix is to pin the post-state lookup to the action's exact
+            # ``(name, version, release, arch, epoch)`` via
+            # :meth:`PackageDatabase.get_package_exact` (with a defensive
+            # fallback on :meth:`get_package` for the rare case where the
+            # DB no longer holds the row libsolv saw — e.g. a media refresh
+            # mid-transaction).  Keeping the full action object also lets
+            # the helper log which fallback fired under ``--debug orphans``.
+            #
+            # ``in`` and iteration semantics on a dict mirror those on a
+            # set of names, so other usages downstream are unaffected.
+            upgraded_names: dict = {}
+            installed_names: dict = {}
+            removed_names = set()
 
-        # Packages replaced via Obsoletes are removed implicitly by rpm
-        # but do not appear in all_actions (SHOW_ACTIVE hides them).
-        # Include them in removed_names so they are excluded from
-        # post_state, and track them separately to avoid misclassifying
-        # them as orphans.
-        if obsoleted_names:
-            removed_names |= obsoleted_names
+            for action in all_actions:
+                if action.action == TransactionType.UPGRADE:
+                    upgraded_names[action.name] = action
+                elif action.action == TransactionType.INSTALL:
+                    installed_names[action.name] = action
+                elif action.action == TransactionType.REMOVE:
+                    removed_names.add(action.name)
 
-        if not (upgraded_names or installed_names or removed_names):
-            return UpgradeOrphanPlan()
+            # Packages replaced via Obsoletes are removed implicitly by rpm
+            # but do not appear in all_actions (SHOW_ACTIVE hides them).
+            # Include them in removed_names so they are excluded from
+            # post_state, and track them separately to avoid misclassifying
+            # them as orphans.
+            if obsoleted_names:
+                removed_names |= obsoleted_names
 
-        logger = logging.getLogger(__name__)
+            if not (upgraded_names or installed_names or removed_names):
+                return UpgradeOrphanPlan()
 
-        def _collect_from_header(hdr):
-            """Extract versioned requires/recommends/supplements/provides from a header.
+            logger = logging.getLogger(__name__)
 
-            Returns ``(requires, provides, supplements)`` where:
+            def _collect_from_header(hdr):
+                """Extract versioned requires/recommends/supplements/provides from a header.
 
-            * ``requires`` is a ``list[(name, sense, evr)]`` — an edge
-              is only satisfied by a provider whose EVR matches the
-              ``(sense, evr)`` constraint.  Recommends are merged in
-              because they are real dependency edges for orphan
-              computation.
-            * ``provides`` is a ``list[(name, evr)]``.
-            * ``supplements`` is a ``list[(name, sense, evr)]`` — each
-              entry is a capability that, if satisfied by any installed
-              package, keeps this package alive (reverse weak dep).
+                Returns ``(requires, provides, supplements)`` where:
 
-            ``rpmlib(…)`` build-time capabilities are stripped.
-            """
-            reqs: List[Tuple[str, int, str]] = []
-            req_names = hdr[rpm.RPMTAG_REQUIRENAME] or []
-            req_vers = hdr[rpm.RPMTAG_REQUIREVERSION] or []
-            req_flags = hdr[rpm.RPMTAG_REQUIREFLAGS] or []
-            for i, req_name in enumerate(req_names):
-                if req_name.startswith('rpmlib('):
-                    continue
-                ver = req_vers[i] if i < len(req_vers) else ''
-                flag_raw = req_flags[i] if i < len(req_flags) else 0
-                reqs.append((req_name, flag_raw & _SENSE_MASK, ver or ''))
+                * ``requires`` is a ``list[(name, sense, evr)]`` — an edge
+                  is only satisfied by a provider whose EVR matches the
+                  ``(sense, evr)`` constraint.  Recommends are merged in
+                  because they are real dependency edges for orphan
+                  computation.
+                * ``provides`` is a ``list[(name, evr)]``.
+                * ``supplements`` is a ``list[(name, sense, evr)]`` — each
+                  entry is a capability that, if satisfied by any installed
+                  package, keeps this package alive (reverse weak dep).
 
-            rec_names = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
-            rec_vers = hdr[rpm.RPMTAG_RECOMMENDVERSION] or []
-            rec_flags = hdr[rpm.RPMTAG_RECOMMENDFLAGS] or []
-            for i, rec_name in enumerate(rec_names):
-                ver = rec_vers[i] if i < len(rec_vers) else ''
-                flag_raw = rec_flags[i] if i < len(rec_flags) else 0
-                reqs.append((rec_name, flag_raw & _SENSE_MASK, ver or ''))
+                ``rpmlib(…)`` build-time capabilities are stripped.
+                """
+                reqs: List[Tuple[str, int, str]] = []
+                req_names = hdr[rpm.RPMTAG_REQUIRENAME] or []
+                req_vers = hdr[rpm.RPMTAG_REQUIREVERSION] or []
+                req_flags = hdr[rpm.RPMTAG_REQUIREFLAGS] or []
+                for i, req_name in enumerate(req_names):
+                    if req_name.startswith('rpmlib('):
+                        continue
+                    ver = req_vers[i] if i < len(req_vers) else ''
+                    flag_raw = req_flags[i] if i < len(req_flags) else 0
+                    reqs.append((req_name, flag_raw & _SENSE_MASK, ver or ''))
 
-            # Suggests count as protective edges by default (project policy:
-            # anything you installed via --suggests or accepted at install
-            # time should not be auto-removed unless explicitly requested).
-            sug_names = hdr[rpm.RPMTAG_SUGGESTNAME] or []
-            sug_vers = hdr[rpm.RPMTAG_SUGGESTVERSION] or []
-            sug_flags = hdr[rpm.RPMTAG_SUGGESTFLAGS] or []
-            for i, sug_name in enumerate(sug_names):
-                ver = sug_vers[i] if i < len(sug_vers) else ''
-                flag_raw = sug_flags[i] if i < len(sug_flags) else 0
-                reqs.append((sug_name, flag_raw & _SENSE_MASK, ver or ''))
+                rec_names = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
+                rec_vers = hdr[rpm.RPMTAG_RECOMMENDVERSION] or []
+                rec_flags = hdr[rpm.RPMTAG_RECOMMENDFLAGS] or []
+                for i, rec_name in enumerate(rec_names):
+                    ver = rec_vers[i] if i < len(rec_vers) else ''
+                    flag_raw = rec_flags[i] if i < len(rec_flags) else 0
+                    reqs.append((rec_name, flag_raw & _SENSE_MASK, ver or ''))
 
-            provs: List[Tuple[str, str]] = []
-            prov_names = hdr[rpm.RPMTAG_PROVIDENAME] or []
-            prov_vers = hdr[rpm.RPMTAG_PROVIDEVERSION] or []
-            for i, prov_name in enumerate(prov_names):
-                ver = prov_vers[i] if i < len(prov_vers) else ''
-                provs.append((prov_name, ver or ''))
+                # Suggests count as protective edges by default (project policy:
+                # anything you installed via --suggests or accepted at install
+                # time should not be auto-removed unless explicitly requested).
+                sug_names = hdr[rpm.RPMTAG_SUGGESTNAME] or []
+                sug_vers = hdr[rpm.RPMTAG_SUGGESTVERSION] or []
+                sug_flags = hdr[rpm.RPMTAG_SUGGESTFLAGS] or []
+                for i, sug_name in enumerate(sug_names):
+                    ver = sug_vers[i] if i < len(sug_vers) else ''
+                    flag_raw = sug_flags[i] if i < len(sug_flags) else 0
+                    reqs.append((sug_name, flag_raw & _SENSE_MASK, ver or ''))
 
-            supps: List[Tuple[str, int, str]] = []
-            supp_names = hdr[rpm.RPMTAG_SUPPLEMENTNAME] or []
-            supp_vers = hdr[rpm.RPMTAG_SUPPLEMENTVERSION] or []
-            supp_flags = hdr[rpm.RPMTAG_SUPPLEMENTFLAGS] or []
-            for i, supp_name in enumerate(supp_names):
-                ver = supp_vers[i] if i < len(supp_vers) else ''
-                flag_raw = supp_flags[i] if i < len(supp_flags) else 0
-                supps.append((supp_name, flag_raw & _SENSE_MASK, ver or ''))
+                provs: List[Tuple[str, str]] = []
+                prov_names = hdr[rpm.RPMTAG_PROVIDENAME] or []
+                prov_vers = hdr[rpm.RPMTAG_PROVIDEVERSION] or []
+                for i, prov_name in enumerate(prov_names):
+                    ver = prov_vers[i] if i < len(prov_vers) else ''
+                    provs.append((prov_name, ver or ''))
 
-            return reqs, provs, supps
+                supps: List[Tuple[str, int, str]] = []
+                supp_names = hdr[rpm.RPMTAG_SUPPLEMENTNAME] or []
+                supp_vers = hdr[rpm.RPMTAG_SUPPLEMENTVERSION] or []
+                supp_flags = hdr[rpm.RPMTAG_SUPPLEMENTFLAGS] or []
+                for i, supp_name in enumerate(supp_names):
+                    ver = supp_vers[i] if i < len(supp_vers) else ''
+                    flag_raw = supp_flags[i] if i < len(supp_flags) else 0
+                    supps.append((supp_name, flag_raw & _SENSE_MASK, ver or ''))
 
-        def _collect_from_synthesis(pkg):
-            """Extract versioned requires/recommends/provides from a synthesis dict.
-
-            Parses ``name[op evr]`` capability strings stored by
-            :mod:`urpm.core.synthesis` into the same tuple layout used
-            by :func:`_collect_from_header`.  Missing ``pkg`` produces
-            empty lists.
-            """
-            reqs: List[Tuple[str, int, str]] = []
-            provs: List[Tuple[str, str]] = []
-            supps: List[Tuple[str, int, str]] = []
-            if not pkg:
                 return reqs, provs, supps
 
-            for r in pkg.get('requires', []):
-                name, sense, evr = _parse_synthesis_cap(r)
-                if name.startswith('rpmlib('):
+            def _collect_from_synthesis(pkg):
+                """Extract versioned requires/recommends/provides from a synthesis dict.
+
+                Parses ``name[op evr]`` capability strings stored by
+                :mod:`urpm.core.synthesis` into the same tuple layout used
+                by :func:`_collect_from_header`.  Missing ``pkg`` produces
+                empty lists.
+                """
+                reqs: List[Tuple[str, int, str]] = []
+                provs: List[Tuple[str, str]] = []
+                supps: List[Tuple[str, int, str]] = []
+                if not pkg:
+                    return reqs, provs, supps
+
+                for r in pkg.get('requires', []):
+                    name, sense, evr = _parse_synthesis_cap(r)
+                    if name.startswith('rpmlib('):
+                        continue
+                    reqs.append((name, sense, evr))
+                for r in pkg.get('recommends', []):
+                    name, sense, evr = _parse_synthesis_cap(r)
+                    reqs.append((name, sense, evr))
+                # ``@suggests@`` always counts as a protective edge in the
+                # orphan-detection graph, regardless of the resolver's
+                # ``suggests_as_recommends`` setting.  Two reasons:
+                # (1) Project policy: anything installed via --suggests or
+                #     accepted at install must not be auto-removed unless
+                #     the user explicitly asks for cleanup of weak-deps;
+                # (2) On Mageia synthesis, ``@suggests@`` is the legacy
+                #     storage of RPM Recommends (genhdlist2 mapping); on
+                #     genmedia-built media it carries real Suggests.  Both
+                #     readings count as protection per (1).
+                for r in pkg.get('suggests', []):
+                    name, sense, evr = _parse_synthesis_cap(r)
+                    reqs.append((name, sense, evr))
+                for p in pkg.get('provides', []):
+                    name, _sense, evr = _parse_synthesis_cap(p)
+                    provs.append((name, evr))
+                for r in pkg.get('supplements', []):
+                    name, sense, evr = _parse_synthesis_cap(r)
+                    supps.append((name, sense, evr))
+
+                return reqs, provs, supps
+
+            def _pkg_self_evr(pkg):
+                """Build the EVR string for a synthesis pkg dict (may be empty)."""
+                if not pkg:
+                    return ''
+                epoch = pkg.get('epoch', 0) or 0
+                try:
+                    epoch_int = int(epoch)
+                except (TypeError, ValueError):
+                    epoch_int = 0
+                version = pkg.get('version', '') or ''
+                release = pkg.get('release', '') or ''
+                if epoch_int > 0:
+                    return f"{epoch_int}:{version}-{release}"
+                return f"{version}-{release}"
+
+            def _lookup_post_pkg(action):
+                """Return the synthesis row for the exact NEVRA libsolv chose.
+
+                Parses :attr:`PackageAction.evr` into ``(epoch, version,
+                release)`` and queries
+                :meth:`PackageDatabase.get_package_exact`. Falls back to
+                :meth:`PackageDatabase.get_package` (semantically-latest row
+                for the same name+arch) when the exact row is not found —
+                which should be rare and indicates a DB/decision desync
+                (e.g. a medium was just refreshed and the old row dropped).
+                The fallback is logged at WARNING level so ``--debug
+                orphans`` users see it without recompiling.
+                """
+                from urpm.core.synthesis import parse_evr
+                epoch, version, release = parse_evr(action.evr)
+                pkg = self.db.get_package_exact(
+                    action.name, version, release, action.arch, epoch=epoch,
+                )
+                if pkg is not None:
+                    return pkg
+                # Defensive fallback. The semantically-latest row may carry
+                # a slightly different Requires set than the one libsolv
+                # picked, so we log loudly: this is the diagnostic signal
+                # that the orphan detector is reading a *different* version
+                # than the one being installed.
+                logger.warning(
+                    "find_upgrade_orphans: exact row not found for %s "
+                    "(evr=%r arch=%s); falling back to latest semantic row "
+                    "via get_package — orphan graph may be slightly stale",
+                    action.name, action.evr, action.arch,
+                )
+                return self.db.get_package(action.name, arch=action.arch)
+
+            # Build S_pre (current rpmdb) and S_post (rpmdb + upgrades applied,
+            # removals excluded, new installs added) in a single rpmdb pass.
+            #
+            # Each state entry stores requires as list[(name, sense, evr)] and
+            # provides as list[(name, evr)] so the reverse-dep graph can be
+            # filtered by version constraints.  The auto-generated self-provide
+            # ``name = EVR`` is always present in well-formed RPM headers and
+            # synthesis entries, but we re-append it here as a safety net for
+            # sparsely populated fixtures (see ``test_orphans.py``).
+            pre_state = {}
+            post_state = {}
+
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                if name == 'gpg-pubkey':
                     continue
-                reqs.append((name, sense, evr))
-            for r in pkg.get('recommends', []):
-                name, sense, evr = _parse_synthesis_cap(r)
-                reqs.append((name, sense, evr))
-            # ``@suggests@`` always counts as a protective edge in the
-            # orphan-detection graph, regardless of the resolver's
-            # ``suggests_as_recommends`` setting.  Two reasons:
-            # (1) Project policy: anything installed via --suggests or
-            #     accepted at install must not be auto-removed unless
-            #     the user explicitly asks for cleanup of weak-deps;
-            # (2) On Mageia synthesis, ``@suggests@`` is the legacy
-            #     storage of RPM Recommends (genhdlist2 mapping); on
-            #     genmedia-built media it carries real Suggests.  Both
-            #     readings count as protection per (1).
-            for r in pkg.get('suggests', []):
-                name, sense, evr = _parse_synthesis_cap(r)
-                reqs.append((name, sense, evr))
-            for p in pkg.get('provides', []):
-                name, _sense, evr = _parse_synthesis_cap(p)
-                provs.append((name, evr))
-            for r in pkg.get('supplements', []):
-                name, sense, evr = _parse_synthesis_cap(r)
-                supps.append((name, sense, evr))
 
-            return reqs, provs, supps
+                epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+                version = hdr[rpm.RPMTAG_VERSION] or ''
+                release = hdr[rpm.RPMTAG_RELEASE] or ''
+                self_evr = (
+                    f"{epoch}:{version}-{release}" if epoch
+                    else f"{version}-{release}"
+                )
 
-        def _pkg_self_evr(pkg):
-            """Build the EVR string for a synthesis pkg dict (may be empty)."""
-            if not pkg:
-                return ''
-            epoch = pkg.get('epoch', 0) or 0
-            try:
-                epoch_int = int(epoch)
-            except (TypeError, ValueError):
-                epoch_int = 0
-            version = pkg.get('version', '') or ''
-            release = pkg.get('release', '') or ''
-            if epoch_int > 0:
-                return f"{epoch_int}:{version}-{release}"
-            return f"{version}-{release}"
-
-        def _lookup_post_pkg(action):
-            """Return the synthesis row for the exact NEVRA libsolv chose.
-
-            Parses :attr:`PackageAction.evr` into ``(epoch, version,
-            release)`` and queries
-            :meth:`PackageDatabase.get_package_exact`. Falls back to
-            :meth:`PackageDatabase.get_package` (semantically-latest row
-            for the same name+arch) when the exact row is not found —
-            which should be rare and indicates a DB/decision desync
-            (e.g. a medium was just refreshed and the old row dropped).
-            The fallback is logged at WARNING level so ``--debug
-            orphans`` users see it without recompiling.
-            """
-            from urpm.core.synthesis import parse_evr
-            epoch, version, release = parse_evr(action.evr)
-            pkg = self.db.get_package_exact(
-                action.name, version, release, action.arch, epoch=epoch,
-            )
-            if pkg is not None:
-                return pkg
-            # Defensive fallback. The semantically-latest row may carry
-            # a slightly different Requires set than the one libsolv
-            # picked, so we log loudly: this is the diagnostic signal
-            # that the orphan detector is reading a *different* version
-            # than the one being installed.
-            logger.warning(
-                "find_upgrade_orphans: exact row not found for %s "
-                "(evr=%r arch=%s); falling back to latest semantic row "
-                "via get_package — orphan graph may be slightly stale",
-                action.name, action.evr, action.arch,
-            )
-            return self.db.get_package(action.name, arch=action.arch)
-
-        # Build S_pre (current rpmdb) and S_post (rpmdb + upgrades applied,
-        # removals excluded, new installs added) in a single rpmdb pass.
-        #
-        # Each state entry stores requires as list[(name, sense, evr)] and
-        # provides as list[(name, evr)] so the reverse-dep graph can be
-        # filtered by version constraints.  The auto-generated self-provide
-        # ``name = EVR`` is always present in well-formed RPM headers and
-        # synthesis entries, but we re-append it here as a safety net for
-        # sparsely populated fixtures (see ``test_orphans.py``).
-        pre_state = {}
-        post_state = {}
-
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            if name == 'gpg-pubkey':
-                continue
-
-            epoch = hdr[rpm.RPMTAG_EPOCH] or 0
-            version = hdr[rpm.RPMTAG_VERSION] or ''
-            release = hdr[rpm.RPMTAG_RELEASE] or ''
-            self_evr = (
-                f"{epoch}:{version}-{release}" if epoch
-                else f"{version}-{release}"
-            )
-
-            rpm_reqs, rpm_provs, rpm_supps = _collect_from_header(hdr)
-            rpm_provs.append((name, self_evr))
-            pre_state[name] = {
-                'requires': rpm_reqs,
-                'provides': rpm_provs,
-                'supplements': rpm_supps,
-            }
-
-            if name in removed_names:
-                continue
-
-            if name in upgraded_names:
-                new_pkg = _lookup_post_pkg(upgraded_names[name])
-                new_reqs, new_provs, new_supps = _collect_from_synthesis(new_pkg)
-                new_provs.append((name, _pkg_self_evr(new_pkg)))
-                post_state[name] = {
-                    'requires': new_reqs,
-                    'provides': new_provs,
-                    'supplements': new_supps,
-                }
-            else:
-                post_state[name] = {
+                rpm_reqs, rpm_provs, rpm_supps = _collect_from_header(hdr)
+                rpm_provs.append((name, self_evr))
+                pre_state[name] = {
                     'requires': rpm_reqs,
                     'provides': rpm_provs,
                     'supplements': rpm_supps,
                 }
 
-        for name in installed_names:
-            if name in post_state:
-                continue
-            new_pkg = _lookup_post_pkg(installed_names[name])
-            reqs, provs, supps = _collect_from_synthesis(new_pkg)
-            provs.append((name, _pkg_self_evr(new_pkg)))
-            post_state[name] = {
-                'requires': reqs,
-                'provides': provs,
-                'supplements': supps,
+                if name in removed_names:
+                    continue
+
+                if name in upgraded_names:
+                    new_pkg = _lookup_post_pkg(upgraded_names[name])
+                    new_reqs, new_provs, new_supps = _collect_from_synthesis(new_pkg)
+                    new_provs.append((name, _pkg_self_evr(new_pkg)))
+                    post_state[name] = {
+                        'requires': new_reqs,
+                        'provides': new_provs,
+                        'supplements': new_supps,
+                    }
+                else:
+                    post_state[name] = {
+                        'requires': rpm_reqs,
+                        'provides': rpm_provs,
+                        'supplements': rpm_supps,
+                    }
+
+            for name in installed_names:
+                if name in post_state:
+                    continue
+                new_pkg = _lookup_post_pkg(installed_names[name])
+                reqs, provs, supps = _collect_from_synthesis(new_pkg)
+                provs.append((name, _pkg_self_evr(new_pkg)))
+                post_state[name] = {
+                    'requires': reqs,
+                    'provides': provs,
+                    'supplements': supps,
+                }
+
+            def _build_reverse_deps(state):
+                """Build a reverse-dependency graph with version-constraint filtering.
+
+                For each package ``P``, return the set of packages that
+                require ``P`` — but only when the require edge is
+                version-satisfied.  A provider whose EVR fails to match a
+                require's ``(sense, evr)`` constraint is not credited with
+                an in-edge, which is what lets :func:`find_upgrade_orphans`
+                detect a virtual rename such as ``tt1`` (``Provides: tt =
+                1``) → ``tt2`` (``Provides: tt = 2``) against a
+                ``Requires: tt >= 2``.
+
+                Supplements are handled with the protective semantics
+                of a reverse weak-dep: if ``B`` supplements a capability
+                that ``P`` provides, then ``P`` is the *trigger* keeping
+                ``B`` alive.  ``reverse_deps[X]`` is the set of packages
+                whose presence protects ``X`` during DFS, so we record
+                ``reverse_deps[B].add(P)`` — walking up from ``B`` leads
+                to ``P`` and, transitively, to whatever keeps ``P`` alive.
+                Boolean expressions such as ``Supplements: (A and B)``
+                are stored as independent capabilities in both synthesis
+                and libsolv; we protect if any of them is satisfied
+                (conservative OR), which may occasionally keep a package
+                that strict AND would drop, but never removes a package
+                that strict AND would keep.
+                """
+                cap_providers: dict = {}
+                for name, info in state.items():
+                    for cap_name, prov_evr in info['provides']:
+                        cap_providers.setdefault(cap_name, []).append(
+                            (name, prov_evr)
+                        )
+
+                rev = {name: set() for name in state}
+                for name, info in state.items():
+                    for req_name, req_sense, req_evr in info['requires']:
+                        for provider, prov_evr in cap_providers.get(req_name, ()):
+                            if provider == name:
+                                continue
+                            if _provider_satisfies(prov_evr, req_sense, req_evr):
+                                rev[provider].add(name)
+                    for supp_name, supp_sense, supp_evr in info.get('supplements', ()):
+                        for provider, prov_evr in cap_providers.get(supp_name, ()):
+                            if provider == name:
+                                continue
+                            if _provider_satisfies(prov_evr, supp_sense, supp_evr):
+                                rev[name].add(provider)
+                return rev
+
+            pre_reverse = _build_reverse_deps(pre_state)
+            post_reverse = _build_reverse_deps(post_state)
+
+            # Newly installed packages are not yet in the persisted "unrequested"
+            # set (mark_dependencies runs AFTER the transaction).  Treat them
+            # as unrequested for this computation so that:
+            #   1. they become valid orphan candidates when nothing ends up
+            #      requiring them, and
+            #   2. graph traversal walks THROUGH them instead of stopping
+            #      (they must not count as "explicit" ancestors for their
+            #      own dependencies).
+            effective_unrequested = set(unrequested)
+            effective_unrequested |= {n.lower() for n in installed_names}
+
+            def _is_orphan(pkg_name, rev_deps):
+                """True iff no explicit (non-unrequested) ancestor reaches pkg_name.
+
+                Iterative DFS to avoid recursion limits on large dep graphs.
+                """
+                visited = {pkg_name}
+                stack = [pkg_name]
+                while stack:
+                    current = stack.pop()
+                    for parent in rev_deps.get(current, set()):
+                        if parent.lower() not in effective_unrequested:
+                            return False
+                        if parent not in visited:
+                            visited.add(parent)
+                            stack.append(parent)
+                return True
+
+            # Literal translation of the formal spec:
+            #   P ∈ S_post ∧ unrequested(P)
+            #   ∧ orphan(P, S_post)
+            #   ∧ ¬(P ∈ S_pre ∧ orphan(P, S_pre))
+            # Probe set used by the reject-trace below — narrowed so the
+            # debug log stays signal-rich on the typical 38k-solvable run.
+            # Includes packages an external observer (urpm autoremove)
+            # confirms as post-tx orphans, but that the upgrade-orphan
+            # detector is suspected of missing.  Add names freely here
+            # while diagnosing; nothing else depends on its contents.
+            _orphan_reject_probe = {
+                'kwin', 'kwin-common', 'kwin-wayland',
+                'lib64kwin6', 'lib64klipper6', 'lib64notificationmanager1',
+                'lib64taskmanager6', 'lib64batterycontrol6',
+                'lib64kfontinst6', 'lib64kfontinstui6',
+                'lib64kf6pulseaudioqt_5', 'lib64kcmkwincommon6',
+                'lib64bind9.20.18', 'lib64bind9.20.20',
+                'lib64xcb-devel', 'x11-proto-devel', 'lib64x11-devel',
+                'lib64xt-devel', 'lib64sm-devel', 'lib64ice-devel',
+                'lib64xau-devel', 'lib64xdmcp-devel', 'lib64uuid-devel',
+                'lib64pixman-devel', 'libpthread-stubs',
+                'lib64xcb-dbe0', 'lib64xcb-screensaver0',
+                'lib64xcb-xf86dri0', 'lib64xcb-xtest0', 'lib64xcb-xvmc0',
+                'lib64gpac12',
             }
 
-        def _build_reverse_deps(state):
-            """Build a reverse-dependency graph with version-constraint filtering.
+            orphan_candidates = set()
+            for name in post_state:
+                probe = DEBUG_ORPHANS and name in _orphan_reject_probe
 
-            For each package ``P``, return the set of packages that
-            require ``P`` — but only when the require edge is
-            version-satisfied.  A provider whose EVR fails to match a
-            require's ``(sense, evr)`` constraint is not credited with
-            an in-edge, which is what lets :func:`find_upgrade_orphans`
-            detect a virtual rename such as ``tt1`` (``Provides: tt =
-            1``) → ``tt2`` (``Provides: tt = 2``) against a
-            ``Requires: tt >= 2``.
+                if name.lower() not in effective_unrequested:
+                    if probe:
+                        logger.warning(
+                            "orphans: REJECT %s — not in effective_unrequested "
+                            "(in unrequested=%s, in installed_names=%s)",
+                            name,
+                            name.lower() in unrequested,
+                            name in installed_names,
+                        )
+                    continue
 
-            Supplements are handled with the protective semantics
-            of a reverse weak-dep: if ``B`` supplements a capability
-            that ``P`` provides, then ``P`` is the *trigger* keeping
-            ``B`` alive.  ``reverse_deps[X]`` is the set of packages
-            whose presence protects ``X`` during DFS, so we record
-            ``reverse_deps[B].add(P)`` — walking up from ``B`` leads
-            to ``P`` and, transitively, to whatever keeps ``P`` alive.
-            Boolean expressions such as ``Supplements: (A and B)``
-            are stored as independent capabilities in both synthesis
-            and libsolv; we protect if any of them is satisfied
-            (conservative OR), which may occasionally keep a package
-            that strict AND would drop, but never removes a package
-            that strict AND would keep.
-            """
-            cap_providers: dict = {}
-            for name, info in state.items():
-                for cap_name, prov_evr in info['provides']:
-                    cap_providers.setdefault(cap_name, []).append(
-                        (name, prov_evr)
-                    )
+                if not _is_orphan(name, post_reverse):
+                    if probe:
+                        in_edges = post_reverse.get(name, set())
+                        explicit_parents = sorted(
+                            p for p in in_edges
+                            if p.lower() not in effective_unrequested
+                        )
+                        logger.warning(
+                            "orphans: REJECT %s — has explicit ancestor in "
+                            "post_state (in_edges=%d, explicit_in_edges=%s)",
+                            name, len(in_edges), explicit_parents[:8],
+                        )
+                    continue
 
-            rev = {name: set() for name in state}
-            for name, info in state.items():
-                for req_name, req_sense, req_evr in info['requires']:
-                    for provider, prov_evr in cap_providers.get(req_name, ()):
-                        if provider == name:
-                            continue
-                        if _provider_satisfies(prov_evr, req_sense, req_evr):
-                            rev[provider].add(name)
-                for supp_name, supp_sense, supp_evr in info.get('supplements', ()):
-                    for provider, prov_evr in cap_providers.get(supp_name, ()):
-                        if provider == name:
-                            continue
-                        if _provider_satisfies(prov_evr, supp_sense, supp_evr):
-                            rev[name].add(provider)
-            return rev
+                if name in pre_state and _is_orphan(name, pre_reverse):
+                    if probe:
+                        in_edges_pre = pre_reverse.get(name, set())
+                        in_edges_post = post_reverse.get(name, set())
+                        logger.warning(
+                            "orphans: REJECT %s — pre-orphan filter "
+                            "(pre_in_edges=%d, post_in_edges=%d, "
+                            "pre_sample=%s, post_sample=%s)",
+                            name,
+                            len(in_edges_pre), len(in_edges_post),
+                            sorted(in_edges_pre)[:6],
+                            sorted(in_edges_post)[:6],
+                        )
+                    continue
 
-        pre_reverse = _build_reverse_deps(pre_state)
-        post_reverse = _build_reverse_deps(post_state)
-
-        # Newly installed packages are not yet in the persisted "unrequested"
-        # set (mark_dependencies runs AFTER the transaction).  Treat them
-        # as unrequested for this computation so that:
-        #   1. they become valid orphan candidates when nothing ends up
-        #      requiring them, and
-        #   2. graph traversal walks THROUGH them instead of stopping
-        #      (they must not count as "explicit" ancestors for their
-        #      own dependencies).
-        effective_unrequested = set(unrequested)
-        effective_unrequested |= {n.lower() for n in installed_names}
-
-        def _is_orphan(pkg_name, rev_deps):
-            """True iff no explicit (non-unrequested) ancestor reaches pkg_name.
-
-            Iterative DFS to avoid recursion limits on large dep graphs.
-            """
-            visited = {pkg_name}
-            stack = [pkg_name]
-            while stack:
-                current = stack.pop()
-                for parent in rev_deps.get(current, set()):
-                    if parent.lower() not in effective_unrequested:
-                        return False
-                    if parent not in visited:
-                        visited.add(parent)
-                        stack.append(parent)
-            return True
-
-        # Literal translation of the formal spec:
-        #   P ∈ S_post ∧ unrequested(P)
-        #   ∧ orphan(P, S_post)
-        #   ∧ ¬(P ∈ S_pre ∧ orphan(P, S_pre))
-        # Probe set used by the reject-trace below — narrowed so the
-        # debug log stays signal-rich on the typical 38k-solvable run.
-        # Includes packages an external observer (urpm autoremove)
-        # confirms as post-tx orphans, but that the upgrade-orphan
-        # detector is suspected of missing.  Add names freely here
-        # while diagnosing; nothing else depends on its contents.
-        _orphan_reject_probe = {
-            'kwin', 'kwin-common', 'kwin-wayland',
-            'lib64kwin6', 'lib64klipper6', 'lib64notificationmanager1',
-            'lib64taskmanager6', 'lib64batterycontrol6',
-            'lib64kfontinst6', 'lib64kfontinstui6',
-            'lib64kf6pulseaudioqt_5', 'lib64kcmkwincommon6',
-            'lib64bind9.20.18', 'lib64bind9.20.20',
-            'lib64xcb-devel', 'x11-proto-devel', 'lib64x11-devel',
-            'lib64xt-devel', 'lib64sm-devel', 'lib64ice-devel',
-            'lib64xau-devel', 'lib64xdmcp-devel', 'lib64uuid-devel',
-            'lib64pixman-devel', 'libpthread-stubs',
-            'lib64xcb-dbe0', 'lib64xcb-screensaver0',
-            'lib64xcb-xf86dri0', 'lib64xcb-xtest0', 'lib64xcb-xvmc0',
-            'lib64gpac12',
-        }
-
-        orphan_candidates = set()
-        for name in post_state:
-            probe = DEBUG_ORPHANS and name in _orphan_reject_probe
-
-            if name.lower() not in effective_unrequested:
-                if probe:
-                    logger.warning(
-                        "orphans: REJECT %s — not in effective_unrequested "
-                        "(in unrequested=%s, in installed_names=%s)",
-                        name,
-                        name.lower() in unrequested,
-                        name in installed_names,
-                    )
-                continue
-
-            if not _is_orphan(name, post_reverse):
-                if probe:
+                orphan_candidates.add(name)
+                if DEBUG_ORPHANS:
+                    post_reqs = post_state.get(name, {}).get('requires', ())
                     in_edges = post_reverse.get(name, set())
-                    explicit_parents = sorted(
-                        p for p in in_edges
-                        if p.lower() not in effective_unrequested
-                    )
+                    provs = [
+                        p for p, _ in
+                        post_state.get(name, {}).get('provides', ())
+                    ]
                     logger.warning(
-                        "orphans: REJECT %s — has explicit ancestor in "
-                        "post_state (in_edges=%d, explicit_in_edges=%s)",
-                        name, len(in_edges), explicit_parents[:8],
-                    )
-                continue
-
-            if name in pre_state and _is_orphan(name, pre_reverse):
-                if probe:
-                    in_edges_pre = pre_reverse.get(name, set())
-                    in_edges_post = post_reverse.get(name, set())
-                    logger.warning(
-                        "orphans: REJECT %s — pre-orphan filter "
-                        "(pre_in_edges=%d, post_in_edges=%d, "
-                        "pre_sample=%s, post_sample=%s)",
+                        "orphans: flag %s in_edges=%d provides=%d requires=%d "
+                        "provs_sample=%s in_edges_sample=%s reqs_sample=%s",
                         name,
-                        len(in_edges_pre), len(in_edges_post),
-                        sorted(in_edges_pre)[:6],
-                        sorted(in_edges_post)[:6],
+                        len(in_edges),
+                        len(provs),
+                        len(post_reqs),
+                        provs[:8],
+                        list(in_edges)[:8],
+                        [r[0] for r in post_reqs[:8]],
                     )
-                continue
 
-            orphan_candidates.add(name)
-            if DEBUG_ORPHANS:
-                post_reqs = post_state.get(name, {}).get('requires', ())
-                in_edges = post_reverse.get(name, set())
-                provs = [
-                    p for p, _ in
-                    post_state.get(name, {}).get('provides', ())
-                ]
-                logger.warning(
-                    "orphans: flag %s in_edges=%d provides=%d requires=%d "
-                    "provs_sample=%s in_edges_sample=%s reqs_sample=%s",
-                    name,
-                    len(in_edges),
-                    len(provs),
-                    len(post_reqs),
-                    provs[:8],
-                    list(in_edges)[:8],
-                    [r[0] for r in post_reqs[:8]],
-                )
+            # Build the plan: rpmdb-side removes and cancelled new versions.
+            plan = UpgradeOrphanPlan()
 
-        # Build the plan: rpmdb-side removes and cancelled new versions.
-        plan = UpgradeOrphanPlan()
-
-        # Category 1 — orphans currently in the rpmdb are erased with their
-        # old (pre-transaction) EVR.  A package being upgraded-then-orphaned
-        # lands here too: its old version appears in removes, and its new
-        # version is cancelled in the second loop below.
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            if name not in orphan_candidates:
-                continue
-
-            epoch = hdr[rpm.RPMTAG_EPOCH] or 0
-            version = hdr[rpm.RPMTAG_VERSION]
-            release = hdr[rpm.RPMTAG_RELEASE]
-            arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-            size = hdr[rpm.RPMTAG_SIZE] or 0
-
-            if epoch and epoch > 0:
-                evr = f"{epoch}:{version}-{release}"
-            else:
-                evr = f"{version}-{release}"
-
-            plan.removes.append(PackageAction(
-                action=TransactionType.REMOVE,
-                name=name,
-                evr=evr,
-                arch=arch,
-                nevra=f"{name}-{evr}.{arch}",
-                size=size,
-            ))
-
-        # Category 2 — orphans whose new version would be installed by the
-        # current transaction must have that install cancelled.  Previously
-        # this path emitted a REMOVE action for the newly-installed name,
-        # which caused rpm's transaction engine to silently no-op the
-        # simultaneous install+remove (cf. ``test_auto_select_f``).  We now
-        # return the names separately so the caller can drop the action
-        # and skip the downloaded RPM without asking rpm to install+remove
-        # the same NVRA in one shot.
-        #
-        # Refinement: a NEW INSTALL pulled by libsolv to satisfy a
-        # versioned require of an UPGRADED package (e.g. ``lib64gimp-gir3.0``
-        # for ``gimp-3.2.4``'s ``Requires: typelib(Gimp) = 3.0``) appears
-        # in ``orphan_candidates`` whenever its only requirers are part of
-        # a closed unrequested cluster (gimp/gimp-python both classified
-        # DEPENDENCY).  Cancelling such an install would silently drop a
-        # provider that ``rpm ts.check()`` then refuses, blocking the
-        # whole transaction.  Cancellation is therefore performed in two
-        # passes plus an iteration to fix-point:
-        #
-        # 1. UPGRADE / DOWNGRADE / REINSTALL actions in ``orphan_candidates``
-        #    cancel unconditionally (a now-orphan upgrade has no useful
-        #    target post-tx).
-        # 2. INSTALL actions in ``orphan_candidates`` cancel only when
-        #    *no surviving requirer* remains in the plan — i.e. every
-        #    package whose post_state requires this name is itself
-        #    cancelled or absent from the plan.  When at least one
-        #    surviving UPGRADE/INSTALL still requires it, the install is
-        #    pulled for a legitimate reason and must be kept.
-        # 3. Iteration: a freshly-cancelled action may invalidate the
-        #    "surviving requirer" status of dependencies pulled by it,
-        #    cascading further INSTALL cancellations.  Repeat the
-        #    INSTALL pass until ``cancelled_new_versions`` stabilises.
-        new_version_actions = {
-            TransactionType.INSTALL,
-            TransactionType.UPGRADE,
-            TransactionType.DOWNGRADE,
-            TransactionType.REINSTALL,
-        }
-        upgrade_like_actions = {
-            TransactionType.UPGRADE,
-            TransactionType.DOWNGRADE,
-            TransactionType.REINSTALL,
-        }
-
-        # Pass 1 — cancel orphan-candidate upgrades unconditionally.
-        for action in all_actions:
-            if action.action in upgrade_like_actions and action.name in orphan_candidates:
-                plan.cancelled_new_versions.add(action.name.lower())
-
-        # Pass 2 (iterative) — cancel orphan-candidate installs whose
-        # requirers are all cancelled or absent from the plan.
-        action_by_lower_name = {
-            a.name.lower(): a for a in all_actions
-            if a.action in new_version_actions
-        }
-        install_orphans = [
-            a for a in all_actions
-            if a.action == TransactionType.INSTALL
-            and a.name in orphan_candidates
-        ]
-
-        while True:
-            newly_cancelled = False
-            for action in install_orphans:
-                key = action.name.lower()
-                if key in plan.cancelled_new_versions:
+            # Category 1 — orphans currently in the rpmdb are erased with their
+            # old (pre-transaction) EVR.  A package being upgraded-then-orphaned
+            # lands here too: its old version appears in removes, and its new
+            # version is cancelled in the second loop below.
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                if name not in orphan_candidates:
                     continue
-                requirers = post_reverse.get(action.name, set())
-                # A requirer "survives" iff it is a planned action that
-                # has not been cancelled.  Requirers that are not in the
-                # plan at all (i.e. only present via @System or pre_state)
-                # are NOT counted as surviving — their post_state edges
-                # come from packages we don't actively install/upgrade.
-                has_survivor = any(
-                    r.lower() in action_by_lower_name
-                    and r.lower() not in plan.cancelled_new_versions
-                    for r in requirers
-                )
-                if has_survivor:
-                    continue
-                plan.cancelled_new_versions.add(key)
-                newly_cancelled = True
-            if not newly_cancelled:
-                break
 
-        return plan
+                epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+                version = hdr[rpm.RPMTAG_VERSION]
+                release = hdr[rpm.RPMTAG_RELEASE]
+                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                size = hdr[rpm.RPMTAG_SIZE] or 0
+
+                if epoch and epoch > 0:
+                    evr = f"{epoch}:{version}-{release}"
+                else:
+                    evr = f"{version}-{release}"
+
+                plan.removes.append(PackageAction(
+                    action=TransactionType.REMOVE,
+                    name=name,
+                    evr=evr,
+                    arch=arch,
+                    nevra=f"{name}-{evr}.{arch}",
+                    size=size,
+                ))
+
+            # Category 2 — orphans whose new version would be installed by the
+            # current transaction must have that install cancelled.  Previously
+            # this path emitted a REMOVE action for the newly-installed name,
+            # which caused rpm's transaction engine to silently no-op the
+            # simultaneous install+remove (cf. ``test_auto_select_f``).  We now
+            # return the names separately so the caller can drop the action
+            # and skip the downloaded RPM without asking rpm to install+remove
+            # the same NVRA in one shot.
+            #
+            # Refinement: a NEW INSTALL pulled by libsolv to satisfy a
+            # versioned require of an UPGRADED package (e.g. ``lib64gimp-gir3.0``
+            # for ``gimp-3.2.4``'s ``Requires: typelib(Gimp) = 3.0``) appears
+            # in ``orphan_candidates`` whenever its only requirers are part of
+            # a closed unrequested cluster (gimp/gimp-python both classified
+            # DEPENDENCY).  Cancelling such an install would silently drop a
+            # provider that ``rpm ts.check()`` then refuses, blocking the
+            # whole transaction.  Cancellation is therefore performed in two
+            # passes plus an iteration to fix-point:
+            #
+            # 1. UPGRADE / DOWNGRADE / REINSTALL actions in ``orphan_candidates``
+            #    cancel unconditionally (a now-orphan upgrade has no useful
+            #    target post-tx).
+            # 2. INSTALL actions in ``orphan_candidates`` cancel only when
+            #    *no surviving requirer* remains in the plan — i.e. every
+            #    package whose post_state requires this name is itself
+            #    cancelled or absent from the plan.  When at least one
+            #    surviving UPGRADE/INSTALL still requires it, the install is
+            #    pulled for a legitimate reason and must be kept.
+            # 3. Iteration: a freshly-cancelled action may invalidate the
+            #    "surviving requirer" status of dependencies pulled by it,
+            #    cascading further INSTALL cancellations.  Repeat the
+            #    INSTALL pass until ``cancelled_new_versions`` stabilises.
+            new_version_actions = {
+                TransactionType.INSTALL,
+                TransactionType.UPGRADE,
+                TransactionType.DOWNGRADE,
+                TransactionType.REINSTALL,
+            }
+            upgrade_like_actions = {
+                TransactionType.UPGRADE,
+                TransactionType.DOWNGRADE,
+                TransactionType.REINSTALL,
+            }
+
+            # Pass 1 — cancel orphan-candidate upgrades unconditionally.
+            for action in all_actions:
+                if action.action in upgrade_like_actions and action.name in orphan_candidates:
+                    plan.cancelled_new_versions.add(action.name.lower())
+
+            # Pass 2 (iterative) — cancel orphan-candidate installs whose
+            # requirers are all cancelled or absent from the plan.
+            action_by_lower_name = {
+                a.name.lower(): a for a in all_actions
+                if a.action in new_version_actions
+            }
+            install_orphans = [
+                a for a in all_actions
+                if a.action == TransactionType.INSTALL
+                and a.name in orphan_candidates
+            ]
+
+            while True:
+                newly_cancelled = False
+                for action in install_orphans:
+                    key = action.name.lower()
+                    if key in plan.cancelled_new_versions:
+                        continue
+                    requirers = post_reverse.get(action.name, set())
+                    # A requirer "survives" iff it is a planned action that
+                    # has not been cancelled.  Requirers that are not in the
+                    # plan at all (i.e. only present via @System or pre_state)
+                    # are NOT counted as surviving — their post_state edges
+                    # come from packages we don't actively install/upgrade.
+                    has_survivor = any(
+                        r.lower() in action_by_lower_name
+                        and r.lower() not in plan.cancelled_new_versions
+                        for r in requirers
+                    )
+                    if has_survivor:
+                        continue
+                    plan.cancelled_new_versions.add(key)
+                    newly_cancelled = True
+                if not newly_cancelled:
+                    break
+
+            return plan
 
     def find_erase_orphans(self, erase_names: List[str], erase_recommends: bool = False,
                            keep_suggests: bool = False) -> list:
-        """Find packages that will become orphans after erasing packages.
+        """rpmdb access via urpm.core.rpmdb.open_ts context manager — never open a librpm handle in the parent (module contract, see urpm.core.rpmdb).
+
+        Find packages that will become orphans after erasing packages.
 
         Strategy:
         1. Build the forward dependency tree of packages being erased
@@ -1618,334 +1640,336 @@ class OrphansMixin:
         builddeps = self._get_builddep_packages()
         unrequested -= set(builddeps.keys())
 
-        ts = rpm.TransactionSet(self.root or '/')
+        from .. import rpmdb
 
-        # Build maps for all installed packages
-        pkg_provides = {}  # name -> set of capability names
-        pkg_requires = {}  # name -> set of capability names (raw, not resolved)
-        pkg_recommends = {}  # name -> set of recommended capability names
-        pkg_suggests = {}  # name -> set of suggested capability names
-        pkg_supplements = {}  # name -> set of supplemented capability names
-        cap_to_pkg = {}    # capability -> set of package names providing it
-        name_to_original = {}  # lowercase name -> original case name
-        pkg_headers = {}   # name -> rpm header
-        all_installed = set()
+        with rpmdb.open_ts(self.root or '/') as ts:
 
-        for hdr in ts.dbMatch():
-            name = hdr[rpm.RPMTAG_NAME]
-            if name == 'gpg-pubkey':
-                continue
+            # Build maps for all installed packages
+            pkg_provides = {}  # name -> set of capability names
+            pkg_requires = {}  # name -> set of capability names (raw, not resolved)
+            pkg_recommends = {}  # name -> set of recommended capability names
+            pkg_suggests = {}  # name -> set of suggested capability names
+            pkg_supplements = {}  # name -> set of supplemented capability names
+            cap_to_pkg = {}    # capability -> set of package names providing it
+            name_to_original = {}  # lowercase name -> original case name
+            pkg_headers = {}   # name -> rpm header
+            all_installed = set()
 
-            all_installed.add(name)
-            name_to_original[name.lower()] = name
-            pkg_headers[name] = hdr
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                if name == 'gpg-pubkey':
+                    continue
 
-            provides = set()
-            for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                cap = self._extract_cap_name(prov)
-                provides.add(cap)
-                if cap not in cap_to_pkg:
-                    cap_to_pkg[cap] = set()
-                cap_to_pkg[cap].add(name)
-            pkg_provides[name] = provides
+                all_installed.add(name)
+                name_to_original[name.lower()] = name
+                pkg_headers[name] = hdr
 
-            requires = set()
-            for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                if not req.startswith('rpmlib(') and not req.startswith('/'):
-                    requires.add(self._extract_cap_name(req))
-            pkg_requires[name] = requires
+                provides = set()
+                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                    cap = self._extract_cap_name(prov)
+                    provides.add(cap)
+                    if cap not in cap_to_pkg:
+                        cap_to_pkg[cap] = set()
+                    cap_to_pkg[cap].add(name)
+                pkg_provides[name] = provides
 
-            # Also collect RECOMMENDS for dep_tree building
-            recommends = set()
-            for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
-                if not rec.startswith('rpmlib(') and not rec.startswith('/'):
-                    recommends.add(self._extract_cap_name(rec))
-            pkg_recommends[name] = recommends
+                requires = set()
+                for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
+                    if not req.startswith('rpmlib(') and not req.startswith('/'):
+                        requires.add(self._extract_cap_name(req))
+                pkg_requires[name] = requires
 
-            # Also collect SUGGESTS for dep_tree building
-            suggests = set()
-            for sug in (hdr[rpm.RPMTAG_SUGGESTNAME] or []):
-                if not sug.startswith('rpmlib(') and not sug.startswith('/'):
-                    suggests.add(self._extract_cap_name(sug))
-            pkg_suggests[name] = suggests
+                # Also collect RECOMMENDS for dep_tree building
+                recommends = set()
+                for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
+                    if not rec.startswith('rpmlib(') and not rec.startswith('/'):
+                        recommends.add(self._extract_cap_name(rec))
+                pkg_recommends[name] = recommends
 
-            # Collect SUPPLEMENTS — reverse weak-dep: ``name`` is pulled
-            # in by the presence of any installed package providing one
-            # of these capabilities.  Used both to extend the dep_tree
-            # (a plugin anchored only by Supplements onto an erased
-            # target must be considered for removal) and to protect a
-            # candidate at iteration time (Supplements target still
-            # installed ⇒ keep the plugin).
-            supplements = set()
-            for supp in (hdr[rpm.RPMTAG_SUPPLEMENTNAME] or []):
-                if not supp.startswith('rpmlib(') and not supp.startswith('/'):
-                    supplements.add(self._extract_cap_name(supp))
-            pkg_supplements[name] = supplements
+                # Also collect SUGGESTS for dep_tree building
+                suggests = set()
+                for sug in (hdr[rpm.RPMTAG_SUGGESTNAME] or []):
+                    if not sug.startswith('rpmlib(') and not sug.startswith('/'):
+                        suggests.add(self._extract_cap_name(sug))
+                pkg_suggests[name] = suggests
 
-        # Helper: resolve a capability to the installed package that provides it
-        def resolve_cap_to_pkg(cap: str) -> Optional[str]:
-            """Find which installed package provides this capability."""
-            providers = cap_to_pkg.get(cap, set())
-            if len(providers) == 1:
-                return next(iter(providers))
-            elif len(providers) > 1:
-                # Multiple providers - return the first one (all are installed)
-                return next(iter(providers))
-            return None
+                # Collect SUPPLEMENTS — reverse weak-dep: ``name`` is pulled
+                # in by the presence of any installed package providing one
+                # of these capabilities.  Used both to extend the dep_tree
+                # (a plugin anchored only by Supplements onto an erased
+                # target must be considered for removal) and to protect a
+                # candidate at iteration time (Supplements target still
+                # installed ⇒ keep the plugin).
+                supplements = set()
+                for supp in (hdr[rpm.RPMTAG_SUPPLEMENTNAME] or []):
+                    if not supp.startswith('rpmlib(') and not supp.startswith('/'):
+                        supplements.add(self._extract_cap_name(supp))
+                pkg_supplements[name] = supplements
+
+            # Helper: resolve a capability to the installed package that provides it
+            def resolve_cap_to_pkg(cap: str) -> Optional[str]:
+                """Find which installed package provides this capability."""
+                providers = cap_to_pkg.get(cap, set())
+                if len(providers) == 1:
+                    return next(iter(providers))
+                elif len(providers) > 1:
+                    # Multiple providers - return the first one (all are installed)
+                    return next(iter(providers))
+                return None
 
 
-        # Helper: get direct dependencies of a package (as package names)
-        def get_direct_deps(pkg_name: str) -> set:
-            """Get packages that pkg_name directly depends on (REQUIRES only)."""
-            deps = set()
-            for cap in pkg_requires.get(pkg_name, set()):
-                provider = resolve_cap_to_pkg(cap)
-                if provider and provider != pkg_name:  # Skip self-deps
-                    deps.add(provider)
-            return deps
+            # Helper: get direct dependencies of a package (as package names)
+            def get_direct_deps(pkg_name: str) -> set:
+                """Get packages that pkg_name directly depends on (REQUIRES only)."""
+                deps = set()
+                for cap in pkg_requires.get(pkg_name, set()):
+                    provider = resolve_cap_to_pkg(cap)
+                    if provider and provider != pkg_name:  # Skip self-deps
+                        deps.add(provider)
+                return deps
 
-        # Helper: get deps including recommends (for dep_tree building)
-        # Note: SUGGESTS are NOT followed because they are not installed by default
-        def get_all_deps(pkg_name: str) -> set:
-            """Get packages that pkg_name depends on or recommends (not suggests)."""
-            deps = set()
-            # REQUIRES
-            for cap in pkg_requires.get(pkg_name, set()):
-                provider = resolve_cap_to_pkg(cap)
-                if provider and provider != pkg_name:
-                    deps.add(provider)
-            # RECOMMENDS (installed by default)
-            for cap in pkg_recommends.get(pkg_name, set()):
-                provider = resolve_cap_to_pkg(cap)
-                if provider and provider != pkg_name:
-                    deps.add(provider)
-            # SUGGESTS are NOT followed - they are not installed by default
-            return deps
-
-        # Build reverse index: capability -> list of (pkg_that_needs_it, dep_type)
-        # This is much faster than iterating all packages for each candidate
-        cap_needed_by = {}  # cap -> [(pkg, dep_type), ...]
-        for pkg_name in all_installed:
-            for cap in pkg_requires.get(pkg_name, set()):
-                if cap not in cap_needed_by:
-                    cap_needed_by[cap] = []
-                cap_needed_by[cap].append((pkg_name, 'R'))
-            if not erase_recommends:
+            # Helper: get deps including recommends (for dep_tree building)
+            # Note: SUGGESTS are NOT followed because they are not installed by default
+            def get_all_deps(pkg_name: str) -> set:
+                """Get packages that pkg_name depends on or recommends (not suggests)."""
+                deps = set()
+                # REQUIRES
+                for cap in pkg_requires.get(pkg_name, set()):
+                    provider = resolve_cap_to_pkg(cap)
+                    if provider and provider != pkg_name:
+                        deps.add(provider)
+                # RECOMMENDS (installed by default)
                 for cap in pkg_recommends.get(pkg_name, set()):
+                    provider = resolve_cap_to_pkg(cap)
+                    if provider and provider != pkg_name:
+                        deps.add(provider)
+                # SUGGESTS are NOT followed - they are not installed by default
+                return deps
+
+            # Build reverse index: capability -> list of (pkg_that_needs_it, dep_type)
+            # This is much faster than iterating all packages for each candidate
+            cap_needed_by = {}  # cap -> [(pkg, dep_type), ...]
+            for pkg_name in all_installed:
+                for cap in pkg_requires.get(pkg_name, set()):
                     if cap not in cap_needed_by:
                         cap_needed_by[cap] = []
-                    cap_needed_by[cap].append((pkg_name, 'M'))
-            if keep_suggests:
-                for cap in pkg_suggests.get(pkg_name, set()):
-                    if cap not in cap_needed_by:
-                        cap_needed_by[cap] = []
-                    cap_needed_by[cap].append((pkg_name, 'S'))
+                    cap_needed_by[cap].append((pkg_name, 'R'))
+                if not erase_recommends:
+                    for cap in pkg_recommends.get(pkg_name, set()):
+                        if cap not in cap_needed_by:
+                            cap_needed_by[cap] = []
+                        cap_needed_by[cap].append((pkg_name, 'M'))
+                if keep_suggests:
+                    for cap in pkg_suggests.get(pkg_name, set()):
+                        if cap not in cap_needed_by:
+                            cap_needed_by[cap] = []
+                        cap_needed_by[cap].append((pkg_name, 'S'))
 
-        # Reverse index for Supplements: capability -> packages that declare
-        # ``Supplements: <cap>``.  Walking this index from an erased package's
-        # provides yields the plugins that would be losing their anchor.
-        cap_supplemented_by = {}  # cap -> [pkg1, pkg2, ...]
-        for pkg_name, supps in pkg_supplements.items():
-            for cap in supps:
-                cap_supplemented_by.setdefault(cap, []).append(pkg_name)
+            # Reverse index for Supplements: capability -> packages that declare
+            # ``Supplements: <cap>``.  Walking this index from an erased package's
+            # provides yields the plugins that would be losing their anchor.
+            cap_supplemented_by = {}  # cap -> [pkg1, pkg2, ...]
+            for pkg_name, supps in pkg_supplements.items():
+                for cap in supps:
+                    cap_supplemented_by.setdefault(cap, []).append(pkg_name)
 
-        # Normalize erase_names to original case
-        erase_set_original = set()
-        for name in erase_names:
-            orig = name_to_original.get(name.lower())
-            if orig:
-                erase_set_original.add(orig)
+            # Normalize erase_names to original case
+            erase_set_original = set()
+            for name in erase_names:
+                orig = name_to_original.get(name.lower())
+                if orig:
+                    erase_set_original.add(orig)
 
-        # STEP 1: Build the forward dependency tree (including RECOMMENDS)
-        # Start from packages being erased and follow their deps + recommends recursively
-        dep_tree = set(erase_set_original)
-        to_process = list(erase_set_original)
+            # STEP 1: Build the forward dependency tree (including RECOMMENDS)
+            # Start from packages being erased and follow their deps + recommends recursively
+            dep_tree = set(erase_set_original)
+            to_process = list(erase_set_original)
 
-        while to_process:
-            pkg = to_process.pop()
-            for dep in get_all_deps(pkg):
-                if dep not in dep_tree:
-                    dep_tree.add(dep)
-                    to_process.append(dep)
-            # Reverse weak-dep extension: any installed package whose
-            # ``Supplements:`` targets one of ``pkg``'s provided
-            # capabilities is anchored by ``pkg`` — becomes a candidate
-            # once ``pkg`` is being erased.  The iteration loop below
-            # still gets the last word (a remaining Supplements target
-            # will protect the plugin).
-            for cap in pkg_provides.get(pkg, set()):
-                for supp_pkg in cap_supplemented_by.get(cap, ()):
-                    if supp_pkg not in dep_tree:
-                        dep_tree.add(supp_pkg)
-                        to_process.append(supp_pkg)
+            while to_process:
+                pkg = to_process.pop()
+                for dep in get_all_deps(pkg):
+                    if dep not in dep_tree:
+                        dep_tree.add(dep)
+                        to_process.append(dep)
+                # Reverse weak-dep extension: any installed package whose
+                # ``Supplements:`` targets one of ``pkg``'s provided
+                # capabilities is anchored by ``pkg`` — becomes a candidate
+                # once ``pkg`` is being erased.  The iteration loop below
+                # still gets the last word (a remaining Supplements target
+                # will protect the plugin).
+                for cap in pkg_provides.get(pkg, set()):
+                    for supp_pkg in cap_supplemented_by.get(cap, ()):
+                        if supp_pkg not in dep_tree:
+                            dep_tree.add(supp_pkg)
+                            to_process.append(supp_pkg)
 
-        # STEP 2: Find orphans
-        # A package is an orphan if:
-        # 1. It's in dep_tree (dependency of something being removed)
-        # 2. It's in unrequested (was installed as a dependency)
-        # 3. No package that will REMAIN installed requires it
+            # STEP 2: Find orphans
+            # A package is an orphan if:
+            # 1. It's in dep_tree (dependency of something being removed)
+            # 2. It's in unrequested (was installed as a dependency)
+            # 3. No package that will REMAIN installed requires it
 
-        # Initial set of packages to remove
-        to_remove = set(erase_set_original)  # Always include explicitly requested
-        for pkg in dep_tree:
-            if pkg.lower() in unrequested:
-                to_remove.add(pkg)
+            # Initial set of packages to remove
+            to_remove = set(erase_set_original)  # Always include explicitly requested
+            for pkg in dep_tree:
+                if pkg.lower() in unrequested:
+                    to_remove.add(pkg)
 
-        # Debug: write initial state
-        logger = logging.getLogger(__name__)
-        logger.debug(f"Orphan detection: dep_tree={len(dep_tree)}, unrequested={len(unrequested)}, initial to_remove={len(to_remove)}")
+            # Debug: write initial state
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Orphan detection: dep_tree={len(dep_tree)}, unrequested={len(unrequested)}, initial to_remove={len(to_remove)}")
 
-        if DEBUG_RESOLVER:
-            try:
-                with open('.debug-orphans.log', 'w') as f:
-                    f.write(f"dep_tree size: {len(dep_tree)}\n")
-                    f.write(f"unrequested size: {len(unrequested)}\n")
-                    f.write(f"initial to_remove size: {len(to_remove)}\n")
-                    f.write(f"all_installed size: {len(all_installed)}\n")
-                    f.write(f"cap_to_pkg size: {len(cap_to_pkg)}\n\n")
+            if DEBUG_RESOLVER:
+                try:
+                    with open('.debug-orphans.log', 'w') as f:
+                        f.write(f"dep_tree size: {len(dep_tree)}\n")
+                        f.write(f"unrequested size: {len(unrequested)}\n")
+                        f.write(f"initial to_remove size: {len(to_remove)}\n")
+                        f.write(f"all_installed size: {len(all_installed)}\n")
+                        f.write(f"cap_to_pkg size: {len(cap_to_pkg)}\n\n")
 
-                    # Check .so capability resolution
-                    test_cap = "libKF6CoreAddons.so.6()(64bit)"
-                    if test_cap in cap_to_pkg:
-                        f.write(f"'{test_cap}' -> {cap_to_pkg[test_cap]}\n")
-                    else:
-                        f.write(f"'{test_cap}' NOT in cap_to_pkg\n")
-                        similar = [c for c in cap_to_pkg.keys() if 'KF6CoreAddons' in c]
-                        f.write(f"Similar caps: {similar[:10]}\n")
-                    f.write("\n")
+                        # Check .so capability resolution
+                        test_cap = "libKF6CoreAddons.so.6()(64bit)"
+                        if test_cap in cap_to_pkg:
+                            f.write(f"'{test_cap}' -> {cap_to_pkg[test_cap]}\n")
+                        else:
+                            f.write(f"'{test_cap}' NOT in cap_to_pkg\n")
+                            similar = [c for c in cap_to_pkg.keys() if 'KF6CoreAddons' in c]
+                            f.write(f"Similar caps: {similar[:10]}\n")
+                        f.write("\n")
 
-                    # Check if lib64kf6coreaddons6 is in dep_tree and to_remove
-                    f.write(f"lib64kf6coreaddons6 in dep_tree: {'lib64kf6coreaddons6' in dep_tree}\n")
-                    f.write(f"kcoreaddons in dep_tree: {'kcoreaddons' in dep_tree}\n")
-                    f.write(f"lib64kf6coreaddons6 in to_remove: {'lib64kf6coreaddons6' in to_remove}\n")
-                    f.write(f"kcoreaddons in to_remove: {'kcoreaddons' in to_remove}\n")
-                    f.write(f"'lib64kf6coreaddons6' in unrequested: {'lib64kf6coreaddons6' in unrequested}\n\n")
+                        # Check if lib64kf6coreaddons6 is in dep_tree and to_remove
+                        f.write(f"lib64kf6coreaddons6 in dep_tree: {'lib64kf6coreaddons6' in dep_tree}\n")
+                        f.write(f"kcoreaddons in dep_tree: {'kcoreaddons' in dep_tree}\n")
+                        f.write(f"lib64kf6coreaddons6 in to_remove: {'lib64kf6coreaddons6' in to_remove}\n")
+                        f.write(f"kcoreaddons in to_remove: {'kcoreaddons' in to_remove}\n")
+                        f.write(f"'lib64kf6coreaddons6' in unrequested: {'lib64kf6coreaddons6' in unrequested}\n\n")
 
-                    # Check which dep_tree packages are NOT in unrequested
-                    not_in_unrequested = [p for p in dep_tree if p.lower() not in unrequested]
-                    f.write(f"dep_tree packages NOT in unrequested ({len(not_in_unrequested)}):\n")
-                    for p in sorted(not_in_unrequested)[:50]:
-                        f.write(f"  {p}\n")
-                    if len(not_in_unrequested) > 50:
-                        f.write(f"  ... and {len(not_in_unrequested) - 50} more\n")
-                    f.write("\n")
-            except:
-                pass
+                        # Check which dep_tree packages are NOT in unrequested
+                        not_in_unrequested = [p for p in dep_tree if p.lower() not in unrequested]
+                        f.write(f"dep_tree packages NOT in unrequested ({len(not_in_unrequested)}):\n")
+                        for p in sorted(not_in_unrequested)[:50]:
+                            f.write(f"  {p}\n")
+                        if len(not_in_unrequested) > 50:
+                            f.write(f"  ... and {len(not_in_unrequested) - 50} more\n")
+                        f.write("\n")
+                except:
+                    pass
 
-        # Orphan detection algorithm:
-        # A package can be removed if ALL its reverse deps are also being removed,
-        # OR if there are other providers of the required capability that remain.
-        # We iteratively remove packages from candidates that have blocking rdeps.
+            # Orphan detection algorithm:
+            # A package can be removed if ALL its reverse deps are also being removed,
+            # OR if there are other providers of the required capability that remain.
+            # We iteratively remove packages from candidates that have blocking rdeps.
 
-        candidates = set(to_remove)
-        candidates_lower = {p.lower() for p in candidates}
-        removed_from_candidates = {}  # For debug: pkg -> (blocker, dep_type, capability)
+            candidates = set(to_remove)
+            candidates_lower = {p.lower() for p in candidates}
+            removed_from_candidates = {}  # For debug: pkg -> (blocker, dep_type, capability)
 
-        # Iterate until stable (use sorted for determinism)
-        changed = True
-        iteration = 0
-        while changed:
-            changed = False
-            iteration += 1
-            for pkg_name in sorted(candidates):
-                if pkg_name in erase_set_original:
-                    continue  # Always remove explicitly requested packages
+            # Iterate until stable (use sorted for determinism)
+            changed = True
+            iteration = 0
+            while changed:
+                changed = False
+                iteration += 1
+                for pkg_name in sorted(candidates):
+                    if pkg_name in erase_set_original:
+                        continue  # Always remove explicitly requested packages
 
-                # Check if any package outside candidates needs a capability we provide
-                # and we are the only remaining provider
-                dominated = False
-                blocker_info = None
-                for cap in pkg_provides.get(pkg_name, set()):
-                    for dependent, dep_type in cap_needed_by.get(cap, []):
-                        if dependent == pkg_name:
-                            continue
-                        dep_lower = dependent.lower()
-                        # Skip if dependent is also being removed
-                        if dep_lower in candidates_lower:
-                            continue
-                        # dependent needs cap and is NOT being removed
-                        # Check if there are other providers that remain
-                        providers = cap_to_pkg.get(cap, set())
-                        remaining = [p for p in providers
-                                     if p != pkg_name and p.lower() not in candidates_lower]
-                        if not remaining:
-                            # No other provider - this blocks removal
-                            dominated = True
-                            blocker_info = (dependent, dep_type, cap)
+                    # Check if any package outside candidates needs a capability we provide
+                    # and we are the only remaining provider
+                    dominated = False
+                    blocker_info = None
+                    for cap in pkg_provides.get(pkg_name, set()):
+                        for dependent, dep_type in cap_needed_by.get(cap, []):
+                            if dependent == pkg_name:
+                                continue
+                            dep_lower = dependent.lower()
+                            # Skip if dependent is also being removed
+                            if dep_lower in candidates_lower:
+                                continue
+                            # dependent needs cap and is NOT being removed
+                            # Check if there are other providers that remain
+                            providers = cap_to_pkg.get(cap, set())
+                            remaining = [p for p in providers
+                                         if p != pkg_name and p.lower() not in candidates_lower]
+                            if not remaining:
+                                # No other provider - this blocks removal
+                                dominated = True
+                                blocker_info = (dependent, dep_type, cap)
+                                break
+                        if dominated:
                             break
+
+                    # Supplements protection: ``pkg_name`` is anchored by any
+                    # ``Supplements:`` capability still provided by a package
+                    # that won't be removed.  Boolean ``Supplements: (A and B)``
+                    # is stored as two independent caps — any surviving one is
+                    # enough to keep ``pkg_name`` (conservative OR).
+                    if not dominated:
+                        for cap in pkg_supplements.get(pkg_name, set()):
+                            providers = cap_to_pkg.get(cap, set())
+                            remaining = [p for p in providers
+                                         if p.lower() not in candidates_lower]
+                            if remaining:
+                                dominated = True
+                                blocker_info = (remaining[0], 'Supp', cap)
+                                break
+
                     if dominated:
-                        break
+                        candidates.remove(pkg_name)
+                        candidates_lower.remove(pkg_name.lower())
+                        removed_from_candidates[pkg_name] = blocker_info
+                        changed = True
 
-                # Supplements protection: ``pkg_name`` is anchored by any
-                # ``Supplements:`` capability still provided by a package
-                # that won't be removed.  Boolean ``Supplements: (A and B)``
-                # is stored as two independent caps — any surviving one is
-                # enough to keep ``pkg_name`` (conservative OR).
-                if not dominated:
-                    for cap in pkg_supplements.get(pkg_name, set()):
-                        providers = cap_to_pkg.get(cap, set())
-                        remaining = [p for p in providers
-                                     if p.lower() not in candidates_lower]
-                        if remaining:
-                            dominated = True
-                            blocker_info = (remaining[0], 'Supp', cap)
-                            break
+            to_remove = candidates
 
-                if dominated:
-                    candidates.remove(pkg_name)
-                    candidates_lower.remove(pkg_name.lower())
-                    removed_from_candidates[pkg_name] = blocker_info
-                    changed = True
+            if DEBUG_RESOLVER:
+                try:
+                    with open('.debug-orphans.log', 'a') as f:
+                        f.write(f"Options: erase_recommends={erase_recommends}, keep_suggests={keep_suggests}\n")
+                        f.write(f"Iterations: {iteration}\n")
+                        f.write(f"Initial candidates: {len(to_remove) + len(removed_from_candidates)}\n")
+                        f.write(f"Removed from candidates: {len(removed_from_candidates)}\n")
+                        f.write(f"Final to_remove: {len(to_remove)}\n\n")
+                        f.write(f"Packages that must stay (R=Requires, M=Recommends, S=Suggests):\n")
+                        for pkg in sorted(removed_from_candidates.keys()):
+                            blocker, dep_type, cap = removed_from_candidates[pkg]
+                            f.write(f"  {pkg} <-[{dep_type}]- {blocker} (via {cap})\n")
+                except:
+                    pass
 
-        to_remove = candidates
+            logger.debug(f"Orphan detection: iterations={iteration}, kept={len(removed_from_candidates)}, final={len(to_remove)}")
 
-        if DEBUG_RESOLVER:
-            try:
-                with open('.debug-orphans.log', 'a') as f:
-                    f.write(f"Options: erase_recommends={erase_recommends}, keep_suggests={keep_suggests}\n")
-                    f.write(f"Iterations: {iteration}\n")
-                    f.write(f"Initial candidates: {len(to_remove) + len(removed_from_candidates)}\n")
-                    f.write(f"Removed from candidates: {len(removed_from_candidates)}\n")
-                    f.write(f"Final to_remove: {len(to_remove)}\n\n")
-                    f.write(f"Packages that must stay (R=Requires, M=Recommends, S=Suggests):\n")
-                    for pkg in sorted(removed_from_candidates.keys()):
-                        blocker, dep_type, cap = removed_from_candidates[pkg]
-                        f.write(f"  {pkg} <-[{dep_type}]- {blocker} (via {cap})\n")
-            except:
-                pass
+            # Build PackageAction list (exclude the explicitly erased packages)
+            erase_set_lower = set(n.lower() for n in erase_names)
+            orphans = []
 
-        logger.debug(f"Orphan detection: iterations={iteration}, kept={len(removed_from_candidates)}, final={len(to_remove)}")
+            for name in to_remove:
+                if name.lower() in erase_set_lower:
+                    continue
 
-        # Build PackageAction list (exclude the explicitly erased packages)
-        erase_set_lower = set(n.lower() for n in erase_names)
-        orphans = []
+                hdr = pkg_headers.get(name)
+                if not hdr:
+                    continue
 
-        for name in to_remove:
-            if name.lower() in erase_set_lower:
-                continue
+                epoch = hdr[rpm.RPMTAG_EPOCH] or 0
+                version = hdr[rpm.RPMTAG_VERSION]
+                release = hdr[rpm.RPMTAG_RELEASE]
+                arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
+                size = hdr[rpm.RPMTAG_SIZE] or 0
 
-            hdr = pkg_headers.get(name)
-            if not hdr:
-                continue
+                if epoch and epoch > 0:
+                    evr = f"{epoch}:{version}-{release}"
+                else:
+                    evr = f"{version}-{release}"
 
-            epoch = hdr[rpm.RPMTAG_EPOCH] or 0
-            version = hdr[rpm.RPMTAG_VERSION]
-            release = hdr[rpm.RPMTAG_RELEASE]
-            arch = hdr[rpm.RPMTAG_ARCH] or 'noarch'
-            size = hdr[rpm.RPMTAG_SIZE] or 0
+                orphans.append(PackageAction(
+                    action=TransactionType.REMOVE,
+                    name=name,
+                    evr=evr,
+                    arch=arch,
+                    nevra=f"{name}-{evr}.{arch}",
+                    size=size,
+                ))
 
-            if epoch and epoch > 0:
-                evr = f"{epoch}:{version}-{release}"
-            else:
-                evr = f"{version}-{release}"
-
-            orphans.append(PackageAction(
-                action=TransactionType.REMOVE,
-                name=name,
-                evr=evr,
-                arch=arch,
-                nevra=f"{name}-{evr}.{arch}",
-                size=size,
-            ))
-
-        return orphans
+            return orphans
