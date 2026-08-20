@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from ..i18n import _
+from ..core import colors
 
 if TYPE_CHECKING:
     from .database import PackageDatabase
@@ -340,14 +342,16 @@ class AppStreamManager:
         appstream_url = media_url.rstrip('/') + '/media_info/appstream.xml.lzma'
 
         try:
-            log(f"Checking {appstream_url}")
+            if self.verbose:
+                log(_("Checking {}".format(appstream_url)))
             req = Request(appstream_url, method='HEAD')
             req.add_header('User-Agent', 'urpm-ng/1.0')
 
             with urlopen(req, timeout=10) as response:
                 if response.status == 200:
                     # File exists, download it
-                    log(f"Downloading AppStream for {media_name}")
+                    if self.verbose:
+                        log(_("Downloading AppStream for {}").format(media_name))
                     req = Request(appstream_url)
                     req.add_header('User-Agent', 'urpm-ng/1.0')
 
@@ -368,7 +372,8 @@ class AppStreamManager:
                     with open(output_path, 'w', encoding='utf-8') as f:
                         f.write(xml_data)
 
-                    log(f"Downloaded AppStream for {media_name}: {component_count} components")
+                    if self.verbose:
+                        log(_("Downloaded AppStream for {}: {} components").format(media_name, colors.count(component_count)))
                     return AppStreamSyncResult(
                         media_name=media_name,
                         success=True,
@@ -378,15 +383,15 @@ class AppStreamManager:
 
         except HTTPError as e:
             if e.code == 404:
-                log(f"No upstream AppStream for {media_name}, generating...")
+                log(_("No upstream AppStream for {}, generating...").format(media_name))
             else:
-                logger.warning(f"HTTP error fetching AppStream for {media_name}: {e}")
+                logger.warning(_("HTTP error fetching AppStream for {}: {}").format(media_name, e))
         except URLError as e:
-            logger.warning(f"Network error fetching AppStream for {media_name}: {e}")
+            logger.warning(_("Network error fetching AppStream for {}: {}").format(media_name, e))
         except lzma.LZMAError as e:
-            logger.warning(f"Failed to decompress AppStream for {media_name}: {e}")
+            logger.warning(_("Failed to decompress fetching AppStream for {}: {}").format(media_name, e))
         except Exception as e:
-            logger.warning(f"Error fetching AppStream for {media_name}: {e}")
+            logger.warning(_("Error fetching AppStream for {}: {}").format(media_name, e))
 
         # Fallback: generate from synthesis
         try:
@@ -395,7 +400,8 @@ class AppStreamManager:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(xml_str)
 
-            log(f"Generated AppStream for {media_name}: {component_count} components")
+            if self.verbose:
+                print(_("Generated AppStream for {}: {} components").format(media_name, colors.count(component_count)))
             return AppStreamSyncResult(
                 media_name=media_name,
                 success=True,
@@ -404,7 +410,7 @@ class AppStreamManager:
             )
 
         except Exception as e:
-            logger.error(f"Failed to generate AppStream for {media_name}: {e}")
+            logger.error(_("Failed to generate AppStream for {}: {}").format(media_name, e))
             return AppStreamSyncResult(
                 media_name=media_name,
                 success=False,
@@ -450,7 +456,7 @@ class AppStreamManager:
 
         # Find all per-media AppStream files
         if not self.appstream_dir.exists():
-            log("No AppStream directory found")
+            log(_("No AppStream directory found"))
             return 0, 0
 
         for xml_file in sorted(self.appstream_dir.glob('*.xml')):
@@ -464,15 +470,16 @@ class AppStreamManager:
                     total_components += 1
 
                 media_count += 1
-                logger.debug(f"Merged {xml_file.name}")
+                logger.debug(_("Merged {}").format(xml_file.name))
 
             except ET.ParseError as e:
-                logger.warning(f"Failed to parse {xml_file}: {e}")
+                logger.warning(_("Failed to parse {}: {}").format(xml_file, e))
             except Exception as e:
-                logger.warning(f"Error processing {xml_file}: {e}")
+                logger.warning(_("Error processing {}: {}").format(xml_file, e))
 
         if total_components == 0:
-            log("No components to merge")
+            if self.verbose:
+                log(_("No components to merge"))
             return 0, 0
 
         # Write merged catalog (gzipped)
@@ -482,7 +489,8 @@ class AppStreamManager:
         with gzip.open(self.catalog_path, 'wt', encoding='utf-8') as f:
             f.write(xml_str)
 
-        log(f"Merged {total_components} components from {media_count} media into {self.catalog_path}")
+        if self.verbose:
+            print(_("Merged {} components from {} media into {}").format(total_components, media_count, self.catalog_path))
         return total_components, media_count
 
     def refresh_system_cache(self) -> bool:
@@ -500,19 +508,19 @@ class AppStreamManager:
                 timeout=120
             )
             if result.returncode == 0:
-                logger.info("AppStream cache refreshed successfully")
+                logger.info(_("AppStream cache refreshed successfully"))
                 return True
             else:
-                logger.warning(f"appstreamcli returned {result.returncode}: {result.stderr}")
+                logger.warning(_("appstreamcli returned {}: {}").format(result.returncode, result.stderr))
                 return False
         except FileNotFoundError:
-            logger.info("appstreamcli not installed, skipping cache refresh")
+            logger.info(_("appstreamcli not installed, skipping cache refresh"))
             return True  # Not an error if not installed
         except subprocess.TimeoutExpired:
-            logger.warning("appstreamcli timed out")
+            logger.warning(_("appstreamcli timed out"))
             return False
         except Exception as e:
-            logger.warning(f"Failed to refresh AppStream cache: {e}")
+            logger.warning(_("Failed to refresh AppStream cache: {}").format(e))
             return False
 
     def get_status(self) -> List[Dict]:
@@ -756,6 +764,7 @@ class AppStreamManager:
         output_path: Path,
         *,
         compression_filter: str = 'xz -7',
+        verbose=False,
     ) -> int | None:
         """Build an AppStream catalog from cached metainfo files.
 
@@ -778,12 +787,13 @@ class AppStreamManager:
         """
         xml_files = list(self._iter_xml_files(cache_dir))
         if not xml_files:
-            logger.warning("\n⚠  No XML file found in cache, catalogue not generated.")
+            print(colors.warning("\n⚠  " + _("No XML file found in cache, catalogue not generated.")))
             return None
 
-        logger.info(f"\n{'─' * 52}")
-        logger.info(f"CATALOG — assembling {len(xml_files)} XML file(s)")
-        logger.info(f"{'─' * 52}")
+        if verbose:
+            print(f"\n{'─' * 52}")
+            print(_("CATALOG — assembling {} XML file(s)").format(colors.count(len(xml_files))))
+            print(f"{'─' * 52}")
 
         components_el = ET.Element("components", {
             "version": "0.15",
@@ -803,7 +813,8 @@ class AppStreamManager:
             # print(f"  +  {xml_file.relative_to(cache_dir)}")
 
         if ok_count == 0:
-            logger.info("No valid components, catalog not generated.")
+            if verbose:
+                print(colors.warning("\n⚠  " +_("No valid components, catalog not generated.")))
             return None
 
         tree = ET.ElementTree(components_el)

@@ -17,6 +17,8 @@ from . import GenerateResult
 from .compress import parse_filter
 from .scanner import RpmScanner
 from traceback import format_exc
+from ..i18n import _
+from ..core import colors
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +147,7 @@ class MediaGenerator:
                 return result
 
             result.packages_count = len(packages)
+            print(_("Scanned {} RPMs files").format(result.packages_count))
             logger.info(f"Scanned {len(packages)} RPMs from {self.rpms_dir}")
 
             # Parse filter strings once.
@@ -171,6 +174,7 @@ class MediaGenerator:
                 )
                 result.hdlist_written = True
                 generated_files.append(hdlist_filename)
+                print(_("Wrotten hdlist"))
 
             # ── 4. Write synthesis ───────────────────────────────
             if synthesis:
@@ -182,6 +186,7 @@ class MediaGenerator:
                 )
                 result.synthesis_written = True
                 generated_files.append(synthesis_filename)
+                print(_("Wrotten synthesis"))
 
             # ── 5. Write XML info ────────────────────────────────
             if xml_info:
@@ -200,7 +205,9 @@ class MediaGenerator:
                         compression_filter=f'{xml_comp} -{xml_level}',
                     )
                     generated_files.append(xml_filename)
+                    print(_("Wrotten XML file {}").format(xml_filename))
                 result.xml_info_written = True
+
 
             # ── 6. Write AppStream ───────────────────────────────
             if appstream:
@@ -209,8 +216,8 @@ class MediaGenerator:
                 cache_dir = self.rpms_dir / '.genhdlist'
                 cache_dir.mkdir(exist_ok=True)
                 from urpm.core.appstream import AppStreamManager
-                if force:
-                    logger.info("⚡ Force mode: all packages will be re-extracted.\n")
+                if force and self.verbose:
+                    logger.info(_("Force mode: all packages will be re-extracted.") + "\n")
 
                 # AppStreamManager needs a db instance, but for generation
                 # from RPM dir we use extract_from_rpm + build_catalog
@@ -241,9 +248,11 @@ class MediaGenerator:
                 appstream_mgr.build_catalog(
                     cache_dir, as_path,
                     compression_filter=f'{xml_comp} -{xml_level}',
+                    verbose=self.verbose
                 )
                 result.appstream_written = True
                 generated_files.append(as_filename)
+                print(_("Wrotten Appstream metadata file {}").format(as_filename))
 
             # ── 7. Move tmp → final (atomic per file) ────────────
             version_prefix = ''
@@ -276,6 +285,7 @@ class MediaGenerator:
                 ]
                 self._generate_md5sum(final_files)
                 result.md5sum_written = True
+                print(_("Generated MD5SUM file"))
 
             result.success = True
 

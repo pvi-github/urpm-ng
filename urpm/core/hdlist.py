@@ -15,6 +15,7 @@ from typing import BinaryIO, Dict, Iterator, List, Optional, Any, IO
 from .compression import decompress_stream
 from struct import pack
 import logging
+from ..i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -677,7 +678,7 @@ class HdlistWriter():
             try:
                 return json.loads(state_file.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
-                logger.warning("Warning: corrupted state file, falling back to full rebuild.")
+                logger.warning(_("Warning: corrupted state file, falling back to full rebuild."))
         return {}
 
     def _save_state(self, state: dict) -> None:
