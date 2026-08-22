@@ -7,6 +7,7 @@ See :mod:`urpm.core.system_profile` for the format and the diff logic.
 """
 from __future__ import annotations
 
+import re
 import socket
 import subprocess
 import sys
@@ -305,6 +306,64 @@ class _ApplyResult:
         # need them (see :func:`_rescue_kept_deps`).  Set on the erase
         # phase only ; unused on install.
         self.rescued: List[Tuple[str, str, str]] = []
+        # Names dropped from the erase list because they are
+        # hardware-specific packages the target machine needs to keep
+        # (see :func:`_detect_hw_specific`).  Set on the erase phase
+        # only ; unused on install.
+        self.hw_preserved: List[str] = []
+
+
+# ---------------------------------------------------------------------------
+# Hardware-specific package detection
+# ---------------------------------------------------------------------------
+
+# Regexes matching packages the target machine likely NEEDS regardless of
+# what the source profile says.  A clone from a physical box onto a VM
+# (or vice versa) would otherwise strip guest tools, kernel modules and
+# firmware the target hardware / hypervisor depends on — a distupgrade
+# will then boot into a broken graphics stack.
+#
+# Concrete failure mode observed (2026-08-22) : source profile lacks
+# ``dkms-virtualbox``.  System import removes it on a VirtualBox target ;
+# distupgrade installs a new kernel ; the ``vboxvideo`` DRM module is
+# never rebuilt for that new kernel ; Xorg falls back to ``vmwgfx``,
+# which reports ``device max cursor size = 0``.  gnome-shell spam-loops
+# ``drmModeAtomicCommit`` failures, session hangs and dies.
+#
+# The list stays conservative — better to preserve a redundant package
+# than to leave the target machine unbootable.  Add patterns here as
+# new hardware categories surface.
+_HW_SPECIFIC_PATTERNS: Tuple[str, ...] = (
+    r'^dkms-.*',                        # DKMS kernel modules (drivers)
+    r'^virtualbox-guest-additions.*',   # VirtualBox guest tools
+    r'^open-vm-tools.*',                # VMware guest tools
+    r'^spice-vdagent.*',                # QEMU/SPICE guest agent
+    r'^qemu-guest-agent.*',             # QEMU guest agent
+    r'^x11-driver-video-.*',            # Xorg video drivers (per-GPU)
+    r'^x11-driver-input-.*',            # Xorg input drivers (touchpad,
+                                        #                     wacom, ...)
+    r'^kernel-firmware-.*',             # Firmware blobs (nonfree, iwlwifi,
+                                        #                 amdgpu, ...)
+    r'^microcode-.*',                   # CPU microcode
+    r'^amd-ucode.*',                    # AMD microcode variants
+    r'^nvidia.*',                       # NVIDIA proprietary drivers
+    r'^lib64nvidia.*',                  # NVIDIA proprietary libs
+    r'^broadcom-wl.*',                  # Broadcom WiFi
+    r'^bumblebee.*',                    # Optimus dual-GPU
+    r'^radeon-firmware.*',              # Radeon firmware (if outside
+                                        # kernel-firmware pattern)
+)
+_HW_SPECIFIC_RE = re.compile(
+    '|'.join(f'(?:{p})' for p in _HW_SPECIFIC_PATTERNS))
+
+
+def _detect_hw_specific(names: List[str]) -> List[str]:
+    """Return the subset of *names* matching any hardware-specific
+    pattern (see :data:`_HW_SPECIFIC_PATTERNS`).  Preserves the input
+    ordering so the caller can present the list to the user in the
+    same order as the erase plan.
+    """
+    return [n for n in names if _HW_SPECIFIC_RE.match(n)]
 
 
 def _render_preflight_gaps(install_missing: List[str],
@@ -405,6 +464,14 @@ def _render_delta_report(*,
             print(colors.dim(_(
                 "        (+ {n} more)").format(
                     n=len(rescued_names) - 10)))
+    if erase_result.hw_preserved:
+        # Full list — the user explicitly authorised the preservation
+        # (or opted in via --preserve-hw), no reason to truncate.
+        print(colors.warning(_(
+            "    - {n} hardware-specific package(s) preserved :").format(
+                n=len(erase_result.hw_preserved))))
+        for name in erase_result.hw_preserved:
+            print(f"        {colors.dim(name)}")
     if erase_result.transaction_error:
         print(colors.error(_(
             "    - transaction refused : {err}").format(
@@ -712,12 +779,53 @@ def cmd_system_import(args, db: 'PackageDatabase') -> int:
                 print(_("Aborted."))
                 return 1
 
+    # 6bis. Hardware-specific preservation.  Detect kernel modules,
+    # display / input drivers, hypervisor guest tools and firmware in
+    # the erase list.  Removing these can leave the target machine
+    # unbootable — most acutely when a subsequent distupgrade brings
+    # in a new kernel that has no matching DKMS module to rebuild
+    # against, forcing Xorg onto a wrong DRM driver (documented case
+    # 2026-08-22 : ``dkms-virtualbox`` removed → vmwgfx used on a
+    # VirtualBox target → gnome-shell locked in cursor-update failure
+    # loop).  Interactive : prompt to preserve (Y default).  Non-
+    # interactive (``--auto``) : preserve only when ``--preserve-hw``
+    # is set — otherwise we honour the strict clone.
+    hw_specific = _detect_hw_specific(erase_ok) if erase_ok else []
+    hw_preserved: List[str] = []
+    if hw_specific:
+        preserve = getattr(args, "preserve_hw", False)
+        if not preserve and not getattr(args, "auto", False):
+            print()
+            print(colors.warning(_(
+                "⚠ {n} hardware-specific package(s) in the erase list — "
+                "removing them can leave the target machine broken "
+                "(kernel modules, drivers, guest tools, firmware)."
+            ).format(n=len(hw_specific))))
+            for name in hw_specific:
+                print(f"    {colors.dim(name)}")
+            try:
+                resp = input(_(
+                    "Preserve these {n} hardware-specific package(s) ? "
+                    "[Y/n] ").format(n=len(hw_specific)))
+            except (KeyboardInterrupt, EOFError):
+                print(_("\nAborted."))
+                return 1
+            # Default is Y (preserve) — an empty response OR anything
+            # starting with 'y'/'o' (yes/oui) accepts preservation.
+            resp = resp.strip().lower()
+            preserve = (resp == "" or resp[0:1] in ("y", "o"))
+        if preserve:
+            hw_preserved = list(hw_specific)
+            hw_set = set(hw_specific)
+            erase_ok = [n for n in erase_ok if n not in hw_set]
+
     # 7. Apply packages — atomic transactions (the default urpm
     # behaviour) so partial state can never happen.  Pre-flight
     # above already filtered to what's viable ; anything urpm still
     # refuses is a real dep-graph conflict the user has to see.
     install_result = _ApplyResult()
     erase_result = _ApplyResult()
+    erase_result.hw_preserved = hw_preserved
 
     if install_ok:
         print(colors.info(_(

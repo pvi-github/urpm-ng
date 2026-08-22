@@ -2625,6 +2625,19 @@ Set auto_add = false to disable all automatic server addition.
                'Intended for faithful bug reproduction ; the resulting '
                'system will have broken dependencies.')
     )
+    system_import.add_argument(
+        '--preserve-hw', action='store_true',
+        help=_('Non-interactive mode : preserve hardware-specific '
+               'packages (DKMS modules, X11 drivers, guest tools, '
+               'firmware, microcode) even when they are absent from '
+               'the source profile.  In interactive mode the same '
+               'protection is already offered as a Y-default prompt ; '
+               'this flag is the ``--auto`` counterpart.  Prevents '
+               'the classic « cloned profile removes the target '
+               'machine\'s vboxvideo / iwlwifi / nvidia driver, '
+               'distupgrade brings a new kernel, no DKMS rebuild, '
+               'graphics stack breaks » failure.')
+    )
 
     # =========================================================================
     # peer - P2P peer management
