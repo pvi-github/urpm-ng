@@ -442,15 +442,25 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     )
     partial_exit = 2 if result.skipped else 0
 
-    # Handle --reinstall for local RPMs that are already installed at same version
+    # Handle --reinstall.  The resolver returns empty actions when a
+    # requested package is already installed at the latest available
+    # version ; --reinstall means "install it again anyway" (dnf-style
+    # semantic).  We synthesise REINSTALL actions here for every
+    # user-requested package the resolver skipped :
+    # - Local RPM files (via ``local_rpm_infos``) : the local NEVRA is
+    #   the reinstall target.
+    # - Named packages (via ``resolved_packages``) : the latest media
+    #   candidate is the reinstall target (matches the version the user
+    #   would get with a plain ``urpm i`` on a fresh install).
     reinstall_mode = getattr(args, 'reinstall', False)
-    if reinstall_mode and local_rpm_infos:
+    if reinstall_mode:
         from ...core.resolver import PackageAction, TransactionType
         actions_names = {a.name for a in result.actions}
+        local_names = {info['name'] for info in local_rpm_infos}
+
+        # a) Local RPMs already installed at same NEVRA.
         for info in local_rpm_infos:
             if info['name'] not in actions_names:
-                # Package not in actions = already installed at same version
-                # Add as REINSTALL action
                 epoch = info.get('epoch', 0) or 0
                 evr = f"{epoch}:{info['version']}-{info['release']}" if epoch else f"{info['version']}-{info['release']}"
                 reinstall_action = PackageAction(
@@ -465,6 +475,35 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     solvable_id=resolver._localrpm_nevra_to_id.get(info['nevra']),
                 )
                 result.actions.append(reinstall_action)
+                actions_names.add(info['name'])
+
+        # b) Named packages already at latest — look up the media
+        #    candidate and add a REINSTALL action pointing at it.
+        for pkg_spec in resolved_packages:
+            pkg_name = _extract_pkg_name(pkg_spec)
+            if pkg_name in actions_names or pkg_name in local_names:
+                continue
+            wanted_arch = pick_arch_for_lookup(pkg_spec, target_arch_for_lookup)
+            pkg = db.get_package(pkg_name, arch=wanted_arch)
+            if not pkg:
+                # Nothing available in the media — nothing to reinstall.
+                continue
+            epoch = pkg.get('epoch', 0) or 0
+            evr = (f"{epoch}:{pkg['version']}-{pkg['release']}"
+                   if epoch else f"{pkg['version']}-{pkg['release']}")
+            reinstall_action = PackageAction(
+                action=TransactionType.REINSTALL,
+                name=pkg['name'],
+                evr=evr,
+                arch=pkg['arch'],
+                nevra=pkg['nevra'],
+                size=pkg.get('filesize', 0) or 0,
+                media_name=pkg.get('media_name', ''),
+                reason=InstallReason.EXPLICIT,
+                solvable_id=None,
+            )
+            result.actions.append(reinstall_action)
+            actions_names.add(pkg['name'])
 
     if not result.actions:
         # Distinguish "no-op" (already installed at latest) from "package
