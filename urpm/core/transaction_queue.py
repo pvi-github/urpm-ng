@@ -1664,6 +1664,16 @@ class TransactionQueue:
         if DEBUG_EXECINSTALL:
             _debug_write("[install] transaction ordered")
 
+        # Deep diagnostic (opt-in via ``URPM_DUP_DIAG=1``) : dump the
+        # ordered transaction so post-mortem tooling can tell whether
+        # rpm.ts marked implicit erase-old for each addInstall('u').
+        try:
+            from . import _dup_diag as _dupd
+            _dupd.dump_transaction_set(
+                "tx", "pre_run", ts)
+        except Exception:  # noqa: BLE001
+            pass
+
         if op.test:
             return True, len(rpm_paths), [], []
 
@@ -1948,9 +1958,30 @@ class TransactionQueue:
 
         # Track .rpmnew files created during this transaction
         rpmnew_before = _list_rpmnew_files(self.root or "/")
+        try:
+            from . import _dup_diag as _dupd
+            _dupd.snapshot_rpmdb("tx-pre-run")
+            _dupd.emit("tx", "ts_run_start",
+                       {"n_packages": total, "op_type": op.op_type.value})
+        except Exception:  # noqa: BLE001
+            pass
         problems = ts.run(callback, '')
         rpmnew_after = _list_rpmnew_files(self.root or "/")
         new_rpmnew_files = list(rpmnew_after - rpmnew_before)
+
+        try:
+            from . import _dup_diag as _dupd
+            _dupd.snapshot_rpmdb("tx-post-run")
+            _dupd.dump_ts_problems("tx", "post_run_problems", problems)
+            _dupd.emit("tx", "ts_run_end", {
+                "extraction_errors": list(extraction_errors),
+                "script_error_packages":
+                    sorted(self._script_error_packages),
+                "new_rpmnew_files": new_rpmnew_files,
+                "problems_count": len(problems) if problems else 0,
+            })
+        except Exception:  # noqa: BLE001
+            pass
 
         if DEBUG_EXECINSTALL:
             _debug_write(f"[install] ts.run() returned: problems={problems}")

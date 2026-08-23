@@ -120,6 +120,13 @@ def run_stage4(
         import urpm.core.distupgrade.stages_4_5 as _self
         marker_path = _self.POSTBOOT_MARKER_PATH
 
+    try:
+        from .. import _dup_diag as _dupd
+        _dupd.snapshot_rpmdb("stage4-begin")
+        _dupd.emit("stage4", "begin", {})
+    except Exception:  # noqa: BLE001
+        pass
+
     state = read_state(db) or {}
     version_from = state.get("version_from")
     version_to = state.get("version_to")
@@ -148,6 +155,23 @@ def run_stage4(
     # marker file alone signals « Stage 5 pending ».
     write_postboot_marker(postboot_scripts or [], path=marker_path)
     delete_state(db)
+
+    try:
+        from .. import _dup_diag as _dupd
+        _dupd.snapshot_rpmdb("stage4-end")
+        _dupd.emit("stage4", "end", {
+            "rpmnew_count": len(rpmnew_files),
+            "failed_scriptlets_count": len(failed_scriptlets),
+            "failed_scriptlets_sample": [
+                {"pkg": r.get("pkg_name"), "status": r.get("status")}
+                for r in failed_scriptlets[:20]
+            ],
+            "residuals_count": len(residuals),
+            "residuals_sample": residuals[:20],
+            "orphan_media_count": len(orphan_media),
+        })
+    except Exception:  # noqa: BLE001
+        pass
 
     return {
         "rpmnew_files": rpmnew_files,

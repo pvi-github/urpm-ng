@@ -223,6 +223,15 @@ def execvp_to_continue(*, auto: bool = False) -> None:
     argv = ["urpm", "distupgrade", "--continue"]
     if auto:
         argv.append("--yes")
+    try:
+        from .. import _dup_diag as _dupd
+        _dupd.snapshot_rpmdb("execvp-pre")
+        _dupd.dump_process_env("execvp", "pre_execvp")
+        _dupd.emit("execvp", "about_to_execvp", {
+            "target_argv": argv, "target_bin": "/usr/bin/urpm",
+        })
+    except Exception:  # noqa: BLE001
+        pass
     os.execvp("/usr/bin/urpm", argv)
     # If we get here, something is very wrong.
     raise Stage3Error("execvp to /usr/bin/urpm returned unexpectedly")
@@ -280,6 +289,20 @@ def _run_one_side(
     logger.info("Stage 3 Tx %s : begin_transaction id=%d, %d package(s)",
                 side.upper(), tx_id, len(ordered_paths))
 
+    try:
+        from .. import _dup_diag as _dupd
+        _dupd.snapshot_rpmdb(f"stage3-{side}-begin")
+        _dupd.emit(f"stage3-{side}", "begin", {
+            "side": side, "cmdline": cmdline,
+            "n_packages": len(ordered_paths),
+            "erase_names_count": len(erase_names or []),
+            "erase_names_sample": (erase_names or [])[:20],
+            "plan_sample": [str(p) for p in ordered_paths[:20]],
+            "plan_count": len(ordered_paths),
+        })
+    except Exception:  # noqa: BLE001
+        pass
+
     options = InstallOptions(
         verify_signatures=True,
         force=True,       # RPMPROB_FILTER_REPLACEPKG + REPLACENEWFILES + REPLACEOLDFILES
@@ -318,6 +341,20 @@ def _run_one_side(
         rpmnew_files=rpmnew_files,
     )
     ops.complete_transaction(tx_id)
+
+    try:
+        from .. import _dup_diag as _dupd
+        _dupd.snapshot_rpmdb(f"stage3-{side}-end")
+        _dupd.emit(f"stage3-{side}", "end", {
+            "side": side, "tx_id": tx_id,
+            "rpmnew_files_count": len(rpmnew_files),
+            "queue_success": getattr(queue_result, "success", None),
+            "queue_errors": [
+                str(e) for e in getattr(queue_result, "errors", None) or []
+            ],
+        })
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def run_stage3_tx_a(

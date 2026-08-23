@@ -1047,6 +1047,20 @@ def _cmd_run_stage3_tx_a_and_execvp(
             n_a=len(tx_a_plan), n_b=len(tx_b_plan),
             n_rm=len(remove_names))))
 
+    try:
+        from ...core import _dup_diag as _dupd
+        _dupd.emit("stage3-split", "plan_computed", {
+            "tx_a_count": len(tx_a_plan),
+            "tx_b_count": len(tx_b_plan),
+            "remove_count": len(remove_names),
+            "tx_a_plan": list(tx_a_plan),
+            "tx_b_plan": list(tx_b_plan),
+            "erase_names": list(remove_names),
+            "nevra_to_path_count": len(nevra_to_path),
+        })
+    except Exception:  # noqa: BLE001
+        pass
+
     # Persist BOTH plans + the NEVRA→path map into `.state` before
     # anything mutating runs.  This gives the post-execvp instance
     # (loaded on the target stack) a complete picture without having
@@ -1131,6 +1145,13 @@ def _cmd_continue_after_execvp(args, db) -> int:
         run_stage4,
     )
 
+    try:
+        from ...core import _dup_diag as _dupd
+        _dupd.dump_process_env("execvp", "post_execvp")
+        _dupd.snapshot_rpmdb("execvp-post")
+    except Exception:  # noqa: BLE001
+        pass
+
     state = read_state(db)
     if state is None:
         print(colors.error(_(
@@ -1142,6 +1163,19 @@ def _cmd_continue_after_execvp(args, db) -> int:
     version_from = state.get("version_from", "unknown")
     version_to = state.get("version_to", "unknown")
     erase_names = state.get("erase_names") or []
+
+    try:
+        from ...core import _dup_diag as _dupd
+        _dupd.emit("execvp", "state_loaded", {
+            "tx_b_plan_count": len(tx_b_plan),
+            "tx_b_plan_sample": tx_b_plan[:20],
+            "erase_names_count": len(erase_names),
+            "erase_names_sample": erase_names[:20],
+            "nevra_to_path_count": len(nevra_to_path),
+            "version_from": version_from, "version_to": version_to,
+        })
+    except Exception:  # noqa: BLE001
+        pass
 
     if not tx_b_plan and not erase_names:
         print(colors.info(_(
