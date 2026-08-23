@@ -226,3 +226,213 @@ class TestRunStage1:
         with pytest.raises(Stage1Error, match="no target-release media"):
             run_stage1(db, source_identity="10",
                        target=target, arch="x86_64")
+
+
+class TestChooseTargetUrlSegment:
+    """Pure-function tests for the url_version stale-pin rule
+    (SPEC_DISTUPGRADE §4.1 — papoteur beta case).
+
+    Regression coverage : a mga9 machine whose servers were
+    populated with ``url_version='9'`` at add time would build the
+    Stage 1 target catalogue URL under ``/9/`` (the source segment),
+    fetch the source catalogue by mistake, and end up with zero
+    target-release media in the pool.  ``choose_target_url_segment``
+    detects that shape and returns the target segment plus an
+    "update needed" flag so the caller refreshes the pin.
+    """
+
+    def test_null_falls_back_to_target(self):
+        from urpm.core.distupgrade.version import (
+            choose_target_url_segment,
+        )
+        assert choose_target_url_segment(None, "9", "10") == ("10", False)
+        assert choose_target_url_segment("", "9", "10") == ("10", False)
+
+    def test_stale_numeric_pin_refreshed(self):
+        """papoteur case : url_version='9' == source, target='10'."""
+        from urpm.core.distupgrade.version import (
+            choose_target_url_segment,
+        )
+        assert choose_target_url_segment("9", "9", "10") == ("10", True)
+
+    def test_cauldron_alias_preserved(self):
+        """Freeze case : mirror serves target under /cauldron/.
+
+        Non-numeric url_version is intentional per-server override,
+        preserved verbatim even when it matches source_identity.
+        """
+        from urpm.core.distupgrade.version import (
+            choose_target_url_segment,
+        )
+        assert choose_target_url_segment(
+            "cauldron", "cauldron", "11") == ("cauldron", False)
+        assert choose_target_url_segment(
+            "cauldron", "10", "11") == ("cauldron", False)
+
+    def test_mismatched_numeric_pin_preserved(self):
+        """Non-matching numeric pin is treated as intentional override."""
+        from urpm.core.distupgrade.version import (
+            choose_target_url_segment,
+        )
+        assert choose_target_url_segment(
+            "10", "9", "11") == ("10", False)
+
+
+class TestInsertTargetMediaUrlVersionRefresh:
+    """Integration : Stage 1's target-media insertion refreshes stale
+    url_version pins and journals the pre-image for ``--abort``.
+    """
+
+    def test_stale_pin_updates_row_and_journals_snapshot(
+            self, db, monkeypatch):
+        from urpm.core.distupgrade.stage1 import _insert_target_media
+
+        # Seed one official server with a stale url_version pin.
+        conn = db._get_connection()
+        conn.execute("""
+            INSERT INTO server
+              (name, protocol, host, base_path, url_version,
+               is_official, enabled)
+            VALUES (?, ?, ?, ?, ?, 1, 1)
+        """, ("test-mirror", "https", "mirror.example.org",
+              "/mageia/distrib", "9"))
+        conn.commit()
+
+        captured_urls = []
+
+        def _fake_upsert(db, url, mode, enabled_policy=None):
+            captured_urls.append(url)
+            r = MagicMock()
+            r.outcomes = []
+            r.server_was_created = False
+            return r
+
+        monkeypatch.setattr(
+            "urpm.core.media_pipeline.upsert_media_tree",
+            _fake_upsert,
+        )
+
+        undo = {
+            "modified_media": [],
+            "modified_servers": [],
+            "created_media_ids": [],
+            "created_server_ids": [],
+        }
+        target = ReleaseIdentity(identity="10", numeric="10")
+        created, failed = _insert_target_media(
+            db, target, "x86_64",
+            source_identity="9",
+            undo_journal=undo,
+        )
+
+        # URL built under the TARGET segment, not the stale '9'.
+        assert captured_urls == [
+            "https://mirror.example.org/mageia/distrib/10/x86_64/media/"]
+        # Row refreshed on the server.
+        row = conn.execute(
+            "SELECT url_version FROM server WHERE name=?",
+            ("test-mirror",)).fetchone()
+        assert row["url_version"] == "10"
+        # Pre-image journaled so --abort can restore.
+        assert len(undo["modified_servers"]) == 1
+        assert undo["modified_servers"][0]["url_version"] == "9"
+
+    def test_null_pin_does_not_journal(self, db, monkeypatch):
+        from urpm.core.distupgrade.stage1 import _insert_target_media
+
+        conn = db._get_connection()
+        conn.execute("""
+            INSERT INTO server
+              (name, protocol, host, base_path, url_version,
+               is_official, enabled)
+            VALUES (?, ?, ?, ?, NULL, 1, 1)
+        """, ("test-mirror", "https", "mirror.example.org",
+              "/mageia/distrib"))
+        conn.commit()
+
+        captured_urls = []
+
+        def _fake_upsert(db, url, mode, enabled_policy=None):
+            captured_urls.append(url)
+            r = MagicMock()
+            r.outcomes = []
+            r.server_was_created = False
+            return r
+
+        monkeypatch.setattr(
+            "urpm.core.media_pipeline.upsert_media_tree",
+            _fake_upsert,
+        )
+
+        undo = {
+            "modified_media": [],
+            "modified_servers": [],
+            "created_media_ids": [],
+            "created_server_ids": [],
+        }
+        target = ReleaseIdentity(identity="10", numeric="10")
+        _insert_target_media(
+            db, target, "x86_64",
+            source_identity="9",
+            undo_journal=undo,
+        )
+
+        # URL uses target segment via the fallback.
+        assert captured_urls == [
+            "https://mirror.example.org/mageia/distrib/10/x86_64/media/"]
+        # Row still NULL, no journal entry.
+        row = conn.execute(
+            "SELECT url_version FROM server WHERE name=?",
+            ("test-mirror",)).fetchone()
+        assert row["url_version"] is None
+        assert undo["modified_servers"] == []
+
+    def test_cauldron_alias_preserved_at_stage1(self, db, monkeypatch):
+        from urpm.core.distupgrade.stage1 import _insert_target_media
+
+        conn = db._get_connection()
+        conn.execute("""
+            INSERT INTO server
+              (name, protocol, host, base_path, url_version,
+               is_official, enabled)
+            VALUES (?, ?, ?, ?, 'cauldron', 1, 1)
+        """, ("test-mirror", "https", "mirror.example.org",
+              "/mageia/distrib"))
+        conn.commit()
+
+        captured_urls = []
+
+        def _fake_upsert(db, url, mode, enabled_policy=None):
+            captured_urls.append(url)
+            r = MagicMock()
+            r.outcomes = []
+            r.server_was_created = False
+            return r
+
+        monkeypatch.setattr(
+            "urpm.core.media_pipeline.upsert_media_tree",
+            _fake_upsert,
+        )
+
+        undo = {
+            "modified_media": [],
+            "modified_servers": [],
+            "created_media_ids": [],
+            "created_server_ids": [],
+        }
+        target = ReleaseIdentity(identity="11", numeric="11")
+        _insert_target_media(
+            db, target, "x86_64",
+            source_identity="cauldron",
+            undo_journal=undo,
+        )
+
+        # URL keeps the alias segment.
+        assert captured_urls == [
+            "https://mirror.example.org/mageia/distrib/cauldron/x86_64/media/"]
+        # Row untouched, no journal entry.
+        row = conn.execute(
+            "SELECT url_version FROM server WHERE name=?",
+            ("test-mirror",)).fetchone()
+        assert row["url_version"] == "cauldron"
+        assert undo["modified_servers"] == []

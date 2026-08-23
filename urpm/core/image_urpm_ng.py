@@ -488,8 +488,16 @@ def _detect_host_source(
     # known (e.g. ``cauldron`` when the mirror was configured for a
     # release that is still baking in cauldron).  Fallback to
     # ``target_release`` handles pre-v32 rows and custom servers
-    # with no detected Mageia layout.
-    url_segment = srv.get("url_version") or target_release
+    # with no detected Mageia layout.  See
+    # :func:`choose_target_url_segment` for the 3-case rule that
+    # avoids using a stale numeric pin (mga10 host building a mga9
+    # image would otherwise fetch under ``/10/``).
+    from .distupgrade.version import choose_target_url_segment
+    from .config import get_system_version
+    host_release = get_system_version() or target_release
+    url_segment, _ = choose_target_url_segment(
+        srv.get("url_version"), host_release, target_release,
+    )
     media = dict(media)
     media["discover_url"] = (
         f"{protocol}://{host}{base_path}/{url_segment}/{target_arch}/media/"

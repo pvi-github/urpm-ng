@@ -187,7 +187,8 @@ def _rollback_stage1(db: 'PackageDatabase') -> tuple:
        via the schema's ``ON DELETE CASCADE``.
     2. **Restore every row Stage 1 modified** — ``modified_media``
        snapshots carry the pre-mutation ``(enabled, disabled_by,
-       name)`` tuple, restored verbatim.
+       name)`` tuple, restored verbatim.  ``modified_servers``
+       snapshots carry the pre-refresh ``url_version`` value.
 
     Fallback for state files without an undo journal (pre-v0.9 stub
     attempts) : find rows tagged ``distupgrade`` /
@@ -226,6 +227,14 @@ def _rollback_stage1(db: 'PackageDatabase') -> tuple:
                     int(snap.get("enabled") or 0),
                     snap.get("disabled_by"),
                     snap.get("name"),
+                    int(snap["id"]),
+                ))
+                n_restored += cur.rowcount
+            for snap in undo.get("modified_servers") or []:
+                cur = conn.execute("""
+                    UPDATE server SET url_version = ? WHERE id = ?
+                """, (
+                    snap.get("url_version"),
                     int(snap["id"]),
                 ))
                 n_restored += cur.rowcount
@@ -584,7 +593,8 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
     # reachable official mirror.
     auto = getattr(args, "auto", False)
     maturity = probe_target_maturity(
-        db, _target_early, _platform.machine())
+        db, _target_early, _platform.machine(),
+        source_identity=_current)
     if not auto:
         if maturity.probe_error:
             print(colors.warning(_(

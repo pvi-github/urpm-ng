@@ -88,6 +88,8 @@ def _stripped_name(current: str) -> str:
 # Media columns Stage 1 mutates and ``--abort`` must restore verbatim.
 _UNDO_TRACKED_COLS = ("enabled", "disabled_by", "name")
 
+_SERVER_UNDO_TRACKED_COLS = ("url_version",)
+
 
 def _snapshot_media_row(row) -> dict:
     """Capture the pre-mutation state of a media row for ``--abort``.
@@ -99,6 +101,17 @@ def _snapshot_media_row(row) -> dict:
     """
     d = dict(row)
     return {"id": d["id"], **{c: d.get(c) for c in _UNDO_TRACKED_COLS}}
+
+
+def _snapshot_server_row(row) -> dict:
+    """Capture the pre-mutation state of a server row for ``--abort``.
+
+    Currently only ``url_version`` is tracked — the sole server-side
+    mutation Stage 1 performs (stale-pin refresh in
+    :func:`_insert_target_media`).  ``--abort`` restores it verbatim.
+    """
+    d = dict(row) if not isinstance(row, dict) else row
+    return {"id": d["id"], **{c: d.get(c) for c in _SERVER_UNDO_TRACKED_COLS}}
 
 
 def _try_transpose_string(s: str, src: str, tgt: str) -> Optional[str]:
@@ -465,6 +478,7 @@ def _insert_target_media(db: "PackageDatabase",
                          target: "ReleaseIdentity",
                          arch: str,
                          *,
+                         source_identity: str,
                          source_enabled_short_names: set = None,
                          undo_journal: dict = None,
                          ) -> Tuple[List[str], List[str]]:
@@ -487,12 +501,14 @@ def _insert_target_media(db: "PackageDatabase",
     """
     from ..config import build_server_url
     from ..media_pipeline import upsert_media_tree, MediaTreeError
+    from .version import choose_target_url_segment
 
     identity_for_url = (
         target.identity if target.numeric is None
         else target.numeric  # cauldron:11 → URL uses 11 unless server carries a url_version override
     )
-    # Prefer the server's own url_version if set (SPEC v0.8.7 rules).
+    # url_version pin handling : see :func:`choose_target_url_segment` docstring
+    # for the 3-case decision (NULL / stale source-identity / alias).
 
     conn = db._get_connection()
     servers = conn.execute("""
@@ -521,8 +537,24 @@ def _insert_target_media(db: "PackageDatabase",
     for srv in servers:
         srv_dict = dict(srv)
         base_url = build_server_url(srv_dict)
-        # Server-specific url_version wins for the URL segment
-        url_seg = srv_dict.get("url_version") or target.identity
+        url_seg, pin_needs_update = choose_target_url_segment(
+            srv_dict.get("url_version"), source_identity,
+            target.identity,
+        )
+        # Stale-pin refresh : snapshot pre-image + UPDATE row so the
+        # per-server pin tracks the new current release post-Stage 1.
+        # Skipped when no undo_journal is provided (test-only path).
+        if pin_needs_update:
+            if undo_journal is not None:
+                undo_journal["modified_servers"].append(
+                    _snapshot_server_row(srv_dict))
+            with db._lock:
+                conn.execute(
+                    "UPDATE server SET url_version=? WHERE id=?",
+                    (target.identity, srv_dict["id"]),
+                )
+                conn.commit()
+            srv_dict["url_version"] = target.identity
         # Target arch/version tree URL
         catalogue_url = (
             f"{base_url.rstrip('/')}/{url_seg}/{arch}/media/"
@@ -631,6 +663,7 @@ def run_stage1(
     # ``urpm distupgrade --abort`` to reverse every mutation verbatim.
     undo_journal = {
         "modified_media": [],       # snapshots for restore
+        "modified_servers": [],     # snapshots for restore (url_version)
         "created_media_ids": [],    # DELETE these
         "created_server_ids": [],   # DELETE these (cascades)
     }
@@ -654,6 +687,7 @@ def run_stage1(
 
     created_urls, failed_servers = _insert_target_media(
         db, target, arch,
+        source_identity=source_identity,
         source_enabled_short_names=source_enabled,
         undo_journal=undo_journal,
     )

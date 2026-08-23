@@ -45,6 +45,73 @@ class VersionDetectionError(Exception):
     """No target release could be determined."""
 
 
+def choose_target_url_segment(
+    server_url_version: Optional[str],
+    source_identity: str,
+    target_identity: str,
+) -> "tuple[str, bool]":
+    """Decide the URL segment to use for a target-release catalogue.
+
+    ``server.url_version`` is a per-server override describing the
+    URL segment that mirror exposes for the release the machine
+    currently tracks (e.g. ``'cauldron'`` when the mirror serves
+    release 11 under ``/cauldron/`` during the pre-GA freeze).
+
+    In a stable, single-release lifetime the field is either
+    ``NULL`` (never populated) or captures the current release
+    identity extracted from the URL at server-add time.  Neither
+    case creates a semantic issue for install / upgrade — the
+    fallback ``url_version or identity`` returns the correct
+    segment for the machine's current release.
+
+    A distupgrade N → N+1 crosses that boundary.  The segment
+    stored on the server row (``'9'`` on a mga9 machine) becomes a
+    stale pin the moment we start building URLs for the target
+    release : without this helper the caller would fetch the
+    ``.../9/x86_64/media/`` catalogue and see the SOURCE release
+    tree — no target packages ever reach the pool, plan comes back
+    empty or ``0-install/N-erase`` (papoteur beta case).
+
+    The 3-way decision :
+
+    - ``server_url_version`` **empty** (``None`` or ``""``) →
+      ``(target_identity, False)`` : no pin, no update needed.
+    - ``server_url_version`` **numeric and equal to
+      ``source_identity``** → stale pin, use ``(target_identity,
+      True)`` : caller must snapshot + UPDATE the row so the pin
+      tracks the new current release post-distupgrade.
+    - ``server_url_version`` **anything else** (a non-numeric alias
+      like ``'cauldron'``, or a numeric value not matching the
+      source) → ``(server_url_version, False)`` : intentional
+      per-server override for the target release, preserved
+      verbatim.  Notably the freeze case where a mirror keeps
+      serving release N+1 under ``/cauldron/`` even after GA.
+
+    Args:
+        server_url_version: Current value of ``server.url_version``
+            (may be ``None``).
+        source_identity: The release identity the machine is
+            migrating FROM (e.g. ``'9'``).  Used to detect the
+            stale-pin case.
+        target_identity: The release identity the machine is
+            migrating TO (e.g. ``'10'``).  Used both as the default
+            segment and as the value to write on stale-pin update.
+
+    Returns:
+        ``(url_segment, pin_needs_update)``.  Callers building a
+        catalogue URL use ``url_segment``.  When
+        ``pin_needs_update`` is True, callers in a mutating context
+        (Stage 1 with an undo journal) must snapshot the row and
+        ``UPDATE server SET url_version = target_identity``.
+    """
+    if not server_url_version:
+        return target_identity, False
+    if (server_url_version == source_identity
+            and server_url_version.isdigit()):
+        return target_identity, True
+    return server_url_version, False
+
+
 def read_current_release() -> Optional[str]:
     """Return the current release numeric identity or ``None``.
 
@@ -170,6 +237,8 @@ def probe_target_maturity(
         db,
         target: ReleaseIdentity,
         arch: str,
+        *,
+        source_identity: Optional[str] = None,
 ) -> TargetMaturity:
     """Fetch the target ``media.cfg`` and report its release stage.
 
@@ -207,7 +276,12 @@ def probe_target_maturity(
     for srv in servers:
         srv_dict = dict(srv)
         base_url = build_server_url(srv_dict)
-        url_seg = srv_dict.get("url_version") or identity_for_url
+        # Read-only probe : ignore the `pin_needs_update` flag, the
+        # DB update happens at Stage 1 in the mutating context.
+        url_seg, _ = choose_target_url_segment(
+            srv_dict.get("url_version"), source_identity,
+            identity_for_url,
+        )
         catalogue_url = f"{base_url.rstrip('/')}/{url_seg}/{arch}/media/"
         try:
             raw = fetch_media_cfg(catalogue_url)
