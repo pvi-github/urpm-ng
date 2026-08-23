@@ -1168,12 +1168,12 @@ def _cmd_continue_after_execvp(args, db) -> int:
         except Stage3Error as exc:
             tx_b_progress.cleanup()
             # Erase the widget's 3-line region (header + bar + sub) so
-        # the next print doesn't bleed into leftover ANSI-drawn bars.
-        import sys
-        if sys.stdout.isatty():
-            print("\r\033[2A\033[J", end='', flush=True)
-        else:
-            print()
+            # the next print doesn't bleed into leftover ANSI-drawn bars.
+            import sys
+            if sys.stdout.isatty():
+                print("\r\033[2A\033[J", end='', flush=True)
+            else:
+                print()
             print(colors.error(_(
                 "Installation of remaining components failed : "
                 "{err}").format(err=exc)))
