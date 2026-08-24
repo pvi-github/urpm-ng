@@ -396,6 +396,168 @@ def run_stage3_tx_a(
     smoke()
 
 
+def _canonical_nevra(nevra: str) -> Optional[str]:
+    """Normalise ``name-EPOCH:version-release.arch`` for comparison.
+
+    Handles both epoch-prefixed (``menu-messages-1:1-8.mga10.noarch``)
+    and epoch-less (``menu-messages-1-8.mga10.noarch``) inputs.
+    Returns ``name|epoch|version|release|arch`` — a tuple joined by
+    ``|`` so it can be used as a set key without ambiguity.  Missing
+    epoch normalises to ``0`` per RPM convention.
+
+    Returns ``None`` for strings that don't match the shape at all —
+    caller can treat them as opaque and compare verbatim.
+    """
+    import re
+    # Split off trailing .arch
+    m = re.match(r"^(.+)\.([^.]+)$", nevra)
+    if not m:
+        return None
+    body, arch = m.group(1), m.group(2)
+    # Split off release (last -N segment before arch)
+    m = re.match(r"^(.+)-([^-]+)$", body)
+    if not m:
+        return None
+    body, release = m.group(1), m.group(2)
+    # Split off version (last -N segment, may have epoch prefix)
+    m = re.match(r"^(.+)-(?:(\d+):)?([^-]+)$", body)
+    if not m:
+        return None
+    name, epoch, version = m.group(1), m.group(2) or "0", m.group(3)
+    return f"{name}|{epoch}|{version}|{release}|{arch}"
+
+
+def _installed_nevras_canonical(root: str = "/") -> set:
+    """Return the set of installed package NEVRAs in canonical form."""
+    try:
+        import rpm
+        ts_probe = rpm.TransactionSet(root)
+        ts_probe.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
+        seen = set()
+        for h in ts_probe.dbMatch():
+            nevra_str = (
+                f"{h['name']}-{h['epoch'] or 0}:{h['version']}-"
+                f"{h['release']}.{h['arch'] or 'noarch'}"
+            )
+            canon = _canonical_nevra(nevra_str)
+            if canon:
+                seen.add(canon)
+        return seen
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _retry_missing_installs(
+    db: "PackageDatabase",
+    *,
+    planned_nevras: List[str],
+    rpm_paths_by_nevra: dict,
+    version_from: str,
+    version_to: str,
+) -> dict:
+    """One-shot retry pass for packages Tx B silently failed to install.
+
+    After Tx B's ``ts.run()`` returns without raising, rpm's callback
+    machinery has fired INST_STOP for every package — including those
+    whose cpio extraction failed with "Directory not empty",
+    "No data available", or "No such file or directory".  These
+    silent failures never reach the ``problems`` list ``ts.run()``
+    returns, so ``_execute_install`` counts them as success.
+
+    Compare the planned Tx B NEVRAs against the current rpmdb : any
+    planned NEVRA absent from the rpmdb after commit is a silent
+    failure.  Rebuild a mini-plan from ``rpm_paths_by_nevra``, run
+    one ``execute_install`` on it with the same ``force=True +
+    nodeps=True`` semantics as Tx B, and report what recovered.
+
+    The retry is one-shot : if a package fails twice, it stays failed
+    (avoids infinite loops on genuine incompatibilities).  Callers
+    surface the still-missing set to the user in Stage 4.
+
+    Returns ``{missing_before_retry, retry_recovered, still_missing}``
+    where each value is a list of NEVRA strings.
+    """
+    from ..operations import InstallOptions, PackageOperations
+
+    installed = _installed_nevras_canonical()
+    if not installed:
+        # rpm probe failed — refuse to guess.  Skip retry.
+        return {
+            "missing_before_retry": [],
+            "retry_recovered": [],
+            "still_missing": [],
+        }
+
+    missing_paths: list = []
+    missing_nevras: list = []
+    for nevra in planned_nevras:
+        canon = _canonical_nevra(nevra)
+        if canon is None or canon in installed:
+            continue
+        rpm_path = (rpm_paths_by_nevra.get(nevra)
+                    or rpm_paths_by_nevra.get(_strip_epoch(nevra)))
+        if rpm_path is None:
+            # Downloaded artefact missing — nothing to retry with.
+            missing_nevras.append(nevra)
+            continue
+        missing_paths.append(str(rpm_path))
+        missing_nevras.append(nevra)
+
+    if not missing_paths:
+        return {
+            "missing_before_retry": missing_nevras,
+            "retry_recovered": [],
+            "still_missing": missing_nevras,
+        }
+
+    logger.info(
+        "Stage 3 Tx B retry : %d package(s) missing from rpmdb, "
+        "attempting one retry pass", len(missing_paths))
+
+    ops = PackageOperations(db)
+    tx_id = ops.begin_transaction(
+        'distupgrade',
+        f"urpm distupgrade tx-b retry {version_from}->{version_to}",
+        [])
+    options = InstallOptions(
+        verify_signatures=True, force=True, nodeps=True,
+    )
+    try:
+        queue_result = ops.execute_install(
+            rpm_paths=missing_paths, options=options,
+            progress_callback=None, full_sync=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        ops.abort_transaction(tx_id)
+        logger.warning("Tx B retry raised : %s", exc)
+        return {
+            "missing_before_retry": missing_nevras,
+            "retry_recovered": [],
+            "still_missing": missing_nevras,
+        }
+
+    if queue_result is None or not getattr(queue_result, "success", False):
+        ops.abort_transaction(tx_id)
+    else:
+        ops.record_scriptlet_output(tx_id, queue_result)
+        ops.complete_transaction(tx_id)
+
+    # Re-probe rpmdb to see what actually recovered.
+    installed_after = _installed_nevras_canonical()
+    recovered, still_missing = [], []
+    for nevra in missing_nevras:
+        canon = _canonical_nevra(nevra)
+        if canon is not None and canon in installed_after:
+            recovered.append(nevra)
+        else:
+            still_missing.append(nevra)
+    return {
+        "missing_before_retry": missing_nevras,
+        "retry_recovered": recovered,
+        "still_missing": still_missing,
+    }
+
+
 def run_stage3_tx_b(
     db: "PackageDatabase",
     *,
@@ -431,5 +593,28 @@ def run_stage3_tx_b(
         erase_names=erase_names,
         progress_callback=progress_callback,
     )
+
+    # Silent-fail retry pass : Tx B fires ~all callbacks (INST_STOP,
+    # SCRIPT_STOP) even when the cpio extraction failed for a package
+    # -- "Directory not empty" / "No data available" / "No such file
+    # or directory" errors are printed to stderr but don't propagate
+    # as rpm problems.  A single retry of each missing package, once
+    # the filesystem state has settled (mga N counterparts of
+    # successful installs are gone, freeing conflicting file paths),
+    # picks up most of these silent failures.
+    retry_result = _retry_missing_installs(
+        db, planned_nevras=tx_b_plan,
+        rpm_paths_by_nevra=rpm_paths_by_nevra,
+        version_from=version_from,
+        version_to=version_to,
+    )
+    if retry_result["missing_before_retry"]:
+        logger.info(
+            "Stage 3 Tx B : %d package(s) missing after commit, "
+            "retry recovered %d, %d still missing",
+            len(retry_result["missing_before_retry"]),
+            len(retry_result["retry_recovered"]),
+            len(retry_result["still_missing"]),
+        )
 
     bump_stage("transactions_done", db)

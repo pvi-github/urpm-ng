@@ -230,12 +230,22 @@ class TestRunStage3TxA:
 
 
 class TestRunStage3TxB:
-    def test_happy_path_persists_state(self, state_db):
+    def test_happy_path_persists_state(self, state_db, monkeypatch):
         from urpm.core.distupgrade.state import read_state
+        from urpm.core.distupgrade import stage3
+
         ops = MagicMock()
         ops.begin_transaction.return_value = 200
         ops.execute_install.return_value = _fake_queue_result(
             rpmnew=["/etc/bar.rpmnew"])
+        # Retry pass probes the rpmdb : pretend the planned NEVRA is
+        # already installed so the retry short-circuits.  Testing the
+        # retry path itself lives in TestRetryMissingInstalls below.
+        canon = stage3._canonical_nevra("bar-2-1.mga11.x86_64")
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda root="/": {canon},
+        )
         with patch("urpm.core.operations.PackageOperations",
                    return_value=ops):
             run_stage3_tx_b(
@@ -253,3 +263,119 @@ class TestRunStage3TxB:
         assert state["stage"] == "transactions_done"
         assert state["tx_b_transaction_id"] == 200
         assert state["rpmnew_files_tx_b"] == ["/etc/bar.rpmnew"]
+
+
+class TestCanonicalNevra:
+    """Canonicalisation used by the Tx B retry pass to compare
+    plan NEVRAs against rpmdb rows regardless of epoch presence."""
+
+    def test_with_epoch(self):
+        from urpm.core.distupgrade.stage3 import _canonical_nevra
+        assert _canonical_nevra(
+            "menu-messages-1:1-8.mga10.noarch") == \
+            "menu-messages|1|1|8.mga10|noarch"
+
+    def test_without_epoch_normalises_to_zero(self):
+        from urpm.core.distupgrade.stage3 import _canonical_nevra
+        assert _canonical_nevra(
+            "menu-messages-1-8.mga10.noarch") == \
+            "menu-messages|0|1|8.mga10|noarch"
+
+    def test_epoch_vs_no_epoch_match_when_epoch_zero(self):
+        from urpm.core.distupgrade.stage3 import _canonical_nevra
+        a = _canonical_nevra("foo-0:2.7.0-1.mga10.x86_64")
+        b = _canonical_nevra("foo-2.7.0-1.mga10.x86_64")
+        assert a == b
+
+    def test_malformed_returns_none(self):
+        from urpm.core.distupgrade.stage3 import _canonical_nevra
+        assert _canonical_nevra("not-a-nevra") is None
+
+
+class TestRetryMissingInstalls:
+    """Retry pass fires exactly when the rpmdb probe reveals that
+    packages from ``tx_b_plan`` are absent post-commit."""
+
+    def test_no_missing_no_retry(self, state_db, monkeypatch):
+        from urpm.core.distupgrade import stage3
+        ops = MagicMock()
+        # All planned NEVRAs already in rpmdb → nothing to retry.
+        canon = stage3._canonical_nevra("foo-1-1.mga11.x86_64")
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda root="/": {canon},
+        )
+        with patch("urpm.core.operations.PackageOperations",
+                   return_value=ops):
+            result = stage3._retry_missing_installs(
+                state_db,
+                planned_nevras=["foo-1-1.mga11.x86_64"],
+                rpm_paths_by_nevra={
+                    "foo-1-1.mga11.x86_64": "/cache/foo.rpm"},
+                version_from="10", version_to="11",
+            )
+        assert result["missing_before_retry"] == []
+        assert result["retry_recovered"] == []
+        ops.begin_transaction.assert_not_called()
+
+    def test_missing_triggers_retry_and_recovers(self, state_db, monkeypatch):
+        from urpm.core.distupgrade import stage3
+
+        planned = ["foo-1-1.mga11.x86_64", "bar-2-1.mga11.x86_64"]
+        # Before retry : bar is installed, foo is missing.  After
+        # retry : both are installed (successful recovery).
+        canon_foo = stage3._canonical_nevra("foo-1-1.mga11.x86_64")
+        canon_bar = stage3._canonical_nevra("bar-2-1.mga11.x86_64")
+        probe_calls = [0]
+
+        def _probe(root="/"):
+            probe_calls[0] += 1
+            if probe_calls[0] == 1:
+                return {canon_bar}
+            return {canon_foo, canon_bar}
+
+        monkeypatch.setattr(stage3, "_installed_nevras_canonical", _probe)
+
+        ops = MagicMock()
+        ops.begin_transaction.return_value = 999
+        ops.execute_install.return_value = _fake_queue_result(rpmnew=[])
+        with patch("urpm.core.operations.PackageOperations",
+                   return_value=ops):
+            result = stage3._retry_missing_installs(
+                state_db,
+                planned_nevras=planned,
+                rpm_paths_by_nevra={
+                    "foo-1-1.mga11.x86_64": "/cache/foo.rpm",
+                    "bar-2-1.mga11.x86_64": "/cache/bar.rpm",
+                },
+                version_from="10", version_to="11",
+            )
+        assert result["missing_before_retry"] == ["foo-1-1.mga11.x86_64"]
+        assert result["retry_recovered"] == ["foo-1-1.mga11.x86_64"]
+        assert result["still_missing"] == []
+        ops.begin_transaction.assert_called_once()
+        ops.execute_install.assert_called_once()
+        # Only the missing package should be in the retry batch.
+        args = ops.execute_install.call_args
+        assert args.kwargs["rpm_paths"] == ["/cache/foo.rpm"]
+
+    def test_missing_but_no_rpm_path_stays_missing(self, state_db, monkeypatch):
+        from urpm.core.distupgrade import stage3
+        # Probe reports SOME installed pkg (so probe worked) but our
+        # planned foo is absent.  No path for foo in nevra_to_path so
+        # nothing to retry with -- it stays in still_missing.
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda root="/": {stage3._canonical_nevra("other-1-1.mga11.x86_64")},
+        )
+        ops = MagicMock()
+        with patch("urpm.core.operations.PackageOperations",
+                   return_value=ops):
+            result = stage3._retry_missing_installs(
+                state_db,
+                planned_nevras=["foo-1-1.mga11.x86_64"],
+                rpm_paths_by_nevra={},  # no path known
+                version_from="10", version_to="11",
+            )
+        assert "foo-1-1.mga11.x86_64" in result["still_missing"]
+        ops.begin_transaction.assert_not_called()
