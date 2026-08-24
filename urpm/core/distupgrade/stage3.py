@@ -510,6 +510,36 @@ def _retry_missing_installs(
             "still_missing": missing_nevras,
         }
 
+    # Free the .rpm cache of packages already in the rpmdb before the
+    # retry — those payloads were consumed by Tx B, we don't need them
+    # again.  On papoteur run 9 the disk was 100 % full during Tx B ;
+    # freeing ~500 MB-1.5 GB of already-installed .rpm files here gives
+    # the retry enough room to succeed on the big packages (R-base,
+    # gimp, openblas, kernel-firmware-nonfree) that hit "No space left
+    # on device" the first time.
+    freed_bytes = 0
+    freed_files = 0
+    import os as _os
+    for nevra, rpm_path in rpm_paths_by_nevra.items():
+        canon = _canonical_nevra(nevra)
+        if canon is None or canon not in installed:
+            continue
+        try:
+            st = _os.stat(rpm_path)
+            _os.unlink(rpm_path)
+            freed_bytes += st.st_size
+            freed_files += 1
+        except FileNotFoundError:
+            pass
+        except OSError as exc:  # noqa: BLE001
+            logger.debug("cache purge : cannot unlink %s : %s",
+                         rpm_path, exc)
+    if freed_files:
+        logger.info(
+            "Stage 3 Tx B retry : purged %d already-installed .rpm "
+            "from cache (%.1f MB freed) before retry",
+            freed_files, freed_bytes / (1024 * 1024))
+
     logger.info(
         "Stage 3 Tx B retry : %d package(s) missing from rpmdb, "
         "attempting one retry pass", len(missing_paths))
