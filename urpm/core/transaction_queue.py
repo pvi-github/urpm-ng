@@ -1702,6 +1702,25 @@ class TransactionQueue:
         total = len(rpm_paths)
         packages_done = [0]       # Unique packages with extraction complete
         seen_paths = set()        # Paths already counted (dedup multi-installed)
+        # Diagnostic : capture t0 per active scriptlet so SCRIPT_STOP can
+        # emit its duration.  Key = ``(script_name, script_type)`` so two
+        # scriptlets on the same package (e.g. %post + %posttrans) don't
+        # collide.
+        script_timings: dict = {}
+        # Diagnostic : track per-package callback events so post-run we
+        # can tell which packages rpm silently skipped (INST_START never
+        # fired, or fired without matching INST_STOP).  Keys are the
+        # ``key`` argument the callback receives (the rpm path from
+        # ``addInstall``).
+        pkg_callback_seen: dict = {
+            "inst_start": set(),
+            "inst_stop": set(),
+            "verify_start": set(),
+            "verify_stop": set(),
+            "cpio_error": set(),
+            "inst_open": set(),
+            "inst_close": set(),
+        }
         # CPIO extraction failures do NOT show up in the ``problems`` list
         # returned by ts.run() — they only surface here via callback.  The
         # list tracks *which* packages failed so the returned error is
@@ -1752,6 +1771,20 @@ class TransactionQueue:
                 if _attr.startswith('RPMCALLBACK_'):
                     _CB_NAMES[getattr(rpm, _attr)] = _attr[12:]
 
+        # Diagnostic : map callback constant -> the pkg_callback_seen key
+        # to bump when that constant fires.  Kept flat so the lookup in
+        # the callback stays a single ``dict.get`` — no per-call cost
+        # beyond ``dict.get`` + ``set.add``.
+        _diag_cb_map = {
+            rpm.RPMCALLBACK_INST_START: "inst_start",
+            rpm.RPMCALLBACK_INST_STOP: "inst_stop",
+            rpm.RPMCALLBACK_VERIFY_START: "verify_start",
+            rpm.RPMCALLBACK_VERIFY_STOP: "verify_stop",
+            rpm.RPMCALLBACK_CPIO_ERROR: "cpio_error",
+            rpm.RPMCALLBACK_INST_OPEN_FILE: "inst_open",
+            rpm.RPMCALLBACK_INST_CLOSE_FILE: "inst_close",
+        }
+
         def callback(reason, amount, total_pkg, key, client_data):
             # ── Debug logging (--debug tsrun) ──
             if DEBUG_TSRUN and reason != rpm.RPMCALLBACK_INST_PROGRESS:
@@ -1762,6 +1795,10 @@ class TransactionQueue:
                     f"key={pname} in_verify={in_verify[0]} "
                     f"done={packages_done[0]} total={total}"
                 )
+            # ── Diag : record per-package callback fingerprint ──
+            _diag_key_slot = _diag_cb_map.get(reason)
+            if _diag_key_slot is not None and key:
+                pkg_callback_seen[_diag_key_slot].add(str(key))
 
             # ── VERIFY phase: header signature checks ──
             if reason == rpm.RPMCALLBACK_VERIFY_START:
@@ -1916,6 +1953,12 @@ class TransactionQueue:
                                current=packages_done[0], total=total,
                                phase='script', script=script_name,
                                script_type=int(amount or 0))
+                # Diag : timestamp when this scriptlet starts.
+                try:
+                    import time as _t
+                    script_timings[(script_name, int(amount or 0))] = _t.monotonic()
+                except Exception:  # noqa: BLE001
+                    pass
                 return
 
             if reason == rpm.RPMCALLBACK_SCRIPT_STOP:
@@ -1924,12 +1967,38 @@ class TransactionQueue:
                                current=packages_done[0], total=total,
                                phase='script_done', script=script_name,
                                script_type=int(amount or 0))
+                # Diag : emit duration.
+                try:
+                    import time as _t
+                    from . import _dup_diag as _dupd
+                    key_t = (script_name, int(amount or 0))
+                    t0 = script_timings.pop(key_t, None)
+                    if t0 is not None and _dupd.is_enabled():
+                        _dupd.emit("tx-scripts", "script_done", {
+                            "pkg": script_name,
+                            "script_type": int(amount or 0),
+                            "duration_s": round(_t.monotonic() - t0, 3),
+                            "current": packages_done[0],
+                            "total": total,
+                        })
+                except Exception:  # noqa: BLE001
+                    pass
                 return
 
             if reason == rpm.RPMCALLBACK_SCRIPT_ERROR:
                 script_name = _clean_script_key(key)
                 _log_background(f"Scriptlet error: {script_name}")
                 self._script_error_packages.add(script_name)
+                try:
+                    from . import _dup_diag as _dupd
+                    _dupd.emit("tx-scripts", "script_error", {
+                        "pkg": script_name,
+                        "script_type": int(amount or 0),
+                        "current": packages_done[0],
+                        "total": total,
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
                 return
 
         # Set problem filters
@@ -1958,11 +2027,13 @@ class TransactionQueue:
 
         # Track .rpmnew files created during this transaction
         rpmnew_before = _list_rpmnew_files(self.root or "/")
+        _sampler = None
         try:
             from . import _dup_diag as _dupd
             _dupd.snapshot_rpmdb("tx-pre-run")
             _dupd.emit("tx", "ts_run_start",
                        {"n_packages": total, "op_type": op.op_type.value})
+            _sampler = _dupd.MetricsSampler("tx", interval_s=10.0).start()
         except Exception:  # noqa: BLE001
             pass
         problems = ts.run(callback, '')
@@ -1970,15 +2041,38 @@ class TransactionQueue:
         new_rpmnew_files = list(rpmnew_after - rpmnew_before)
 
         try:
+            if _sampler is not None:
+                _sampler.stop()
             from . import _dup_diag as _dupd
             _dupd.snapshot_rpmdb("tx-post-run")
             _dupd.dump_ts_problems("tx", "post_run_problems", problems)
+            planned_set = {str(p) for p in rpm_paths}
+            inst_started = pkg_callback_seen["inst_start"]
+            inst_stopped = pkg_callback_seen["inst_stop"]
+            skipped_never_started = sorted(planned_set - inst_started)
+            skipped_no_stop = sorted(inst_started - inst_stopped)
             _dupd.emit("tx", "ts_run_end", {
                 "extraction_errors": list(extraction_errors),
                 "script_error_packages":
                     sorted(self._script_error_packages),
                 "new_rpmnew_files": new_rpmnew_files,
                 "problems_count": len(problems) if problems else 0,
+                "pending_scripts_at_end": [
+                    {"pkg": k[0], "script_type": k[1]}
+                    for k in script_timings
+                ],
+                "planned_count": len(planned_set),
+                "inst_start_count": len(inst_started),
+                "inst_stop_count": len(inst_stopped),
+                "verify_start_count": len(pkg_callback_seen["verify_start"]),
+                "verify_stop_count": len(pkg_callback_seen["verify_stop"]),
+                "cpio_error_count": len(pkg_callback_seen["cpio_error"]),
+                "skipped_never_started_count": len(skipped_never_started),
+                "skipped_never_started_sample": skipped_never_started[:100],
+                "skipped_no_stop_count": len(skipped_no_stop),
+                "skipped_no_stop_sample": skipped_no_stop[:100],
+                "cpio_error_sample": sorted(
+                    pkg_callback_seen["cpio_error"])[:50],
             })
         except Exception:  # noqa: BLE001
             pass

@@ -49,9 +49,11 @@ payload}``.  Machine-readable so post-mortem tooling can diff.
 Enable
 ------
 
-Set ``URPM_DUP_DIAG=1`` in the environment before running
-``urpm distupgrade``.  ``os.execvp`` propagates env so both sides
-enable together.
+Turn on with ``urpm distupgrade --debug distupgrade`` (or
+``--debug all``).  The CLI sets ``URPM_DUP_DIAG=1`` on the current
+process ; ``os.execvp`` from Stage 3 propagates env, so the
+post-execvp mga N+1 process picks the flag up and continues writing
+into the same ``/var/log/dup-diag/`` tree.
 """
 
 from __future__ import annotations
@@ -67,8 +69,22 @@ _ENV_KEY = "URPM_DUP_DIAG"
 
 
 def is_enabled() -> bool:
-    """Return True iff diagnostic dump is opt-in via env."""
+    """Return True iff diagnostic dump is turned on.
+
+    Wired to ``urpm distupgrade --debug distupgrade`` (or
+    ``--debug all``) — the CLI calls :func:`enable` which sets the
+    ``URPM_DUP_DIAG`` env var.  Env is used (rather than a module
+    global) because ``os.execvp`` from Stage 3 propagates env : the
+    post-execvp mga N+1 process sees the same setting without needing
+    a second CLI arg.
+    """
     return os.environ.get(_ENV_KEY, "") not in ("", "0", "false", "False")
+
+
+def enable() -> None:
+    """Turn diagnostic dump on for this process and every ``execvp``ed
+    child.  Idempotent."""
+    os.environ[_ENV_KEY] = "1"
 
 
 def _ensure_root() -> Optional[Path]:
@@ -225,6 +241,133 @@ def dump_ts_problems(stage: str, event: str, problems) -> None:
     except Exception as exc:  # noqa: BLE001
         emit("errors", f"{stage}_dump_problems_failed",
              {"event": event, "err": repr(exc)})
+
+
+class MetricsSampler:
+    """Background sampler emitting cpu%/mem/disk/io every ``interval_s``.
+
+    Started right before ``ts.run()`` and stopped right after.  Zero
+    cost when ``URPM_DUP_DIAG`` is unset : ``start()`` returns a
+    no-op instance whose ``stop()`` does nothing.
+
+    Each sample is one JSONL line in
+    ``/var/log/dup-diag/<stage>-metrics.jsonl`` with keys :
+
+    - ``cpu_percent`` : 0-100, from ``/proc/stat`` delta
+    - ``mem_avail_kb`` / ``mem_total_kb`` : from ``/proc/meminfo``
+    - ``disk_free_root_kb`` : from ``os.statvfs('/')``
+    - ``load1`` : from ``os.getloadavg()``
+    - ``io_wait_pct`` : from ``/proc/stat`` iowait delta
+
+    Read-only : parses ``/proc``, never mutates anything.  All errors
+    swallowed — a broken sampler must not crash the transaction.
+    """
+
+    def __init__(self, stage: str, interval_s: float = 10.0):
+        self.stage = stage
+        self.interval_s = interval_s
+        self._thread = None
+        self._stop_evt = None
+        self._prev_cpu = None
+        self._prev_iowait = None
+        self._prev_total = None
+
+    def _read_cpu(self):
+        try:
+            with open("/proc/stat", "r") as fh:
+                for line in fh:
+                    if line.startswith("cpu "):
+                        parts = line.split()[1:]
+                        vals = [int(v) for v in parts[:10]]
+                        total = sum(vals)
+                        idle = vals[3]
+                        iowait = vals[4] if len(vals) > 4 else 0
+                        return total, idle, iowait
+        except Exception:  # noqa: BLE001
+            pass
+        return None, None, None
+
+    def _sample_once(self):
+        try:
+            payload = {}
+            total, idle, iowait = self._read_cpu()
+            if total is not None and self._prev_total is not None:
+                dt = total - self._prev_total
+                di = idle - self._prev_cpu
+                dw = iowait - self._prev_iowait
+                if dt > 0:
+                    payload["cpu_percent"] = round(100 * (1 - di / dt), 1)
+                    payload["io_wait_pct"] = round(100 * dw / dt, 1)
+            self._prev_total = total
+            self._prev_cpu = idle
+            self._prev_iowait = iowait
+
+            try:
+                with open("/proc/meminfo", "r") as fh:
+                    mem = {}
+                    for line in fh:
+                        k, _, v = line.partition(":")
+                        v = v.strip().split()
+                        if v:
+                            mem[k] = int(v[0])
+                    payload["mem_avail_kb"] = mem.get("MemAvailable", 0)
+                    payload["mem_total_kb"] = mem.get("MemTotal", 0)
+                    payload["swap_used_kb"] = mem.get(
+                        "SwapTotal", 0) - mem.get("SwapFree", 0)
+            except Exception:  # noqa: BLE001
+                pass
+
+            try:
+                st = os.statvfs("/")
+                payload["disk_free_root_kb"] = int(st.f_bavail * st.f_frsize / 1024)
+                payload["disk_total_root_kb"] = int(st.f_blocks * st.f_frsize / 1024)
+            except Exception:  # noqa: BLE001
+                pass
+
+            try:
+                l1, l5, l15 = os.getloadavg()
+                payload["load1"] = round(l1, 2)
+                payload["load5"] = round(l5, 2)
+                payload["load15"] = round(l15, 2)
+            except Exception:  # noqa: BLE001
+                pass
+
+            emit(self.stage + "-metrics", "sample", payload)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _run(self):
+        # Prime the CPU delta baseline.
+        total, idle, iowait = self._read_cpu()
+        self._prev_total = total
+        self._prev_cpu = idle
+        self._prev_iowait = iowait
+        while not self._stop_evt.is_set():
+            self._sample_once()
+            self._stop_evt.wait(self.interval_s)
+
+    def start(self):
+        if not is_enabled():
+            return self
+        try:
+            import threading
+            self._stop_evt = threading.Event()
+            self._thread = threading.Thread(
+                target=self._run, name="dup-diag-metrics", daemon=True)
+            self._thread.start()
+        except Exception:  # noqa: BLE001
+            pass
+        return self
+
+    def stop(self):
+        if self._stop_evt is None:
+            return
+        try:
+            self._stop_evt.set()
+            if self._thread is not None:
+                self._thread.join(timeout=5.0)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def dump_process_env(stage: str, event: str) -> None:

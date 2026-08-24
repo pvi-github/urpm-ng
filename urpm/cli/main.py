@@ -353,7 +353,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--debug',
         type=str,
         metavar='COMPONENT',
-        help=_('Enable debug output (solver, tsrun, orphans, download, timing, all)')
+        help=_('Enable debug output (solver, tsrun, orphans, download, timing, distupgrade, all)')
     )
     debug_parent.add_argument(
         '--watched',
@@ -1209,6 +1209,7 @@ bloquant clair.
 
 Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.
 '''),
+        parents=[debug_parent],
     )
     distupgrade_parser.add_argument(
         '--resume', action='store_true',

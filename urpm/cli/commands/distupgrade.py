@@ -26,6 +26,17 @@ if TYPE_CHECKING:
 
 def cmd_distupgrade(args, db: 'PackageDatabase') -> int:
     """Handle `urpm distupgrade [--resume | --continue | --abort | --to N]`."""
+    # Diag hook : ``--debug distupgrade`` (or ``--debug all``) turns on
+    # the deep post-mortem tracer in ``urpm/core/_dup_diag.py`` — writes
+    # per-stage JSONL + rpmdb snapshots under ``/var/log/dup-diag/``.
+    # Env var, so ``os.execvp`` from Stage 3 propagates the flag to the
+    # mga N+1 process without needing a second CLI arg.
+    _debug = getattr(args, 'debug', None) or ''
+    _debug_parts = {d.strip() for d in _debug.split(',')} if _debug else set()
+    if 'distupgrade' in _debug_parts or 'all' in _debug_parts:
+        from ...core import _dup_diag as _dupd
+        _dupd.enable()
+
     if getattr(args, 'abort', False):
         return _cmd_abort(db)
 
