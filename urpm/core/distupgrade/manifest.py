@@ -33,6 +33,18 @@ TRANSACTION_A_PROVIDES: List[str] = [
     "python3-zstandard",
     "glibc",
     "urpm-ng-core",
+    # rpm-helper : scripts sourced by many packages' %pre/%post
+    # (add-user, add-group, useradd wrapper, service unit
+    # install helpers).  If it's still on the mga N version at
+    # Tx B time, the transient window while it's being upgraded
+    # loses %pre calls that fire concurrently — rpm silently
+    # skips the whole package (no INST_START, no error).  Papoteur
+    # beta case : gdm, pipewire, alsa-utils, screen, openvpn all
+    # skipped this way in Tx B, all recover if reinstalled after
+    # the transaction settles.  Anchoring in Tx A eliminates the
+    # race by making sure rpm-helper is on the target version
+    # before any Tx B package's %pre runs.
+    "rpm-helper",
 ]
 
 
