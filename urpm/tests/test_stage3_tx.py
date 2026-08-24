@@ -379,3 +379,105 @@ class TestRetryMissingInstalls:
             )
         assert "foo-1-1.mga11.x86_64" in result["still_missing"]
         ops.begin_transaction.assert_not_called()
+
+
+class TestSplitPlanBySize:
+    """Batch slicing preserves topological order and respects size cap."""
+
+    def test_empty_plan(self):
+        from urpm.core.distupgrade.stage3 import _split_plan_by_size
+        assert _split_plan_by_size([], {}, 200 * 1024 * 1024) == []
+
+    def test_all_small_one_batch(self, tmp_path):
+        from urpm.core.distupgrade.stage3 import _split_plan_by_size
+        paths = {}
+        plan = []
+        for i in range(5):
+            p = tmp_path / f"pkg{i}-1-1.mga10.x86_64.rpm"
+            p.write_bytes(b"x" * (10 * 1024 * 1024))  # 10 MB each
+            nevra = f"pkg{i}-1-1.mga10.x86_64"
+            plan.append(nevra)
+            paths[nevra] = str(p)
+        batches = _split_plan_by_size(plan, paths, 200 * 1024 * 1024)
+        assert len(batches) == 1
+        assert batches[0] == plan
+
+    def test_size_cap_splits(self, tmp_path):
+        from urpm.core.distupgrade.stage3 import _split_plan_by_size
+        paths = {}
+        plan = []
+        for i in range(5):
+            p = tmp_path / f"pkg{i}-1-1.mga10.x86_64.rpm"
+            p.write_bytes(b"x" * (60 * 1024 * 1024))  # 60 MB each
+            nevra = f"pkg{i}-1-1.mga10.x86_64"
+            plan.append(nevra)
+            paths[nevra] = str(p)
+        # 60 MB × 5 = 300 MB total, cap 200 MB → 3 batches (60+60+60=180, next
+        # 60 makes 240 > 200 → new batch)
+        batches = _split_plan_by_size(plan, paths, 200 * 1024 * 1024)
+        assert len(batches) == 2
+        # First batch : as many 60 MB pkgs as fit under 200 MB → 3
+        assert batches[0] == plan[:3]
+        assert batches[1] == plan[3:]
+
+    def test_oversize_single_pkg_gets_own_batch(self, tmp_path):
+        from urpm.core.distupgrade.stage3 import _split_plan_by_size
+        big = tmp_path / "big-1-1.mga10.x86_64.rpm"
+        big.write_bytes(b"x" * (300 * 1024 * 1024))  # 300 MB
+        plan = ["big-1-1.mga10.x86_64"]
+        batches = _split_plan_by_size(
+            plan, {"big-1-1.mga10.x86_64": str(big)},
+            200 * 1024 * 1024)
+        assert batches == [plan]
+
+    def test_missing_rpm_counts_as_zero(self, tmp_path):
+        """A .rpm unlinked by earlier cleanup mid-Tx still fits its
+        batch : size accounting treats missing files as 0 rather than
+        raising."""
+        from urpm.core.distupgrade.stage3 import _split_plan_by_size
+        plan = ["missing-1-1.mga10.x86_64", "also-missing-1-1.mga10.noarch"]
+        batches = _split_plan_by_size(
+            plan,
+            {"missing-1-1.mga10.x86_64": "/nonexistent/foo.rpm",
+             "also-missing-1-1.mga10.noarch": "/nonexistent/bar.rpm"},
+            200 * 1024 * 1024)
+        assert batches == [plan]
+
+
+class TestPurgeInstalledBatchRpms:
+    def test_installed_get_unlinked_missing_stay(self, tmp_path, monkeypatch):
+        from urpm.core.distupgrade import stage3
+        installed_rpm = tmp_path / "installed-1-1.mga10.x86_64.rpm"
+        installed_rpm.write_bytes(b"x" * 1024)
+        failed_rpm = tmp_path / "failed-1-1.mga10.x86_64.rpm"
+        failed_rpm.write_bytes(b"x" * 1024)
+        canon_installed = stage3._canonical_nevra(
+            "installed-1-1.mga10.x86_64")
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda root="/": {canon_installed},
+        )
+        freed_files, freed_bytes = stage3._purge_installed_batch_rpms(
+            ["installed-1-1.mga10.x86_64", "failed-1-1.mga10.x86_64"],
+            {"installed-1-1.mga10.x86_64": str(installed_rpm),
+             "failed-1-1.mga10.x86_64": str(failed_rpm)},
+        )
+        assert freed_files == 1
+        assert freed_bytes == 1024
+        assert not installed_rpm.exists()
+        assert failed_rpm.exists()
+
+    def test_empty_installed_probe_no_purge(self, tmp_path, monkeypatch):
+        from urpm.core.distupgrade import stage3
+        rpm_file = tmp_path / "foo-1-1.mga10.x86_64.rpm"
+        rpm_file.write_bytes(b"x")
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda root="/": set(),
+        )
+        freed_files, freed_bytes = stage3._purge_installed_batch_rpms(
+            ["foo-1-1.mga10.x86_64"],
+            {"foo-1-1.mga10.x86_64": str(rpm_file)},
+        )
+        assert freed_files == 0
+        assert rpm_file.exists()

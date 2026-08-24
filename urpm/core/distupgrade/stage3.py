@@ -396,6 +396,97 @@ def run_stage3_tx_a(
     smoke()
 
 
+def _split_plan_by_size(
+    plan: List[str],
+    rpm_paths_by_nevra: dict,
+    max_batch_bytes: int,
+) -> List[List[str]]:
+    """Slice ``plan`` into batches by cumulative on-disk .rpm size.
+
+    The plan is already in libsolv's topological order.  Slicing
+    contiguously preserves that order across batches : the Requires
+    closure of every package in batch K lives entirely in batches
+    ``[0..K-1]``, so ``rpm.ts.order()`` inside each batch can
+    resolve dependencies without needing ``RPMTRANS_FLAG_NODEPS``.
+
+    A single package larger than ``max_batch_bytes`` still lands in
+    its own batch — we never bisect a single install.
+
+    ``.rpm`` files unlinked earlier in the transaction (e.g. by the
+    per-batch cache purge) or missing from ``rpm_paths_by_nevra``
+    count as size 0 : batch boundaries chase disk peak, not plan
+    size accounting.
+
+    Returns a list of NEVRA-list batches ; empty list for an empty
+    input plan.
+    """
+    import os as _os
+    batches: List[List[str]] = []
+    current: List[str] = []
+    current_bytes = 0
+    for nevra in plan:
+        rpm_path = (rpm_paths_by_nevra.get(nevra)
+                    or rpm_paths_by_nevra.get(_strip_epoch(nevra)))
+        try:
+            sz = _os.stat(rpm_path).st_size if rpm_path else 0
+        except OSError:
+            sz = 0
+        if current and current_bytes + sz > max_batch_bytes:
+            batches.append(current)
+            current = []
+            current_bytes = 0
+        current.append(nevra)
+        current_bytes += sz
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _purge_installed_batch_rpms(
+    batch: List[str],
+    rpm_paths_by_nevra: dict,
+) -> "tuple[int, int]":
+    """Unlink cached .rpm files of packages in ``batch`` that are now
+    committed to the rpmdb.
+
+    Called right after each batch's ``ts.run()`` returns : whatever
+    landed in the rpmdb doesn't need its payload again, whatever
+    silently failed keeps its .rpm so the end-of-Tx-B retry doesn't
+    have to re-download.
+
+    Returns ``(freed_files, freed_bytes)``.
+    """
+    import os as _os
+    installed = _installed_nevras_canonical()
+    if not installed:
+        return 0, 0
+    freed_files = 0
+    freed_bytes = 0
+    for nevra in batch:
+        canon = _canonical_nevra(nevra)
+        if canon is None or canon not in installed:
+            continue
+        rpm_path = (rpm_paths_by_nevra.get(nevra)
+                    or rpm_paths_by_nevra.get(_strip_epoch(nevra)))
+        if not rpm_path:
+            continue
+        try:
+            st = _os.stat(rpm_path)
+            _os.unlink(rpm_path)
+            freed_bytes += st.st_size
+            freed_files += 1
+        except FileNotFoundError:
+            pass
+        except OSError as exc:  # noqa: BLE001
+            logger.debug("batch purge : cannot unlink %s : %s",
+                         rpm_path, exc)
+    if freed_files:
+        logger.info(
+            "Stage 3 Tx B batch : purged %d .rpm from cache (%.1f MB)",
+            freed_files, freed_bytes / (1024 * 1024))
+    return freed_files, freed_bytes
+
+
 def _canonical_nevra(nevra: str) -> Optional[str]:
     """Normalise ``name-EPOCH:version-release.arch`` for comparison.
 
@@ -614,24 +705,47 @@ def run_stage3_tx_b(
         version_to=version_to,
     )
 
-    _run_one_side(
-        db,
-        side="b",
-        plan=tx_b_plan,
-        rpm_paths_by_nevra=rpm_paths_by_nevra,
-        cmdline=f"urpm distupgrade tx-b {version_from}->{version_to}",
-        erase_names=erase_names,
-        progress_callback=progress_callback,
+    # Batch the plan by cumulative .rpm size to cap the disk peak.
+    # Slices follow the libsolv topological order — a package's Requires
+    # closure lives entirely in earlier batches, so per-batch ts.order()
+    # never sees a missing dependency and standard rpm dep enforcement
+    # keeps working (no NODEPS trickery needed).  Per-batch cleanup of
+    # already-committed .rpm files further limits the peak.
+    batches = _split_plan_by_size(
+        tx_b_plan, rpm_paths_by_nevra,
+        max_batch_bytes=200 * 1024 * 1024,
     )
+    logger.info(
+        "Stage 3 Tx B : %d package(s) split into %d batch(es) "
+        "(~%d MB max)", len(tx_b_plan), len(batches), 200)
 
-    # Silent-fail retry pass : Tx B fires ~all callbacks (INST_STOP,
-    # SCRIPT_STOP) even when the cpio extraction failed for a package
-    # -- "Directory not empty" / "No data available" / "No such file
-    # or directory" errors are printed to stderr but don't propagate
-    # as rpm problems.  A single retry of each missing package, once
-    # the filesystem state has settled (mga N counterparts of
-    # successful installs are gone, freeing conflicting file paths),
-    # picks up most of these silent failures.
+    for i, batch in enumerate(batches, start=1):
+        # erase_names go with the LAST batch : the packages they name
+        # are typically obsoleted by an install in the plan, so they
+        # need to survive until that install runs.
+        batch_erase = erase_names if i == len(batches) else None
+        _run_one_side(
+            db,
+            side="b",
+            plan=batch,
+            rpm_paths_by_nevra=rpm_paths_by_nevra,
+            cmdline=(f"urpm distupgrade tx-b batch {i}/{len(batches)} "
+                     f"{version_from}->{version_to}"),
+            erase_names=batch_erase,
+            progress_callback=progress_callback,
+        )
+        # Free the .rpm cache of packages this batch successfully
+        # committed to rpmdb : failed ones keep their .rpm so the
+        # retry pass at end-of-Tx-B doesn't have to re-download.
+        _purge_installed_batch_rpms(batch, rpm_paths_by_nevra)
+
+    # Silent-fail retry pass : rpm fires INST_STOP even when a package's
+    # cpio extraction failed with "Directory not empty" / "No data
+    # available" / "No such file or directory" (errors are printed to
+    # stderr but don't propagate as rpm problems).  A single retry of
+    # each missing package, once the filesystem state has settled (mga N
+    # counterparts of successful installs are gone, freeing conflicting
+    # file paths), picks up most of these silent failures.
     retry_result = _retry_missing_installs(
         db, planned_nevras=tx_b_plan,
         rpm_paths_by_nevra=rpm_paths_by_nevra,
