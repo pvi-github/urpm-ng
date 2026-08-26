@@ -196,6 +196,35 @@ class OrphansMixin:
         - TransactionType, PackageAction from resolver
     """
 
+    def enrich_orphans(self, names) -> list:
+        """Build :class:`OrphanInfo` records for a set of package names.
+
+        Companion to :meth:`find_all_orphans` for the interactive triage
+        workflow : the caller has the orphan names from ``find_all_orphans``
+        (which returns :class:`PackageAction`) but the TUI needs richer
+        metadata (Summary, Group, install-time, Provides).  A single
+        ``dbMatch()`` sweep collects every hdr in scope, matches the
+        requested names, and returns :class:`OrphanInfo` in the input
+        order — the caller keeps its display order stable.
+        """
+        from .orphan_classify import OrphanInfo, orphan_info_from_hdr
+
+        if not HAS_RPM or not names:
+            return []
+
+        wanted = set(names)
+        from .. import rpmdb
+        found = {}
+        with rpmdb.open_ts(self.root or '/') as ts:
+            for hdr in ts.dbMatch():
+                nm = hdr[rpm.RPMTAG_NAME]
+                if nm in wanted:
+                    found[nm] = orphan_info_from_hdr(hdr)
+        # Preserve the caller's order ; drop unknowns silently — a name
+        # that vanished between find_all_orphans and enrich_orphans is
+        # legitimately gone and no longer eligible for triage.
+        return [found[n] for n in names if n in found]
+
     def _find_orphans_iterative(self, initial_removes: set) -> list:
         """rpmdb access via urpm.core.rpmdb.open_ts context manager — never open a librpm handle in the parent (module contract, see urpm.core.rpmdb).
 

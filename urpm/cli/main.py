@@ -1687,6 +1687,24 @@ Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.
         action='store_true',
         help=_('No confirmation')
     )
+    autoremove_parser.add_argument(
+        '--interactive', '-i',
+        action='store_true',
+        help=_('Interactive triage of orphans: keep/remove/skip per '
+               'package, with categories (previous-release relics, '
+               'SONAME sublibs, userland) and composable filters. '
+               'Implies --orphans.')
+    )
+    autoremove_parser.add_argument(
+        '--filter',
+        action='append',
+        default=[],
+        metavar='EXPR',
+        help=_('Filter expression for --interactive '
+               '(repeatable, or comma-separated). '
+               'Examples: disttag=mga9  kind=sublib  size>10M  '
+               'installed<30d  name~=^lib64.*')
+    )
 
     # =========================================================================
     # mark

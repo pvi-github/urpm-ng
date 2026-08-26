@@ -43,10 +43,22 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
     do_faildeps = getattr(args, 'faildeps', False)
     do_builddeps = getattr(args, 'buildrequires', False)
     do_all = getattr(args, 'all', False)
+    interactive = getattr(args, 'interactive', False)
 
     # --all enables everything
     if do_all:
         do_orphans = do_kernels = do_faildeps = do_builddeps = True
+
+    # --interactive implies --orphans and refuses to combine with the
+    # other selectors : the triage flow is orphan-specific by design.
+    if interactive:
+        do_orphans = True
+        if do_kernels or do_faildeps or do_builddeps or do_all:
+            from .. import colors
+            print(colors.error(_(
+                "--interactive only triages orphans ; drop --kernels / "
+                "--faildeps / --buildrequires / --all.")))
+            return 2
 
     # Default to --orphans if no selector specified
     if not (do_orphans or do_kernels or do_faildeps or do_builddeps):
@@ -56,6 +68,13 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
     root = getattr(args, 'root', None)
     urpm_root = getattr(args, 'urpm_root', None)
     resolver = Resolver(db, arch=arch, root=root, urpm_root=urpm_root)
+
+    # Interactive orphan triage : delegates to a distinct flow that
+    # asks per-package decisions and returns two sets (to_remove,
+    # to_keep) to apply.  Reuses the existing erase pipeline for the
+    # actual apply.
+    if interactive:
+        return _cmd_autoremove_interactive(args, db, resolver, root, urpm_root)
 
     # Collect packages to remove from each selector
     packages_to_remove = []  # List of (name, nevra, size, reason)
@@ -338,6 +357,191 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         return 0
 
     except Exception as e:
+        db.abort_transaction(transaction_id)
+        raise
+    finally:
+        signal.signal(signal.SIGINT, original_handler)
+
+
+def _cmd_autoremove_interactive(
+    args, db: 'PackageDatabase', resolver, root, urpm_root
+) -> int:
+    """Interactive orphan triage flow (kept / removed / skipped per pkg).
+
+    Splits into three phases :
+
+    1. **Discovery** — reuses ``resolver.find_all_orphans()`` and enriches
+       every survivor into an :class:`OrphanInfo` for the TUI to display.
+    2. **Session** — hands off to :class:`TriageSession`, which is
+       exercised by unit tests via scripted stdin.  It returns a
+       :class:`TriageResult` : which names to erase, which to promote
+       explicit.
+    3. **Apply** — ``keep`` names go through :meth:`Resolver.mark_as_explicit`
+       (no rpm transaction — just the tracking file).  ``remove`` names
+       are handed to the same ``TransactionQueue`` pipeline the classic
+       ``--orphans`` flow uses, so we inherit its lock handling, root
+       privilege check, progress display and history recording.
+    """
+    import platform
+    import signal
+    import sys
+
+    from .. import colors
+    from ...core.resolver import format_size
+    from ...auth.privileges import require_privileges
+    from ...core.background_install import InstallLock
+    from ...core.transaction_queue import (
+        TransactionQueue, TransactionProgress, TransactionPhase,
+    )
+    from ...core.config import get_rpm_root
+    from ...core.resolution.orphan_classify import current_distmajor
+    from ..helpers.orphans_triage import TriageSession
+
+    if not sys.stdin.isatty():
+        print(colors.error(_(
+            "--interactive requires a TTY on stdin. "
+            "Use 'urpm autoremove --orphans' for non-interactive mode.")))
+        return 2
+
+    print(_("Searching for orphaned packages..."))
+    orphan_actions = resolver.find_all_orphans()
+    if not orphan_actions:
+        print(colors.success(_("No orphaned packages found.")))
+        return 0
+
+    print(_("  Enriching metadata for {n} orphans...").format(
+        n=len(orphan_actions)))
+    names = [a.name for a in orphan_actions]
+    infos = resolver.enrich_orphans(names)
+    if not infos:
+        print(colors.error(_("Could not enrich orphan metadata.")))
+        return 1
+
+    session = TriageSession(
+        orphans=infos,
+        current_major=current_distmajor(root=root or "/"),
+        initial_filters=getattr(args, 'filter', None) or [],
+    )
+    result = session.run()
+
+    if not (result.to_remove or result.to_keep):
+        print(_("No decisions made ; nothing applied."))
+        return 0
+
+    # Phase 3a — promote 'keep' names to explicit.  No rpm transaction :
+    # this only rewrites installed-through-deps.list so future
+    # autoremove runs stop proposing them.
+    if result.to_keep:
+        resolver.mark_as_explicit(result.to_keep)
+        print(colors.success(
+            _("Marked {n} packages as kept (explicit).").format(
+                n=len(result.to_keep))))
+
+    if not result.to_remove:
+        return 0
+
+    # Phase 3b — erase pipeline.  Mirrors the classic --orphans branch
+    # in cmd_autoremove : same lock, same privilege check, same
+    # TransactionQueue, same history recording.
+    allow_no_root = getattr(args, 'allow_no_root', False)
+    if not allow_no_root:
+        require_privileges(action_id="org.mageia.urpm.remove")
+
+    total_size = sum(p.size for p in infos if p.name in set(result.to_remove))
+    print("\n" + ngettext(
+        "The following package will be removed:",
+        "The following {count} packages will be removed:",
+        len(result.to_remove)).format(count=len(result.to_remove)))
+    for name in result.to_remove:
+        print(f"  {colors.error(name)}")
+    print("\n" + _("Disk space to free: {size}").format(
+        size=format_size(total_size)))
+
+    cmd_line = "urpm autoremove --interactive"
+    transaction_id = db.begin_transaction('autoremove', cmd_line)
+    for name in result.to_remove:
+        info = next((p for p in infos if p.name == name), None)
+        db.record_package(
+            transaction_id,
+            info.nevra if info else name,
+            name, 'remove', 'orphan')
+
+    interrupted = [False]
+    original_handler = signal.getsignal(signal.SIGINT)
+
+    def sigint_handler(signum, frame):
+        if interrupted[0]:
+            print(_("\n\nForce abort!"))
+            db.abort_transaction(transaction_id)
+            signal.signal(signal.SIGINT, original_handler)
+            raise KeyboardInterrupt
+        else:
+            interrupted[0] = True
+            print(_("\n\nInterrupt requested - finishing current package..."))
+
+    signal.signal(signal.SIGINT, sigint_handler)
+
+    try:
+        install_root = root or urpm_root
+        lock = InstallLock(root=install_root)
+        if not lock.acquire(blocking=False):
+            print(colors.warning(_("  RPM database is locked by another process.")))
+            print(colors.dim(_("  Waiting for lock... (Ctrl+C to cancel)")))
+            lock.acquire(blocking=True)
+        lock.release()  # child re-acquires
+
+        rpm_root = get_rpm_root(root, urpm_root)
+        use_userns = bool(allow_no_root and rpm_root)
+        queue = TransactionQueue(root=rpm_root or "/", use_userns=use_userns)
+        queue.add_erase(result.to_remove, operation_id="autoremove")
+
+        last_shown = [None]
+
+        def queue_progress(tp: TransactionProgress):
+            if tp.phase in (TransactionPhase.VERIFY, TransactionPhase.PREPARE):
+                return
+            if tp.phase == TransactionPhase.SCRIPT:
+                print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] "
+                      f"Running: {tp.script_name}", end='', flush=True)
+            elif last_shown[0] != tp.package_name:
+                print(f"\r\033[K  [{tp.packages_done}/{tp.packages_total}] "
+                      f"{tp.package_name}", end='', flush=True)
+                last_shown[0] = tp.package_name
+
+        sync_mode = getattr(args, 'sync', False)
+        queue_result = queue.execute(
+            progress_callback=queue_progress, full_sync=sync_mode)
+
+        print(f"\r\033[K  [{len(result.to_remove)}/{len(result.to_remove)}] "
+              + _("done"))
+
+        if not queue_result.success:
+            print(colors.error("\n" + _("Removal failed:")))
+            if queue_result.operations:
+                for err in queue_result.operations[0].errors[:3]:
+                    print(f"  {colors.error(err)}")
+            elif queue_result.overall_error:
+                print(f"  {colors.error(queue_result.overall_error)}")
+            db.abort_transaction(transaction_id)
+            return 1
+
+        if interrupted[0]:
+            print(colors.warning("\n  " + _("Autoremove interrupted")))
+            db.abort_transaction(transaction_id)
+            return 130
+
+        removed = (queue_result.operations[0].count
+                   if queue_result.operations else len(result.to_remove))
+        print(colors.success("  " + ngettext(
+            "{count} package removed",
+            "{count} packages removed",
+            removed).format(count=removed)))
+
+        db.complete_transaction(transaction_id)
+        resolver.unmark_packages(result.to_remove)
+        return 0
+
+    except Exception:
         db.abort_transaction(transaction_id)
         raise
     finally:

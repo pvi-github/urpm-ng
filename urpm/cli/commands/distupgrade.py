@@ -1346,10 +1346,88 @@ def _render_stage4_report(summary: dict, *, db=None, auto: bool = False) -> None
             "No .rpmnew, no failed scriptlet, no residual, no "
             "orphan media — clean upgrade.")))
 
+    # ── Orphan triage invitation ─────────────────────────────────
+    _prompt_orphan_triage_after_dup(db, auto=auto)
+
     # ── Next-step recommendations ─────────────────────────────────
     print("\n" + colors.info(_(
         "Next :  reboot so the post-boot adjustments run on next "
         "startup.")))
+
+
+def _prompt_orphan_triage_after_dup(db, *, auto: bool) -> None:
+    """Offer to run interactive orphan triage after a fresh distupgrade.
+
+    Distupgrade legitimately leaves ~300 orphans (packages the operator
+    installed on the previous release but whose old requirement chain
+    is gone).  Blindly ``y`` on ``urpm autoremove --orphans`` risks
+    losing user-facing tools ; blindly ``N`` leaves clutter.  The
+    triage session lets the operator sort them with context.  Skipped
+    under ``--auto`` and when stdin is not a TTY.
+    """
+    import sys
+    from ...i18n import confirm_yes
+
+    if auto or not sys.stdin.isatty():
+        return
+
+    # Cheap probe : only bother the operator if there are enough
+    # orphans that manual review is actually valuable.  Reuses the
+    # same resolver the CLI would have used.
+    try:
+        import platform
+        from ...core.resolver import Resolver
+        resolver = Resolver(db, arch=platform.machine())
+        orphan_names = [a.name for a in resolver.find_all_orphans()]
+    except Exception:  # noqa: BLE001
+        return
+
+    if len(orphan_names) < 20:
+        return
+
+    print("\n" + colors.bold(_(
+        "{n} orphan packages detected after the distupgrade.").format(
+            n=len(orphan_names))))
+    print(colors.dim(_(
+        "  A mix of previous-release relics (safe to remove), SONAME "
+        "sublibs (usually safe), and user-facing packages worth "
+        "reviewing one by one.")))
+    try:
+        response = input(_(
+            "  Enter interactive triage now ? [y/N] "))
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return
+    if not confirm_yes(response):
+        print(colors.dim(_(
+            "    Skipped ; run later with :  "
+            "urpm autoremove --interactive")))
+        return
+
+    _run_interactive_triage(db, resolver, orphan_names)
+
+
+def _run_interactive_triage(db, resolver, orphan_names) -> None:
+    """Delegate to the ``cleanup._cmd_autoremove_interactive`` flow.
+
+    Builds a minimal ``args`` shim so the shared helper does not have
+    to grow a distupgrade-specific entry point.
+    """
+    from types import SimpleNamespace
+    from .cleanup import _cmd_autoremove_interactive
+
+    args = SimpleNamespace(
+        interactive=True, orphans=True, filter=[], auto=False,
+        allow_no_root=False, root=None, urpm_root=None, sync=False,
+    )
+    try:
+        _cmd_autoremove_interactive(
+            args, db, resolver, root=None, urpm_root=None)
+    except Exception as exc:  # noqa: BLE001
+        print(colors.error(_(
+            "Interactive triage failed : {err}. "
+            "Run manually with :  urpm autoremove --interactive"
+        ).format(err=exc)))
 
 
 def _prompt_drop_transposed(db, transposed_media, *, auto: bool) -> None:
