@@ -149,10 +149,16 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
             print("\n  " + colors.bold(
                 _("Scriptlet output ({count}):").format(count=len(scriptlet_outputs))))
             for entry in scriptlet_outputs:
-                color_fn = colors.error if entry['is_error'] else colors.dim
+                # ``get_scriptlet_output`` unifies v34 (``history_scriptlets``)
+                # and legacy (``history_scriptlet_output``) rows behind a
+                # single ``status`` field : 'ok' / 'failed' / 'started'.
+                # The legacy ``is_error`` flag is no longer exposed
+                # (see ``urpm.core.db.history:get_scriptlet_output``).
+                color_fn = (colors.error if entry.get('status') == 'failed'
+                            else colors.dim)
                 label = entry['pkg_name'] or _("(pre-install)")
                 print(color_fn(f"    {label}:"))
-                for line in entry['output'].splitlines():
+                for line in (entry.get('output') or "").splitlines():
                     print(color_fn(f"      {line}"))
 
         print()
