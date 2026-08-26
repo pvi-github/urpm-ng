@@ -719,11 +719,52 @@ def run_stage3_tx_b(
         "Stage 3 Tx B : %d package(s) split into %d batch(es) "
         "(~%d MB max)", len(tx_b_plan), len(batches), 200)
 
+    # Global progress across batches.  Without this, the caller's
+    # progress bar resets to 0 at every batch boundary and the user
+    # loses all sense of overall Tx B advancement.  We wrap the
+    # incoming callback with a per-batch offset so ``packages_done``
+    # and ``packages_total`` reflect the whole Tx B plan (installs +
+    # last-batch erases), not the current batch alone.
+    from dataclasses import replace
+    from ..transaction_queue import TransactionPhase
+
+    total_planned = len(tx_b_plan) + len(erase_names or [])
+    _prog_state = {"done_before_batch": 0, "last_local_done": 0}
+
+    def _global_progress(tp):
+        # Track the last local packages_done seen so we can advance
+        # ``done_before_batch`` by that amount at end of batch.  rpm
+        # reports monotonically-increasing ``packages_done`` within a
+        # single transaction, so the highest value is the count of
+        # packages the batch actually processed (including cpio-failed
+        # ones — those still fire INST_STOP, see the retry pass below).
+        if tp.packages_done > _prog_state["last_local_done"]:
+            _prog_state["last_local_done"] = tp.packages_done
+        if progress_callback is None:
+            return
+        # Only rewrite the counters on phases whose ``packages_done`` is
+        # a package-level index.  VERIFY / PREPARE run once per batch
+        # over that batch's set — translating them to a global scale
+        # would look like the bar jumps ahead during verification.
+        if tp.phase in (TransactionPhase.INSTALL,
+                        TransactionPhase.SCRIPT,
+                        TransactionPhase.ERASE):
+            adjusted = replace(
+                tp,
+                packages_done=(_prog_state["done_before_batch"]
+                               + tp.packages_done),
+                packages_total=total_planned,
+            )
+            progress_callback(adjusted)
+        else:
+            progress_callback(tp)
+
     for i, batch in enumerate(batches, start=1):
         # erase_names go with the LAST batch : the packages they name
         # are typically obsoleted by an install in the plan, so they
         # need to survive until that install runs.
         batch_erase = erase_names if i == len(batches) else None
+        _prog_state["last_local_done"] = 0
         _run_one_side(
             db,
             side="b",
@@ -732,8 +773,9 @@ def run_stage3_tx_b(
             cmdline=(f"urpm distupgrade tx-b batch {i}/{len(batches)} "
                      f"{version_from}->{version_to}"),
             erase_names=batch_erase,
-            progress_callback=progress_callback,
+            progress_callback=_global_progress,
         )
+        _prog_state["done_before_batch"] += _prog_state["last_local_done"]
         # Free the .rpm cache of packages this batch successfully
         # committed to rpmdb : failed ones keep their .rpm so the
         # retry pass at end-of-Tx-B doesn't have to re-download.

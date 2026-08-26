@@ -17,7 +17,7 @@ returning after Stage 0.
 import time
 from typing import TYPE_CHECKING
 
-from ...i18n import _
+from ...i18n import _, ngettext
 from .. import colors
 
 if TYPE_CHECKING:
@@ -736,14 +736,19 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
         if _pa["dl_display"] is not None:
             _pa["dl_display"].finish()
         if _pa["install_progress"] is not None:
-            _pa["install_progress"].cleanup()
             # Erase the widget's 3-line region (header + bar + sub) so
-        # the next print doesn't bleed into leftover ANSI-drawn bars.
-        import sys
-        if sys.stdout.isatty():
-            print("\r\033[2A\033[J", end='', flush=True)
-        else:
-            print()
+            # the next print doesn't bleed into leftover ANSI-drawn bars.
+            # ONLY do the ANSI up-and-erase when we actually drew a
+            # widget ; otherwise the cursor is still on a plain text
+            # line — moving 2 rows up and clearing would trample the
+            # surrounding "Bringing the source release up to date"
+            # multi-line message that wraps into that region.
+            _pa["install_progress"].cleanup()
+            import sys
+            if sys.stdout.isatty():
+                print("\r\033[2A\033[J", end='', flush=True)
+            else:
+                print()
 
     print(colors.success(_(
         "Preliminary checks OK — current version : {cur}, target : {tgt}.").format(
@@ -1488,7 +1493,8 @@ def _drop_transposed_media(db, transposed_media) -> int:
             f"UPDATE media SET disabled_by = 'pending_drop' "
             f"WHERE id IN ({placeholders})", ids)
         conn.commit()
-    print("  " + colors.success(_(
-        "Flagged {n} old repositor(y|ies) for post-reboot cleanup.").format(
-            n=len(ids))))
+    print("  " + colors.success(ngettext(
+        "Flagged {n} old repository for post-reboot cleanup.",
+        "Flagged {n} old repositories for post-reboot cleanup.",
+        len(ids)).format(n=len(ids))))
     return len(ids)

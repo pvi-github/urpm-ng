@@ -265,6 +265,157 @@ class TestRunStage3TxB:
         assert state["rpmnew_files_tx_b"] == ["/etc/bar.rpmnew"]
 
 
+class TestGlobalProgressAcrossBatches:
+    """The ``progress_callback`` seen by callers must count against the
+    whole Tx B plan, not the currently-running batch.  Without the
+    per-batch offset the bar resets to 0 every batch and the operator
+    loses global visibility (regression seen 2026-08-25 on papoteur)."""
+
+    def _run(self, state_db, monkeypatch, plan_size, batch_size,
+             erase_names=None):
+        """Drive ``run_stage3_tx_b`` while spying on execute_install.
+
+        Fabricates a ``rpm_paths_by_nevra`` where each .rpm claims
+        ``batch_size`` bytes ; combined with a ``max_batch_bytes`` of
+        exactly one .rpm's worth, ``_split_plan_by_size`` produces one
+        batch per package.  Then we simulate rpm firing INST_STOP for
+        every package of each batch and record every ``packages_done``
+        / ``packages_total`` pair the caller received.
+        """
+        from urpm.core.distupgrade import stage3
+        from urpm.core.transaction_queue import (
+            TransactionPhase, TransactionProgress)
+
+        plan = [f"pkg{i}-1-1.mga11.x86_64" for i in range(plan_size)]
+        paths = {n: f"/cache/{n}" for n in plan}
+
+        # Uniform 100-byte .rpm files, batch cap = 100 * batch_size,
+        # so each batch holds exactly ``batch_size`` packages.
+        monkeypatch.setattr(
+            stage3, "_split_plan_by_size",
+            lambda plan_, paths_, max_batch_bytes: [
+                plan_[i:i + batch_size]
+                for i in range(0, len(plan_), batch_size)
+            ],
+        )
+        # Retry pass has no bearing on progress ; short-circuit it.
+        monkeypatch.setattr(
+            stage3, "_retry_missing_installs",
+            lambda _db, **_: {"missing_before_retry": [],
+                              "retry_recovered": [],
+                              "still_missing": []},
+        )
+        monkeypatch.setattr(
+            stage3, "_purge_installed_batch_rpms",
+            lambda batch, paths: (0, 0),
+        )
+
+        ops = MagicMock()
+        ops.begin_transaction.return_value = 200
+        ops.execute_install.return_value = _fake_queue_result()
+
+        def fire_progress(**kwargs):
+            """Simulate rpm firing INST_STOP for every batch pkg."""
+            cb = kwargs["progress_callback"]
+            batch_plan = kwargs["rpm_paths"]
+            # rpm reports local packages_done 1..N against local total N.
+            for i, path in enumerate(batch_plan, start=1):
+                cb(TransactionProgress(
+                    phase=TransactionPhase.INSTALL,
+                    package_name=path,
+                    packages_done=i,
+                    packages_total=len(batch_plan),
+                ))
+            return _fake_queue_result()
+
+        ops.execute_install.side_effect = fire_progress
+
+        seen = []
+
+        def caller_progress(tp):
+            seen.append((tp.packages_done, tp.packages_total, tp.package_name))
+
+        with patch("urpm.core.operations.PackageOperations",
+                   return_value=ops):
+            run_stage3_tx_b(
+                state_db,
+                tx_b_plan=plan,
+                rpm_paths_by_nevra=paths,
+                version_from="10", version_to="11",
+                erase_names=erase_names,
+                progress_callback=caller_progress,
+            )
+        return seen, plan
+
+    def test_counter_advances_across_batches(
+            self, state_db, monkeypatch):
+        # 6 pkgs split into 3 batches of 2 : the caller must see the
+        # local (1,2)+(1,2)+(1,2) sequences merged into a monotonic
+        # 1..6 progression against a stable total of 6.
+        seen, plan = self._run(state_db, monkeypatch,
+                                plan_size=6, batch_size=2)
+        dones = [d for d, _t, _n in seen]
+        totals = {t for _d, t, _n in seen}
+        assert dones == [1, 2, 3, 4, 5, 6]
+        assert totals == {6}
+
+    def test_totals_include_erases(self, state_db, monkeypatch):
+        # 4 install + 2 erase → the caller must see total=6 throughout,
+        # even during the install-only batches.
+        seen, _ = self._run(state_db, monkeypatch,
+                             plan_size=4, batch_size=2,
+                             erase_names=["olda", "oldb"])
+        totals = {t for _d, t, _n in seen}
+        assert totals == {6}
+
+    def test_no_wrap_when_no_callback(self, state_db, monkeypatch):
+        # progress_callback=None must not raise ; the wrapper is inert.
+        # (Direct assertion : no exception during the run.)
+        from urpm.core.distupgrade import stage3
+        from urpm.core.transaction_queue import (
+            TransactionPhase, TransactionProgress)
+
+        plan = ["a-1-1.mga11.x86_64", "b-1-1.mga11.x86_64"]
+        monkeypatch.setattr(
+            stage3, "_split_plan_by_size",
+            lambda plan_, paths_, max_batch_bytes: [plan_],
+        )
+        monkeypatch.setattr(
+            stage3, "_retry_missing_installs",
+            lambda _db, **_: {"missing_before_retry": [],
+                              "retry_recovered": [],
+                              "still_missing": []},
+        )
+        monkeypatch.setattr(
+            stage3, "_purge_installed_batch_rpms",
+            lambda batch, paths: (0, 0),
+        )
+
+        ops = MagicMock()
+        ops.begin_transaction.return_value = 200
+
+        def fire_progress(**kwargs):
+            cb = kwargs["progress_callback"]
+            cb(TransactionProgress(
+                phase=TransactionPhase.INSTALL,
+                package_name="a-1-1.mga11.x86_64",
+                packages_done=1, packages_total=2,
+            ))
+            return _fake_queue_result()
+
+        ops.execute_install.side_effect = fire_progress
+
+        with patch("urpm.core.operations.PackageOperations",
+                   return_value=ops):
+            run_stage3_tx_b(
+                state_db,
+                tx_b_plan=plan,
+                rpm_paths_by_nevra={n: f"/c/{n}" for n in plan},
+                version_from="10", version_to="11",
+                progress_callback=None,
+            )
+
+
 class TestCanonicalNevra:
     """Canonicalisation used by the Tx B retry pass to compare
     plan NEVRAs against rpmdb rows regardless of epoch presence."""

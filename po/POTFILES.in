@@ -9,6 +9,12 @@ urpm/cli/commands/__init__.py
 urpm/cli/commands/install.py
 urpm/cli/commands/remove.py
 urpm/cli/commands/upgrade.py
+urpm/cli/commands/distupgrade.py
+urpm/cli/commands/genmedia.py
+urpm/cli/commands/progress.py
+urpm/cli/commands/readme.py
+urpm/cli/commands/recover.py
+urpm/cli/commands/system.py
 urpm/cli/commands/query.py
 urpm/cli/commands/media.py
 urpm/cli/commands/server.py
@@ -30,6 +36,7 @@ urpm/cli/helpers/media.py
 urpm/cli/helpers/package.py
 urpm/cli/helpers/progress.py
 urpm/cli/helpers/resolver.py
+urpm/cli/helpers/orphans_triage.py
 urpm/core/operations.py
 urpm/core/resolver.py
 urpm/core/download.py
