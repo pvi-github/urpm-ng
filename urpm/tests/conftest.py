@@ -17,6 +17,8 @@ variable in their own ``monkeypatch``.
 
 from __future__ import annotations
 
+import gettext
+
 import pytest
 
 
@@ -24,3 +26,18 @@ import pytest
 def _disable_mirror_discovery(monkeypatch):
     """Prevent ``ensure_minimum_servers`` from hitting the network."""
     monkeypatch.setenv("URPM_SKIP_MIRROR_DISCOVERY", "1")
+
+
+@pytest.fixture(autouse=True)
+def _force_null_translations(monkeypatch):
+    """Force ``_()`` to return the untranslated msgid in tests.
+
+    Assertions on user-facing strings should be written against the
+    canonical English msgid — otherwise the suite fails on any
+    machine whose locale ships a translation for the message (Mageia
+    developer box, i18n first-pass rollouts, ...).  Swapping in
+    :class:`gettext.NullTranslations` neutralises every catalogue for
+    the duration of the test.
+    """
+    from urpm import i18n
+    monkeypatch.setattr(i18n, "_translation", gettext.NullTranslations())

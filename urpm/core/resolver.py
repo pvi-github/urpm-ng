@@ -2172,6 +2172,103 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             skipped=skipped,
         )
 
+    def _rescue_file_provides_dropouts(
+        self, trans, jobs, *, atomic, debug,
+    ):
+        """Second-chance solve when silent-drop victims are detected.
+
+        Chest-pack for a Mageia synthesis limitation — see
+        :mod:`urpm.core.resolution.file_provides_rescue` for the full
+        rationale.  Returns a fresh, re-solved transaction when a
+        rescue was performed, otherwise ``None`` (caller keeps the
+        original transaction).
+        """
+        from .resolution.file_provides_rescue import (
+            find_silent_drops,
+            collect_unmet_file_requires,
+            gather_paths_from_media,
+            inject_provides,
+        )
+        from .config import get_base_dir, get_media_local_path
+
+        drops = find_silent_drops(self.pool, trans)
+        if not drops:
+            return None
+        debug.log(
+            f"file-provides rescue : {len(drops)} silent drop(s) detected"
+        )
+
+        targets = [target for (_installed, target) in drops]
+        paths_of_interest = collect_unmet_file_requires(self.pool, targets)
+        if not paths_of_interest:
+            debug.log(
+                "file-provides rescue : drops present but no unmet file "
+                "Requires — cause is elsewhere, no rescue attempted"
+            )
+            return None
+        debug.log(
+            f"file-provides rescue : searching {len(paths_of_interest)} "
+            f"path(s) in target-media files.xml.lzma"
+        )
+
+        # Walk every 'available' repo currently in the pool ; each
+        # carries its media dict in appdata (set at pool creation
+        # time in resolution/pool.py).
+        base_dir = get_base_dir(urpm_root=self.urpm_root)
+        media_paths = []
+        for repo in self.pool.repos:
+            info = getattr(repo, "appdata", None)
+            if not info or info.get("type") != "available":
+                continue
+            media = info.get("media")
+            if not media:
+                continue
+            media_paths.append(get_media_local_path(media, base_dir))
+
+        nevra_to_paths = gather_paths_from_media(
+            media_paths, paths_of_interest,
+        )
+        injected = inject_provides(self.pool, nevra_to_paths)
+        debug.log(
+            f"file-provides rescue : injected {injected} provides "
+            f"across {len(nevra_to_paths)} solvable(s)"
+        )
+        if injected == 0:
+            return None
+
+        # Re-index whatprovides before the second solve so the newly
+        # added file-provides are visible.
+        self.pool.createwhatprovides()
+
+        # Fresh Solver — a libsolv Solver caches its transaction, and
+        # mutating the pool underneath it would leave stale state.
+        solver2 = self.pool.Solver()
+        solver2.set_flag(solv.Solver.SOLVER_FLAG_DUP_ALLOW_NAMECHANGE, 1)
+        solver2.set_flag(solv.Solver.SOLVER_FLAG_ALLOW_UNINSTALL, 1)
+        if not self.install_recommends:
+            solver2.set_flag(solv.Solver.SOLVER_FLAG_IGNORE_RECOMMENDED, 1)
+
+        job_origins = self._classify_jobs(
+            jobs, default_kind="implicit_upgrade",
+        )
+        problems, _skipped = self._solve(
+            solver2, jobs, job_origins, atomic=atomic, debug=debug,
+        )
+        if problems:
+            debug.log(
+                "file-provides rescue : re-solve produced problems, "
+                "falling back to original transaction"
+            )
+            return None
+        trans2 = solver2.transaction()
+        if trans2.isempty():
+            debug.log(
+                "file-provides rescue : re-solve produced empty tx, "
+                "falling back to original transaction"
+            )
+            return None
+        return trans2
+
     def resolve_distupgrade(self, target_version: str,
                             *, atomic: bool = False) -> Resolution:
         """Resolve a full-system distupgrade (SPEC_DISTUPGRADE §4.2).
@@ -2262,6 +2359,20 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             return Resolution(
                 success=True, actions=[], problems=[], skipped=held,
             )
+
+        # Chest-pack : Mageia's synthesis.hdlist.cz omits file-provides
+        # such as /usr/bin/date, so a mga10 package that Requires such
+        # a path is silently ejected by libsolv the moment the DUP
+        # drops the mga9 rpmdb providers.  See
+        # urpm/core/resolution/file_provides_rescue.py header for the
+        # full rationale.  This runs a targeted second solve only when
+        # the first one already produced silent-drop victims — nominal
+        # distupgrades pay zero cost.
+        rescued = self._rescue_file_provides_dropouts(
+            trans, jobs, atomic=atomic, debug=debug,
+        )
+        if rescued is not None:
+            trans = rescued
         trans.order()
 
         actions: List[PackageAction] = []
