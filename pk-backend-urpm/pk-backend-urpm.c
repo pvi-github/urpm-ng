@@ -319,6 +319,9 @@ void
 pk_backend_search_names(PkBackend *backend, PkBackendJob *job,
                         PkBitfield filters, gchar **values)
 {
+    /* filters + values are read from the PkBackendJob payload inside
+     * the thread ; the wrapper only forwards. Silence -Wunused-parameter. */
+    (void)backend; (void)filters; (void)values;
     pk_backend_job_thread_create(job, pk_backend_search_thread, NULL, NULL);
 }
 
@@ -327,6 +330,7 @@ pk_backend_search_details(PkBackend *backend, PkBackendJob *job,
                           PkBitfield filters, gchar **values)
 {
     /* Same as search_names for now */
+    (void)backend; (void)filters; (void)values;
     pk_backend_job_thread_create(job, pk_backend_search_thread, NULL, NULL);
 }
 
@@ -422,6 +426,7 @@ pk_backend_get_updates_thread(PkBackendJob *job, GVariant *params, gpointer user
 void
 pk_backend_get_updates(PkBackend *backend, PkBackendJob *job, PkBitfield filters)
 {
+    (void)backend; (void)filters;
     pk_backend_job_thread_create(job, pk_backend_get_updates_thread, NULL, NULL);
 }
 
@@ -1309,6 +1314,7 @@ void
 pk_backend_resolve(PkBackend *backend, PkBackendJob *job,
                    PkBitfield filters, gchar **packages)
 {
+    (void)backend; (void)filters; (void)packages;
     pk_backend_job_thread_create(job, pk_backend_resolve_thread, NULL, NULL);
 }
 
@@ -1468,6 +1474,7 @@ pk_backend_get_packages_thread(PkBackendJob *job, GVariant *params, gpointer use
 void
 pk_backend_get_packages(PkBackend *backend, PkBackendJob *job, PkBitfield filters)
 {
+    (void)backend; (void)filters;
     pk_backend_job_thread_create(job, pk_backend_get_packages_thread, NULL, NULL);
 }
 
@@ -1566,6 +1573,7 @@ void
 pk_backend_depends_on(PkBackend *backend, PkBackendJob *job, PkBitfield filters,
                        gchar **package_ids, gboolean recursive)
 {
+    (void)backend; (void)filters; (void)package_ids; (void)recursive;
     pk_backend_job_thread_create(job, pk_backend_depends_on_thread, NULL, NULL);
 }
 
@@ -1654,6 +1662,7 @@ void
 pk_backend_required_by(PkBackend *backend, PkBackendJob *job, PkBitfield filters,
                         gchar **package_ids, gboolean recursive)
 {
+    (void)backend; (void)filters; (void)package_ids; (void)recursive;
     pk_backend_job_thread_create(job, pk_backend_required_by_thread, NULL, NULL);
 }
 
@@ -1932,6 +1941,7 @@ pk_backend_what_provides(PkBackend *backend, PkBackendJob *job,
                          PkBitfield filters, gchar **values)
 {
     /* Use search with provides flag */
+    (void)backend; (void)filters; (void)values;
     pk_backend_job_thread_create(job, pk_backend_search_thread, NULL, NULL);
 }
 
@@ -1940,6 +1950,7 @@ pk_backend_search_groups(PkBackend *backend, PkBackendJob *job,
                          PkBitfield filters, gchar **values)
 {
     /* RPM groups don't map well to PackageKit groups - return empty */
+    (void)backend; (void)filters; (void)values;
     pk_backend_job_finished(job);
 }
 
@@ -2048,5 +2059,6 @@ void
 pk_backend_search_files(PkBackend *backend, PkBackendJob *job,
                         PkBitfield filters, gchar **values)
 {
+    (void)backend; (void)filters; (void)values;
     pk_backend_job_thread_create(job, pk_backend_search_files_thread, NULL, NULL);
 }
