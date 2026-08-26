@@ -113,7 +113,14 @@ def make_progress_callback(
         ).format(total)
         _state['dw'] = len(str(total))
         count_w = 1 + _state['dw'] + 1 + _state['dw'] + 1 + 4
-        _state['bar_width'] = max(int(term_width * 0.8), 20)
+        # Reserve enough right-margin for the count suffix
+        # (" NNNN/MMMM PPP%" is ~15 chars) plus the two "[]" delimiters
+        # plus a 1-char safety margin so the composed bar-line stays
+        # strictly under term_width — a line that exactly fills the
+        # terminal auto-wraps on most emulators, and that broken
+        # invariant later trips the widget's \e[2A cursor-up trick.
+        _state['bar_width'] = max(
+            min(int(term_width * 0.8), term_width - 18), 20)
 
     def _clip(text, maxw):
         """Clip visible text (ignoring ANSI codes) to maxw chars."""
@@ -163,9 +170,17 @@ def make_progress_callback(
         s = _state['sub_line']
         if not _state['started']:
             _state['started'] = True
-            # First render: print blank line for spacing, then 3 display lines.
-            # No cursor-up — we're establishing the 3-line region.
-            print(f"\n{_CLR}{h}\n{_CLR}{b}\n{_CLR}{s}",
+            # Reserve 3 lines below the cursor by scrolling first, then
+            # rewind to the origin.  When the widget starts near the
+            # bottom of the terminal, without this the subsequent
+            # \\e[2A cursor-ups race against the terminal's own scroll
+            # and land on the wrong row — the whole 3-line region ends
+            # up rewritten one line off, producing the "each render on
+            # a new line" pattern seen in high-render-rate scenarios
+            # like distupgrade Tx B.
+            print("\n\n\n\033[3A", end='', flush=True)
+            # Now render at the origin : cursor at the header row.
+            print(f"{_CLR}{h}\n{_CLR}{b}\n{_CLR}{s}",
                   end='', flush=True)
         else:
             # Subsequent renders: go up 2 lines to rewrite all 3 in place.
@@ -196,11 +211,18 @@ def make_progress_callback(
             _state['animator'] = None
 
     def _build_header_line(header_text, info_text):
-        """Build header line: title left, info right, clipped to term_width."""
-        info_clipped = _clip(info_text, term_width - len(header_text) - 2)
-        padding = term_width - len(header_text) - len(info_clipped)
+        """Build header line: title left, info right, clipped to term_width.
+
+        Truncate one char below the terminal's real width : a line
+        that exactly fills the terminal auto-wraps on most emulators,
+        and the widget's \\e[2A cursor-up trick counts on the three
+        visible lines occupying exactly three physical rows.
+        """
+        width = term_width - 1
+        info_clipped = _clip(info_text, width - len(header_text) - 2)
+        padding = width - len(header_text) - len(info_clipped)
         line = f"{header_text}{' ' * max(padding, 1)}{info_clipped}"
-        return line[:term_width]
+        return line[:width]
 
     def _build_main_bar(done, pkg_total, pct):
         bw = _state['bar_width']
@@ -225,7 +247,9 @@ def make_progress_callback(
                 ).format(pkg_total)
                 _state['dw'] = len(str(pkg_total))
                 count_w = 1 + _state['dw'] + 1 + _state['dw'] + 1 + 4
-                _state['bar_width'] = max(int(term_width * 0.8), 20)
+                # See the identical rationale above (init branch).
+                _state['bar_width'] = max(
+                    min(int(term_width * 0.8), term_width - 18), 20)
 
             # Dedup
             state_key = (progress.phase, progress.packages_done,
