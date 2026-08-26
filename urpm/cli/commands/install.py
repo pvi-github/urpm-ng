@@ -1148,6 +1148,18 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     nodeps = getattr(args, 'nodeps', False)
     auto_mode = getattr(args, 'auto', False)
 
+    # ``--from-file`` is a pre-resolved plan (typically produced by
+    # ``urpm distupgrade --export-plan`` on the source machine).  The
+    # peer's job is to fetch those NEVRAs verbatim into its cache — no
+    # re-resolution needed, and any NEVRA the peer's pool doesn't know
+    # about (mirror divergence, disabled testing repos, third-party
+    # media the peer doesn't share …) should skip rather than abort
+    # the whole download.  Force the nodeps path and enable best-
+    # effort semantics for it.
+    _plan_best_effort = bool(from_file)
+    if _plan_best_effort:
+        nodeps = True
+
     # Show what we're downloading
     print(colors.info("\n" + _("Resolving packages for download...")))
     if target_release:
@@ -1176,6 +1188,15 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
             if not pkg:
                 not_found.append(pkg_spec)
                 continue
+            # Plan-mode strict NEVRA check : ``get_package_smart``
+            # falls back to name-only lookup when the exact NEVRA
+            # isn't in the peer's pool.  Downloading a different-EVR
+            # package silently is worse than skipping — the source
+            # peer that pulls from this cache asks for the exact
+            # NEVRA and would treat any mismatch as cache miss.
+            if _plan_best_effort and pkg.get('nevra') != pkg_spec:
+                not_found.append(pkg_spec)
+                continue
 
             media = db.get_media_by_id(pkg['media_id'])
             media_name = media.get('name', 'unknown') if media else 'unknown'
@@ -1194,15 +1215,40 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
             print(f"Insert {pkg['name']} {pkg.get('filesize',0)}")
 
         if not_found:
-            print(colors.error(_("Packages not found ({count}):").format(count=len(not_found))))
+            # In plan-best-effort mode (``--from-file``), a missing
+            # NEVRA is a warning, not a fatal error : we skip it and
+            # download what the peer's pool DOES know.  Otherwise the
+            # user asked explicitly for those packages by name and a
+            # miss is a real failure.
             show_all = getattr(args, 'show_all', False)
             preview = not_found if show_all else not_found[:10]
-            for p in preview:
-                print(f"  {p}")
-            if not show_all and len(not_found) > 10:
-                print("  " + _("... and {count} more (use --show-all to list them)").format(
-                    count=len(not_found) - 10))
-            return 1
+            if _plan_best_effort:
+                print(colors.warning(_(
+                    "Skipping {count} NEVRA(s) not found in the peer's "
+                    "pool (mirror divergence or disabled testing repos):"
+                ).format(count=len(not_found))))
+                for p in preview:
+                    print(f"  {colors.dim(p)}")
+                if not show_all and len(not_found) > 10:
+                    print("  " + _(
+                        "... and {count} more (use --show-all to list them)"
+                    ).format(count=len(not_found) - 10))
+                if not actions:
+                    print(colors.error(_(
+                        "No package from the plan could be resolved. "
+                        "Check the peer's enabled media set.")))
+                    return 1
+            else:
+                print(colors.error(_(
+                    "Packages not found ({count}):").format(
+                        count=len(not_found))))
+                for p in preview:
+                    print(f"  {p}")
+                if not show_all and len(not_found) > 10:
+                    print("  " + _(
+                        "... and {count} more (use --show-all to list them)"
+                    ).format(count=len(not_found) - 10))
+                return 1
 
         result = Resolution(success=True, actions=actions, problems=[])
     else:
