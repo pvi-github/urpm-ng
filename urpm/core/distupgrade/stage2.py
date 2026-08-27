@@ -121,6 +121,8 @@ def download_plan(
     *,
     urpm_root: Optional[str] = None,
     progress_callback=None,
+    target_version: Optional[str] = None,
+    target_arch: Optional[str] = None,
 ) -> dict:
     """Fetch every RPM the ``result.actions`` requires.
 
@@ -172,6 +174,13 @@ def download_plan(
         options=InstallOptions(),
         progress_callback=progress_callback,
         urpm_root=urpm_root,
+        # Threaded through so ``query_peers_have`` can filter each
+        # LAN peer's inventory to the release we're actually asking
+        # for.  Without this the peer discovery returned an empty
+        # availability map on every distupgrade download and all
+        # traffic went upstream.
+        target_version=target_version,
+        target_arch=target_arch,
     )
     summary["downloaded"] = downloaded
     summary["already_present"] = cached
@@ -242,7 +251,11 @@ def run_stage2(
         raise Stage2Aborted()
 
     download_summary = download_plan(
-        db, result, progress_callback=download_progress_callback)
+        db, result,
+        progress_callback=download_progress_callback,
+        target_version=target.identity,
+        target_arch=arch,
+    )
 
     prior.update({"stage": "downloaded"})
     write_state(prior, db)

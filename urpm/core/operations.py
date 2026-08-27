@@ -269,7 +269,9 @@ class PackageOperations:
         download_items: List[DownloadItem],
         options: InstallOptions = None,
         progress_callback: Callable = None,
-        urpm_root: str = None
+        urpm_root: str = None,
+        target_version: str = None,
+        target_arch: str = None,
     ) -> Tuple[list, int, int, dict]:
         """Download packages.
 
@@ -278,6 +280,15 @@ class PackageOperations:
             options: Install options (peers config)
             progress_callback: Download progress callback
             urpm_root: Override base dir for cache
+            target_version: Optional Mageia release identity forwarded
+                to the peer discovery query so LAN peers can filter
+                their inventory to the release we're actually asking
+                for.  Without this, distupgrade downloads never hit
+                peers because ``query_peers_have`` reaches them with
+                no version filter and they can't tell mga9 apart from
+                mga10.  Passing a value here ties the coordinator to
+                the release you want.
+            target_arch: Same rationale for arch.
 
         Returns:
             (dl_results, downloaded_count, cached_count, peer_stats)
@@ -295,7 +306,9 @@ class PackageOperations:
             cache_dir=cache_dir,
             use_peers=options.use_peers,
             only_peers=options.only_peers,
-            db=self.db
+            db=self.db,
+            target_version=target_version,
+            target_arch=target_arch,
         )
 
         dl_results, downloaded, cached, peer_stats = downloader.download_all(
