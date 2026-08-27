@@ -71,6 +71,12 @@ rpm-all: rpm rpm-rpmdrake
 
 INSTALL_VR = $(VERSION)-$(RELEASE)
 
+# Disttag of the current host — ``rpm --eval "%{?dist}"`` returns
+# ``.mga10`` on mga10, ``.mga9`` on mga9, etc.  Used to filter the
+# install ``find`` patterns so a machine with mga9 and mga10 RPMs
+# co-located under rpmbuild/RPMS/ never installs the wrong ones.
+INSTALL_DIST := $(shell rpm --eval "%{?dist}")
+
 # Shared body — expects $$META (the top-level RPMs to hand to
 # ``urpm i'', which then sibling-scans for subpackages).  On a
 # box that has no urpm-ng yet we bootstrap by ``urpmi''-ing just
@@ -83,7 +89,7 @@ INSTALL_CMD = \
 		echo "no RPMs matching $(INSTALL_VR) -- run 'make rpm' or 'make rpm-all' first" >&2; \
 		exit 1; \
 	fi; \
-	CORE=$$(find rpmbuild/RPMS -name "urpm-ng-core-$(INSTALL_VR).*.rpm" \
+	CORE=$$(find rpmbuild/RPMS -name "urpm-ng-core-$(INSTALL_VR)$(INSTALL_DIST).*.rpm" \
 	              ! -name "*-debuginfo-*" ! -name "*-debugsource-*" | head -1); \
 	if rpm -q urpm-ng-core >/dev/null 2>&1; then \
 		echo "==> urpm-ng-core present; urpm i --auto --reinstall (sibling scan picks the rest)"; \
@@ -102,20 +108,20 @@ INSTALL_CMD = \
 
 install-core:
 	@META=$$(find rpmbuild/RPMS \
-	              -name "urpm-ng-core-$(INSTALL_VR).*.rpm" \
+	              -name "urpm-ng-core-$(INSTALL_VR)$(INSTALL_DIST).*.rpm" \
 	              ! -name "*-debuginfo-*" ! -name "*-debugsource-*" \
 	              | tr '\n' ' '); \
 	$(INSTALL_CMD)
 
 install:
 	@META=$$(find rpmbuild/RPMS \
-	              -name "urpm-ng-$(INSTALL_VR).*.rpm" \
+	              -name "urpm-ng-$(INSTALL_VR)$(INSTALL_DIST).*.rpm" \
 	              ! -name "*-debuginfo-*" ! -name "*-debugsource-*" \
 	              | tr '\n' ' '); \
 	$(INSTALL_CMD)
 
 install-all:
-	@META="$$(find rpmbuild/RPMS -name "urpm-ng-all-$(INSTALL_VR).*.rpm" | tr '\n' ' ')$$(find rpmdrake/rpmbuild/RPMS -name "rpmdrake-ng-$(INSTALL_VR).*.rpm" | tr '\n' ' ')"; \
+	@META="$$(find rpmbuild/RPMS -name "urpm-ng-all-$(INSTALL_VR)$(INSTALL_DIST).*.rpm" | tr '\n' ' ')$$(find rpmdrake/rpmbuild/RPMS -name "rpmdrake-ng-$(INSTALL_VR)$(INSTALL_DIST).*.rpm" | tr '\n' ' ')"; \
 	$(INSTALL_CMD)
 
 clean:

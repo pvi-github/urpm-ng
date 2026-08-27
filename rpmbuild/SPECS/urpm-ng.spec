@@ -1,6 +1,6 @@
 %define name urpm-ng
 %define version 0.9.5
-%define release 1
+%define release 4
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
@@ -93,6 +93,13 @@ Requires:       gnupg2
 # synthesis at all.
 Recommends:     python3-cffi
 Requires:       zstd
+# ``urpm build`` and ``urpm mkimage`` shell out to rpmbuild (from
+# rpm-build) and bm (the Mageia build wrapper) — without both the
+# build workflow can't proceed even one step, but the rest of the
+# CLI still works, so we mark them as Requires only on the
+# packager-facing path.  Neither pulls a heavy dep tree of its own.
+Requires:       rpm-build
+Requires:       bm
 
 %description core
 Core components of urpm-ng package manager:
