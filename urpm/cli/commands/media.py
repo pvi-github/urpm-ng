@@ -898,32 +898,54 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     from ...auth.privileges import require_privileges
 
     url = args.url
-    custom_args = getattr(args, 'custom', None)
-    is_custom = custom_args is not None
+    is_custom = bool(getattr(args, 'custom', False))
+    explicit_name = getattr(args, 'name', None)
+    explicit_shortname = getattr(args, 'shortname', None)
 
     # Parse URL based on mode
     if is_custom:
-        # Custom mode: user provides name and short_name via --custom "Name" short_name
-        name = custom_args[0]
-        short_name = custom_args[1]
+        # Custom mode : name and short_name auto-generated from the
+        # URL (see urpm.cli.helpers.short_names for the ruleset), with
+        # optional --name / --shortname overrides.
+        import platform
+        from ...core.config import get_system_version
+        from ..helpers.short_names import generate_media_names
 
         parsed = parse_custom_media_url(url)
         if not parsed:
             print(colors.error(_("Error: could not parse URL: {url}").format(url=url)))
             return 1
 
-        parsed['name'] = name
-        parsed['short_name'] = short_name
-        # Version priority: --version flag > detected from URL > system version
-        import platform
-        from ...core.config import get_system_version
         machine = platform.machine()
+        primary_arch = machine if machine in KNOWN_ARCHES else 'x86_64'
+        current_release = get_system_version()
+
+        generated = generate_media_names(
+            url,
+            current_release=current_release,
+            primary_arch=primary_arch,
+            override_name=explicit_name,
+            override_shortname=explicit_shortname,
+        )
+        if not generated["name"] or not generated["short_name"]:
+            print(colors.error(_(
+                "Error: could not derive a name/short_name from URL: "
+                "{url}").format(url=url)))
+            print(_(
+                "Pass --name and --shortname explicitly to bypass the "
+                "auto-generator."))
+            return 1
+        parsed['name'] = generated["name"]
+        parsed['short_name'] = generated["short_name"]
+
+        # Version priority: --version flag > detected from URL >
+        # generator > system version
         explicit_version = getattr(args, 'version', None)
         if explicit_version:
             parsed['version'] = explicit_version
         elif not parsed.get('version'):
-            parsed['version'] = get_system_version()
-        parsed['arch'] = parsed.get('arch') or (machine if machine in KNOWN_ARCHES else 'x86_64')
+            parsed['version'] = generated["version"] or current_release
+        parsed['arch'] = parsed.get('arch') or generated["arch"] or primary_arch
 
     else:
         # Official mode: auto-parse URL

@@ -1811,23 +1811,29 @@ Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.
 For official Mageia media, just provide the URL:
   urpm media add https://mirrors.mageia.org/mageia/9/x86_64/media/core/release/
 
-For custom/third-party media, use --custom with name and short_name:
-  urpm media add --custom "My Repo" myrepo https://example.com/repo/x86_64/
+For custom/third-party media, --custom auto-generates a display
+name and short identifier from the URL :
+  urpm media add --custom https://ftp.blogdrake.org/mageia/mageia10/free/x86_64/
 
-For legacy mode (non-Mageia URL with explicit name):
-  urpm media add --name "My Media" https://example.com/repo/
+Both can be overridden explicitly :
+  urpm media add --custom https://example.com/repo/ --name "My Repo" --shortname myrepo
 ''')
     )
     media_add.add_argument('url', help=_('Media URL'))
     media_add.add_argument(
         '--name',
-        help=_('Media name (legacy mode, for non-Mageia URLs without --custom)')
+        help=_('Explicit display name (override auto-generation).')
+    )
+    media_add.add_argument(
+        '--shortname',
+        help=_('Explicit short identifier (override auto-generation).')
     )
     media_add.add_argument(
         '--custom',
-        nargs=2,
-        metavar=('NAME', 'SHORT_NAME'),
-        help=_('Add as custom media with display name and short identifier')
+        action='store_true',
+        help=_('Add as custom media ; display name and short identifier '
+               'are auto-generated from the URL unless --name / --shortname '
+               'are given.')
     )
     media_add.add_argument(
         '--update',

@@ -1,6 +1,7 @@
 """Media and URL helper functions."""
 
 import os
+import re
 import subprocess
 import tempfile
 from urllib.parse import urlparse
@@ -10,6 +11,32 @@ KNOWN_VERSIONS = {'7', '8', '9', '10', 'cauldron'}
 
 # Known architectures
 KNOWN_ARCHES = {'x86_64', 'aarch64', 'armv7hl', 'i586', 'i686'}
+
+# Version segment with optional ``mageia`` / ``mga`` prefix — covers
+# community layouts like blogdrake (``mageia10``, ``mga10``) in
+# addition to the officiels' bare ``10``.  Captures the version
+# number so the caller can compare it to :data:`KNOWN_VERSIONS`.
+# Kept in sync with :data:`urpm.core.media_pipeline._VERSION_TOKEN_RE`.
+_VERSION_TOKEN_RE = re.compile(
+    r"^(?:mageia|mga)?(\d+(?:\.\d+)?|cauldron)$", re.IGNORECASE,
+)
+
+
+def _match_version_token(segment: str) -> str | None:
+    """Return the version number if *segment* carries one, else None.
+
+    Recognises ``10``, ``cauldron``, ``mageia10``, ``mga10`` and
+    returns the numeric portion (or ``'cauldron'``) as a lowercase
+    string.  Only versions in :data:`KNOWN_VERSIONS` are accepted —
+    a random ``mageia42`` is rejected as noise.
+    """
+    if not segment:
+        return None
+    m = _VERSION_TOKEN_RE.match(segment)
+    if not m:
+        return None
+    version = m.group(1).lower()
+    return version if version in KNOWN_VERSIONS else None
 
 # Known media classes
 KNOWN_CLASSES = {'core', 'nonfree', 'tainted', 'debug'}
@@ -266,42 +293,38 @@ def parse_custom_media_url(url: str) -> dict | None:
     else:
         return None
 
-    # Best-effort version/arch detection from URL path
-    # Look for pattern: version/arch/media/ (same as official Mageia URLs)
-    version = None
-    arch = None
+    # Version and arch detection.  Scan the path independently for
+    # each — officiels place them consecutive (``.../10/x86_64/``),
+    # blogdrake plate separates them by the channel
+    # (``.../mageia10/free/x86_64/``), and this decoupled scan handles
+    # both.  Version tokens accept the ``mageia<N>`` / ``mga<N>``
+    # prefix in addition to the bare form.
     parts = [p for p in path.split('/') if p]
-    try:
-        media_idx = parts.index('media')
-        if media_idx >= 2:
-            candidate_arch = parts[media_idx - 1]
-            candidate_version = parts[media_idx - 2]
-            if candidate_arch in KNOWN_ARCHES and candidate_version in KNOWN_VERSIONS:
-                version = candidate_version
-                arch = candidate_arch
-    except ValueError:
-        pass  # No 'media' in path, that's fine for custom URLs
+    version_hits = [
+        (i, _match_version_token(p)) for i, p in enumerate(parts)
+        if _match_version_token(p) is not None
+    ]
+    arch_hits = [(i, p) for i, p in enumerate(parts) if p in KNOWN_ARCHES]
 
-    # ── base_path / relative_path split ─────────────────────────────
-    # Keep in lockstep with :func:`urpm.core.media_pipeline._split_url`
-    # — when a Mageia-style ``<version>/<arch>`` segment pair is
-    # present, everything BEFORE it belongs to the server's base_path
-    # and everything at/after it belongs to the media's relative_path.
-    # Divergence between the two would double-count the pre-version
-    # segments when the URL is reconstructed downstream (server issue
-    # observed on file:///home/... paths where the server heuristic
-    # matched but this parser left base_path='').
-    split_idx = None
-    for i in range(len(parts) - 1):
-        if (parts[i] in KNOWN_VERSIONS
-                and parts[i + 1] in KNOWN_ARCHES):
-            split_idx = i
-            break
-
-    if split_idx is not None:
-        base_path = '/' + '/'.join(parts[:split_idx]) if split_idx > 0 else ''
-        relative_path = '/'.join(parts[split_idx:])
+    # Guard : require exactly one hit on each dimension.  Multiple
+    # candidates on either side means the URL is either weird or
+    # third-party in a way we shouldn't guess ; the user can force
+    # things via ``--version`` / ``--arch`` at that point.
+    if len(version_hits) == 1 and len(arch_hits) == 1:
+        version = version_hits[0][1]
+        arch = arch_hits[0][1]
+        # ── base_path / relative_path split ─────────────────────────
+        # Keep in lockstep with :func:`urpm.core.media_pipeline._split_url`.
+        # Pivot is whichever of the two segments comes first — for
+        # official URLs that's the version, for blogdrake plate too
+        # (mageia<N> before <arch>).  Everything before the pivot
+        # belongs to base_path, everything at/after to relative_path.
+        pivot = min(version_hits[0][0], arch_hits[0][0])
+        base_path = '/' + '/'.join(parts[:pivot]) if pivot > 0 else ''
+        relative_path = '/'.join(parts[pivot:])
     else:
+        version = None
+        arch = None
         base_path = ''
         relative_path = path.lstrip('/')
 

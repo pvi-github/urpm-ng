@@ -119,8 +119,13 @@ def _try_transpose_string(s: str, src: str, tgt: str) -> Optional[str]:
 
     Patterns handled, in priority order :
 
-    1. ``mga<src>`` → ``mga<tgt>`` — Mageia disttag anywhere.
-    2. Segment ``<src>`` where segments are ``/``-separated — covers
+    1. ``mageia<src>`` → ``mageia<tgt>`` — community layouts like
+       blogdrake that write the release as a prefixed segment
+       (``mageia9/free/x86_64``).  Tried before the ``mga`` variant
+       because ``mga`` is a proper substring of ``mageia`` in some
+       contexts we don't want to fold twice.
+    2. ``mga<src>`` → ``mga<tgt>`` — Mageia disttag anywhere.
+    3. Segment ``<src>`` where segments are ``/``-separated — covers
        ``/9/`` in the middle, ``9/`` at start, ``/9`` at end, and a
        bare ``9`` alone.  Matched segment-wise (not by ``str.replace``)
        so a ``9`` inside a coincidental hash or file name is left alone.
@@ -132,6 +137,9 @@ def _try_transpose_string(s: str, src: str, tgt: str) -> Optional[str]:
     """
     if not s or not src.isdigit():
         return None
+    prefixed_src, prefixed_tgt = f"mageia{src}", f"mageia{tgt}"
+    if prefixed_src in s:
+        return s.replace(prefixed_src, prefixed_tgt)
     tag_src, tag_tgt = f"mga{src}", f"mga{tgt}"
     if tag_src in s:
         return s.replace(tag_src, tag_tgt)
@@ -158,22 +166,62 @@ def _probe_url_reachable(url: str, *, timeout: int = 5) -> bool:
     if url.startswith("file://"):
         return Path(url[7:]).exists()
     if url.startswith(("http://", "https://")):
+        return _probe_http(url, timeout=timeout)
+    return False
+
+
+def _probe_http(url: str, *, timeout: int) -> bool:
+    """HEAD-first probe with a GET fallback on empty-reply / bad HEAD.
+
+    Some HTTP servers (blogdrake among them) close the connection on
+    HEAD requests to directory listings — pycurl surfaces this as
+    ``error 52 : Empty reply from server``.  When that happens, we
+    fall back to a bounded GET (``Range: bytes=0-0``) that always
+    works when the URL exists.
+    """
+    import pycurl
+
+    def _run(nobody: bool) -> tuple[int | None, Exception | None]:
+        c = pycurl.Curl()
         try:
-            import pycurl
-            c = pycurl.Curl()
             c.setopt(pycurl.URL, url)
-            c.setopt(pycurl.NOBODY, 1)
+            if nobody:
+                c.setopt(pycurl.NOBODY, 1)
+            else:
+                c.setopt(pycurl.RANGE, "0-0")
+                # WRITEFUNCTION must report bytes actually consumed ;
+                # returning anything else makes pycurl abort with
+                # CURLE_WRITE_ERROR (23).
+                c.setopt(pycurl.WRITEFUNCTION, len)
             c.setopt(pycurl.CONNECTTIMEOUT, timeout)
             c.setopt(pycurl.TIMEOUT, timeout)
             c.setopt(pycurl.FOLLOWLOCATION, 1)
             c.setopt(pycurl.MAXREDIRS, 5)
             c.perform()
-            code = c.getinfo(pycurl.RESPONSE_CODE)
+            return c.getinfo(pycurl.RESPONSE_CODE), None
+        except Exception as exc:  # noqa: BLE001
+            return None, exc
+        finally:
             c.close()
-            return 200 <= code < 400
-        except Exception:  # noqa: BLE001
-            return False
-    return False
+
+    code, exc = _run(nobody=True)
+    # Some servers (blogdrake among them) close the connection on
+    # HEAD requests to directory listings — pycurl surfaces this as
+    # CURLE_GOT_NOTHING (52).  Also 405 / 501 explicitly reject HEAD.
+    # Fall back to a bounded GET (``Range: bytes=0-0``) which every
+    # HTTP server that exposes the URL will honour.
+    if code is None or code in (0, 405, 501):
+        code, exc = _run(nobody=False)
+    if exc is not None:
+        logger.warning(
+            "stage1 probe : %s raised %s: %s",
+            url, type(exc).__name__, exc)
+        return False
+    if not (200 <= code < 400):
+        logger.warning(
+            "stage1 probe : %s returned HTTP %s", url, code)
+        return False
+    return True
 
 
 def _transpose_third_party_media(
@@ -239,16 +287,15 @@ def _transpose_third_party_media(
             row.get("short_name") or "", source_identity, target_identity)
 
         if not new_relpath:
-            # Not a warning — the aggregate count is reported in the
-            # translated Stage 1 summary and the row is listed again
-            # in the Stage 4 orphan-media section.  Keep the detail
-            # at info level for post-mortem debugging only.
-            logger.info(
-                "stage1 : cannot transpose %s : relative_path %r "
-                "has no 'mga%s' marker and no '%s' segment — "
-                "marking orphan",
+            # Orphaning is a user-visible event : surface the cause
+            # at warning level with a specific tag so users hitting
+            # unexpected orphans can point us at the right branch.
+            logger.warning(
+                "stage1 orphan[no-relpath-marker] : cannot transpose "
+                "%s : relative_path %r has no 'mga%s'/'mageia%s'/'%s' "
+                "marker — marking orphan",
                 row["name"], row.get("relative_path"),
-                source_identity, source_identity)
+                source_identity, source_identity, source_identity)
             _mark_orphan(conn, db, row, undo_journal)
             orphaned.append(row)
             continue
@@ -273,13 +320,18 @@ def _transpose_third_party_media(
                 reachable_servers.append(srv)
 
         if not reachable_servers:
-            # info-level : same rationale as above — the row shows up
-            # in the Stage 1 aggregate count and again in the Stage 4
-            # orphan-media section, both properly translated.
-            logger.info(
-                "stage1 : none of %d server(s) for %s serve %r — "
-                "marking orphan",
-                len(linked_servers), row["name"], new_relpath)
+            # Include every attempted probe URL so a partial-failure
+            # scenario (one server behind, another ahead) is legible
+            # in the log without extra tooling.
+            probe_report = ", ".join(
+                f"{build_server_url(s).rstrip('/')}/{new_relpath}"
+                for s in linked_servers
+            )
+            logger.warning(
+                "stage1 orphan[probe-unreachable] : none of %d "
+                "server(s) for %s reachable at transposed URL — "
+                "marking orphan.  probed : [%s]",
+                len(linked_servers), row["name"], probe_report)
             _mark_orphan(conn, db, row, undo_journal)
             orphaned.append(row)
             continue
@@ -326,8 +378,9 @@ def _transpose_third_party_media(
                 len(reachable_servers))
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "stage1 : transpose insert failed for %s : %s",
-                row["name"], exc)
+                "stage1 orphan[insert-failed] : %s : %s "
+                "(new_name=%r new_short=%r new_relpath=%r)",
+                row["name"], exc, new_name, new_short, new_relpath)
             _mark_orphan(conn, db, row, undo_journal)
             orphaned.append(row)
     return activated, orphaned

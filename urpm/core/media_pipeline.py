@@ -161,7 +161,30 @@ class UpsertResult:
 _PLACEHOLDER_VALUES = frozenset({"unknown", "none", "null", ""})
 _KNOWN_ARCHES = frozenset({"x86_64", "i586", "i686", "aarch64",
                            "armv7hl", "armv5tl", "ppc64le", "noarch"})
+# Bare version segment as officiels ship it — ``10``, ``11.5``,
+# ``cauldron``.
 _VERSION_RE = re.compile(r"^(?:\d+(?:\.\d+)?|cauldron)$", re.IGNORECASE)
+# Version segment with optional ``mageia`` / ``mga`` prefix — covers
+# community layouts like blogdrake (``mageia10``, ``mga10``) in
+# addition to the officiels' bare form.  Capturing group ``(1)`` is
+# the version number itself, stripped of any prefix.
+_VERSION_TOKEN_RE = re.compile(
+    r"^(?:mageia|mga)?(\d+(?:\.\d+)?|cauldron)$", re.IGNORECASE,
+)
+
+
+def _match_version_token(segment: str) -> Optional[str]:
+    """Return the canonical version number if *segment* carries one.
+
+    Recognises both bare (``10``, ``cauldron``) and prefixed
+    (``mageia10``, ``mga10``) forms, and returns the version number
+    (or ``'cauldron'``) as a lowercase string.  Returns ``None`` when
+    the segment doesn't look like a version at all.
+    """
+    if not segment:
+        return None
+    m = _VERSION_TOKEN_RE.match(segment)
+    return m.group(1).lower() if m else None
 
 
 def _is_placeholder(value: Optional[str]) -> bool:
@@ -189,23 +212,31 @@ def _split_url(url: str) -> tuple[str, str, str]:
     host = parsed.netloc
     path = parsed.path or ""
 
-    # Heuristic: find the first `<version>/<arch>` segment pair and
-    # treat everything before it as the server base_path.
+    # Independent scan for version and arch — we don't require them
+    # to be adjacent.  Officiels put them consecutive
+    # (``.../10/x86_64/``), blogdrake plate separates them by the
+    # channel (``.../mageia10/free/x86_64/``).  Both work here.
     parts = [p for p in path.split("/") if p]
-    for i in range(len(parts) - 1):
-        if _VERSION_RE.fullmatch(parts[i]) and parts[i + 1] in _KNOWN_ARCHES:
-            base = "/" + "/".join(parts[:i]) if parts[:i] else ""
-            return protocol, host, base
-    # No Mageia pattern recognised — leave base_path empty.
-    return protocol, host, ""
+    version_idxs = [i for i, p in enumerate(parts)
+                    if _match_version_token(p)]
+    arch_idxs = [i for i, p in enumerate(parts) if p in _KNOWN_ARCHES]
+    # Guard: exactly one of each — multiple hits on either side would
+    # be ambiguous and the safer play is to leave base_path empty and
+    # let the caller fall back on --custom explicit values.
+    if len(version_idxs) != 1 or len(arch_idxs) != 1:
+        return protocol, host, ""
+    pivot = min(version_idxs[0], arch_idxs[0])
+    base = "/" + "/".join(parts[:pivot]) if parts[:pivot] else ""
+    return protocol, host, base
 
 
 def _extract_version_from_url(url: str) -> str:
     """Pull a Mageia version segment from URL path, if any."""
     parsed = urlparse(url.rstrip("/"))
     for part in parsed.path.split("/"):
-        if part and _VERSION_RE.fullmatch(part):
-            return part.lower()
+        version = _match_version_token(part)
+        if version is not None:
+            return version
     return ""
 
 

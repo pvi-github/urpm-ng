@@ -91,15 +91,30 @@ class TestParser:
         assert args.name == 'My Repo'
 
     def test_media_add_custom(self):
-        """Test media add with --custom for third-party repos."""
+        """Test media add with --custom for third-party repos.
+
+        ``--custom`` is now a boolean flag ; the display name and
+        short identifier are auto-generated from the URL by
+        :mod:`urpm.cli.helpers.short_names`, with optional
+        ``--name`` / ``--shortname`` overrides.
+        """
         parser = create_parser()
         args = parser.parse_args([
-            'media', 'add', 'http://example.com/custom/',
-            '--custom', 'My Custom Repo', 'mycustom'
+            'media', 'add', '--custom', 'http://example.com/custom/'
         ])
         assert args.media_command == 'add'
         assert args.url == 'http://example.com/custom/'
-        assert args.custom == ['My Custom Repo', 'mycustom']
+        assert args.custom is True
+        assert args.name is None
+        assert args.shortname is None
+        args = parser.parse_args([
+            'media', 'add', '--custom',
+            '--name', 'My Custom Repo', '--shortname', 'mycustom',
+            'http://example.com/custom/'
+        ])
+        assert args.custom is True
+        assert args.name == 'My Custom Repo'
+        assert args.shortname == 'mycustom'
 
     def test_media_update_command(self):
         """Test media update with optional media name."""
