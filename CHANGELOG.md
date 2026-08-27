@@ -15,6 +15,56 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.6] — 2026-08-27
+
+Hotfix release for four regressions surfaced by the 0.9.5 beta
+runs — three of them on the `distupgrade` path, one on the build
+side.  All are safe to apply mid-cycle.
+
+### Bug Fixes
+
+- **`distupgrade --resume` re-ran Stage 0 + Stage 1 on the already
+  mutated DB.**  A `--resume` after a Stage 2 interruption fell
+  through to the fresh entry point, replayed the Phase A preamble
+  and re-transposed the media rows, which then produced a bogus
+  small plan on the second solve.  Stage 1 is now idempotent
+  (skips media rows already present at the target release), and
+  the resume dispatcher inspects `.state.stage` to skip Phase A
+  and Stage 1 when they were already applied.
+
+- **Distupgrade Stage 2 downloads never hit LAN peers.**  The
+  distupgrade downloader was instantiated without
+  `target_version` / `target_arch`, so `query_peers_have` returned
+  an empty availability map on every request and all traffic went
+  upstream.  Both parameters are now threaded through
+  `download_plan` → `download_packages` → `Downloader`.
+
+- **Extraction sub-bar stayed grey during long transactions.**
+  The Stage 3 progress dedup filter dropped the `bytes_done`
+  component of each event, so INST_PROGRESS updates for big
+  packages (LibreOffice, kernel) were coalesced away and the
+  bottom bar never re-coloured.  The dedup key now includes
+  `bytes_done`, throttled to ~30 Hz to keep the display fluid
+  without flooding.  Header lines piling up between Tx B batches
+  also fixed — the internal `Waiting for scriptlets…` print is
+  now gated on the absence of a progress callback (the display
+  already shows it).
+
+### Packaging
+
+- **`make install` picked up cross-release RPMs from
+  `rpmbuild/RPMS`.**  The install-core / install / install-all
+  find patterns now honour `%{?dist}` so a machine with mga9 +
+  mga10 build artefacts on the same tree installs the current
+  release only.
+- **`urpm-ng-core` gained `Requires: rpm-build` and `Requires:
+  bm`.**  Both are needed at runtime for `urpm build` and
+  `urpm image make` respectively ; they were previously silently
+  pulled by transitive dependencies and started missing on lean
+  installs.
+
+---
+
 ## [0.9.5] — 2026-08-27
 
 > **⚠️ WARNING — the `distupgrade` feature is still young.**  Only
