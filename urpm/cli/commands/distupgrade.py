@@ -62,6 +62,27 @@ def cmd_distupgrade(args, db: 'PackageDatabase') -> int:
         return _cmd_export_plan(args, db, to_arg=to_arg,
                                 export_file=export_plan)
 
+    # Guard : a fresh ``urpm distupgrade`` invocation must NOT reuse
+    # a leftover ``.state`` from an interrupted previous run.  Stage
+    # 1 rewrites the media DB in place ; a bare rerun would then
+    # produce a bogus Stage 2 plan (~39 removes) and declare the
+    # distupgrade "finished" without touching most of the packages
+    # (real bug reported after a ^C during Stage 2 download).  Point
+    # the user at ``--resume`` or ``--abort`` instead.
+    from ...core.distupgrade import read_state
+    state = read_state(db)
+    if state is not None:
+        stage = state.get("stage", "?")
+        version_to = state.get("version_to", "?")
+        print(colors.error(_(
+            "A previous distupgrade is already in progress "
+            "(stage={stage}, target=mga{version_to}).").format(
+                stage=stage, version_to=version_to)))
+        print(_(
+            "Continue with :  urpm distupgrade --resume\n"
+            "Or roll back with :  urpm distupgrade --abort"))
+        return 1
+
     return _cmd_run_to(args, db, to_arg=to_arg,
                       dry_run=getattr(args, 'dry_run', False))
 
@@ -105,20 +126,55 @@ def _cmd_resume(db: 'PackageDatabase') -> int:
     if stage == "stage4_running":
         return _resume_from_stage4(db)
 
-    # Pre-Tx-A boundary : fall through to a fresh ``--to`` run.
+    # Pre-Tx-A boundary : re-enter ``_cmd_run_to`` but with the
+    # Stage 0 preamble AND Stage 1 pinned OFF when the DB has
+    # already been mutated by the previous run.  Two hard rules :
+    #
+    # * Stage 0's Phase A upgrade must NOT run once media are
+    #   swapped — it would try to install mga N packages against
+    #   the mga N+1 catalogues, an obvious catastrophe.
+    # * Stage 1 must NOT re-run once media are swapped — its
+    #   effects are already in the DB, and re-solving after
+    #   idempotent-but-wasteful re-transposition burns time and
+    #   noise for zero benefit.
     version_to = state.get("version_to")
     if not version_to:
         print(colors.error(_(
             "cannot resume : ``.state`` lacks ``version_to``.  "
             "Run ``urpm distupgrade --abort`` and start over.")))
         return 1
-    print(colors.dim(_(
-        "  re-entering Stage 0 → target={t}").format(t=version_to)))
 
-    # Synthesise an args-like namespace to re-enter ``_cmd_run_to``.
+    # Stages past ``pre_check_done`` mean Stage 1 has started (or
+    # completed).  Even ``stage1_running`` counts : Phase A must
+    # not re-execute against a partially-swapped DB.
+    pre_tx_a_past_stage0 = {
+        "stage1_running", "media_swapped",
+        "stage2_running", "downloaded",
+    }
+    skip_phase_a = stage in pre_tx_a_past_stage0
+    skip_stage1 = stage in {"media_swapped", "stage2_running", "downloaded"}
+
+    what = []
+    if skip_phase_a:
+        what.append("Phase A preamble")
+    if skip_stage1:
+        what.append("Stage 1")
+    if what:
+        print(colors.dim(_(
+            "  re-entering ``_cmd_run_to`` — skipping {parts} "
+            "(already done)").format(parts=", ".join(what))))
+    else:
+        print(colors.dim(_(
+            "  re-entering Stage 0 → target={t}").format(t=version_to)))
+
     class _Args:
         dry_run = False
-    return _cmd_run_to(_Args(), db, to_arg=version_to, dry_run=False)
+        auto = True
+    return _cmd_run_to(
+        _Args(), db, to_arg=version_to, dry_run=False,
+        skip_phase_a_upgrade=skip_phase_a,
+        skip_stage1=skip_stage1,
+    )
 
 
 def _resume_from_tx_a(db, state: dict) -> int:
@@ -558,10 +614,21 @@ def _cmd_export_plan(args, db, *, to_arg: str, export_file: str) -> int:
             "packages.db restored — nothing persisted on your system.")))
 
 
-def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
+def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
+                skip_phase_a_upgrade: bool = False,
+                skip_stage1: bool = False) -> int:
     """Drive Stage 0 up to `pre_check_done` and stop.
 
-    Later tickets replace the stop with Stage 1+ once available.
+    ``skip_phase_a_upgrade`` — when True, skips the Stage 0 preamble
+    « upgrade source release » ; used by the resume path where the
+    media may already have been swapped by a previous Stage 1
+    (running Phase A upgrade against mga N+1 media while the machine
+    is still on mga N would install cross-release packages — a
+    catastrophic outcome the resume path must avoid).
+
+    ``skip_stage1`` — when True, skips ``run_stage1`` entirely ;
+    used when resuming from a stage past ``media_swapped`` because
+    Stage 1's effects are already committed to the DB.
     """
     from ...core.distupgrade import (
         Stage0Error,
@@ -720,7 +787,11 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
         stage0 = run_stage0(
             db,
             user_supplied_target=to_arg,
-            skip_phase_a_upgrade=dry_run,
+            # Two independent reasons to skip the source-release
+            # upgrade : ``--dry-run`` (no side effects) and the
+            # resume path (media already swapped ; upgrading now
+            # would install cross-release packages).
+            skip_phase_a_upgrade=dry_run or skip_phase_a_upgrade,
             phase_a_on_plan_computed=_pa_plan,
             phase_a_download_progress=_pa_dl,
             phase_a_install_progress=_pa_install,
@@ -763,51 +834,59 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool) -> int:
             "and clear the state with `urpm distupgrade --abort`.")))
         return 0
 
-    print(colors.info(_(
-        "Switching repositories (mga{src} → mga{tgt})...").format(
-            src=stage0.current or "?",
-            tgt=stage0.target.display())))
-    try:
-        stage1_summary = run_stage1(
-            db,
-            source_identity=stage0.current or "unknown",
-            target=stage0.target,
-        )
-    except Stage1Error as exc:
-        print(colors.error(str(exc)))
-        return 1
-
-    n_src = len(stage1_summary["disabled_source"])
-    n_orph = len(stage1_summary["disabled_orphan"])
-    n_new = len(stage1_summary["created_urls"])
-    n_failed = len(stage1_summary["failed_servers"])
-    print(colors.success(_(
-        "Repository switchover done : {n_src} source repositories "
-        "disabled, {n_orph} third-party repositories with no target "
-        "counterpart flagged, {n_new} target catalogue(s) added.").format(
-            n_src=n_src, n_orph=n_orph, n_new=n_new)))
-    if n_failed:
-        print(colors.warning(_(
-            "  {n} server(s) failed target-catalogue upsert : {names}").format(
-                n=n_failed,
-                names=", ".join(stage1_summary["failed_servers"]))))
-
-    # List the third-party repositories that couldn't be transposed
-    # to a mga N+1 counterpart, upfront — the user needs to know
-    # BEFORE the Stage 2 prompt what they're losing, so they can
-    # abort and re-run once the maintainer publishes the target
-    # tree, or accept the loss knowingly.
-    if stage1_summary["disabled_orphan"]:
-        print(colors.warning(_(
-            "  Third-party repositories with no mga{tgt} counterpart "
-            "(will be unavailable after the upgrade) :").format(
+    if skip_stage1:
+        print(colors.info(_(
+            "Repositories already switched to mga{tgt} — skipping "
+            "Stage 1 (resume path).").format(
                 tgt=stage0.target.display())))
-        for orph in stage1_summary["disabled_orphan"][:15]:
-            print(f"    {colors.dim(orph['name'])}")
-        if len(stage1_summary["disabled_orphan"]) > 15:
-            print(colors.dim(_(
-                "    (+ {n} more)").format(
-                    n=len(stage1_summary["disabled_orphan"]) - 15)))
+        stage1_summary = None
+    else:
+        print(colors.info(_(
+            "Switching repositories (mga{src} → mga{tgt})...").format(
+                src=stage0.current or "?",
+                tgt=stage0.target.display())))
+        try:
+            stage1_summary = run_stage1(
+                db,
+                source_identity=stage0.current or "unknown",
+                target=stage0.target,
+            )
+        except Stage1Error as exc:
+            print(colors.error(str(exc)))
+            return 1
+
+    if stage1_summary is not None:
+        n_src = len(stage1_summary["disabled_source"])
+        n_orph = len(stage1_summary["disabled_orphan"])
+        n_new = len(stage1_summary["created_urls"])
+        n_failed = len(stage1_summary["failed_servers"])
+        print(colors.success(_(
+            "Repository switchover done : {n_src} source repositories "
+            "disabled, {n_orph} third-party repositories with no target "
+            "counterpart flagged, {n_new} target catalogue(s) added.").format(
+                n_src=n_src, n_orph=n_orph, n_new=n_new)))
+        if n_failed:
+            print(colors.warning(_(
+                "  {n} server(s) failed target-catalogue upsert : {names}").format(
+                    n=n_failed,
+                    names=", ".join(stage1_summary["failed_servers"]))))
+
+        # List the third-party repositories that couldn't be transposed
+        # to a mga N+1 counterpart, upfront — the user needs to know
+        # BEFORE the Stage 2 prompt what they're losing, so they can
+        # abort and re-run once the maintainer publishes the target
+        # tree, or accept the loss knowingly.
+        if stage1_summary["disabled_orphan"]:
+            print(colors.warning(_(
+                "  Third-party repositories with no mga{tgt} counterpart "
+                "(will be unavailable after the upgrade) :").format(
+                    tgt=stage0.target.display())))
+            for orph in stage1_summary["disabled_orphan"][:15]:
+                print(f"    {colors.dim(orph['name'])}")
+            if len(stage1_summary["disabled_orphan"]) > 15:
+                print(colors.dim(_(
+                    "    (+ {n} more)").format(
+                        n=len(stage1_summary["disabled_orphan"]) - 15)))
 
     # After Stage 1 the target-release media rows exist in the DB but
     # their synthesis metadata isn't on disk yet.  The libsolv pool

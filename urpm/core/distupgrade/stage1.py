@@ -336,27 +336,49 @@ def _transpose_third_party_media(
             orphaned.append(row)
             continue
 
+        # Idempotency guard : after a ^C mid-Stage 2, the mga N+1
+        # rows this loop is about to insert already exist from the
+        # first pass.  A re-run would hit the ``UNIQUE (mageia_version,
+        # architecture, short_name)`` constraint and mark the source
+        # media orphan — the second run's Stage 2 would then see a
+        # bogus catalogue and produce a near-empty plan.  Look up the
+        # target row first and reuse it if present.
+        resolved_new_name = (
+            new_name or f"{row['name']}-mga{target_identity}")
+        resolved_new_short = (
+            new_short or f"{row['short_name']}-mga{target_identity}")
+        target_arch = row.get("architecture") or ""
+        existing = db.get_media_by_version_arch_shortname(
+            target_identity, target_arch, resolved_new_short)
         try:
-            new_id = db.add_media(
-                name=new_name or f"{row['name']}-mga{target_identity}",
-                short_name=new_short or f"{row['short_name']}"
-                                        f"-mga{target_identity}",
-                mageia_version=target_identity,
-                architecture=row.get("architecture") or "",
-                relative_path=new_relpath,
-                is_official=False,
-                allow_unsigned=bool(row.get("allow_unsigned")),
-                # Preserve source enabled state so the user's on/off
-                # preference carries across the migration — a disabled
-                # mga N third-party stays disabled on mga N+1.
-                enabled=bool(row.get("enabled")),
-                update_media=bool(row.get("update_media")),
-                priority=row.get("priority", 50),
-                url=None,          # modern rows carry no legacy url
-                mirrorlist=None,
-            )
-            if undo_journal is not None and new_id is not None:
-                undo_journal["created_media_ids"].append(int(new_id))
+            if existing is not None:
+                # Rerun path : reuse the existing mga N+1 row.
+                new_id = existing["id"]
+                logger.info(
+                    "stage1 : mga%s counterpart of %s already present "
+                    "(id=%d, short_name=%r) — reusing",
+                    target_identity, row["name"], new_id,
+                    resolved_new_short)
+            else:
+                new_id = db.add_media(
+                    name=resolved_new_name,
+                    short_name=resolved_new_short,
+                    mageia_version=target_identity,
+                    architecture=target_arch,
+                    relative_path=new_relpath,
+                    is_official=False,
+                    allow_unsigned=bool(row.get("allow_unsigned")),
+                    # Preserve source enabled state so the user's on/off
+                    # preference carries across the migration — a disabled
+                    # mga N third-party stays disabled on mga N+1.
+                    enabled=bool(row.get("enabled")),
+                    update_media=bool(row.get("update_media")),
+                    priority=row.get("priority", 50),
+                    url=None,          # modern rows carry no legacy url
+                    mirrorlist=None,
+                )
+                if undo_journal is not None and new_id is not None:
+                    undo_journal["created_media_ids"].append(int(new_id))
             for srv in reachable_servers:
                 db.link_server_media(srv["id"], new_id)
             with db._lock:
