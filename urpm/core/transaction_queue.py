@@ -796,8 +796,14 @@ class TransactionQueue:
             # Always wait — proc.returncode is None until wait() is called.
             if progress_callback and hasattr(progress_callback, 'cleanup'):
                 progress_callback.cleanup()
-            if full_sync:
-                # Newline to close the progress display before the wait message
+            if full_sync and not progress_callback:
+                # Wait-message is redundant when a callback (widget) is
+                # driving the display : the SCRIPT-phase callbacks
+                # already surface the running scriptlet in the sub-line,
+                # and this raw print would poke a stray line above the
+                # widget's 3-line region every time full_sync waits.
+                # Kept for headless / non-widget contexts where the user
+                # would otherwise see nothing.
                 from ..i18n import _
                 print("\n\033[33m  " + _("Waiting for scriptlets to complete...")
                       + "\033[0m", flush=True)

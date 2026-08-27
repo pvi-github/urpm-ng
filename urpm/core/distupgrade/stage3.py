@@ -719,44 +719,86 @@ def run_stage3_tx_b(
         "Stage 3 Tx B : %d package(s) split into %d batch(es) "
         "(~%d MB max)", len(tx_b_plan), len(batches), 200)
 
-    # Global progress across batches.  Without this, the caller's
-    # progress bar resets to 0 at every batch boundary and the user
-    # loses all sense of overall Tx B advancement.  We wrap the
-    # incoming callback with a per-batch offset so ``packages_done``
-    # and ``packages_total`` reflect the whole Tx B plan (installs +
-    # last-batch erases), not the current batch alone.
+    # Global progress across batches.  The caller's widget is built for
+    # a single transaction ; without this wrap its bar resets to 0 at
+    # every batch boundary and the operator loses all sense of overall
+    # Tx B advancement.  We rewrite ``packages_done`` / ``packages_total``
+    # so the bar spans the whole Tx B plan (installs + last-batch
+    # erases), NOT the current batch alone.
+    #
+    # Two invariants the widget relies on that we must not violate :
+    #
+    # 1. **``packages_done`` monotonic across the whole transaction.**
+    #    We accumulate ``done_before_batch`` from the *planned* batch
+    #    size (``len(batch)`` + ``len(batch_erase or [])``), never
+    #    from an observed callback value — rpm's SCRIPT and ERASE
+    #    phases can advance ``packages_done`` past a batch's install
+    #    count, and summing that back into the offset overshoots the
+    #    plan (papoteur beta showed 3024/2615).  A final ``min`` cap
+    #    guards against any residual drift.
+    # 2. **Render density stays at ~1 per package.**  The old widget
+    #    silenced INSTALL callbacks past batch 1 (its ``all_extracted``
+    #    heuristic fired once done reached the batch's local total).
+    #    Our global counter defeats that heuristic, so we drop
+    #    identical INST_PROGRESS byte-ticks at the wrap level : forward
+    #    a callback only when ``(phase, adjusted_done, package_name,
+    #    script_name)`` actually changes.  This preserves the widget's
+    #    3-line cursor-up trick, which loses its footing under sustained
+    #    100 Hz render rates.
     from dataclasses import replace
     from ..transaction_queue import TransactionPhase
 
     total_planned = len(tx_b_plan) + len(erase_names or [])
-    _prog_state = {"done_before_batch": 0, "last_local_done": 0}
+    import time as _time
+    # ``last_forwarded`` deduplicates identical states ; ``last_ts``
+    # throttles byte-level INST_PROGRESS floods (a 100 MB package
+    # emits ~10 000 callbacks) to ~30 Hz so the extraction sub-bar
+    # actually moves without swamping the widget's cursor-up trick.
+    _prog_state = {"done_before_batch": 0,
+                   "last_forwarded": None,
+                   "last_ts": 0.0}
 
     def _global_progress(tp):
-        # Track the last local packages_done seen so we can advance
-        # ``done_before_batch`` by that amount at end of batch.  rpm
-        # reports monotonically-increasing ``packages_done`` within a
-        # single transaction, so the highest value is the count of
-        # packages the batch actually processed (including cpio-failed
-        # ones — those still fire INST_STOP, see the retry pass below).
-        if tp.packages_done > _prog_state["last_local_done"]:
-            _prog_state["last_local_done"] = tp.packages_done
         if progress_callback is None:
             return
-        # Only rewrite the counters on phases whose ``packages_done`` is
-        # a package-level index.  VERIFY / PREPARE run once per batch
-        # over that batch's set — translating them to a global scale
-        # would look like the bar jumps ahead during verification.
         if tp.phase in (TransactionPhase.INSTALL,
                         TransactionPhase.SCRIPT,
                         TransactionPhase.ERASE):
+            adjusted_done = min(
+                _prog_state["done_before_batch"] + tp.packages_done,
+                total_planned)
+            # Include ``bytes_done`` so the extraction sub-bar
+            # progresses on big packages ; identical states still
+            # get dedup'd byte-for-byte.
+            dedup_key = (tp.phase, adjusted_done,
+                         tp.package_name, tp.script_name,
+                         tp.bytes_done)
+            if dedup_key == _prog_state["last_forwarded"]:
+                return
+            # 30 Hz throttle : keep the byte-level movement visible
+            # without letting the terminal drown in ANSI-cursor
+            # escapes.  The key WITHOUT bytes_done is what we compare
+            # against : as long as the package (or its phase) stays
+            # the same, we cap the render rate ; a package change
+            # bypasses the throttle so transitions feel snappy.
+            now = _time.monotonic()
+            slim_key = (tp.phase, adjusted_done,
+                        tp.package_name, tp.script_name)
+            last_slim = (_prog_state["last_forwarded"] or (None,) * 4)[:4]
+            if (slim_key == last_slim
+                    and (now - _prog_state["last_ts"]) < 0.033):
+                return
+            _prog_state["last_forwarded"] = dedup_key
+            _prog_state["last_ts"] = now
             adjusted = replace(
                 tp,
-                packages_done=(_prog_state["done_before_batch"]
-                               + tp.packages_done),
+                packages_done=adjusted_done,
                 packages_total=total_planned,
             )
             progress_callback(adjusted)
         else:
+            # VERIFY / PREPARE : forward verbatim ; the widget itself
+            # returns early on those phases so the rewriting is moot.
             progress_callback(tp)
 
     for i, batch in enumerate(batches, start=1):
@@ -764,7 +806,6 @@ def run_stage3_tx_b(
         # are typically obsoleted by an install in the plan, so they
         # need to survive until that install runs.
         batch_erase = erase_names if i == len(batches) else None
-        _prog_state["last_local_done"] = 0
         _run_one_side(
             db,
             side="b",
@@ -775,7 +816,9 @@ def run_stage3_tx_b(
             erase_names=batch_erase,
             progress_callback=_global_progress,
         )
-        _prog_state["done_before_batch"] += _prog_state["last_local_done"]
+        # Accumulate from the *planned* count, not an observed callback
+        # value — see the invariants block above.
+        _prog_state["done_before_batch"] += len(batch) + len(batch_erase or [])
         # Free the .rpm cache of packages this batch successfully
         # committed to rpmdb : failed ones keep their .rpm so the
         # retry pass at end-of-Tx-B doesn't have to re-download.
