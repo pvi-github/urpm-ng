@@ -1233,6 +1233,14 @@ Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.
                'and downstream mutations'),
     )
     distupgrade_parser.add_argument(
+        '--show-all',
+        action='store_true',
+        help=_('Show the full plan (installs, upgrades, removes, '
+               'orphans...) without truncation to the first ~10 lines '
+               'per bucket.  Handy on export-plan runs and for review '
+               'before the Stage 2 confirmation prompt.'),
+    )
+    distupgrade_parser.add_argument(
         '-y', '--yes', '--auto', dest='auto', action='store_true',
         help=_('Skip the Stage 2 confirmation prompt and proceed '
                'straight to download/install'),

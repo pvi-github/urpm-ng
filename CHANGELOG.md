@@ -15,6 +15,125 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.5] — 2026-08-27
+
+> **⚠️ WARNING — the `distupgrade` feature is still young.**  Only
+> use it on a machine you can afford to lose and reinstall, or on a
+> machine you can snapshot and restore (VM, Clonezilla, btrfs/LVM
+> snapshot…).  Every failure report makes the next version safer.
+
+Distupgrade robustness pass.  Three independent silent-drop bugs
+surfaced during real mga9→mga10 beta runs — synthesis metadata
+that dropped cockpit + a few KDE apps, Tx B skipping 400+ packages
+under disk pressure, and community mirrors left off the target
+release — all three now diagnose cleanly and recover automatically.
+New interactive orphans triage for post-distupgrade cleanup,
+`--preserve-hw` on `system import`, and a full rework of the
+`--custom` media add UX with auto-generated names.
+
+### Major Features
+
+- **Interactive orphans triage.**  `urpm autoremove --interactive`
+  opens a TUI that walks through the orphans classified into
+  previous-release relics, SONAME sublibs and user-facing packages
+  with per-package keep/remove/skip decisions, batch shortcuts,
+  filter language and a details view.  Distupgrade Stage 4 invites
+  the user to run it right after a successful migration.
+
+- **Tx B batching by 200 MB slices.**  Large distupgrade Tx B runs
+  (2000+ packages) were exhausting `/var/cache/urpm/rpms` and
+  triggering silent skips.  The commit / order phase now slices
+  into 200 MB batches, purges each batch's RPMs after commit, and
+  progresses a global counter across the slices so the display
+  stays honest.
+
+- **`--preserve-hw` on `urpm system import`.**  When importing a
+  profile onto a machine with different hardware, keeps the
+  target's hardware-specific packages (nvidia drivers, intel
+  firmware, hardware-tied kernels) even when the source didn't
+  have them.
+
+- **Auto-generated names on `media add --custom`.**  The flag no
+  longer requires positional `name` and `short_name` args ; both
+  are derived from the URL (blogdrake plate URL →
+  `short_name=blgrk_free`, `name=Blogdrake_Free`) via a vowel-drop
+  compression rule with a mnemonic table for ambiguous hosts.
+  `--name` / `--shortname` are optional overrides.
+
+### Bug Fixes
+
+- **File-provides silent drops in `distupgrade`.**  Mageia's
+  `synthesis.hdlist.cz` omits most file-provides ; in a full DUP
+  the mga9 rpmdb providers vanish and mga10 packages that
+  `Require` a file path (`cockpit-system`, `elograf`, and their
+  downstream `cockpit`, `cockpit-networkmanager`) become
+  unresolvable and get silently ejected by libsolv.  New reactive
+  rescue pass in `resolve_distupgrade` detects silent-drop
+  victims, streams each target media's `files.xml.lzma` filtered
+  on the missing paths, injects the missing provides on the
+  matching solvables and re-solves.  Zero cost when nothing was
+  dropped.
+
+- **Community-mirror URL support.**  Version detection now
+  recognises `mageia<N>` / `mga<N>` in addition to bare `<N>`,
+  and parsers scan version and arch independently with a
+  uniqueness guard.  Stage 1 URL transposition gained the
+  `mageia<src>` → `mageia<tgt>` rewrite so a mga9 blogdrake media
+  survives the migration to mga10.  `media discover` used to
+  substring-match the bare version inside the URL — hitting `10`
+  inside `mageia10` and losing the `mageia` prefix from every
+  discovered media's `relative_path`, silently 404-ing at the
+  next `media update`.  Now matches segment-wise and preserves
+  the actual URL token.
+
+- **Stage 1 mirror probe HEAD fallback.**  Some HTTP mirrors close
+  the connection on directory `HEAD` requests
+  (`CURLE_GOT_NOTHING`), silently orphaning perfectly reachable
+  media.  Probe now falls back to a bounded `GET` (`Range: 0-0`)
+  when `HEAD` returns empty, and the previously-swallowed pycurl
+  exception is surfaced as a tagged
+  `stage1 orphan[probe-unreachable]` warning.
+
+- **Distupgrade robustness pass.**  `rpm-helper` anchored in Tx A
+  (fixed `%pre` scriptlet race), silent-skipped packages retried
+  automatically in Tx B, RPM cache purged between batches,
+  `except` scope fix in the post-`execvp` path, stale
+  `url_version` refresh in Stage 1 for cauldron-pinned media.
+
+- **`urpm i --reinstall` on named packages.**  Was matching the
+  RPM file path only and silently doing nothing when passed a
+  package name.  Now resolves the name via the pool.
+
+- **`urpm download --from-file` best-effort mode.**  Downloads
+  what it can and reports failures instead of aborting the batch
+  when some packages are unreachable.
+
+- **`urpm history --detail` scriptlet rendering.**  `is_error`
+  column crash was masking the scriptlet trace ; the detail view
+  now prints the real output.
+
+- **rpmdrake accepts the 9th progress argument.**  DBus signature
+  drift crashed rpmdrake on every install progress update.
+
+### System / Robustness
+
+- Safe rpmdb access reworked so an interrupted `system import` no
+  longer leaves the rpmdb in a partially-open state.
+
+- Deep opt-in distupgrade diagnostics behind `--debug=distupgrade`
+  for beta-tester bug reports.
+
+### Packaging / Docs
+
+- i18n first-pass refresh at 0.9.4 covered the ~1600 msgids of the
+  distupgrade UX rework across the six shipped locales
+  (de/es/fr/it/nl/pt).  A ~150-msgid delta from the 0.9.5
+  additions (rescue, community URLs, orphans triage tweaks) is
+  documented in the backlog for the 0.9.6 catch-up, along with
+  `urpm.1` de/es/nl/pt content parity with en/fr/it.
+
+---
+
 ## [0.9.2] — 2026-08-15
 
 > **⚠️ WARNING — the `distupgrade` feature is very young.**  Only use

@@ -556,23 +556,45 @@ def decompose_url(
     """
     parsed = urlparse(url.rstrip('/'))
     path = parsed.path.strip('/')
+    parts = path.split('/') if path else []
 
-    # Try to find {version}/{arch}/media (or just {version}/media if no arch)
-    if version and arch:
-        needle = f"{version}/{arch}/media"
-    elif version:
-        needle = f"{version}/media"
-    else:
-        needle = None
+    # The version segment in the URL may be bare (``10``) or prefixed
+    # (``mageia10`` / ``mga10``) — community mirrors like blogdrake
+    # publish under the prefixed form.  We match segment-wise (not
+    # substring) so ``mageia10`` isn't hit inside a bare ``10`` needle,
+    # and we preserve the actual URL token so ``relative_path``
+    # reconstruction below keeps the prefix.
+    version_prefixes = ('', 'mageia', 'mga')
+    version_seg_idx = None
+    if version:
+        candidates = {f"{p}{version}" for p in version_prefixes}
+        for i, seg in enumerate(parts):
+            if seg in candidates:
+                version_seg_idx = i
+                break
 
-    if needle and needle in path:
-        idx = path.index(needle)
-        base_path = '/' + path[:idx].rstrip('/') if idx > 0 else ''
-        media_root = needle
-    else:
-        # Fallback: entire path is the media root
-        base_path = ''
-        media_root = path
+    def _split(idx: int, take: int) -> tuple[str, str]:
+        """Return (base_path, media_root) with *take* segments from idx."""
+        base = '/' + '/'.join(parts[:idx]) if idx > 0 else ''
+        root = '/'.join(parts[idx:idx + take])
+        return base, root
+
+    base_path = ''
+    media_root = path
+    if version_seg_idx is not None:
+        n = len(parts)
+        # Standard officiel + blogdrake-via-media.cfg layout :
+        # ``<version_seg>/<arch>/media[/...]``
+        if (arch and version_seg_idx + 2 < n + 1
+                and parts[version_seg_idx + 1] == arch
+                and (version_seg_idx + 2 >= n
+                     or parts[version_seg_idx + 2] == 'media')):
+            take = 3 if version_seg_idx + 2 < n else 2
+            base_path, media_root = _split(version_seg_idx, take)
+        # Legacy no-arch layout : ``<version_seg>/media``.
+        elif (version_seg_idx + 1 < n
+              and parts[version_seg_idx + 1] == 'media'):
+            base_path, media_root = _split(version_seg_idx, 2)
 
     return parsed.scheme, parsed.hostname or '', base_path, media_root
 

@@ -24,6 +24,7 @@ from urpm.cli.helpers.media import (
     parse_custom_media_url,
 )
 from urpm.core.distupgrade.stage1 import _try_transpose_string
+from urpm.core.media_cfg import decompose_url
 from urpm.core.media_pipeline import (
     _extract_version_from_url,
     _match_version_token as core_match_version_token,
@@ -209,3 +210,56 @@ class TestTryTransposeString:
         assert _try_transpose_string(
             "no-version-here", "9", "10",
         ) is None
+
+
+# ── decompose_url (media discover) ───────────────────────────────────
+
+
+class TestDecomposeUrl:
+    """``decompose_url`` splits an officiel-shaped media root URL into
+    ``(scheme, host, base_path, media_root)``.  The version segment
+    in the URL may be prefixed (``mageia10``) — the split must
+    preserve that token verbatim so downstream ``relative_path``
+    reconstruction from ``media.cfg`` sections
+    (``[../../free/x86_64]`` → ``mageia10/free/x86_64``) keeps the
+    correct URL prefix and the follow-up ``urpm media update``
+    finds the synthesis at the right place.
+    """
+
+    def test_officiel_layout(self):
+        assert decompose_url(
+            "https://mirror.example.org/pub/Mageia/distrib/10/x86_64/media",
+            "10", "x86_64",
+        ) == ("https", "mirror.example.org",
+              "/pub/Mageia/distrib", "10/x86_64/media")
+
+    def test_blogdrake_via_media_cfg_prefixed_version(self):
+        # Regression : the substring match used to hit ``10`` inside
+        # ``mageia10``, producing base_path ``/mageia/mageia`` and
+        # media_root ``10/x86_64/media`` — which then rebuilt every
+        # media URL without the ``mageia`` prefix and 404'd at update
+        # time.  We now match segment-wise on {version,
+        # mageia<version>, mga<version>} and keep the actual URL
+        # token.
+        assert decompose_url(
+            "https://ftp.blogdrake.org/mageia/mageia10/x86_64/media",
+            "10", "x86_64",
+        ) == ("https", "ftp.blogdrake.org",
+              "/mageia", "mageia10/x86_64/media")
+
+    def test_blogdrake_trailing_slash(self):
+        assert decompose_url(
+            "https://ftp.blogdrake.org/mageia/mageia10/x86_64/media/",
+            "10", "x86_64",
+        ) == ("https", "ftp.blogdrake.org",
+              "/mageia", "mageia10/x86_64/media")
+
+    def test_no_pattern_falls_back_to_full_path(self):
+        # When the URL doesn't carry the expected shape, base_path
+        # stays empty and media_root captures the whole path so the
+        # caller can decide.
+        scheme, host, base, root = decompose_url(
+            "https://example.org/some/random", "10", "x86_64",
+        )
+        assert base == ""
+        assert root == "some/random"
