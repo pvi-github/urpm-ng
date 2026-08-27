@@ -1,6 +1,6 @@
 %define name urpm-ng
-%define version 0.9.5
-%define release 4
+%define version 0.9.6
+%define release 1
 
 # Full Release including the Mageia disttag, used in Obsoletes /
 # Provides on the noarch subpackages so they match what the rpmdb
