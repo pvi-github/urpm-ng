@@ -606,14 +606,27 @@ def _detect_arch(section: str, default_arch: str) -> str:
     """Detect architecture from a media.cfg section name.
 
     Cross-architecture sections use paths like ``../../i686/media/core/release``
-    where the architecture appears right before ``media``.  Native sections
-    (e.g. ``core/release``) use the default arch from ``[media_info]``.
+    where the architecture appears right before ``media``.  Same-tree
+    siblings that only differ by arch (``../../free/x86_64`` vs
+    ``../../free/noarch``) put the arch at the end of the section path.
+    Native sections (e.g. ``core/release``) fall back to the default
+    arch from ``[media_info]``.
+
+    Recognising a path-final ``noarch`` is what lets the DB store the
+    noarch sibling with ``architecture='noarch'`` (universally loadable
+    into any pool via :mod:`urpm.core.resolution.pool`) instead of
+    inheriting the tree arch and getting skipped on non-matching hosts.
     """
     parts = section.replace('\\', '/').split('/')
 
-    # Look for a known arch followed by 'media' in the path
     for i, part in enumerate(parts):
-        if part in _KNOWN_ARCHES and i + 1 < len(parts) and parts[i + 1] == 'media':
+        if part not in _KNOWN_ARCHES:
+            continue
+        # Cross-arch section : ``../../<arch>/media/...``
+        if i + 1 < len(parts) and parts[i + 1] == 'media':
+            return part
+        # Same-tree sibling : ``.../<arch>`` at end of path
+        if i == len(parts) - 1:
             return part
 
     return default_arch or 'x86_64'
@@ -627,6 +640,17 @@ def _make_short_name(section: str, arch: str, default_arch: str) -> str:
         - ``../../i686/media/core/release`` → ``i686_core_release``
         - ``debug/core/release`` → ``debug_core_release``
         - ``core`` (MLO) → ``core``
+        - ``../../free/x86_64`` (default_arch=x86_64) → ``free``
+        - ``../../free/noarch`` (default_arch=x86_64) → ``free_noarch``
+
+    Only strips an arch segment when it matches this media's own arch
+    (as computed by :func:`_detect_arch`).  A ``noarch`` (or any other
+    arch) sitting alongside a native tree carries genuinely distinct
+    content — its qualifier must survive, otherwise two sections
+    collapse to the same canonical key and the second silently gets
+    treated as a re-link of the first.  Cross-arch sections still get
+    the arch stripped from the middle of the path, then re-prefixed
+    below.
     """
     # Strip ../../ prefixes and /media/ segments
     clean = section
@@ -634,8 +658,12 @@ def _make_short_name(section: str, arch: str, default_arch: str) -> str:
         clean = clean[3:]
 
     parts = clean.split('/')
-    # Remove architecture and 'media' segments
-    filtered = [p for p in parts if p not in ('media',) and p not in _KNOWN_ARCHES]
+    # Drop 'media' separators; drop the arch segment only when it
+    # matches this media's own arch (see docstring rationale).
+    filtered = [
+        p for p in parts
+        if p != 'media' and not (p in _KNOWN_ARCHES and p == arch)
+    ]
 
     name = '_'.join(filtered) if filtered else section.replace('/', '_')
 

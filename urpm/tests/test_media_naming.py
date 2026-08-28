@@ -25,6 +25,8 @@ from urpm.cli.helpers.media import (
 from urpm.core import media_cfg
 from urpm.core.database import PackageDatabase
 from urpm.core.media_cfg import (
+    _detect_arch,
+    _make_short_name,
     is_ugly_name,
     resolve_display_name,
     _strip_to_last_media_segment,
@@ -244,3 +246,88 @@ class TestDisambiguate:
             version="9")
         with pytest.raises(MediaNameCollision):
             disambiguate_media_name(db, "Core Release", "i586")
+
+
+class TestMakeShortName:
+    """Regression tests for :func:`_make_short_name`.
+
+    The blogdrake catalogue exposed a silent collapse : the default-arch
+    strip rule dropped every arch segment, including ``noarch``, so
+    ``free/x86_64`` and ``free/noarch`` both produced short_name
+    ``free``.  The second section then noop'd against the first at
+    canonical-key lookup and its row was silently dropped.
+    """
+
+    def test_default_arch_is_stripped(self):
+        assert _make_short_name("../../free/x86_64", "x86_64", "x86_64") == "free"
+
+    def test_noarch_sibling_short_name_when_arch_defaulted(self):
+        # Guard: if the caller passed x86_64 (pre-fix behaviour where
+        # _detect_arch fell back to info.arch for a path-final noarch),
+        # the short_name must at least keep the ``noarch`` qualifier so
+        # the canonical key (v, x86_64, …) doesn't collapse against the
+        # x86_64 sibling.
+        assert _make_short_name("../../free/noarch", "x86_64", "x86_64") == "free_noarch"
+
+    def test_noarch_sibling_short_name_when_arch_detected(self):
+        # Production path: _detect_arch now recognises the path-final
+        # ``noarch`` and returns 'noarch'.  The strip drops it from
+        # the section parts, and the trailing prefix rule (arch !=
+        # default_arch) re-prepends it as ``noarch_`` — symmetric with
+        # the ``i686_`` prefix on cross-arch media.  Canonical key
+        # (v, 'noarch', 'noarch_free') is doubly distinct from the
+        # x86_64 sibling — no collision possible.
+        assert _make_short_name("../../free/noarch", "noarch", "x86_64") == "noarch_free"
+
+    def test_cross_arch_prefixes(self):
+        # Cross-arch section (i686 under an x86_64 tree) keeps its
+        # arch as a prefix — historical contract of the function.
+        assert _make_short_name(
+            "../../i686/media/core/release", "i686", "x86_64"
+        ) == "i686_core_release"
+
+    def test_pseudo_arch_srpms_preserved(self):
+        # SRPMS isn't in _KNOWN_ARCHES, must survive the filter.
+        assert _make_short_name("../../free/SRPMS", "x86_64", "x86_64") == "free_srpms"
+
+    def test_debug_section_untouched(self):
+        assert _make_short_name(
+            "debug/core/release", "x86_64", "x86_64"
+        ) == "debug_core_release"
+
+    def test_mlo_flat_section(self):
+        assert _make_short_name("core", "x86_64", "x86_64") == "core"
+
+
+class TestDetectArch:
+    """Regression tests for :func:`_detect_arch`.
+
+    Extension over the historical ``<arch>/media/...`` cross-arch
+    pattern : same-tree siblings that carry the arch as the final
+    segment (``.../noarch``, ``.../x86_64``) are recognised too, so
+    a genuinely noarch media gets ``architecture='noarch'`` in the
+    DB and loads into any pool regardless of the caller's arch.
+    """
+
+    def test_cross_arch_i686_media(self):
+        assert _detect_arch("../../i686/media/core/release", "x86_64") == "i686"
+
+    def test_path_final_noarch(self):
+        # Blogdrake pattern: ``[../../free/noarch]``.
+        assert _detect_arch("../../free/noarch", "x86_64") == "noarch"
+
+    def test_path_final_x86_64_matches_default(self):
+        # Same shape but the arch equals the tree default — that's
+        # fine, the arch column ends up = default_arch either way.
+        assert _detect_arch("../../free/x86_64", "x86_64") == "x86_64"
+
+    def test_no_arch_in_path_falls_back(self):
+        assert _detect_arch("core/release", "x86_64") == "x86_64"
+
+    def test_flat_mlo_section(self):
+        assert _detect_arch("core", "x86_64") == "x86_64"
+
+    def test_srpms_is_not_arch(self):
+        # ``SRPMS`` isn't in _KNOWN_ARCHES — must not be misread as
+        # an arch, we let the DB row inherit info.arch instead.
+        assert _detect_arch("../../free/SRPMS", "x86_64") == "x86_64"
