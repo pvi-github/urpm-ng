@@ -10128,3 +10128,27 @@ msgstr "Essayez l'une des commandes :"
 
 #~ msgid "    Drop them later with :  urpm media remove --distupgraded"
 #~ msgstr "    Les supprimer plus tard avec :  urpm media remove --distupgraded"
+
+#: --import-keys 0.9.7
+msgid "Walk each discovered media, fetch its GPG pubkey, and offer to import every unique key before touching the DB"
+msgstr "Parcourir chaque média découvert, récupérer sa clé GPG et proposer d'importer chaque clé unique avant de toucher la base de données"
+
+#: --import-keys 0.9.7
+msgid "--import-keys: no enabled media to sample a pubkey from"
+msgstr "--import-keys : aucun média activé où récupérer une clé publique"
+
+#: --import-keys 0.9.7
+msgid "  {media}: could not fetch pubkey ({error})"
+msgstr "  {media} : impossible de récupérer la clé publique ({error})"
+
+#: --import-keys 0.9.7
+msgid "  {media}: no pubkey published"
+msgstr "  {media} : pas de clé publique publiée"
+
+#: --import-keys 0.9.7
+msgid "  {media}: could not parse pubkey"
+msgstr "  {media} : impossible d'analyser la clé publique"
+
+#: --import-keys 0.9.7
+msgid "\nKey advertised by {media}:"
+msgstr "\nClé annoncée par {media} :"

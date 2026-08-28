@@ -2130,6 +2130,12 @@ Examples:
         action='store_true',
         help=_('Show what would be added without making changes')
     )
+    media_discover.add_argument(
+        '--import-keys',
+        action='store_true',
+        help=_('Walk each discovered media, fetch its GPG pubkey, and '
+               'offer to import every unique key before touching the DB')
+    )
 
     # =========================================================================
     # server / srv

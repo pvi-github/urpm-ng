@@ -10041,3 +10041,27 @@ msgstr "Probeer één van:"
 
 #~ msgid "    Drop them later with :  urpm media remove --distupgraded"
 #~ msgstr "    Verwijder ze later met :  urpm media remove --distupgraded"
+
+#: --import-keys 0.9.7
+msgid "Walk each discovered media, fetch its GPG pubkey, and offer to import every unique key before touching the DB"
+msgstr "Elk ontdekt medium doorlopen, zijn GPG-sleutel ophalen en aanbieden elke unieke sleutel te importeren voordat de database wordt gewijzigd"
+
+#: --import-keys 0.9.7
+msgid "--import-keys: no enabled media to sample a pubkey from"
+msgstr "--import-keys: geen ingeschakeld medium om een openbare sleutel te samplen"
+
+#: --import-keys 0.9.7
+msgid "  {media}: could not fetch pubkey ({error})"
+msgstr "  {media}: kan openbare sleutel niet ophalen ({error})"
+
+#: --import-keys 0.9.7
+msgid "  {media}: no pubkey published"
+msgstr "  {media}: geen openbare sleutel gepubliceerd"
+
+#: --import-keys 0.9.7
+msgid "  {media}: could not parse pubkey"
+msgstr "  {media}: kan openbare sleutel niet ontleden"
+
+#: --import-keys 0.9.7
+msgid "\nKey advertised by {media}:"
+msgstr "\nSleutel aangekondigd door {media}:"

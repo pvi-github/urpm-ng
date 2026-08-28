@@ -2628,6 +2628,83 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
         print(colors.warning(_("\nDry run — no changes made")))
         return 0
 
+    def _enabled_for(m):
+        return should_enable(
+            m, installed,
+            force_nonfree=force_nonfree,
+            force_tainted=force_tainted,
+            force_32bit=force_32bit,
+            force_enable_all=enable_all,
+        )
+
+    # ── GPG key import (--import-keys) ──────────────────────────────
+    # Walk every enabled media, fetch its pubkey, and offer to import
+    # each *unique* key once (dedup by keyid).  Community mirrors
+    # usually share one key across all their channels — we still
+    # probe every media in case the catalogue mixes signers.  A
+    # missing / unfetchable pubkey per-media is a warning, not an
+    # error : partially-signed catalogues stay usable.  Only an
+    # explicit user abort at the prompt stops the discover before
+    # any DB mutation.
+    if getattr(args, 'import_keys', False) and scheme in ('http', 'https', 'ftp'):
+        enabled_media = [m for m in media_list if _enabled_for(m)]
+        if not enabled_media:
+            print(colors.warning(_(
+                "--import-keys: no enabled media to sample a pubkey from")))
+        else:
+            seen_keyids: set[str] = set()
+            for m in enabled_media:
+                media_url = f"{scheme}://{host}{base_path.rstrip('/')}/{m.relative_path}"
+                try:
+                    key_data = _fetch_media_pubkey(media_url)
+                except Exception as exc:  # noqa: BLE001
+                    print(colors.warning(_(
+                        "  {media}: could not fetch pubkey ({error})").format(
+                            media=m.name, error=exc)))
+                    continue
+                if not key_data:
+                    print(colors.dim(_(
+                        "  {media}: no pubkey published").format(media=m.name)))
+                    continue
+                key_info = _get_gpg_key_info(key_data)
+                if not key_info:
+                    print(colors.warning(_(
+                        "  {media}: could not parse pubkey").format(media=m.name)))
+                    continue
+                keyid = key_info['keyid']
+                if keyid in seen_keyids:
+                    continue
+                seen_keyids.add(keyid)
+
+                print(_("\nKey advertised by {media}:").format(media=m.name))
+                print(_("  Key ID:      {keyid}").format(
+                    keyid=key_info.get('keyid_long', keyid)))
+                if key_info.get('fingerprint'):
+                    fp = key_info['fingerprint']
+                    fp_formatted = ' '.join([fp[i:i+4] for i in range(0, len(fp), 4)])
+                    print(_("  Fingerprint: {fingerprint}").format(
+                        fingerprint=fp_formatted))
+                if key_info.get('uid'):
+                    print(_("  User ID:     {uid}").format(uid=key_info['uid']))
+                if _is_key_in_rpm_keyring(keyid):
+                    print(colors.success(_(
+                        "  Key {keyid} already in keyring").format(keyid=keyid)))
+                    continue
+                try:
+                    response = input(_("\nImport this key? [y/N] "))
+                    if not confirm_yes(response):
+                        print(_("Aborted"))
+                        return 1
+                except (KeyboardInterrupt, EOFError):
+                    print(_("\nAborted"))
+                    return 1
+                if _import_gpg_key(key_data):
+                    print(colors.success(_(
+                        "  Key {keyid} imported").format(keyid=keyid)))
+                else:
+                    print(colors.error(_("  Failed to import key")))
+                    return 1
+
     # ── Delegate to the canonical primitive ──────────────────────────
     # The primitive handles server upsert, per-media decision tree,
     # display-name resolution (single source of truth), invariant
@@ -2641,15 +2718,6 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
         MediaTreeFetchError,
         upsert_media_tree,
     )
-
-    def _enabled_for(m):
-        return should_enable(
-            m, installed,
-            force_nonfree=force_nonfree,
-            force_tainted=force_tainted,
-            force_32bit=force_32bit,
-            force_enable_all=enable_all,
-        )
 
     try:
         result = upsert_media_tree(

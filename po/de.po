@@ -10087,3 +10087,27 @@ msgstr "Versuchen Sie eines von:"
 
 #~ msgid "    Drop them later with :  urpm media remove --distupgraded"
 #~ msgstr "    Später verwerfen mit :  urpm media remove --distupgraded"
+
+#: --import-keys 0.9.7
+msgid "Walk each discovered media, fetch its GPG pubkey, and offer to import every unique key before touching the DB"
+msgstr "Jedes gefundene Medium durchlaufen, den GPG-Schlüssel abrufen und jeden eindeutigen Schlüssel zum Import anbieten, bevor die Datenbank geändert wird"
+
+#: --import-keys 0.9.7
+msgid "--import-keys: no enabled media to sample a pubkey from"
+msgstr "--import-keys: kein aktiviertes Medium zum Abrufen eines öffentlichen Schlüssels"
+
+#: --import-keys 0.9.7
+msgid "  {media}: could not fetch pubkey ({error})"
+msgstr "  {media}: öffentlicher Schlüssel konnte nicht abgerufen werden ({error})"
+
+#: --import-keys 0.9.7
+msgid "  {media}: no pubkey published"
+msgstr "  {media}: kein öffentlicher Schlüssel veröffentlicht"
+
+#: --import-keys 0.9.7
+msgid "  {media}: could not parse pubkey"
+msgstr "  {media}: öffentlicher Schlüssel konnte nicht ausgewertet werden"
+
+#: --import-keys 0.9.7
+msgid "\nKey advertised by {media}:"
+msgstr "\nVon {media} angekündigter Schlüssel:"
