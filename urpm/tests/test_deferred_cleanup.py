@@ -11,7 +11,7 @@ from urpm.core.deferred_cleanup import LOCK_PATH, sweep_pending_drop
 
 @pytest.fixture
 def db(monkeypatch, tmp_path):
-    monkeypatch.setattr('urpm.core.config.get_system_version', lambda: '10')
+    monkeypatch.setattr('urpm.core.config.get_system_version', lambda root=None: '10')
     db_path = tmp_path / "packages.db"
     database = PackageDatabase(db_path)
     yield database

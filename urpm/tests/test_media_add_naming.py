@@ -45,7 +45,7 @@ def _pin_system_arch(monkeypatch):
 
 @pytest.fixture
 def db(monkeypatch):
-    monkeypatch.setattr('urpm.core.config.get_system_version', lambda: '10')
+    monkeypatch.setattr('urpm.core.config.get_system_version', lambda root=None: '10')
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         db_path = Path(f.name)
     database = PackageDatabase(db_path)

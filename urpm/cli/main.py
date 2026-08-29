@@ -91,7 +91,7 @@ from .commands.mirror import (
     cmd_mirror_clean, cmd_mirror_sync, cmd_mirror_ratelimit,
 )
 from .commands.media import (
-    cmd_media_list, cmd_init, cmd_distro_switch, cmd_media_add, cmd_media_remove,
+    cmd_media_list, cmd_init, cmd_media_add, cmd_media_remove,
     cmd_media_enable, cmd_media_disable, cmd_media_update,
     cmd_media_import, cmd_media_set, cmd_media_seed_info,
     cmd_media_link, cmd_media_autoconfig, cmd_media_discover,
@@ -1167,31 +1167,6 @@ Examples:
     erase_parser.add_argument(
         '--sync', action='store_true', default=False,
         help=_('Wait for full completion including post-install triggers')
-    )
-
-    # =========================================================================
-    # distro-switch — change the machine's release identity
-    # =========================================================================
-    distro_switch_parser = subparsers.add_parser(
-        'distro-switch',
-        help=_('Change the machine\'s release identity (cauldron ↔ N)'),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=_('''Change this machine's release-level identity.
-
-The machine has a single identity at a time (``cauldron`` or a numeric
-like ``10`` / ``11``) that pins which media the resolver considers.
-Switching is a deliberate act — a dist-upgrade in filigree — so it
-lives in its own verb rather than in ``urpm config``.
-
-Examples:
-  urpm distro-switch cauldron
-  urpm distro-switch 11
-  urpm distro-switch cauldron:12
-'''),
-    )
-    distro_switch_parser.add_argument(
-        'target',
-        help=_('New identity: <cauldron|N|cauldron:N>'),
     )
 
     # =========================================================================
@@ -2924,7 +2899,7 @@ def main(argv=None) -> int:
     if not args.command:
         # Check if any media is configured
         try:
-            db = PackageDatabase(db_path=db_path)
+            db = PackageDatabase(db_path=db_path, urpm_root=urpm_root)
             media_list = db.list_media()
         except Exception:
             # Can't open database or no media - show quick start guide
@@ -2940,7 +2915,7 @@ def main(argv=None) -> int:
             return 1
 
     # Open database for command execution
-    db = PackageDatabase(db_path=db_path)
+    db = PackageDatabase(db_path=db_path, urpm_root=urpm_root)
 
     # SPEC_DISTUPGRADE §4.5 : universal Stage 5 post-boot fallback.
     # A distupgrade that reached Stage 4 leaves a marker.  On the
@@ -3092,8 +3067,6 @@ def main(argv=None) -> int:
         elif args.command in ('list', 'l'):
             return cmd_list(args, db)
 
-        elif args.command == 'distro-switch':
-            return cmd_distro_switch(args, db)
         elif args.command == 'distupgrade':
             return cmd_distupgrade(args, db)
         elif args.command == 'recover':

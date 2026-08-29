@@ -92,132 +92,29 @@ def _probe_cauldron_numeric(base_url: str, timeout: int = 5) -> str:
     return ""
 
 
-def cmd_distro_switch(args, db: 'PackageDatabase') -> int:
-    """Change the machine's release-level identity.
+def _seed_stub_os_release(urpm_root: str, identity: str) -> None:
+    """Write a stub ``<urpm_root>/etc/os-release`` carrying ``VERSION_ID``.
 
-    A machine has a single identity at a time — ``cauldron`` or a
-    numeric like ``10`` / ``11`` — that pins which media the resolver
-    considers.  Switching is a deliberate act (dist-upgrade in
-    filigree), so it lives in a dedicated verb rather than hidden
-    behind a bare ``urpm config set``.
+    Cross-version chroots and mkimage bootstraps need
+    :func:`urpm.core.config.get_system_version` to report the chroot's
+    own identity from the very first resolver call, well before
+    ``mageia-release-common`` gets installed there.  The stub is
+    minimalist (just ``ID`` + ``VERSION_ID``) so it isn't confused
+    with a fully-populated os-release, and the real package's
+    ``%post`` will overwrite it later without any special handling.
 
-    Accepts the same syntaxes as ``--release``:
-    ``11``, ``cauldron``, ``cauldron:11``.
-
-    Preflight checks:
-      * At least one enabled media must already carry the new
-        identity — otherwise the switch would leave the machine with
-        an empty candidate pool.  Diagnostic points at
-        ``urpm media autoconfig`` when the check fails.
-      * Media of the OLD identity that stay enabled are called out so
-        the user knows they will silently drop out of the resolver's
-        view until re-aligned or disabled.
-
-    Then persists the new ``mageia-version`` (and best-effort refresh
-    of ``system-numeric``) in ``config``.
+    Best-effort : silent if the write fails (unusual mounts, quota),
+    since the media pipeline surfaces the mismatch downstream.
     """
-    from .. import colors
-
-    target_arg = getattr(args, 'target', None)
-    identity, explicit_numeric = _parse_release_arg(target_arg)
-    if not identity:
-        print(colors.error(_(
-            "Missing target — pass 'urpm distro-switch <cauldron|N|cauldron:N>'")))
-        return 1
-
-    current = db.get_config('mageia-version') or ''
-
-    # No-op / numeric-only refresh path.
-    if current == identity:
-        if identity == 'cauldron' and explicit_numeric and explicit_numeric.isdigit():
-            db.set_config('system-numeric', explicit_numeric)
-            print(_(
-                "Already on {id}; refreshed system-numeric to {n}").format(
-                id=identity, n=explicit_numeric))
-            return 0
-        print(_("Already on {id} — nothing to do").format(id=identity))
-        return 0
-
-    print(_("Switching release identity: {old} → {new}").format(
-        old=current or _("(unset)"), new=identity))
-
-    # Verify the target has candidate media.
-    media_list = db.list_media()
-    fresh = [m for m in media_list
-             if m.get('enabled') and m.get('mageia_version') == identity]
-    stale = [m for m in media_list
-             if m.get('enabled') and m.get('mageia_version')
-             and m.get('mageia_version') != identity]
-
-    if not fresh:
-        print(colors.error(_(
-            "No enabled media carry identity {id}.  Add them first:").format(
-            id=identity)))
-        print(colors.dim(f"    urpm media autoconfig -r {identity}"))
-        print(colors.dim(_(
-            "  Then re-run: urpm distro-switch {arg}").format(
-            arg=target_arg)))
-        return 2
-
-    if stale:
-        print(colors.warning(_(
-            "{n} enabled media stay tagged {old} and will drop out of "
-            "resolver's view:").format(n=len(stale), old=current or '?')))
-        for m in stale[:10]:
-            print(f"    - {m['name']} ({m.get('mageia_version', '?')})")
-        if len(stale) > 10:
-            print(colors.dim(
-                _("    ... and {n} more").format(n=len(stale) - 10)))
-        print(colors.dim(_(
-            "  Disable them (`urpm media disable NAME`) or rerun `urpm "
-            "media autoconfig` for the new identity if you want them "
-            "aligned.")))
-
-    # Apply the switch.
-    db.set_config('mageia-version', identity)
-
-    # Refresh system-numeric on best-effort basis.  Priority: explicit
-    # override > identity itself when numeric > probe from an enabled
-    # fresh media's first server.  Falls through silently offline.
-    numeric = ''
-    if explicit_numeric and explicit_numeric.isdigit():
-        numeric = explicit_numeric
-    elif identity.isdigit():
-        numeric = identity
-    elif identity == 'cauldron':
-        # Walk one fresh media → its first enabled server → media.cfg
-        # at ``<srv>/<identity>/<arch>/media``.
-        from ...core.config import build_server_url
-        arch = resolve_target_arch(args) if hasattr(args, 'arch') else None
-        for m in fresh:
-            servers = db.get_servers_for_media(m['id'], enabled_only=True)
-            if not servers:
-                continue
-            srv_arch = arch or m.get('architecture') or 'x86_64'
-            base_url = (build_server_url(servers[0]).rstrip('/')
-                        + f"/{identity}/{srv_arch}/media")
-            probed = _probe_cauldron_numeric(base_url)
-            if probed:
-                numeric = probed
-                print(_(
-                    "Target numeric: {n} (probed from {url})").format(
-                    n=numeric, url=base_url))
-                break
-
-    if numeric:
-        db.set_config('system-numeric', numeric)
-    elif identity == 'cauldron':
-        # Keep prior numeric if any; warn if we have nothing.
-        if not db.get_config('system-numeric'):
-            print(colors.warning(_(
-                "Could not determine cauldron's numeric — pass "
-                "'cauldron:N' when online to set it explicitly.")))
-
-    print(colors.success(_("Switched to {id}").format(id=identity)))
-    print(colors.dim(_(
-        "  Next: run 'urpm media update' to sync metadata for the "
-        "new identity.")))
-    return 0
+    try:
+        etc = Path(urpm_root) / "etc"
+        etc.mkdir(parents=True, exist_ok=True)
+        (etc / "os-release").write_text(
+            f'ID=mageia\nVERSION_ID="{identity}"\n',
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def cmd_media_list(args, db: 'PackageDatabase') -> int:
@@ -349,12 +246,17 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         print(colors.dim(_("Use --release to specify (e.g., --release 10 or --release cauldron)")))
         return 1
 
-    # Persist the release-level identity in the DB config.  This is
-    # the ``cauldron`` | ``10`` | ``11`` | … string that anchors
-    # media filtering in ``_get_accepted_versions``.  Without it,
-    # queries fall back to the host's ``/etc/os-release``, which
-    # breaks cross-version chroots (mga9 init on a mga10 host).
-    db.set_config('mageia-version', identity)
+    # Cross-version chroots (mga9 init on a mga10 host, cauldron init
+    # on a stable host…) need ``get_system_version`` to return the
+    # chroot's own identity from the very first resolver call — even
+    # though ``mageia-release-common`` hasn't been installed yet.
+    # Seed a stub ``<chroot>/etc/os-release`` carrying VERSION_ID so
+    # the DB owner's identity is knowable pre-bootstrap ; the real
+    # ``mageia-release-common`` scriptlet will overwrite it later
+    # without complaining.  Skipped for host DBs.
+    urpm_root = getattr(args, 'urpm_root', None)
+    if urpm_root:
+        _seed_stub_os_release(urpm_root, identity)
 
     # Retained for callers below that still read ``version`` — the
     # variable used to double as both identity and numeric before
@@ -663,8 +565,8 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             print(colors.warning(_(
                 "Could not probe cauldron numeric — build/mkimage will "
                 "fall back to /etc/mageia-release at read time.  Re-run "
-                "with '--release cauldron:N' or 'urpm distro-switch cauldron' "
-                "when online to set it explicitly.")))
+                "with '--release cauldron:N' when online to set it "
+                "explicitly.")))
 
     # Discover and add media from each mirror's real catalogue.
     #
@@ -2565,23 +2467,15 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
                 'nonfree': False, 'tainted': False, 'has_32bit': False})()
 
     # ── Warn if repo version differs from local system ────────────────
-    # A DB pinned to a target release (mkimage cross-version chroot,
-    # ``cmd_init`` writes ``mageia-version`` for that) knows exactly
-    # which release its owner intends to serve; honour that first so
-    # ``mkimage --release 10`` from a mga9 host doesn't emit a false
+    # Read the identity from the DB's own ``/etc/os-release`` (host
+    # for a normal DB, chroot's own for a mkimage bootstrap where
+    # ``cmd_init`` seeded a stub earlier).  This is what makes
+    # ``mkimage --release 10`` from a mga9 host stop emitting a false
     # "these media are for Mageia 10, this system runs Mageia 9"
-    # alarm when the mga10 media are exactly what the caller asked
-    # for.  Fall back to the host's os-release only when no pin exists.
-    local_version = db.get_config('mageia-version') or ''
-    if not local_version:
-        try:
-            with open('/etc/os-release') as f:
-                for line in f:
-                    if line.startswith('VERSION_ID='):
-                        local_version = line.strip().split('=')[1].strip('"')
-                        break
-        except OSError:
-            pass
+    # warning when the mga10 media are exactly what the caller asked
+    # for : the chroot's seeded VERSION_ID matches info.version.
+    from ...core.config import get_system_version
+    local_version = get_system_version(root=db.urpm_root) or ''
     if local_version and info.version and info.version != local_version:
         print(colors.warning(
             _("Warning: these media are for Mageia {repo_ver}, "

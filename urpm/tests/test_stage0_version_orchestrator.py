@@ -60,12 +60,12 @@ class TestReadCurrentRelease:
     def test_delegates_to_get_system_version(self, monkeypatch):
         """Thin wrapper — behaviour test lives on get_system_version."""
         monkeypatch.setattr(
-            "urpm.core.config.get_system_version", lambda: "10")
+            "urpm.core.config.get_system_version", lambda root=None: "10")
         assert read_current_release() == "10"
 
     def test_returns_none_when_system_version_absent(self, monkeypatch):
         monkeypatch.setattr(
-            "urpm.core.config.get_system_version", lambda: None)
+            "urpm.core.config.get_system_version", lambda root=None: None)
         assert read_current_release() is None
 
 

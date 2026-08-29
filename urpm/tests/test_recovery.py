@@ -27,7 +27,7 @@ from urpm.core.recovery import (
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "urpm.core.config.get_system_version", lambda: "10")
+        "urpm.core.config.get_system_version", lambda root=None: "10")
     db_path = tmp_path / "packages.db"
     d = PackageDatabase(db_path=db_path)
     yield d
@@ -159,7 +159,7 @@ class TestReconcile:
 class TestStartupWarning:
     def test_warning_printed_on_orphan(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(
-            "urpm.core.config.get_system_version", lambda: "10")
+            "urpm.core.config.get_system_version", lambda root=None: "10")
         db_path = tmp_path / "packages.db"
 
         # First open : bootstrap schema, no orphans.
@@ -182,7 +182,7 @@ class TestStartupWarning:
 
     def test_no_warning_when_clean(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(
-            "urpm.core.config.get_system_version", lambda: "10")
+            "urpm.core.config.get_system_version", lambda root=None: "10")
         db_path = tmp_path / "packages.db"
         d = PackageDatabase(db_path=db_path)
         err = capsys.readouterr().err

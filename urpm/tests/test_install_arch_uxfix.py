@@ -23,7 +23,7 @@ from urpm.core.database import PackageDatabase
 @pytest.fixture
 def db(monkeypatch):
     """Throwaway SQLite-backed PackageDatabase for one test."""
-    monkeypatch.setattr('urpm.core.config.get_system_version', lambda: '9')
+    monkeypatch.setattr('urpm.core.config.get_system_version', lambda root=None: '9')
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         db_path = Path(f.name)
     database = PackageDatabase(db_path)

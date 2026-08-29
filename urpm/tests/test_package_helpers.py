@@ -49,7 +49,8 @@ def multiarch_db(monkeypatch):
     """
     # Match mageia_version="9" set on the test media so the version
     # filter inside get_package() lets the rows through.
-    monkeypatch.setattr('urpm.core.config.get_system_version', lambda: '9')
+    monkeypatch.setattr('urpm.core.config.get_system_version',
+                        lambda root=None: '9')
 
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         db_path = Path(f.name)

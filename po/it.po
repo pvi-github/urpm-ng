@@ -9812,3 +9812,27 @@ msgstr "  {media}: impossibile analizzare la chiave pubblica"
 #: --import-keys 0.9.7
 msgid "\nKey advertised by {media}:"
 msgstr "\nChiave annunciata da {media}:"
+
+#: version-mode preflight (0.9.7)
+msgid "    Add them first: urpm media autoconfig -r {id}"
+msgstr "    Aggiungerli prima: urpm media autoconfig -r {id}"
+
+#: version-mode preflight (0.9.7)
+msgid "Cannot determine system version — /etc/os-release is missing or unreadable."
+msgstr "Impossibile determinare la versione di sistema — /etc/os-release mancante o illeggibile."
+
+#: version-mode preflight (0.9.7)
+msgid "Unknown mode '{mode}' — use system|cauldron|auto"
+msgstr "Modo sconosciuto '{mode}' — usare system|cauldron|auto"
+
+#: version-mode preflight (0.9.7)
+msgid "No enabled media carry identity {id} — nothing for the resolver to pick from."
+msgstr "Nessun supporto attivato porta l'identità {id} — il resolutore non ha nulla da elaborare."
+
+#: version-mode preflight (0.9.7)
+msgid "{n} enabled media stay tagged with a different identity and will drop out of the resolver's view:"
+msgstr "{n} supporti attivati mantengono un'identità diversa e usciranno dalla vista del resolutore:"
+
+#: version-mode preflight (0.9.7)
+msgid "  Disable them with 'urpm media disable NAME' or re-run 'urpm media autoconfig' for {id}."
+msgstr "  Disattivali con 'urpm media disable NAME' o rilancia 'urpm media autoconfig' per {id}."

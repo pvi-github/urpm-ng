@@ -98,7 +98,7 @@ class TestSanitizeLayers:
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "urpm.core.config.get_system_version", lambda: "10")
+        "urpm.core.config.get_system_version", lambda root=None: "10")
     d = PackageDatabase(db_path=tmp_path / "packages.db")
     yield d
     d.close()

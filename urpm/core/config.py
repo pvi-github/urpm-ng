@@ -544,21 +544,13 @@ def get_accepted_versions(db, system_version=_AUTO_DETECT_SYSTEM_VERSION) -> tup
         'other_numeric_media': other_numeric_media,
     }
 
-    # First: the explicit identity pin.  ``cmd_init`` writes it to
-    # ``config.mageia-version`` when the DB is first created; on a
-    # running machine ``urpm distro-switch`` updates it.  A pinned
-    # value is authoritative — no media heuristic, no ambiguity check.
-    # Rows with a different ``mageia_version`` become invisible to the
-    # resolver until the machine switches identity or the media are
-    # dropped.  This is what makes a cauldron chroot on a mga10 host
-    # (or vice-versa) load the right pool without user intervention.
-    pinned_identity = db.get_config('mageia-version')
-    if pinned_identity:
-        return {pinned_identity}, False, conflict_info
-
-    # Second: the older ``version-mode`` escape hatch — kept for
-    # backwards compatibility on machines that were set up before
-    # ``mageia-version`` became the canonical pin.
+    # ``version-mode`` (system|cauldron|None) is the single source of
+    # truth for identity choice ; a pinned value is authoritative and
+    # bypasses the media heuristic below.  ``cmd_init`` seeds a stub
+    # ``/etc/os-release`` in cross-version chroots so ``system`` gives
+    # the right answer even before ``mageia-release-common`` lands
+    # (that stub was the last remaining role of the retired
+    # ``mageia-version`` config key).
     version_mode = db.get_config('version-mode')
     if version_mode == 'cauldron':
         return {'cauldron'}, False, conflict_info

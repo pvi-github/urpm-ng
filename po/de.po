@@ -10111,3 +10111,27 @@ msgstr "  {media}: öffentlicher Schlüssel konnte nicht ausgewertet werden"
 #: --import-keys 0.9.7
 msgid "\nKey advertised by {media}:"
 msgstr "\nVon {media} angekündigter Schlüssel:"
+
+#: version-mode preflight (0.9.7)
+msgid "    Add them first: urpm media autoconfig -r {id}"
+msgstr "    Fügen Sie sie zuerst hinzu: urpm media autoconfig -r {id}"
+
+#: version-mode preflight (0.9.7)
+msgid "Cannot determine system version — /etc/os-release is missing or unreadable."
+msgstr "Systemversion kann nicht ermittelt werden — /etc/os-release fehlt oder ist unlesbar."
+
+#: version-mode preflight (0.9.7)
+msgid "Unknown mode '{mode}' — use system|cauldron|auto"
+msgstr "Unbekannter Modus '{mode}' — verwenden Sie system|cauldron|auto"
+
+#: version-mode preflight (0.9.7)
+msgid "No enabled media carry identity {id} — nothing for the resolver to pick from."
+msgstr "Kein aktiviertes Medium trägt die Identität {id} — der Resolver hat nichts auszuwählen."
+
+#: version-mode preflight (0.9.7)
+msgid "{n} enabled media stay tagged with a different identity and will drop out of the resolver's view:"
+msgstr "{n} aktivierte Medien behalten eine andere Identität und fallen aus der Sicht des Resolvers heraus:"
+
+#: version-mode preflight (0.9.7)
+msgid "  Disable them with 'urpm media disable NAME' or re-run 'urpm media autoconfig' for {id}."
+msgstr "  Deaktivieren Sie sie mit 'urpm media disable NAME' oder starten Sie 'urpm media autoconfig' für {id} neu."

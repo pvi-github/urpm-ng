@@ -10065,3 +10065,27 @@ msgstr "  {media}: kan openbare sleutel niet ontleden"
 #: --import-keys 0.9.7
 msgid "\nKey advertised by {media}:"
 msgstr "\nSleutel aangekondigd door {media}:"
+
+#: version-mode preflight (0.9.7)
+msgid "    Add them first: urpm media autoconfig -r {id}"
+msgstr "    Voeg ze eerst toe: urpm media autoconfig -r {id}"
+
+#: version-mode preflight (0.9.7)
+msgid "Cannot determine system version — /etc/os-release is missing or unreadable."
+msgstr "Kan systeemversie niet bepalen — /etc/os-release ontbreekt of is onleesbaar."
+
+#: version-mode preflight (0.9.7)
+msgid "Unknown mode '{mode}' — use system|cauldron|auto"
+msgstr "Onbekende modus '{mode}' — gebruik system|cauldron|auto"
+
+#: version-mode preflight (0.9.7)
+msgid "No enabled media carry identity {id} — nothing for the resolver to pick from."
+msgstr "Geen ingeschakeld medium draagt identiteit {id} — de resolver heeft niets te verwerken."
+
+#: version-mode preflight (0.9.7)
+msgid "{n} enabled media stay tagged with a different identity and will drop out of the resolver's view:"
+msgstr "{n} ingeschakelde media houden een andere identiteit en vallen uit het zicht van de resolver:"
+
+#: version-mode preflight (0.9.7)
+msgid "  Disable them with 'urpm media disable NAME' or re-run 'urpm media autoconfig' for {id}."
+msgstr "  Schakel ze uit met 'urpm media disable NAME' of voer 'urpm media autoconfig' voor {id} opnieuw uit."

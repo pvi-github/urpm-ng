@@ -224,9 +224,9 @@ def ensure_urpm_ng_in_container(
     # 1 with the target numeric, so ``release`` here is already the
     # numeric (``'11'`` for a cauldron image, not ``'cauldron'``).
     # That means the plain N-only branch of _accepted_disttags fires
-    # and rejects RPMs built on a mga{N-1} host.  Ask urpm inside the
-    # container for its ``mageia-version`` config to recover the
-    # symbolic identity when there is one.
+    # and rejects RPMs built on a mga{N-1} host.  Ask the container's
+    # ``/etc/os-release`` (seeded by ``cmd_init``) for the symbolic
+    # identity when one is set.
     identity = _container_identity(container, cid) or release
     target_numeric = release if release.isdigit() else None
     local_rpm = _detect_local_match(
@@ -603,20 +603,24 @@ def _container_mageia_release(container: "Container", cid: str) -> Optional[str]
 
 
 def _container_identity(container: "Container", cid: str) -> Optional[str]:
-    """Read ``config.mageia-version`` from inside a container's urpm DB.
+    """Read the release identity from a container's ``/etc/os-release``.
 
     Returns the symbolic release identity (``'cauldron'``) when the
     image was built from a cauldron chroot, ``'10'`` / ``'11'`` when
-    it was built from a numeric release, ``None`` when the container
-    doesn't have urpm-ng installed yet or the query fails.
+    it was built from a numeric release, ``None`` when the file is
+    unreadable.  ``cmd_init`` seeds a stub ``os-release`` in every
+    fresh chroot so this call works from the very first bootstrap,
+    before ``mageia-release-common`` lands.
     """
     result = container.exec(
-        cid, ["urpm", "config", "get", "mageia-version"],
+        cid, ["sh", "-c", "grep '^VERSION_ID=' /etc/os-release || true"],
     )
     if result.returncode != 0:
         return None
-    text = (result.stdout or "").strip()
-    return text or None
+    line = (result.stdout or "").strip()
+    if not line.startswith("VERSION_ID="):
+        return None
+    return line.split("=", 1)[1].strip().strip('"') or None
 
 
 def _container_arch(container: "Container", cid: str) -> Optional[str]:

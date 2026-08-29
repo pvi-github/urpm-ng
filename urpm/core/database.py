@@ -95,7 +95,7 @@ def _register_rpm_collation(conn: sqlite3.Connection) -> None:
     conn.create_collation('rpm_version_compare', _rpm_version_collation)
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 36
+SCHEMA_VERSION = 37
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -998,6 +998,13 @@ MIGRATIONS = {
     # tables (schema v22 introduced them), so the check is a no-op
     # there.
     35: (36, ""),
+    # Migration v36 -> v37 : retire the ``mageia-version`` config pin.
+    # Runs in Python (see :meth:`PackageDatabase._migrate_v36_to_v37`)
+    # so it can skip cleanly when the ``config`` table doesn't exist
+    # yet — that happens on old test fixtures that seed a DB at
+    # schema v29-v31 and let the migration chain replay every hop up
+    # to the current version.
+    36: (37, ""),
 }
 
 
@@ -1026,7 +1033,8 @@ class PackageDatabase(
     BUSY_TIMEOUT_MS = 30000
 
     def __init__(self, db_path: Optional[Path] = None,
-                 *, read_only: Optional[bool] = None):
+                 *, read_only: Optional[bool] = None,
+                 urpm_root: Optional[str] = None):
         """Initialize database connection.
 
         Args:
@@ -1044,11 +1052,21 @@ class PackageDatabase(
                 keeps the historical auto-detection from ``os.W_OK``,
                 so ALTER TABLEs still run lazily at the next normal
                 CLI invocation that opens the database read-write.
+            urpm_root: Filesystem root the DB lives under, when non-
+                default (chroot, mkimage bootstrap, ``--urpm-root``).
+                Callers that open a DB inside a chroot MUST set this
+                so :meth:`_get_accepted_versions` reads the chroot's
+                own ``/etc/os-release`` rather than the host's — the
+                former identifies the DB, the latter is a lie.
+                Auto-derived from ``db_path`` when it lives under the
+                standard ``<root>/var/lib/urpm/packages.db`` layout ;
+                pass explicitly for anything else.
         """
         if db_path is None:
             from .config import get_db_path
             db_path = get_db_path()
         self.db_path = Path(db_path)
+        self.urpm_root = urpm_root or self._infer_urpm_root(self.db_path)
 
         import os
         # Read-only mode: caller forced it via ``read_only=True``, OR
@@ -1109,6 +1127,27 @@ class PackageDatabase(
                 self._warn_orphaned_transactions()
             except Exception:
                 pass
+
+    @staticmethod
+    def _infer_urpm_root(db_path: Path) -> Optional[str]:
+        """Guess the chroot root a DB lives under.
+
+        Standard layout is ``<root>/var/lib/urpm/packages.db``.  When
+        ``root == "/"`` (the host) we return ``None`` so
+        :func:`get_system_version` sticks to its default probe.  Any
+        other prefix — mkimage bootstrap, ``--urpm-root`` — hands the
+        chroot's own root to the caller, and :meth:`_get_accepted_versions`
+        then reads that root's ``/etc/os-release`` instead of the
+        host's.  Non-standard db_paths (test fixtures, ad-hoc DBs)
+        return ``None`` — callers must set ``urpm_root`` explicitly.
+        """
+        parts = db_path.parts
+        if len(parts) < 4:
+            return None
+        if parts[-4:] != ("var", "lib", "urpm", "packages.db"):
+            return None
+        root = str(Path(*parts[:-4]) if parts[:-4] else Path("/"))
+        return None if root == "/" else root
 
     def _warn_orphaned_transactions(self) -> None:
         """Emit a stderr warning for each orphaned ``running`` row."""
@@ -1351,6 +1390,8 @@ class PackageDatabase(
                     print("A new column 'filesize' has been added in database. To populate it, launch the command:\n   'urpm media update'")
                 elif version == 35 and to_version == 36:
                     self._migrate_v35_to_v36_indexes(logger)
+                elif version == 36 and to_version == 37:
+                    self._migrate_v36_to_v37_drop_mageia_version(logger)
                 version = to_version
             except sqlite3.Error as e:
                 logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
@@ -1362,6 +1403,31 @@ class PackageDatabase(
                 raise RuntimeError(f"Database migration failed: {e}")
 
         logger.info(f"Database schema is now at version {SCHEMA_VERSION}")
+
+    def _migrate_v36_to_v37_drop_mageia_version(self, logger):
+        """Retire the ``mageia-version`` config pin.
+
+        ``version-mode`` (system|cauldron|auto) is now the single
+        source of truth for release identity ; the numeric side lives
+        in ``/etc/os-release`` (host, or a stub seeded by
+        :func:`urpm.cli.commands.media._seed_stub_os_release` in
+        cross-version chroots).  Any value still stored under
+        ``mageia-version`` is stale and would silently outvote the
+        new mechanism if left in place.
+
+        Skips silently when the ``config`` table doesn't exist yet —
+        replaying the full migration chain from an old test fixture
+        can land here before the table gets created.
+        """
+        exists = self.conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='config'"
+        ).fetchone()
+        if not exists:
+            logger.debug("v37: config table absent, nothing to delete")
+            return
+        self.conn.execute("DELETE FROM config WHERE key = 'mageia-version'")
+        self.conn.commit()
 
     def _migrate_v35_to_v36_indexes(self, logger):
         """Back-fill pkg_id indexes on the four weak-dependency tables.
@@ -2116,15 +2182,15 @@ class PackageDatabase(
         """
         from .config import get_accepted_versions, get_system_version
 
-        # Explicit per-DB target set by ``cmd_init`` for cross-version
-        # chroots (mga9 chroot on a mga10 host).  Wins over both the
-        # get_accepted_versions() heuristic and the host os-release
-        # fallback -- the DB owner told us what it's for.
-        pinned = self.get_config('mageia-version')
-        if pinned:
-            return {pinned}
-
-        accepted, needs_choice, info = get_accepted_versions(self)
+        # ``get_system_version(root=self.urpm_root)`` reads ``/etc/os-release``
+        # from the DB's own filesystem : host for a normal DB, the
+        # chroot's own root for a mkimage bootstrap.  ``cmd_init``
+        # seeds a stub os-release inside cross-version chroots so
+        # this call gives the right answer before any package is
+        # installed there.  ``version-mode`` (system|cauldron|auto)
+        # rides on top and is honoured by ``get_accepted_versions``.
+        sv = get_system_version(root=self.urpm_root)
+        accepted, needs_choice, info = get_accepted_versions(self, sv)
 
         if accepted:
             return accepted
@@ -2134,7 +2200,6 @@ class PackageDatabase(
             return None
 
         # Fallback to system version
-        sv = get_system_version()
         return {sv} if sv else None
 
     def _build_version_filter(self, table_alias: str = "m") -> tuple:

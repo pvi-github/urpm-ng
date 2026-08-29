@@ -15,7 +15,7 @@ from urpm.core.database import PackageDatabase
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "urpm.core.config.get_system_version", lambda: "10")
+        "urpm.core.config.get_system_version", lambda root=None: "10")
     db_path = tmp_path / "packages.db"
     d = PackageDatabase(db_path=db_path)
     yield d

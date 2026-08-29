@@ -46,7 +46,7 @@ from urpm.core.resolver import (
 @pytest.fixture
 def db(monkeypatch):
     """Temporary SQLite-backed PackageDatabase, with mageia_version='9'."""
-    monkeypatch.setattr('urpm.core.config.get_system_version', lambda: '9')
+    monkeypatch.setattr('urpm.core.config.get_system_version', lambda root=None: '9')
 
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         db_path = Path(f.name)

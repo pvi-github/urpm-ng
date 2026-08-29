@@ -16,7 +16,7 @@ def db(monkeypatch):
     """
     # Patch get_system_version to return "9" for consistent testing
     # This ensures version filtering matches our test media (mageia_version="9")
-    monkeypatch.setattr('urpm.core.config.get_system_version', lambda: '9')
+    monkeypatch.setattr('urpm.core.config.get_system_version', lambda root=None: '9')
 
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         db_path = Path(f.name)
@@ -1114,7 +1114,7 @@ class TestSchemaV32Migration:
         raw.close()
 
         monkeypatch.setattr(
-            'urpm.core.config.get_system_version', lambda: '10',
+            'urpm.core.config.get_system_version', lambda root=None: '10',
         )
         db = PackageDatabase(db_path)
         try:
@@ -1197,7 +1197,7 @@ class TestSchemaV32Migration:
         raw.close()
 
         monkeypatch.setattr(
-            'urpm.core.config.get_system_version', lambda: '10',
+            'urpm.core.config.get_system_version', lambda root=None: '10',
         )
         db = PackageDatabase(db_path)
         try:
@@ -1289,7 +1289,7 @@ class TestSchemaV32Migration:
         raw.close()
 
         monkeypatch.setattr(
-            'urpm.core.config.get_system_version', lambda: '10',
+            'urpm.core.config.get_system_version', lambda root=None: '10',
         )
         db = PackageDatabase(db_path)
         try:
@@ -1437,7 +1437,7 @@ class TestSchemaV33Migration:
         raw.close()
 
         monkeypatch.setattr(
-            'urpm.core.config.get_system_version', lambda: '10',
+            'urpm.core.config.get_system_version', lambda root=None: '10',
         )
         db = PackageDatabase(db_path)
         try:
@@ -1543,7 +1543,7 @@ class TestSchemaV34Migration:
         raw.close()
 
         monkeypatch.setattr(
-            'urpm.core.config.get_system_version', lambda: '10',
+            'urpm.core.config.get_system_version', lambda root=None: '10',
         )
         db = PackageDatabase(db_path)
         try:
@@ -1602,7 +1602,7 @@ class TestSchemaV35Migration:
         raw.close()
 
         monkeypatch.setattr(
-            'urpm.core.config.get_system_version', lambda: '10',
+            'urpm.core.config.get_system_version', lambda root=None: '10',
         )
         db = PackageDatabase(db_path)
         try:
@@ -1685,7 +1685,7 @@ class TestSchemaV36WeakDepIndexes:
         raw.close()
 
         monkeypatch.setattr(
-            'urpm.core.config.get_system_version', lambda: '10',
+            'urpm.core.config.get_system_version', lambda root=None: '10',
         )
         db = PackageDatabase(db_path)
         try:

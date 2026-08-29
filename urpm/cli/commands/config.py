@@ -45,17 +45,75 @@ def cmd_config(args) -> int:
     if args.config_cmd in ('version-mode', 'vm'):
         from ...core.database import PackageDatabase
         from ...core.config import get_db_path, get_system_version, get_accepted_versions
+        from .. import colors
 
         db = PackageDatabase(get_db_path())
 
         if hasattr(args, 'mode') and args.mode is not None:
             if args.mode == 'auto':
-                # Remove preference
+                # Remove preference — no preflight, auto-detection
+                # picks whatever the media landscape says.
                 db.set_config('version-mode', None)
                 print(_("version-mode preference removed (auto-detection)"))
+                return 0
+
+            # Preflight : the new mode must have at least one enabled
+            # media carrying its identity ; otherwise the switch would
+            # leave the resolver with an empty candidate pool.  Stale
+            # media (enabled but tagged with a different identity) are
+            # called out so the user knows they will vanish from the
+            # resolver's view.  This preflight replaces the retired
+            # ``urpm distro-switch`` verb.
+            if args.mode == 'cauldron':
+                target_identity = 'cauldron'
+            elif args.mode == 'system':
+                target_identity = get_system_version() or ''
+                if not target_identity:
+                    print(colors.error(_(
+                        "Cannot determine system version — /etc/os-release "
+                        "is missing or unreadable.")))
+                    return 1
             else:
-                db.set_config('version-mode', args.mode)
-                print(_("version-mode set to '{mode}'").format(mode=args.mode))
+                print(colors.error(_(
+                    "Unknown mode '{mode}' — use system|cauldron|auto").format(
+                    mode=args.mode)))
+                return 1
+
+            media_list = db.list_media()
+            fresh = [m for m in media_list
+                     if m.get('enabled')
+                     and m.get('mageia_version') == target_identity]
+            stale = [m for m in media_list
+                     if m.get('enabled')
+                     and m.get('mageia_version')
+                     and m.get('mageia_version') != target_identity]
+
+            if not fresh:
+                print(colors.error(_(
+                    "No enabled media carry identity {id} — nothing for "
+                    "the resolver to pick from.").format(id=target_identity)))
+                print(colors.dim(_(
+                    "    Add them first: urpm media autoconfig -r {id}").format(
+                    id=target_identity)))
+                return 2
+
+            if stale:
+                print(colors.warning(_(
+                    "{n} enabled media stay tagged with a different "
+                    "identity and will drop out of the resolver's view:").format(
+                    n=len(stale))))
+                for m in stale[:10]:
+                    print(f"    - {m['name']} ({m.get('mageia_version', '?')})")
+                if len(stale) > 10:
+                    print(colors.dim(_(
+                        "    ... and {n} more").format(n=len(stale) - 10)))
+                print(colors.dim(_(
+                    "  Disable them with 'urpm media disable NAME' or "
+                    "re-run 'urpm media autoconfig' for {id}.").format(
+                    id=target_identity)))
+
+            db.set_config('version-mode', args.mode)
+            print(_("version-mode set to '{mode}'").format(mode=args.mode))
             return 0
         else:
             # Show current state
