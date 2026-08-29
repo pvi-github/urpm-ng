@@ -568,6 +568,15 @@ def decompose_url(
     version_seg_idx = None
     if version:
         candidates = {f"{p}{version}" for p in version_prefixes}
+        # Freeze period: mirror URLs can still carry the ``cauldron``
+        # segment while ``[media_info]`` has already bumped ``version``
+        # to the next numeric (e.g. mgabiz publishes under
+        # ``.../cauldron/x86_64/media/`` with ``version=11``).  Without
+        # this candidate ``decompose_url`` fails to spot the anchor
+        # segment, leaves ``base_path`` empty and folds the mirror's
+        # own prefix (``/repo/Mageia/mgabiz``) into every media's
+        # ``relative_path`` — every URL reconstruction then doubles it.
+        candidates.add('cauldron')
         for i, seg in enumerate(parts):
             if seg in candidates:
                 version_seg_idx = i

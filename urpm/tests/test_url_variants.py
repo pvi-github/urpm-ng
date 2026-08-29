@@ -263,3 +263,28 @@ class TestDecomposeUrl:
         )
         assert base == ""
         assert root == "some/random"
+
+    def test_mgabiz_cauldron_during_freeze(self):
+        # Regression : mgabiz publishes at ``.../cauldron/x86_64/media/``
+        # but its media.cfg carries the target numeric ``version=11``
+        # (freeze period).  Before the fix, ``decompose_url`` looked
+        # for {11, mageia11, mga11} in the path, missed ``cauldron``,
+        # left base_path empty and folded ``/repo/Mageia/mgabiz`` into
+        # every media's relative_path — every URL reconstruction then
+        # doubled it.  The ``cauldron`` candidate is always added so
+        # the anchor lands on the right segment.
+        assert decompose_url(
+            "https://www.mageia.biz/repo/Mageia/mgabiz/cauldron/x86_64/media/",
+            "11", "x86_64",
+        ) == ("https", "www.mageia.biz",
+              "/repo/Mageia/mgabiz", "cauldron/x86_64/media")
+
+    def test_official_cauldron_when_version_matches(self):
+        # Sanity : the classic cauldron URL where media.cfg also
+        # says ``version=cauldron`` keeps working — the ``cauldron``
+        # candidate would match anyway.
+        assert decompose_url(
+            "https://mirror.example.org/pub/Mageia/distrib/cauldron/x86_64/media",
+            "cauldron", "x86_64",
+        ) == ("https", "mirror.example.org",
+              "/pub/Mageia/distrib", "cauldron/x86_64/media")
