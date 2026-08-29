@@ -82,6 +82,12 @@ class SyncResult:
     # changed and no synthesis re-parse was needed.  Distinguishes
     # "up-to-date" from a genuinely-empty medium.
     skipped: bool = False
+    # Hostname of the server that actually served this media (the one
+    # that won the failover race, or the only enabled server).  ``None``
+    # when the sync failed before any server responded, or when the
+    # legacy single-URL model applies.  Displayed by the CLI so a
+    # user hunting a stale mirror can spot who served what.
+    server_host: Optional[str] = None
 
 
 def download_file(url: str, dest: Path,
@@ -574,7 +580,10 @@ def sync_media(db: PackageDatabase, media_name: str,
         if not needs_update:
             if progress_callback:
                 progress_callback("up-to-date", 0, 0)
-            return SyncResult(success=True, packages_count=0, skipped=True)
+            return SyncResult(
+                success=True, packages_count=0, skipped=True,
+                server_host=(first_server or {}).get('host'),
+            )
 
     # Create temp directory for downloads
     with tempfile.TemporaryDirectory(prefix='urpm_sync_') as tmpdir:
@@ -806,7 +815,8 @@ def sync_media(db: PackageDatabase, media_name: str,
             success=True,
             packages_count=count,
             synthesis_downloaded=synthesis_downloaded,
-            hdlist_downloaded=hdlist_downloaded
+            hdlist_downloaded=hdlist_downloaded,
+            server_host=(server or {}).get('host'),
         )
 
 

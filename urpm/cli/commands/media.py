@@ -92,6 +92,32 @@ def _probe_cauldron_numeric(base_url: str, timeout: int = 5) -> str:
     return ""
 
 
+def _shorten_host(host: str) -> str:
+    """Trim ``www.``, ``ftp.`` and other noise for compact display.
+
+    A full FQDN like ``mageia.mirror.garr.it`` compresses to
+    ``garr.it`` — enough to identify the mirror when the same media
+    update line is compared across syncs, without swallowing half
+    the terminal.  Falls back to the input unchanged when the host
+    is a bare hostname or an IP.
+    """
+    if not host:
+        return ""
+    h = host.lower()
+    # Numeric IPs stay verbatim — no meaningful "org" to keep.
+    if all(seg.isdigit() for seg in h.split(".")):
+        return h
+    for prefix in ("www.", "ftp.", "ftp-", "us.", "mirror.", "mirrors."):
+        if h.startswith(prefix):
+            h = h[len(prefix):]
+    # For long FQDNs, keep the last two labels — that's usually the
+    # organisation ("garr.it", "kernel.org", "cicku.me").
+    parts = h.split(".")
+    if len(parts) > 2:
+        h = ".".join(parts[-2:])
+    return h
+
+
 def _seed_stub_os_release(urpm_root: str, identity: str) -> None:
     """Write a stub ``<urpm_root>/etc/os-release`` carrying ``VERSION_ID``.
 
@@ -1394,17 +1420,26 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
                 print("  " + colors.error(name) + ": " + _("ERROR - {error}").format(error=result.error))
                 errors += 1
                 continue
+            # Compact host suffix so a user hunting a stale mirror
+            # (or one that's failing over) can spot who actually
+            # served each media without reading the daemon logs.
+            host_suffix = ""
+            if getattr(result, 'server_host', None):
+                host_suffix = " " + colors.dim(
+                    f"[{_shorten_host(result.server_host)}]")
             if result.skipped:
                 # HEAD/MD5 check determined nothing changed — distinguish
                 # this from a genuinely-empty re-parse (which keeps the
                 # explicit "0 packages" label) so users can spot a working
                 # conditional sync at a glance.
-                print("  " + colors.info(name) + ": " + colors.dim(_("up-to-date")))
+                print("  " + colors.info(name) + ": "
+                      + colors.dim(_("up-to-date")) + host_suffix)
                 skipped_count += 1
                 continue
             count = result.packages_count
             count_str = colors.success(str(count)) if count > 0 else str(count)
-            print("  " + colors.info(name) + ": " + count_str + " " + ngettext("package", "packages", count))
+            print("  " + colors.info(name) + ": " + count_str + " "
+                  + ngettext("package", "packages", count) + host_suffix)
             total_packages += count
 
         # Summary: only show the package total when something was
