@@ -165,7 +165,8 @@ def install_urpm_ng_core(
     if choice == SOURCE_GITHUB:
         log("  urpm-ng-core: falling back to GitHub release")
         return _install_from_github_in_chroot(
-            chroot_dir, chroot_db, arch, mageia_release, log,
+            chroot_dir, chroot_db, arch, mageia_release,
+            target_numeric, allow_disttag_mismatch, log,
         )
     log(f"  ERROR: unexpected source decision {choice!r}")
     return 1
@@ -258,8 +259,13 @@ def ensure_urpm_ng_in_container(
         )
     if choice == SOURCE_GITHUB:
         log("  urpm-ng-core: falling back to GitHub release")
+        # Pass ``identity`` (may be ``'cauldron'``) rather than the
+        # numeric ``release`` so :func:`_accepted_disttags` applies the
+        # cauldron relaxation.  ``target_numeric`` still carries the
+        # numeric so the disttag set resolves to real values.
         return _install_from_github_in_container(
-            container, cid, arch, release, log,
+            container, cid, arch, identity,
+            target_numeric, allow_disttag_mismatch, log,
         )
     log(f"  ERROR: unexpected source decision {choice!r}")
     return 1
@@ -744,9 +750,12 @@ def _install_from_github_in_chroot(
     chroot_db: "PackageDatabase",
     arch: str,
     mageia_release: str,
+    target_numeric: Optional[str],
+    allow_disttag_mismatch: bool,
     log: callable,
 ) -> int:
-    rpm = _download_urpm_ng_from_github(arch, mageia_release, log)
+    rpm = _download_urpm_ng_from_github(
+        arch, mageia_release, target_numeric, allow_disttag_mismatch, log)
     if rpm is None:
         return 1
     try:
@@ -906,9 +915,12 @@ def _install_from_github_in_container(
     cid: str,
     arch: str,
     mageia_release: str,
+    target_numeric: Optional[str],
+    allow_disttag_mismatch: bool,
     log: callable,
 ) -> int:
-    rpm = _download_urpm_ng_from_github(arch, mageia_release, log)
+    rpm = _download_urpm_ng_from_github(
+        arch, mageia_release, target_numeric, allow_disttag_mismatch, log)
     if rpm is None:
         return 1
     try:
@@ -963,11 +975,17 @@ def _confirm_fallback_github(log: callable) -> bool:
 def _download_urpm_ng_from_github(
     arch: str,
     mageia_release: str,
+    target_numeric: Optional[str],
+    allow_disttag_mismatch: bool,
     log: callable,
 ) -> Optional[Path]:
     """Fetch the latest urpm-ng-core RPM matching arch + Mageia release
     from the project's GitHub releases and return its local path.
     Caller owns the file and must delete it after use.
+
+    ``target_numeric`` and ``allow_disttag_mismatch`` are forwarded to
+    :func:`_github_pick_asset` so Rule 4's disttag filter follows the
+    same relaxation as Rule 1 (see :func:`_accepted_disttags`).
     """
     tag = _github_latest_tag(log)
     if not tag:
@@ -975,7 +993,8 @@ def _download_urpm_ng_from_github(
         return None
     log(f"    latest tag: {tag}")
 
-    rpm_url = _github_pick_asset(tag, arch, mageia_release, log)
+    rpm_url = _github_pick_asset(
+        tag, arch, mageia_release, target_numeric, allow_disttag_mismatch, log)
     if not rpm_url:
         log(f"  ERROR: no urpm-ng-core RPM at {tag} for mga{mageia_release}/{arch}")
         return None
@@ -1021,23 +1040,39 @@ def _github_pick_asset(
     tag: str,
     arch: str,
     mageia_release: str,
+    target_numeric: Optional[str],
+    allow_disttag_mismatch: bool,
     log: callable,
 ) -> Optional[str]:
+    """Pick the ``urpm-ng-core`` asset URL for ``tag`` that matches the
+    target arch + Mageia release.
+
+    Disttag matching goes through :func:`_accepted_disttags` — the same
+    relaxation Rule 1 (local match) already applies.  Chief consequence
+    for cauldron : the raw filter ``".mga{cauldron}."`` never matches
+    anything (cauldron RPMs carry the current numeric disttag, e.g.
+    ``.mga11.``, never ``.mgacauldron.``).  Delegating to
+    :func:`_accepted_disttags` translates the identity into the right
+    set of numeric disttags — ``{.mga11., .mga10.}`` for cauldron at
+    numeric=11 — and unblocks the fallback path.
+    """
     try:
         with urllib.request.urlopen(f"{GITHUB_API}/releases/tags/{tag}") as resp:
             data = json.loads(resp.read())
     except (urllib.error.URLError, OSError) as e:
         log(f"  ERROR: could not fetch release {tag} details: {e}")
         return None
+    accepted = _accepted_disttags(
+        mageia_release, target_numeric, allow_disttag_mismatch)
     for asset in data.get("assets", []):
         name = asset.get("name", "")
         if not name.startswith("urpm-ng-core-"):
             continue
-        if f".mga{mageia_release}." not in name:
-            continue
         if "-debuginfo-" in name or "-debugsource-" in name:
             continue
         if not (name.endswith(f".{arch}.rpm") or name.endswith(".noarch.rpm")):
+            continue
+        if accepted is not None and not any(dt in name for dt in accepted):
             continue
         return asset.get("browser_download_url")
     return None
