@@ -380,6 +380,7 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
         rc = _phase1_bootstrap_chroot(
             args, release, arch, minimal_tag, container, db,
             bootstrap_packages=bootstrap_packages,
+            forward_proxy=forward_proxy,
         )
         if rc != 0:
             return rc
@@ -577,6 +578,7 @@ def _phase1_bootstrap_chroot(
     container: 'Container',
     db: 'PackageDatabase',
     bootstrap_packages: list | None = None,
+    forward_proxy: bool = False,
 ) -> int:
     """Build a minimal bootstrap chroot and import it as ``minimal_tag``.
 
