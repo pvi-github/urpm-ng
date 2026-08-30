@@ -554,28 +554,53 @@ class Container:
         logger.info(f"Creating image {tag} from {directory}")
 
         if use_userns and self.runtime.name == 'podman':
-            # Hermetic env for the ``podman unshare`` wrapper — no
-            # operator ``~/.rpmmacros`` / XDG dirs / etc. reach the
-            # tar+import child.  See :mod:`urpm.core.userns_env`.
-            # ``TMPDIR`` is already pinned to ``<chroot>/tmp`` by
-            # ``bootstrap_env``, so the caller's ``tmpdir`` override
-            # (podman's own scratch space, not the child's) is set
-            # after the fact.
-            from .userns_env import bootstrap_env
-            env = bootstrap_env(directory)
-            env['TMPDIR'] = tmpdir if tmpdir else str(Path(directory).parent)
-            # Run tar + import under podman unshare for proper UID/GID mapping
-            # This is needed when the chroot was built under podman unshare
-            cmd = f'tar -C {directory} -c . | {self.cmd} import - {tag}'
-            result = subprocess.run(
-                ['podman', 'unshare', 'sh', '-c', cmd],
-                capture_output=True,
-                text=True,
-                env=env
+            # Two processes bridged by a plain OS pipe, only ONE of
+            # them wrapped in ``podman unshare`` :
+            #
+            #   podman unshare tar -C <dir> -c .   |   podman import - <tag>
+            #   └── UID mapping active (root=0)        └── operator context,
+            #       so chroot files tar as root:root       XDG_/HOME point at
+            #       instead of the caller's real UID       the rootless storage
+            #                                              podman actually uses
+            #
+            # Wrapping ``podman import`` inside the same ``unshare``
+            # subshell (the previous form) put it under nested
+            # user-namespace territory : image storage lookup
+            # silently landed on whatever ``$HOME/.local/share/
+            # containers`` resolved to inside the userns, so the
+            # tag got registered in an ephemeral store the caller
+            # could not see and Phase 2's ``podman run`` failed
+            # with "did not resolve to an alias".
+            env_tar = os.environ.copy()
+            env_tar['TMPDIR'] = tmpdir if tmpdir else str(Path(directory).parent)
+            env_import = os.environ.copy()
+            env_import['TMPDIR'] = env_tar['TMPDIR']
+
+            tar_proc = subprocess.Popen(
+                ['podman', 'unshare', 'tar', '-C', directory, '-c', '.'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env_tar,
             )
-            if result.returncode != 0:
-                logger.error(f"Import failed: {result.stderr}")
-                print(result.stderr)
+            imp_proc = subprocess.Popen(
+                [self.cmd, 'import', '-', tag],
+                stdin=tar_proc.stdout, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, env=env_import,
+            )
+            # Close our copy so tar sees EPIPE if import dies.
+            tar_proc.stdout.close()
+            imp_out, imp_err = imp_proc.communicate()
+            tar_proc.wait()
+            tar_err = tar_proc.stderr.read().decode(errors='replace')
+            tar_proc.stderr.close()
+
+            if tar_proc.returncode != 0:
+                logger.error(f"tar under unshare failed: {tar_err}")
+                if tar_err:
+                    print(tar_err)
+                return False
+            if imp_proc.returncode != 0:
+                err = imp_err.decode(errors='replace')
+                logger.error(f"podman import failed: {err}")
+                print(err)
                 return False
             return True
 
