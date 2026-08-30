@@ -288,20 +288,28 @@ def build_server_url(server: dict) -> str:
 def build_media_url(server: dict, media: dict) -> str:
     """Build full URL/path to access a media on a server.
 
-    ``media['relative_path']`` is stored as ``<identity>/<arch>/media/…``
-    where ``<identity>`` is the release identity urpm-ng tracks
-    (``10``, ``11``, ``cauldron``…).  When the mirror serves that
-    identity under a different URL segment (typically ``cauldron``
-    for a mirror configured for release ``11`` during freeze), the
-    server row carries the mirror-specific ``url_version`` and we
-    substitute it into the URL.  Pre-v32 rows and custom servers
-    with no detected Mageia layout leave ``url_version`` NULL —
-    the relative_path is then used as-is, matching the historical
-    behaviour.
+    ``media.relative_path`` is written at add/discover time
+    (``media_pipeline._build_relative_path``) as
+    ``<identity>/<arch>/media/…`` where ``<identity>`` is the release
+    identity urpm-ng resolved with the "URL wins" rule.  It is the
+    stable source of truth for where this media lives on this
+    mirror.
+
+    Historically this function also substituted the first segment
+    with ``server.url_version`` to accommodate freeze-window
+    layouts (mirror asked for release ``N`` serving it under
+    ``cauldron``).  That substitution turned the mutable server
+    cache into a runtime rewrite layer and produced dormant-state
+    bugs: a VM whose ``url_version`` was captured under one
+    layout kept rewriting URLs after the mirror had moved on,
+    silently pointing every download at the wrong tree.  The
+    substitution is gone — ``relative_path`` alone drives the URL.
+    Mirror-specific segment lookup at *add* time still consults
+    ``url_version`` at the discovery layer, which is where fresh
+    data belongs.
 
     Args:
-        server: Server dict with 'protocol', 'host', 'base_path',
-            'url_version'.
+        server: Server dict with 'protocol', 'host', 'base_path'.
         media: Media dict with 'relative_path'.
 
     Returns:
@@ -309,14 +317,6 @@ def build_media_url(server: dict, media: dict) -> str:
     """
     base_url = build_server_url(server)
     relative_path = media['relative_path'].strip('/')
-
-    url_version = server.get('url_version')
-    if url_version:
-        segments = relative_path.split('/', 1)
-        if segments and segments[0] != url_version:
-            tail = segments[1] if len(segments) > 1 else ''
-            relative_path = f"{url_version}/{tail}" if tail else url_version
-
     return f"{base_url}/{relative_path}"
 
 

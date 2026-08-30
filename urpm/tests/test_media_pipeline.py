@@ -562,12 +562,20 @@ class TestSplitReleaseArchTail:
         assert ver is None
 
 
-class TestBuildMediaUrlUrlVersion:
-    """``build_media_url`` substitutes the mirror-specific URL segment
-    when the server row carries a ``url_version`` that differs from
-    the media's stored identity.  Covers the freeze case where a
-    release ``11`` media lives on a mirror that exposes it under
-    ``cauldron``."""
+class TestBuildMediaUrlIgnoresUrlVersion:
+    """``build_media_url`` no longer substitutes the first segment of
+    ``media.relative_path`` with ``server.url_version``.
+
+    That runtime rewrite made the mutable server cache authoritative
+    over the URL every download used, and a dormant VM whose
+    ``url_version`` predated a mirror layout change kept building
+    wrong URLs indefinitely.  ``media.relative_path`` — written at
+    add/discover time under the "URL wins for release identity"
+    rule — is now the single source of truth.  ``url_version`` is
+    still consulted at the *add* layer (``cmd_init``,
+    ``image_urpm_ng``) where the data was just refreshed by the
+    probe.
+    """
 
     def _srv(self, **overrides):
         base = {
@@ -577,8 +585,7 @@ class TestBuildMediaUrlUrlVersion:
         base.update(overrides)
         return base
 
-    def test_no_url_version_preserves_relative_path(self):
-        """Pre-v32 row: url_version NULL → relative_path used as-is."""
+    def test_relative_path_used_as_is_when_url_version_null(self):
         from urpm.core.config import build_media_url
         srv = self._srv()
         media = {"relative_path": "10/x86_64/media/core/release"}
@@ -586,8 +593,7 @@ class TestBuildMediaUrlUrlVersion:
             "https://mirror.example.org/distrib/10/x86_64/media/core/release"
         )
 
-    def test_matching_url_version_is_a_noop(self):
-        """url_version equals the first segment → no substitution."""
+    def test_url_version_matching_first_segment_still_noop(self):
         from urpm.core.config import build_media_url
         srv = self._srv(url_version="10")
         media = {"relative_path": "10/x86_64/media/core/release"}
@@ -595,14 +601,12 @@ class TestBuildMediaUrlUrlVersion:
             "https://mirror.example.org/distrib/10/x86_64/media/core/release"
         )
 
-    def test_freeze_case_substitutes_cauldron_for_identity(self):
-        """The bug this whole migration fixes: media stored under
-        identity ``11`` served by a mirror that uses ``cauldron`` →
-        URL must use ``cauldron`` in place of ``11``."""
+    def test_stale_url_version_does_not_rewrite(self):
+        """The dormant-cauldron regression : a stale ``url_version``
+        must not silently rewrite the URL.  ``relative_path`` wins."""
         from urpm.core.config import build_media_url
         srv = self._srv(url_version="cauldron")
         media = {"relative_path": "11/x86_64/media/core/release"}
         assert build_media_url(srv, media) == (
-            "https://mirror.example.org/distrib/cauldron/x86_64/"
-            "media/core/release"
+            "https://mirror.example.org/distrib/11/x86_64/media/core/release"
         )
