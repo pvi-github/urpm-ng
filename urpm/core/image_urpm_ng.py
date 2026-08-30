@@ -776,6 +776,23 @@ def _chroot_install_args(
     packages: list,
     nosignature: bool,
 ) -> argparse.Namespace:
+    """Build the ``cmd_install`` Namespace for the Phase 1
+    ``urpm-ng-core`` install.
+
+    ``noscripts`` is deliberately **off** here: this call happens
+    after ``filesystem`` / ``makedev`` / ``setup`` /
+    ``basesystem-minimal-core`` are already extracted with their
+    scriptlets, so bash / coreutils / glibc / shadow-utils are all
+    in place.  Any ``%post`` a transitive dep of urpm-ng-core ships
+    (``update-alternatives`` for gcc's ``/usr/bin/gcc`` symlink,
+    Python's ``pyc`` byte-compile, …) needs to run *now* — Phase 2
+    only re-touches packages whose version bumped, so a scriptlet
+    skipped in Phase 1 would never be replayed for the finished
+    image.  The bootstrap-stage packages that legitimately need
+    ``--noscripts`` (filesystem's /proc, makedev's shell-only
+    posttrans) are handled in their own dedicated ``_install(...,
+    noscripts=True)`` calls in ``cmd_mkimage``.
+    """
     return argparse.Namespace(
         urpm_root=chroot_dir,
         root=chroot_dir,
@@ -786,7 +803,7 @@ def _chroot_install_args(
         download_only=False,
         nodeps=False,
         nosignature=nosignature,
-        noscripts=True,
+        noscripts=False,
         force=False,
         reinstall=False,
         debug=None,
