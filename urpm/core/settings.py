@@ -227,6 +227,25 @@ class ServerSettings:
 
 
 @dataclass
+class ImageSettings:
+    """``[image]`` — settings for ``urpm image`` subcommands."""
+
+    forward_proxy: bool = False
+    """Forward the host's proxy environment variables (``http_proxy``,
+    ``HTTPS_PROXY``, ``no_proxy``, ``all_proxy``, all their case
+    variants) into the rootless bootstrap wrapper used by
+    ``urpm image make``.
+
+    Defaults to ``False`` so the bootstrap runs with a hermetic
+    environment — no piece of the operator's shell reaches the rpm
+    scriptlets rpm runs during the install.  Turn on when the machine
+    can only reach Mageia mirrors through an outbound HTTP proxy ;
+    can also be overridden per invocation with
+    ``urpm image make --forward-proxy`` / ``--no-forward-proxy``.
+    """
+
+
+@dataclass
 class Settings:
     """Top-level urpm-ng settings, assembled from config files."""
 
@@ -235,6 +254,7 @@ class Settings:
     transaction: TransactionSettings = field(default_factory=TransactionSettings)
     daemon: DaemonSettings = field(default_factory=DaemonSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
+    image: ImageSettings = field(default_factory=ImageSettings)
 
     # Path that was actually loaded (for diagnostics / ``urpm config show``)
     _config_dir: Path = field(default=SYSTEM_CONFIG_DIR, repr=False)
@@ -436,6 +456,15 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
                 ):
                     codes = _as_code_list(raw)
                     setattr(settings.server, key, codes)
+            except ValueError:
+                pass
+
+    # [image]
+    if cp.has_section("image"):
+        for key, raw in cp.items("image"):
+            try:
+                if key == "forward_proxy":
+                    settings.image.forward_proxy = _as_bool(raw)
             except ValueError:
                 pass
 

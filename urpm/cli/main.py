@@ -756,6 +756,17 @@ Examples:
                '(cross-release Python noarch, etc.).'),
     )
     image_make.add_argument(
+        '--forward-proxy',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=_('Forward the host proxy environment (http_proxy, HTTPS_PROXY, '
+               'no_proxy, all variants) into the image chroot. Defaults to '
+               'the [image] forward_proxy config key (false out of the box) '
+               '— the chroot otherwise runs with a hermetic environment. '
+               'Turn on when the machine can only reach Mageia mirrors '
+               'through an outbound HTTP proxy.'),
+    )
+    image_make.add_argument(
         '--exclude', '-x',
         action='append',
         default=[],

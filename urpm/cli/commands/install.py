@@ -933,6 +933,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         root=rpm_root or "/",
         use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
         config_policy=getattr(args, 'config_policy', 'keep'),
+        forward_proxy=getattr(args, 'forward_proxy', False),
     )
 
     def _show_readme_after_commit(qr):

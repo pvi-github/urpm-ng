@@ -816,9 +816,14 @@ def _import_pubkey_best_effort_chroot(
         except (urllib.error.URLError, OSError) as e:
             log(f"    Warning: pubkey fetch from {pubkey_url} failed: {e}")
             return
+        # Hermetic env — keeps the operator's ``~/.rpmmacros`` /
+        # XDG dirs out of the chroot rpm.  See
+        # :mod:`urpm.core.userns_env`.
+        from .userns_env import bootstrap_env
         result = subprocess.run(
             ["rpm", "--root", chroot_dir, "--import", pubkey_path],
             capture_output=True, text=True,
+            env=bootstrap_env(chroot_dir),
         )
         if result.returncode != 0:
             log(f"    Warning: pubkey import failed: {result.stderr.strip()}")

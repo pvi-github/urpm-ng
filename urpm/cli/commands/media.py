@@ -398,7 +398,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             return False
 
         if no_mount:
-            print(_("  Skipping mount operations (container mode)"))
+            print(_("  Skipping mount operations (image chroot)"))
         elif not is_dev_mounted(chroot_dev):
             if is_nodev_filesystem(root_path):
                 print(_("  Filesystem has nodev - bind mounting /dev from host..."))
@@ -512,9 +512,14 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
         # Initialize empty rpmdb in the chroot
         rpmdb_dir = root_path / "var/lib/rpm"
         print(_("Initializing rpmdb..."))
+        # Hermetic env so the operator's ``~/.rpmmacros`` / XDG dirs
+        # don't reach the bootstrap ``rpm`` (see
+        # :mod:`urpm.core.userns_env` for the rationale).
+        from ...core.userns_env import bootstrap_env
+        boot_env = bootstrap_env(urpm_root)
         result = subprocess.run(
             ['rpm', '--root', urpm_root, '--initdb'],
-            capture_output=True, text=True
+            capture_output=True, text=True, env=boot_env,
         )
         if result.returncode != 0:
             print(colors.error(_("Failed to initialize rpmdb: {error}").format(error=result.stderr)))
@@ -532,7 +537,7 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             if Path(key_path).exists():
                 result = subprocess.run(
                     ['rpm', '--root', urpm_root, '--import', key_path],
-                    capture_output=True, text=True
+                    capture_output=True, text=True, env=boot_env,
                 )
                 if result.returncode == 0:
                     print(_("  Imported key from {path}").format(path=key_path))

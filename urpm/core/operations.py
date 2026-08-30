@@ -54,6 +54,12 @@ class InstallOptions:
     only_peers: bool = False
     root: str = "/"
     use_userns: bool = False
+    # Only meaningful when ``use_userns=True`` — asks the bootstrap
+    # wrapper to preserve the operator's proxy env vars.  Off by
+    # default (see :mod:`urpm.core.userns_env`) ; wired by
+    # ``cmd_mkimage`` from ``--forward-proxy`` / ``[image]
+    # forward_proxy``.
+    forward_proxy: bool = False
     config_policy: str = "keep"  # keep, replace, or ask
 
 
@@ -359,7 +365,8 @@ class PackageOperations:
 
         queue = TransactionQueue(
             root=options.root,
-            use_userns=options.use_userns
+            use_userns=options.use_userns,
+            forward_proxy=options.forward_proxy,
         )
         queue.add_install(
             rpm_paths,
@@ -631,7 +638,8 @@ class PackageOperations:
 
         queue = TransactionQueue(
             root=options.root,
-            use_userns=options.use_userns
+            use_userns=options.use_userns,
+            forward_proxy=options.forward_proxy,
         )
         queue.add_erase(
             package_names,
@@ -687,7 +695,8 @@ class PackageOperations:
 
         queue = TransactionQueue(
             root=options.root,
-            use_userns=options.use_userns
+            use_userns=options.use_userns,
+            forward_proxy=options.forward_proxy,
         )
 
         if rpm_paths or erase_names:

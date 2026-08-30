@@ -553,15 +553,17 @@ class Container:
         """
         logger.info(f"Creating image {tag} from {directory}")
 
-        # Set TMPDIR for podman to avoid /tmp quota issues
-        # Use parent of source directory if not specified
-        env = os.environ.copy()
-        if tmpdir:
-            env['TMPDIR'] = tmpdir
-        else:
-            env['TMPDIR'] = str(Path(directory).parent)
-
         if use_userns and self.runtime.name == 'podman':
+            # Hermetic env for the ``podman unshare`` wrapper — no
+            # operator ``~/.rpmmacros`` / XDG dirs / etc. reach the
+            # tar+import child.  See :mod:`urpm.core.userns_env`.
+            # ``TMPDIR`` is already pinned to ``<chroot>/tmp`` by
+            # ``bootstrap_env``, so the caller's ``tmpdir`` override
+            # (podman's own scratch space, not the child's) is set
+            # after the fact.
+            from .userns_env import bootstrap_env
+            env = bootstrap_env(directory)
+            env['TMPDIR'] = tmpdir if tmpdir else str(Path(directory).parent)
             # Run tar + import under podman unshare for proper UID/GID mapping
             # This is needed when the chroot was built under podman unshare
             cmd = f'tar -C {directory} -c . | {self.cmd} import - {tag}'
@@ -577,7 +579,14 @@ class Container:
                 return False
             return True
 
-        # Standard import without unshare
+        # Standard import without unshare — running as root, no
+        # userns wrapper.  Keep the operator's env (this path is
+        # already privileged, hermetic scrubbing would only strip
+        # legitimate proxy / cache config).  ``TMPDIR`` still needs
+        # to be pinned so podman's own scratch space doesn't fill
+        # ``/tmp``.
+        env = os.environ.copy()
+        env['TMPDIR'] = tmpdir if tmpdir else str(Path(directory).parent)
         # tar -C dir -c . | docker/podman import - tag
         # Let tar stderr go to terminal so user sees warnings
         tar_proc = subprocess.Popen(

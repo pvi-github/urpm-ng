@@ -496,9 +496,16 @@ class TransactionQueue:
                 print(f"{op.operation_id}: {op.count} packages")
     """
 
-    def __init__(self, root: str = "/", use_userns: bool = False):
+    def __init__(self, root: str = "/", use_userns: bool = False,
+                 forward_proxy: bool = False):
         self.root = root
         self.use_userns = use_userns
+        # Whether the userns bootstrap wrapper should preserve the
+        # operator's proxy env vars.  Off by default (hermetic env
+        # per :mod:`urpm.core.userns_env`) ; ``cmd_mkimage`` sets it
+        # to ``True`` when the user opted in via
+        # ``--forward-proxy`` or ``[image] forward_proxy = true``.
+        self.forward_proxy = forward_proxy
         self.operations: List[QueuedOperation] = []
         # Sentinel for the scriptlet-marker capture fd. Set to a real fd in
         # _child_process() (root branch). _child_process_standalone() leaves
@@ -730,10 +737,27 @@ class TransactionQueue:
             # podman unshare uses /etc/subuid and /etc/subgid to map a
             # range of UIDs/GIDs, allowing chown operations to work
             # inside the child.
+            # Hermetic env for the child : the ``podman unshare``
+            # wrapper is UID-only, so without explicit scrubbing the
+            # child inherits ``os.environ`` verbatim and the
+            # operator's ``~/.rpmmacros`` / XDG dirs / etc. reach the
+            # rpm scriptlets.  See :mod:`urpm.core.userns_env`.
+            # ``URPM_MKIMAGE_SILENCE`` is signalled from the parent
+            # (see line 831 : this file reads it back inside the
+            # child) so pass it through when set.
+            from .userns_env import bootstrap_env
+            child_env = bootstrap_env(
+                self.root,
+                forward_proxy=self.forward_proxy,
+                passthrough=('URPM_MKIMAGE_SILENCE',
+                             'URPM_HOST_LANG',
+                             'URPM_HOST_LANGUAGE'),
+            )
             proc = subprocess.Popen(
                 ['podman', 'unshare', 'python3', '-c', child_bootstrap],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=child_env,
                 pass_fds=()
             )
 

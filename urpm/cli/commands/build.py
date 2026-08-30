@@ -300,6 +300,17 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     import_key = getattr(args, 'import_key', False)
     exclude_packages = getattr(args, 'exclude', None) or []
 
+    # Effective ``forward_proxy``: CLI flag wins when explicit (True/False),
+    # otherwise fall back to the ``[image] forward_proxy`` setting. Default
+    # off — chroot bootstrap runs in a scrubbed env, no proxy vars leak in
+    # unless the operator opts in.
+    from ...core.settings import get_settings
+    cli_forward_proxy = getattr(args, 'forward_proxy', None)
+    if cli_forward_proxy is None:
+        forward_proxy = get_settings().image.forward_proxy
+    else:
+        forward_proxy = bool(cli_forward_proxy)
+
     # Detect container runtime
     try:
         runtime = detect_runtime(runtime_name)
@@ -693,6 +704,7 @@ def _phase1_bootstrap_chroot(
                 # fall back to the host's ``uname -m`` and end up
                 # trying to fetch x86_64 packages into an i686 chroot.
                 arch=arch,
+                forward_proxy=forward_proxy,
             )
             return cmd_install(ns, chroot_db)
 
@@ -858,7 +870,13 @@ def _phase1_bootstrap_chroot(
             chroot_cmd = ['chroot', tmpdir, '/usr/bin/update-ca-trust', 'extract']
             if os.geteuid() != 0:
                 chroot_cmd = ['podman', 'unshare'] + chroot_cmd
-            uct = subprocess.run(chroot_cmd, capture_output=True, text=True)
+            # Hermetic env — ``update-ca-trust`` is a shell script
+            # that shells out to openssl/p11-kit ; nothing in the
+            # operator's shell should reach it.
+            from ...core.userns_env import bootstrap_env
+            uct_env = bootstrap_env(tmpdir, forward_proxy=forward_proxy)
+            uct = subprocess.run(chroot_cmd, capture_output=True,
+                                 text=True, env=uct_env)
             if uct.returncode != 0:
                 print(colors.warning(_(
                     "  Warning: update-ca-trust returned {rc}: {err}").format(
