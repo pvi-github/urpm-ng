@@ -11,9 +11,10 @@ class MediaMixin:
     """Mixin providing media CRUD operations.
 
     Requires:
-        - self.conn: sqlite3.Connection
-        - self._get_connection(): method returning thread-safe connection
-        - self._lock: threading.Lock for thread safety
+        - self._conn_read(): context manager yielding a per-thread
+          connection for read-only paths.
+        - self._conn_write(): context manager yielding a per-thread
+          connection with the write lock held.
     """
 
     def add_media(self, name: str, short_name: str, mageia_version: str,
@@ -41,51 +42,53 @@ class MediaMixin:
         Returns:
             Media ID
         """
-        cursor = self.conn.execute("""
-            INSERT INTO media (name, short_name, mageia_version, architecture,
-                              relative_path, is_official, allow_unsigned,
-                              enabled, update_media, priority, url,
-                              mirrorlist, added_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, short_name, mageia_version, architecture, relative_path,
-              int(is_official), int(allow_unsigned), int(enabled),
-              int(update_media), priority, url, mirrorlist, int(time.time())))
-        self.conn.commit()
-        return cursor.lastrowid
+        with self._conn_write() as conn:
+            cursor = conn.execute("""
+                INSERT INTO media (name, short_name, mageia_version, architecture,
+                                  relative_path, is_official, allow_unsigned,
+                                  enabled, update_media, priority, url,
+                                  mirrorlist, added_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (name, short_name, mageia_version, architecture, relative_path,
+                  int(is_official), int(allow_unsigned), int(enabled),
+                  int(update_media), priority, url, mirrorlist, int(time.time())))
+            conn.commit()
+            return cursor.lastrowid
 
     def remove_media(self, name: str):
         """Remove a media source and all its packages."""
-        self.conn.execute("DELETE FROM media WHERE name = ?", (name,))
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute("DELETE FROM media WHERE name = ?", (name,))
+            conn.commit()
 
     def get_media(self, name: str) -> Optional[Dict]:
         """Get media info by name. Thread-safe."""
-        conn = self._get_connection()
-        cursor = conn.execute(
-            "SELECT * FROM media WHERE name = ?", (name,)
-        )
-        row = cursor.fetchone()
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM media WHERE name = ?", (name,)
+            )
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     def list_media(self) -> List[Dict]:
         """List all media sources. Thread-safe."""
-        conn = self._get_connection()
-        cursor = conn.execute("SELECT * FROM media ORDER BY priority, name")
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute("SELECT * FROM media ORDER BY priority, name")
+            return [dict(row) for row in cursor]
 
     def enable_media(self, name: str, enabled: bool = True):
         """Enable or disable a media source."""
-        self.conn.execute(
-            "UPDATE media SET enabled = ? WHERE name = ?",
-            (int(enabled), name)
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "UPDATE media SET enabled = ? WHERE name = ?",
+                (int(enabled), name)
+            )
+            conn.commit()
 
     def update_media_sync_info(self, media_id: int, synthesis_md5: str,
                               synthesis_last_modified: str = None):
         """Update media sync timestamp, MD5, and Last-Modified. Thread-safe."""
-        conn = self._get_connection()
-        with self._lock:
+        with self._conn_write() as conn:
             conn.execute("""
                 UPDATE media SET last_sync = ?, synthesis_md5 = ?,
                     synthesis_last_modified = ?
@@ -106,8 +109,7 @@ class MediaMixin:
             md5: Hex-encoded MD5 of the downloaded file, as published
                 in the media's ``MD5SUM`` index.
         """
-        conn = self._get_connection()
-        with self._lock:
+        with self._conn_write() as conn:
             conn.execute(
                 "UPDATE media SET files_xml_md5 = ? WHERE id = ?",
                 (md5, media_id),
@@ -116,21 +118,23 @@ class MediaMixin:
 
     def get_media_by_id(self, media_id: int) -> Optional[Dict]:
         """Get media info by ID."""
-        cursor = self.conn.execute(
-            "SELECT * FROM media WHERE id = ?", (media_id,)
-        )
-        row = cursor.fetchone()
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM media WHERE id = ?", (media_id,)
+            )
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     def get_media_by_version_arch_shortname(self, version: str, arch: str,
                                              short_name: str) -> Optional[Dict]:
         """Get media by version, architecture and short_name (unique key)."""
-        cursor = self.conn.execute(
-            """SELECT * FROM media
-               WHERE mageia_version = ? AND architecture = ? AND short_name = ?""",
-            (version, arch, short_name)
-        )
-        row = cursor.fetchone()
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                """SELECT * FROM media
+                   WHERE mageia_version = ? AND architecture = ? AND short_name = ?""",
+                (version, arch, short_name)
+            )
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     def update_media_mirror_settings(self, media_id: int,
@@ -181,11 +185,12 @@ class MediaMixin:
             return
 
         params.append(media_id)
-        self.conn.execute(
-            f"UPDATE media SET {', '.join(updates)} WHERE id = ?",
-            params
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                f"UPDATE media SET {', '.join(updates)} WHERE id = ?",
+                params
+            )
+            conn.commit()
 
     def list_media_for_sharing(self, version: str = None, arch: str = None) -> List[Dict]:
         """List media available for sharing with peers.
@@ -225,8 +230,9 @@ class MediaMixin:
 
         query += " ORDER BY priority DESC, name"
 
-        cursor = self.conn.execute(query, params)
-        media_list = [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute(query, params)
+            media_list = [dict(row) for row in cursor]
 
         # Filter out disabled versions
         if disabled_versions:
@@ -244,8 +250,7 @@ class MediaMixin:
             changed_at: Unix timestamp when content change was detected.
             delta_seconds: Seconds since previous content change, or None if first.
         """
-        with self._lock:
-            conn = self._get_connection()
+        with self._conn_write() as conn:
             conn.execute(
                 "INSERT INTO media_update_deltas (media_id, changed_at, delta_seconds) "
                 "VALUES (?, ?, ?)",
@@ -265,14 +270,14 @@ class MediaMixin:
         Returns:
             List of delta_seconds values (integers), newest first.
         """
-        conn = self._get_connection()
-        cursor = conn.execute(
-            "SELECT delta_seconds FROM media_update_deltas "
-            "WHERE media_id = ? AND delta_seconds IS NOT NULL "
-            "ORDER BY changed_at DESC LIMIT ?",
-            (media_id, limit),
-        )
-        return [row[0] for row in cursor.fetchall()]
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT delta_seconds FROM media_update_deltas "
+                "WHERE media_id = ? AND delta_seconds IS NOT NULL "
+                "ORDER BY changed_at DESC LIMIT ?",
+                (media_id, limit),
+            )
+            return [row[0] for row in cursor.fetchall()]
 
     def prune_media_update_deltas(self, media_id: int, keep: int = 30):
         """Keep only the N most recent deltas for a media.
@@ -281,8 +286,7 @@ class MediaMixin:
             media_id: Media ID.
             keep: Number of most recent records to keep.
         """
-        with self._lock:
-            conn = self._get_connection()
+        with self._conn_write() as conn:
             conn.execute(
                 "DELETE FROM media_update_deltas "
                 "WHERE media_id = ? AND id NOT IN ("
@@ -305,8 +309,7 @@ class MediaMixin:
             sigma: Standard deviation of update intervals in seconds.
             last_changed: Unix timestamp of last real content change.
         """
-        with self._lock:
-            conn = self._get_connection()
+        with self._conn_write() as conn:
             conn.execute(
                 "UPDATE media SET adaptive_period = ?, adaptive_mu = ?, "
                 "adaptive_sigma = ?, adaptive_last_changed = ? WHERE id = ?",

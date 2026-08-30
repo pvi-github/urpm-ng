@@ -8,9 +8,10 @@ class CacheMixin:
     """Mixin providing cache file tracking operations.
 
     Requires:
-        - self.conn: sqlite3.Connection
-        - self._get_connection(): method returning thread-safe connection
-        - self._lock: threading.Lock for thread safety
+        - self._conn_read(): context manager yielding a per-thread
+          connection for read-only paths.
+        - self._conn_write(): context manager yielding a per-thread
+          connection with the write lock held.
     """
 
     def register_cache_file(self, filename: str, media_id: int, file_path: str,
@@ -33,16 +34,16 @@ class CacheMixin:
         Returns:
             Cache file ID.
         """
-        with self._lock:
-            now = int(time.time())
-            cursor = self.conn.execute("""
+        now = int(time.time())
+        with self._conn_write() as conn:
+            cursor = conn.execute("""
                 INSERT OR REPLACE INTO cache_files
                 (filename, media_id, file_path, file_size, added_time,
                  last_accessed, is_referenced, served_by_server_id)
                 VALUES (?, ?, ?, ?, ?, ?, 1, ?)
             """, (filename, media_id, file_path, file_size, now, now,
                   served_by_server_id))
-            self.conn.commit()
+            conn.commit()
             return cursor.lastrowid
 
     def get_cache_file_server_id(self, file_path: str) -> Optional[int]:
@@ -57,44 +58,45 @@ class CacheMixin:
         the file was served by a peer, or paths absent from the cache
         table altogether.
         """
-        conn = self._get_connection()
-        row = conn.execute(
-            "SELECT served_by_server_id FROM cache_files WHERE file_path = ?",
-            (file_path,),
-        ).fetchone()
+        with self._conn_read() as conn:
+            row = conn.execute(
+                "SELECT served_by_server_id FROM cache_files WHERE file_path = ?",
+                (file_path,),
+            ).fetchone()
         if row is None:
             return None
         return row["served_by_server_id"]
 
     def get_cache_file(self, filename: str, media_id: int = None) -> Optional[Dict]:
         """Get cache file info by filename. Thread-safe."""
-        conn = self._get_connection()
-        if media_id:
-            cursor = conn.execute(
-                "SELECT * FROM cache_files WHERE filename = ? AND media_id = ?",
-                (filename, media_id)
-            )
-        else:
-            cursor = conn.execute(
-                "SELECT * FROM cache_files WHERE filename = ?", (filename,)
-            )
-        row = cursor.fetchone()
+        with self._conn_read() as conn:
+            if media_id:
+                cursor = conn.execute(
+                    "SELECT * FROM cache_files WHERE filename = ? AND media_id = ?",
+                    (filename, media_id)
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM cache_files WHERE filename = ?", (filename,)
+                )
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     def update_cache_file_access(self, filename: str, media_id: int = None):
         """Update last_accessed timestamp for a cache file."""
         now = int(time.time())
-        if media_id:
-            self.conn.execute(
-                "UPDATE cache_files SET last_accessed = ? WHERE filename = ? AND media_id = ?",
-                (now, filename, media_id)
-            )
-        else:
-            self.conn.execute(
-                "UPDATE cache_files SET last_accessed = ? WHERE filename = ?",
-                (now, filename)
-            )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            if media_id:
+                conn.execute(
+                    "UPDATE cache_files SET last_accessed = ? WHERE filename = ? AND media_id = ?",
+                    (now, filename, media_id)
+                )
+            else:
+                conn.execute(
+                    "UPDATE cache_files SET last_accessed = ? WHERE filename = ?",
+                    (now, filename)
+                )
+            conn.commit()
 
     def list_cache_files(self, media_id: int = None, referenced_only: bool = False,
                          order_by: str = 'added_time', limit: int = None) -> List[Dict]:
@@ -127,8 +129,9 @@ class CacheMixin:
         if limit:
             query += f" LIMIT {limit}"
 
-        cursor = self.conn.execute(query, params)
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor]
 
     def mark_cache_files_unreferenced(self, media_id: int, referenced_filenames: List[str]):
         """Mark cache files as unreferenced if not in the provided list.
@@ -139,25 +142,26 @@ class CacheMixin:
             media_id: Media ID
             referenced_filenames: List of filenames that ARE in current synthesis
         """
-        if not referenced_filenames:
-            # Mark all files for this media as unreferenced
-            self.conn.execute(
-                "UPDATE cache_files SET is_referenced = 0 WHERE media_id = ?",
-                (media_id,)
-            )
-        else:
-            # First mark all as unreferenced
-            self.conn.execute(
-                "UPDATE cache_files SET is_referenced = 0 WHERE media_id = ?",
-                (media_id,)
-            )
-            # Then mark the referenced ones
-            placeholders = ','.join('?' * len(referenced_filenames))
-            self.conn.execute(f"""
-                UPDATE cache_files SET is_referenced = 1
-                WHERE media_id = ? AND filename IN ({placeholders})
-            """, [media_id] + referenced_filenames)
-        self.conn.commit()
+        with self._conn_write() as conn:
+            if not referenced_filenames:
+                # Mark all files for this media as unreferenced
+                conn.execute(
+                    "UPDATE cache_files SET is_referenced = 0 WHERE media_id = ?",
+                    (media_id,)
+                )
+            else:
+                # First mark all as unreferenced
+                conn.execute(
+                    "UPDATE cache_files SET is_referenced = 0 WHERE media_id = ?",
+                    (media_id,)
+                )
+                # Then mark the referenced ones
+                placeholders = ','.join('?' * len(referenced_filenames))
+                conn.execute(f"""
+                    UPDATE cache_files SET is_referenced = 1
+                    WHERE media_id = ? AND filename IN ({placeholders})
+                """, [media_id] + referenced_filenames)
+            conn.commit()
 
     def delete_cache_file(self, filename: str, media_id: int = None) -> bool:
         """Delete a cache file record. Thread-safe.
@@ -167,18 +171,18 @@ class CacheMixin:
         Returns:
             True if a record was deleted
         """
-        conn = self._get_connection()
-        if media_id:
-            cursor = conn.execute(
-                "DELETE FROM cache_files WHERE filename = ? AND media_id = ?",
-                (filename, media_id)
-            )
-        else:
-            cursor = conn.execute(
-                "DELETE FROM cache_files WHERE filename = ?", (filename,)
-            )
-        conn.commit()
-        return cursor.rowcount > 0
+        with self._conn_write() as conn:
+            if media_id:
+                cursor = conn.execute(
+                    "DELETE FROM cache_files WHERE filename = ? AND media_id = ?",
+                    (filename, media_id)
+                )
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM cache_files WHERE filename = ?", (filename,)
+                )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def unregister_cache_file(self, file_path: str) -> bool:
         """Delete the cache record matching an absolute or relative file path.
@@ -192,12 +196,12 @@ class CacheMixin:
         Returns:
             True if a row was deleted.
         """
-        conn = self._get_connection()
-        cursor = conn.execute(
-            "DELETE FROM cache_files WHERE file_path = ?", (file_path,)
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+        with self._conn_write() as conn:
+            cursor = conn.execute(
+                "DELETE FROM cache_files WHERE file_path = ?", (file_path,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_cache_stats(self, media_id: int = None) -> Dict[str, Any]:
         """Get cache statistics.
@@ -208,34 +212,35 @@ class CacheMixin:
         Returns:
             Dict with total_files, total_size, referenced_files, unreferenced_files, etc.
         """
-        if media_id:
-            cursor = self.conn.execute("""
-                SELECT
-                    COUNT(*) as total_files,
-                    COALESCE(SUM(file_size), 0) as total_size,
-                    COALESCE(SUM(CASE WHEN is_referenced = 1 THEN 1 ELSE 0 END), 0) as referenced_files,
-                    COALESCE(SUM(CASE WHEN is_referenced = 0 THEN 1 ELSE 0 END), 0) as unreferenced_files,
-                    COALESCE(SUM(CASE WHEN is_referenced = 1 THEN file_size ELSE 0 END), 0) as referenced_size,
-                    COALESCE(SUM(CASE WHEN is_referenced = 0 THEN file_size ELSE 0 END), 0) as unreferenced_size,
-                    MIN(added_time) as oldest_file,
-                    MAX(added_time) as newest_file
-                FROM cache_files WHERE media_id = ?
-            """, (media_id,))
-        else:
-            cursor = self.conn.execute("""
-                SELECT
-                    COUNT(*) as total_files,
-                    COALESCE(SUM(file_size), 0) as total_size,
-                    COALESCE(SUM(CASE WHEN is_referenced = 1 THEN 1 ELSE 0 END), 0) as referenced_files,
-                    COALESCE(SUM(CASE WHEN is_referenced = 0 THEN 1 ELSE 0 END), 0) as unreferenced_files,
-                    COALESCE(SUM(CASE WHEN is_referenced = 1 THEN file_size ELSE 0 END), 0) as referenced_size,
-                    COALESCE(SUM(CASE WHEN is_referenced = 0 THEN file_size ELSE 0 END), 0) as unreferenced_size,
-                    MIN(added_time) as oldest_file,
-                    MAX(added_time) as newest_file
-                FROM cache_files
-            """)
+        with self._conn_read() as conn:
+            if media_id:
+                cursor = conn.execute("""
+                    SELECT
+                        COUNT(*) as total_files,
+                        COALESCE(SUM(file_size), 0) as total_size,
+                        COALESCE(SUM(CASE WHEN is_referenced = 1 THEN 1 ELSE 0 END), 0) as referenced_files,
+                        COALESCE(SUM(CASE WHEN is_referenced = 0 THEN 1 ELSE 0 END), 0) as unreferenced_files,
+                        COALESCE(SUM(CASE WHEN is_referenced = 1 THEN file_size ELSE 0 END), 0) as referenced_size,
+                        COALESCE(SUM(CASE WHEN is_referenced = 0 THEN file_size ELSE 0 END), 0) as unreferenced_size,
+                        MIN(added_time) as oldest_file,
+                        MAX(added_time) as newest_file
+                    FROM cache_files WHERE media_id = ?
+                """, (media_id,))
+            else:
+                cursor = conn.execute("""
+                    SELECT
+                        COUNT(*) as total_files,
+                        COALESCE(SUM(file_size), 0) as total_size,
+                        COALESCE(SUM(CASE WHEN is_referenced = 1 THEN 1 ELSE 0 END), 0) as referenced_files,
+                        COALESCE(SUM(CASE WHEN is_referenced = 0 THEN 1 ELSE 0 END), 0) as unreferenced_files,
+                        COALESCE(SUM(CASE WHEN is_referenced = 1 THEN file_size ELSE 0 END), 0) as referenced_size,
+                        COALESCE(SUM(CASE WHEN is_referenced = 0 THEN file_size ELSE 0 END), 0) as unreferenced_size,
+                        MIN(added_time) as oldest_file,
+                        MAX(added_time) as newest_file
+                    FROM cache_files
+                """)
 
-        row = cursor.fetchone()
+            row = cursor.fetchone()
         return dict(row) if row else {}
 
     def get_files_to_evict(self, media_id: int = None, max_bytes: int = None,
@@ -270,8 +275,9 @@ class CacheMixin:
         # Order: unreferenced first, then oldest accessed
         query += " ORDER BY is_referenced ASC, last_accessed ASC"
 
-        cursor = self.conn.execute(query, params)
-        files = [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute(query, params)
+            files = [dict(row) for row in cursor]
 
         if max_bytes:
             # Only return enough files to free max_bytes

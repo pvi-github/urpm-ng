@@ -10,6 +10,7 @@ import hashlib
 import threading
 import time
 import weakref
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
 
@@ -1220,6 +1221,41 @@ class PackageDatabase(
         self._local.conn = conn
         return conn
 
+    @contextmanager
+    def _conn_read(self):
+        """Yield a per-thread SQLite connection for a read-only path.
+
+        Two disciplined helpers front every SQLite access in the mixins :
+        :meth:`_conn_read` for lookups and :meth:`_conn_write` for
+        anything that mutates rows.  They exist because we open every
+        connection with ``check_same_thread=False`` for
+        ThreadPoolExecutor friendliness ; that unlocks concurrent
+        sharing but does NOT auto-serialise writes, so any code path
+        that touches ``self.conn`` directly (main-thread connection)
+        from a worker thread has a live SQLITE_MISUSE window whenever
+        another thread is mid-statement on the same handle.
+
+        Reads use the thread-local connection with no lock — SQLite
+        WAL supports many concurrent readers, each on its own
+        connection, without contention.
+        """
+        yield self._get_connection()
+
+    @contextmanager
+    def _conn_write(self):
+        """Yield a per-thread SQLite connection with the write lock held.
+
+        Callers doing INSERT / UPDATE / DELETE / commit go through
+        this to serialise writers against each other.  The per-thread
+        connection stays the same as :meth:`_conn_read` — the lock
+        only bounds the write critical section.
+
+        See :meth:`_conn_read` for the rationale behind the two-helper
+        discipline.
+        """
+        with self._lock:
+            yield self._get_connection()
+
     def _detect_schema_version(self) -> int:
         """Detect schema version from existing tables when schema_info is missing.
 
@@ -1885,8 +1921,7 @@ class PackageDatabase(
             progress_callback: Optional callback(count, pkg_name)
             batch_size: Number of packages per batch
         """
-        conn = self._get_connection()
-        with self._lock:
+        with self._conn_write() as conn:
             return self._import_packages_unlocked(
                 conn, packages, media_id, source, progress_callback, batch_size
             )
@@ -2149,26 +2184,27 @@ class PackageDatabase(
 
         Deletes from child tables first to avoid slow CASCADE.
         """
-        # Delete dependencies first (faster than CASCADE)
-        pkg_subquery = "(SELECT id FROM packages WHERE media_id = ?)"
-        for table in ('requires', 'provides', 'conflicts', 'obsoletes',
-                      'recommends', 'suggests', 'supplements', 'enhances'):
-            self.conn.execute(
-                f"DELETE FROM {table} WHERE pkg_id IN {pkg_subquery}",
-                (media_id,)
-            )
+        with self._conn_write() as conn:
+            # Delete dependencies first (faster than CASCADE)
+            pkg_subquery = "(SELECT id FROM packages WHERE media_id = ?)"
+            for table in ('requires', 'provides', 'conflicts', 'obsoletes',
+                          'recommends', 'suggests', 'supplements', 'enhances'):
+                conn.execute(
+                    f"DELETE FROM {table} WHERE pkg_id IN {pkg_subquery}",
+                    (media_id,)
+                )
 
-        # Now delete packages
-        self.conn.execute("DELETE FROM packages WHERE media_id = ?", (media_id,))
-        self.conn.commit()
+            # Now delete packages
+            conn.execute("DELETE FROM packages WHERE media_id = ?", (media_id,))
+            conn.commit()
 
-        # Rebuild FTS index after delete (full rebuild is safest with
-        # external content mode — targeted deletes can desync)
-        if self._has_packages_fts():
-            self.conn.execute(
-                "INSERT INTO packages_fts(packages_fts) VALUES('rebuild')"
-            )
-            self.conn.commit()
+            # Rebuild FTS index after delete (full rebuild is safest with
+            # external content mode — targeted deletes can desync)
+            if self._has_packages_fts(conn):
+                conn.execute(
+                    "INSERT INTO packages_fts(packages_fts) VALUES('rebuild')"
+                )
+                conn.commit()
 
     # =========================================================================
     # Package queries
@@ -2222,10 +2258,15 @@ class PackageDatabase(
 
     def _has_packages_fts(self, conn=None) -> bool:
         """Check if the packages_fts virtual table exists."""
-        c = conn or self.conn
-        row = c.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='packages_fts'"
-        ).fetchone()
+        if conn is not None:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='packages_fts'"
+            ).fetchone()
+            return row is not None
+        with self._conn_read() as c:
+            row = c.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='packages_fts'"
+            ).fetchone()
         return row is not None
 
     def _augment_with_media_name(self, results: List[Dict]) -> None:
@@ -2258,13 +2299,14 @@ class PackageDatabase(
             return
 
         placeholders = ','.join(['?'] * len(pkg_ids))
-        cursor = self.conn.execute(f"""
-            SELECT p.id, m.name AS media_name
-            FROM packages p
-            LEFT JOIN media m ON m.id = p.media_id
-            WHERE p.id IN ({placeholders})
-        """, pkg_ids)
-        name_by_id = {row['id']: row['media_name'] for row in cursor}
+        with self._conn_read() as conn:
+            cursor = conn.execute(f"""
+                SELECT p.id, m.name AS media_name
+                FROM packages p
+                LEFT JOIN media m ON m.id = p.media_id
+                WHERE p.id IN ({placeholders})
+            """, pkg_ids)
+            name_by_id = {row['id']: row['media_name'] for row in cursor}
         for pkg in need_id_lookup:
             pkg['media_name'] = name_by_id.get(pkg.get('id'))
 
@@ -2307,36 +2349,37 @@ class PackageDatabase(
         if search_provides and (limit is None or len(results) < limit):
             pattern_lower = f'%{pattern.lower()}%'
             provides_params = (pattern_lower,) + version_params
-            if limit:
-                remaining = limit - len(results)
-                cursor = self.conn.execute(f"""
-                    SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
-                           p.nevra, p.summary, p.size, pr.capability as matched_provide
-                    FROM packages p
-                    JOIN provides pr ON pr.pkg_id = p.id
-                    {version_join}
-                    WHERE LOWER(pr.capability) LIKE ? {version_filter}
-                    ORDER BY p.name_lower
-                    LIMIT ?
-                """, provides_params + (remaining + len(seen_ids),))
-            else:
-                cursor = self.conn.execute(f"""
-                    SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
-                           p.nevra, p.summary, p.size, pr.capability as matched_provide
-                    FROM packages p
-                    JOIN provides pr ON pr.pkg_id = p.id
-                    {version_join}
-                    WHERE LOWER(pr.capability) LIKE ? {version_filter}
-                    ORDER BY p.name_lower
-                """, provides_params)
+            with self._conn_read() as conn:
+                if limit:
+                    remaining = limit - len(results)
+                    cursor = conn.execute(f"""
+                        SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
+                               p.nevra, p.summary, p.size, pr.capability as matched_provide
+                        FROM packages p
+                        JOIN provides pr ON pr.pkg_id = p.id
+                        {version_join}
+                        WHERE LOWER(pr.capability) LIKE ? {version_filter}
+                        ORDER BY p.name_lower
+                        LIMIT ?
+                    """, provides_params + (remaining + len(seen_ids),))
+                else:
+                    cursor = conn.execute(f"""
+                        SELECT DISTINCT p.id, p.name, p.version, p.release, p.arch,
+                               p.nevra, p.summary, p.size, pr.capability as matched_provide
+                        FROM packages p
+                        JOIN provides pr ON pr.pkg_id = p.id
+                        {version_join}
+                        WHERE LOWER(pr.capability) LIKE ? {version_filter}
+                        ORDER BY p.name_lower
+                    """, provides_params)
 
-            for row in cursor:
-                pkg = dict(row)
-                if pkg['id'] not in seen_ids:
-                    seen_ids.add(pkg['id'])
-                    results.append(pkg)
-                    if limit and len(results) >= limit:
-                        break
+                for row in cursor:
+                    pkg = dict(row)
+                    if pkg['id'] not in seen_ids:
+                        seen_ids.add(pkg['id'])
+                        results.append(pkg)
+                        if limit and len(results) >= limit:
+                            break
 
         # Deduplicate by NEVRA — the same noarch package can appear in
         # both x86_64 and i586 media with different database IDs.
@@ -2381,26 +2424,27 @@ class PackageDatabase(
         limit_clause = f"LIMIT ?" if limit else ""
         limit_params = (limit,) if limit else ()
 
-        cursor = self.conn.execute(f"""
-            SELECT p.id, p.name, p.version, p.release, p.arch,
-                   p.nevra, p.summary, p.size,
-                   (p.name_lower LIKE ?) AS is_name_match
-            FROM packages_fts fts
-            JOIN packages p ON p.id = fts.rowid
-            {version_join}
-            WHERE packages_fts MATCH ? {version_filter}
-            ORDER BY is_name_match DESC, p.name_lower
-            {limit_clause}
-        """, (f'%{pattern.lower()}%', fts_query) + params + limit_params)
+        with self._conn_read() as conn:
+            cursor = conn.execute(f"""
+                SELECT p.id, p.name, p.version, p.release, p.arch,
+                       p.nevra, p.summary, p.size,
+                       (p.name_lower LIKE ?) AS is_name_match
+                FROM packages_fts fts
+                JOIN packages p ON p.id = fts.rowid
+                {version_join}
+                WHERE packages_fts MATCH ? {version_filter}
+                ORDER BY is_name_match DESC, p.name_lower
+                {limit_clause}
+            """, (f'%{pattern.lower()}%', fts_query) + params + limit_params)
 
-        results = []
-        seen_ids = set()
-        for row in cursor:
-            pkg = dict(row)
-            if not pkg.pop('is_name_match', 0):
-                pkg['matched_summary'] = True
-            results.append(pkg)
-            seen_ids.add(pkg['id'])
+            results = []
+            seen_ids = set()
+            for row in cursor:
+                pkg = dict(row)
+                if not pkg.pop('is_name_match', 0):
+                    pkg['matched_summary'] = True
+                results.append(pkg)
+                seen_ids.add(pkg['id'])
 
         return results, seen_ids
 
@@ -2419,61 +2463,62 @@ class PackageDatabase(
         seen_ids = set()
         base_params = (pattern_lower,) + version_params
 
-        # Search by name
-        if limit:
-            cursor = self.conn.execute(f"""
-                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra, p.summary, p.size
-                FROM packages p
-                {version_join}
-                WHERE p.name_lower LIKE ? {version_filter}
-                ORDER BY p.name_lower
-                LIMIT ?
-            """, base_params + (limit,))
-        else:
-            cursor = self.conn.execute(f"""
-                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra, p.summary, p.size
-                FROM packages p
-                {version_join}
-                WHERE p.name_lower LIKE ? {version_filter}
-                ORDER BY p.name_lower
-            """, base_params)
-
-        for row in cursor:
-            pkg = dict(row)
-            results.append(pkg)
-            seen_ids.add(pkg['id'])
-
-        # Search in summary/description
-        if limit is None or len(results) < limit:
+        with self._conn_read() as conn:
+            # Search by name
             if limit:
-                remaining = limit - len(results)
-                cursor = self.conn.execute(f"""
-                    SELECT p.id, p.name, p.version, p.release, p.arch,
-                           p.nevra, p.summary, p.size
+                cursor = conn.execute(f"""
+                    SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra, p.summary, p.size
                     FROM packages p
                     {version_join}
-                    WHERE LOWER(p.summary) LIKE ? {version_filter}
+                    WHERE p.name_lower LIKE ? {version_filter}
                     ORDER BY p.name_lower
                     LIMIT ?
-                """, base_params + (remaining + len(seen_ids),))
+                """, base_params + (limit,))
             else:
-                cursor = self.conn.execute(f"""
-                    SELECT p.id, p.name, p.version, p.release, p.arch,
-                           p.nevra, p.summary, p.size
+                cursor = conn.execute(f"""
+                    SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra, p.summary, p.size
                     FROM packages p
                     {version_join}
-                    WHERE LOWER(p.summary) LIKE ? {version_filter}
+                    WHERE p.name_lower LIKE ? {version_filter}
                     ORDER BY p.name_lower
                 """, base_params)
 
             for row in cursor:
                 pkg = dict(row)
-                if pkg['id'] not in seen_ids:
-                    seen_ids.add(pkg['id'])
-                    pkg['matched_summary'] = True
-                    results.append(pkg)
-                    if limit and len(results) >= limit:
-                        break
+                results.append(pkg)
+                seen_ids.add(pkg['id'])
+
+            # Search in summary/description
+            if limit is None or len(results) < limit:
+                if limit:
+                    remaining = limit - len(results)
+                    cursor = conn.execute(f"""
+                        SELECT p.id, p.name, p.version, p.release, p.arch,
+                               p.nevra, p.summary, p.size
+                        FROM packages p
+                        {version_join}
+                        WHERE LOWER(p.summary) LIKE ? {version_filter}
+                        ORDER BY p.name_lower
+                        LIMIT ?
+                    """, base_params + (remaining + len(seen_ids),))
+                else:
+                    cursor = conn.execute(f"""
+                        SELECT p.id, p.name, p.version, p.release, p.arch,
+                               p.nevra, p.summary, p.size
+                        FROM packages p
+                        {version_join}
+                        WHERE LOWER(p.summary) LIKE ? {version_filter}
+                        ORDER BY p.name_lower
+                    """, base_params)
+
+                for row in cursor:
+                    pkg = dict(row)
+                    if pkg['id'] not in seen_ids:
+                        seen_ids.add(pkg['id'])
+                        pkg['matched_summary'] = True
+                        results.append(pkg)
+                        if limit and len(results) >= limit:
+                            break
 
         return results, seen_ids
 
@@ -2511,29 +2556,30 @@ class PackageDatabase(
             arch_filter = "AND p.arch IN (?, 'noarch')"
             arch_params = (arch,)
 
-        if version_join:
-            cursor = self.conn.execute(f"""
-                SELECT p.* FROM packages p
-                {version_join}
-                WHERE p.name_lower = ? {version_filter} {arch_filter}
-                ORDER BY p.epoch COLLATE rpm_version_compare DESC,
-                         p.version COLLATE rpm_version_compare DESC,
-                         p.release COLLATE rpm_version_compare DESC
-                LIMIT 1
-            """, (name.lower(),) + version_params + arch_params)
-        else:
-            # Without the version join we still need to alias as ``p`` so
-            # the optional arch filter (referencing ``p.arch``) parses.
-            cursor = self.conn.execute(f"""
-                SELECT p.* FROM packages p
-                WHERE p.name_lower = ? {arch_filter}
-                ORDER BY p.epoch COLLATE rpm_version_compare DESC,
-                         p.version COLLATE rpm_version_compare DESC,
-                         p.release COLLATE rpm_version_compare DESC
-                LIMIT 1
-            """, (name.lower(),) + arch_params)
+        with self._conn_read() as conn:
+            if version_join:
+                cursor = conn.execute(f"""
+                    SELECT p.* FROM packages p
+                    {version_join}
+                    WHERE p.name_lower = ? {version_filter} {arch_filter}
+                    ORDER BY p.epoch COLLATE rpm_version_compare DESC,
+                             p.version COLLATE rpm_version_compare DESC,
+                             p.release COLLATE rpm_version_compare DESC
+                    LIMIT 1
+                """, (name.lower(),) + version_params + arch_params)
+            else:
+                # Without the version join we still need to alias as ``p`` so
+                # the optional arch filter (referencing ``p.arch``) parses.
+                cursor = conn.execute(f"""
+                    SELECT p.* FROM packages p
+                    WHERE p.name_lower = ? {arch_filter}
+                    ORDER BY p.epoch COLLATE rpm_version_compare DESC,
+                             p.version COLLATE rpm_version_compare DESC,
+                             p.release COLLATE rpm_version_compare DESC
+                    LIMIT 1
+                """, (name.lower(),) + arch_params)
 
-        row = cursor.fetchone()
+            row = cursor.fetchone()
         if not row:
             return None
 
@@ -2551,13 +2597,14 @@ class PackageDatabase(
 
     def get_package_by_nevra(self, nevra: str) -> Optional[Dict]:
         """Get a package by exact NEVRA."""
-        cursor = self.conn.execute("""
-            SELECT * FROM packages
-            WHERE nevra = ?
-            LIMIT 1
-        """, (nevra,))
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM packages
+                WHERE nevra = ?
+                LIMIT 1
+            """, (nevra,))
 
-        row = cursor.fetchone()
+            row = cursor.fetchone()
         if not row:
             return None
 
@@ -2620,27 +2667,28 @@ class PackageDatabase(
         # version-mode filtering would only mask a legitimate match when
         # the row sits in a medium that is filtered out by the current
         # ``--accept-versions`` config.
-        if epoch is None:
-            cursor = self.conn.execute("""
-                SELECT * FROM packages
-                WHERE name_lower = ?
-                  AND version = ?
-                  AND release = ?
-                  AND arch = ?
-                LIMIT 1
-            """, (name.lower(), version, release, arch))
-        else:
-            cursor = self.conn.execute("""
-                SELECT * FROM packages
-                WHERE name_lower = ?
-                  AND version = ?
-                  AND release = ?
-                  AND arch = ?
-                  AND epoch = ?
-                LIMIT 1
-            """, (name.lower(), version, release, arch, int(epoch)))
+        with self._conn_read() as conn:
+            if epoch is None:
+                cursor = conn.execute("""
+                    SELECT * FROM packages
+                    WHERE name_lower = ?
+                      AND version = ?
+                      AND release = ?
+                      AND arch = ?
+                    LIMIT 1
+                """, (name.lower(), version, release, arch))
+            else:
+                cursor = conn.execute("""
+                    SELECT * FROM packages
+                    WHERE name_lower = ?
+                      AND version = ?
+                      AND release = ?
+                      AND arch = ?
+                      AND epoch = ?
+                    LIMIT 1
+                """, (name.lower(), version, release, arch, int(epoch)))
 
-        row = cursor.fetchone()
+            row = cursor.fetchone()
         if not row:
             return None
 
@@ -2703,23 +2751,24 @@ class PackageDatabase(
             version = ver_rel
             release = '1'
 
-        # Search with all components
-        cursor = self.conn.execute("""
-            SELECT * FROM packages
-            WHERE name_lower = ? AND version = ? AND release = ? AND arch = ?
-            AND (epoch = ? OR (epoch IS NULL AND ? = 0))
-            LIMIT 1
-        """, (name.lower(), version, release, arch, epoch, epoch))
-
-        row = cursor.fetchone()
-        if not row:
-            # Try without epoch constraint (some packages may not have epoch stored)
-            cursor = self.conn.execute("""
+        with self._conn_read() as conn:
+            # Search with all components
+            cursor = conn.execute("""
                 SELECT * FROM packages
                 WHERE name_lower = ? AND version = ? AND release = ? AND arch = ?
+                AND (epoch = ? OR (epoch IS NULL AND ? = 0))
                 LIMIT 1
-            """, (name.lower(), version, release, arch))
+            """, (name.lower(), version, release, arch, epoch, epoch))
+
             row = cursor.fetchone()
+            if not row:
+                # Try without epoch constraint (some packages may not have epoch stored)
+                cursor = conn.execute("""
+                    SELECT * FROM packages
+                    WHERE name_lower = ? AND version = ? AND release = ? AND arch = ?
+                    LIMIT 1
+                """, (name.lower(), version, release, arch))
+                row = cursor.fetchone()
 
         if not row:
             return None
@@ -2793,8 +2842,9 @@ class PackageDatabase(
             """
             params = tuple(names_lower)
 
-        cursor = self.conn.execute(query, params)
-        rows = cursor.fetchall()
+        with self._conn_read() as conn:
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
 
         # Build result dict by name (handle duplicates - keep first/latest).
         # Row layout: (id, name, version, release, arch, summary).
@@ -2845,11 +2895,12 @@ class PackageDatabase(
 
     def _get_deps(self, pkg_id: int, table: str) -> List[str]:
         """Get dependencies from a specific table."""
-        cursor = self.conn.execute(
-            f"SELECT capability FROM {table} WHERE pkg_id = ?",
-            (pkg_id,)
-        )
-        return [row[0] for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                f"SELECT capability FROM {table} WHERE pkg_id = ?",
+                (pkg_id,)
+            )
+            return [row[0] for row in cursor]
 
     def whatprovides(self, capability: str) -> List[Dict]:
         """Find packages that provide a capability.
@@ -2858,56 +2909,60 @@ class PackageDatabase(
         whatprovides``) can annotate their output with which media
         each match comes from without a separate round-trip.
         """
-        cursor = self.conn.execute("""
-            SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra,
-                   m.name AS media_name
-            FROM packages p
-            JOIN provides pr ON pr.pkg_id = p.id
-            LEFT JOIN media m ON p.media_id = m.id
-            WHERE pr.capability = ?
-            ORDER BY p.name_lower
-        """, (capability,))
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra,
+                       m.name AS media_name
+                FROM packages p
+                JOIN provides pr ON pr.pkg_id = p.id
+                LEFT JOIN media m ON p.media_id = m.id
+                WHERE pr.capability = ?
+                ORDER BY p.name_lower
+            """, (capability,))
 
-        return [dict(row) for row in cursor]
+            return [dict(row) for row in cursor]
 
     def whatrequires(self, capability: str, limit: int = 50) -> List[Dict]:
         """Find packages that require a capability."""
-        cursor = self.conn.execute("""
-            SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
-            FROM packages p
-            JOIN requires r ON r.pkg_id = p.id
-            WHERE r.capability = ?
-            ORDER BY p.name_lower
-            LIMIT ?
-        """, (capability, limit))
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
+                FROM packages p
+                JOIN requires r ON r.pkg_id = p.id
+                WHERE r.capability = ?
+                ORDER BY p.name_lower
+                LIMIT ?
+            """, (capability, limit))
 
-        return [dict(row) for row in cursor]
+            return [dict(row) for row in cursor]
 
     def whatrecommends(self, capability: str, limit: int = 50) -> List[Dict]:
         """Find packages that recommend a capability."""
-        cursor = self.conn.execute("""
-            SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
-            FROM packages p
-            JOIN recommends r ON r.pkg_id = p.id
-            WHERE r.capability = ?
-            ORDER BY p.name_lower
-            LIMIT ?
-        """, (capability, limit))
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
+                FROM packages p
+                JOIN recommends r ON r.pkg_id = p.id
+                WHERE r.capability = ?
+                ORDER BY p.name_lower
+                LIMIT ?
+            """, (capability, limit))
 
-        return [dict(row) for row in cursor]
+            return [dict(row) for row in cursor]
 
     def whatsuggests(self, capability: str, limit: int = 50) -> List[Dict]:
         """Find packages that suggest a capability."""
-        cursor = self.conn.execute("""
-            SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
-            FROM packages p
-            JOIN suggests s ON s.pkg_id = p.id
-            WHERE s.capability = ?
-            ORDER BY p.name_lower
-            LIMIT ?
-        """, (capability, limit))
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
+                FROM packages p
+                JOIN suggests s ON s.pkg_id = p.id
+                WHERE s.capability = ?
+                ORDER BY p.name_lower
+                LIMIT ?
+            """, (capability, limit))
 
-        return [dict(row) for row in cursor]
+            return [dict(row) for row in cursor]
 
     def get_packages_for_media(self, media_id: int, with_filename: bool = True,
                                 order_by: str = 'name') -> List[Dict]:
@@ -2927,22 +2982,23 @@ class PackageDatabase(
         elif order_by == 'added':
             order_clause = "p.added_timestamp DESC, p.name_lower"
 
-        cursor = self.conn.execute(f"""
-            SELECT p.id, p.name, p.version, p.release, p.epoch, p.arch,
-                   p.nevra, p.size, p.server_last_modified, m.name as media_name
-            FROM packages p
-            LEFT JOIN media m ON p.media_id = m.id
-            WHERE p.media_id = ?
-            ORDER BY {order_clause}
-        """, (media_id,))
+        with self._conn_read() as conn:
+            cursor = conn.execute(f"""
+                SELECT p.id, p.name, p.version, p.release, p.epoch, p.arch,
+                       p.nevra, p.size, p.server_last_modified, m.name as media_name
+                FROM packages p
+                LEFT JOIN media m ON p.media_id = m.id
+                WHERE p.media_id = ?
+                ORDER BY {order_clause}
+            """, (media_id,))
 
-        results = []
-        for row in cursor:
-            pkg = dict(row)
-            if with_filename:
-                # Build RPM filename: name-version-release.arch.rpm
-                pkg['filename'] = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}.rpm"
-            results.append(pkg)
+            results = []
+            for row in cursor:
+                pkg = dict(row)
+                if with_filename:
+                    # Build RPM filename: name-version-release.arch.rpm
+                    pkg['filename'] = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}.rpm"
+                results.append(pkg)
 
         return results
 
@@ -2957,16 +3013,17 @@ class PackageDatabase(
         Returns:
             Set of RPM filenames (e.g., {'foo-1.0-1.mga10.x86_64.rpm', ...})
         """
-        cursor = self.conn.execute("""
-            SELECT name, version, release, arch
-            FROM packages
-            WHERE media_id = ?
-        """, (media_id,))
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT name, version, release, arch
+                FROM packages
+                WHERE media_id = ?
+            """, (media_id,))
 
-        return {
-            f"{row['name']}-{row['version']}-{row['release']}.{row['arch']}.rpm"
-            for row in cursor
-        }
+            return {
+                f"{row['name']}-{row['version']}-{row['release']}.{row['arch']}.rpm"
+                for row in cursor
+            }
 
     def get_packages_needing_server_dates(self, media_id: int, limit: int = None) -> List[Dict]:
         """Get packages that don't have server_last_modified set.
@@ -2989,12 +3046,13 @@ class PackageDatabase(
         if limit:
             query += f" LIMIT {limit}"
 
-        cursor = self.conn.execute(query, (media_id,))
-        results = []
-        for row in cursor:
-            pkg = dict(row)
-            pkg['filename'] = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}.rpm"
-            results.append(pkg)
+        with self._conn_read() as conn:
+            cursor = conn.execute(query, (media_id,))
+            results = []
+            for row in cursor:
+                pkg = dict(row)
+                pkg['filename'] = f"{pkg['name']}-{pkg['version']}-{pkg['release']}.{pkg['arch']}.rpm"
+                results.append(pkg)
         return results
 
     def update_server_last_modified(self, package_id: int, timestamp: int):
@@ -3004,11 +3062,12 @@ class PackageDatabase(
             package_id: Package ID
             timestamp: Unix timestamp from server's Last-Modified header
         """
-        self.conn.execute(
-            "UPDATE packages SET server_last_modified = ? WHERE id = ?",
-            (timestamp, package_id)
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "UPDATE packages SET server_last_modified = ? WHERE id = ?",
+                (timestamp, package_id)
+            )
+            conn.commit()
 
     def update_server_last_modified_batch(self, updates: List[tuple]):
         """Batch update server_last_modified for multiple packages.
@@ -3016,11 +3075,12 @@ class PackageDatabase(
         Args:
             updates: List of (package_id, timestamp) tuples
         """
-        self.conn.executemany(
-            "UPDATE packages SET server_last_modified = ? WHERE id = ?",
-            [(ts, pkg_id) for pkg_id, ts in updates]
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.executemany(
+                "UPDATE packages SET server_last_modified = ? WHERE id = ?",
+                [(ts, pkg_id) for pkg_id, ts in updates]
+            )
+            conn.commit()
 
     # =========================================================================
     # Statistics
@@ -3030,17 +3090,18 @@ class PackageDatabase(
         """Get database statistics."""
         stats = {}
 
-        cursor = self.conn.execute("SELECT COUNT(*) FROM packages")
-        stats['packages'] = cursor.fetchone()[0]
+        with self._conn_read() as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM packages")
+            stats['packages'] = cursor.fetchone()[0]
 
-        cursor = self.conn.execute("SELECT COUNT(*) FROM provides")
-        stats['provides'] = cursor.fetchone()[0]
+            cursor = conn.execute("SELECT COUNT(*) FROM provides")
+            stats['provides'] = cursor.fetchone()[0]
 
-        cursor = self.conn.execute("SELECT COUNT(*) FROM requires")
-        stats['requires'] = cursor.fetchone()[0]
+            cursor = conn.execute("SELECT COUNT(*) FROM requires")
+            stats['requires'] = cursor.fetchone()[0]
 
-        cursor = self.conn.execute("SELECT COUNT(*) FROM media")
-        stats['media'] = cursor.fetchone()[0]
+            cursor = conn.execute("SELECT COUNT(*) FROM media")
+            stats['media'] = cursor.fetchone()[0]
 
         stats['db_size_mb'] = self.db_path.stat().st_size / 1024 / 1024
         stats['db_path'] = str(self.db_path)
@@ -3053,22 +3114,24 @@ class PackageDatabase(
 
     def get_config(self, key: str, default: str = None) -> Optional[str]:
         """Get a configuration value."""
-        cursor = self.conn.execute(
-            "SELECT value FROM config WHERE key = ?", (key,)
-        )
-        row = cursor.fetchone()
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT value FROM config WHERE key = ?", (key,)
+            )
+            row = cursor.fetchone()
         return row[0] if row else default
 
     def set_config(self, key: str, value: str):
         """Set a configuration value. If value is None, delete the key."""
-        if value is None:
-            self.conn.execute("DELETE FROM config WHERE key = ?", (key,))
-        else:
-            self.conn.execute(
-                "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
-                (key, value)
-            )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            if value is None:
+                conn.execute("DELETE FROM config WHERE key = ?", (key,))
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
+                    (key, value)
+                )
+            conn.commit()
 
     # =========================================================================
     # Multi-media package resolution
@@ -3086,29 +3149,30 @@ class PackageDatabase(
         # Build version filter (respects version-mode config)
         accepted = self._get_accepted_versions()
 
-        if accepted:
-            placeholders = ','.join('?' * len(accepted))
-            cursor = self.conn.execute(f"""
-                SELECT p.*, m.name as media_name, m.priority as media_priority
-                FROM packages p
-                JOIN media m ON p.media_id = m.id
-                WHERE p.name_lower = ? AND m.mageia_version IN ({placeholders})
-                ORDER BY p.epoch COLLATE rpm_version_compare DESC,
-                         p.version COLLATE rpm_version_compare DESC,
-                         p.release COLLATE rpm_version_compare DESC
-            """, (name.lower(),) + tuple(accepted))
-        else:
-            cursor = self.conn.execute("""
-                SELECT p.*, m.name as media_name, m.priority as media_priority
-                FROM packages p
-                LEFT JOIN media m ON p.media_id = m.id
-                WHERE p.name_lower = ?
-                ORDER BY p.epoch COLLATE rpm_version_compare DESC,
-                         p.version COLLATE rpm_version_compare DESC,
-                         p.release COLLATE rpm_version_compare DESC
-            """, (name.lower(),))
+        with self._conn_read() as conn:
+            if accepted:
+                placeholders = ','.join('?' * len(accepted))
+                cursor = conn.execute(f"""
+                    SELECT p.*, m.name as media_name, m.priority as media_priority
+                    FROM packages p
+                    JOIN media m ON p.media_id = m.id
+                    WHERE p.name_lower = ? AND m.mageia_version IN ({placeholders})
+                    ORDER BY p.epoch COLLATE rpm_version_compare DESC,
+                             p.version COLLATE rpm_version_compare DESC,
+                             p.release COLLATE rpm_version_compare DESC
+                """, (name.lower(),) + tuple(accepted))
+            else:
+                cursor = conn.execute("""
+                    SELECT p.*, m.name as media_name, m.priority as media_priority
+                    FROM packages p
+                    LEFT JOIN media m ON p.media_id = m.id
+                    WHERE p.name_lower = ?
+                    ORDER BY p.epoch COLLATE rpm_version_compare DESC,
+                             p.version COLLATE rpm_version_compare DESC,
+                             p.release COLLATE rpm_version_compare DESC
+                """, (name.lower(),))
 
-        packages = [dict(row) for row in cursor]
+            packages = [dict(row) for row in cursor]
 
         # Add effective priority considering pins
         for pkg in packages:
@@ -3187,44 +3251,45 @@ class PackageDatabase(
             media_filter = f" WHERE media_id IN ({placeholders})"
             params = list(media_ids)
 
-        # Load packages: name_lower -> (id, name, size)
-        cursor = self.conn.execute(f"""
-            SELECT id, name, name_lower, COALESCE(size, 0) FROM packages {media_filter}
-        """, params)
-        pkg_by_name = {}  # name_lower -> (id, name, size)
-        pkg_by_id = {}    # id -> (name, size)
-        for pkg_id, name, name_lower, size in cursor:
-            # Keep highest version (first seen due to ORDER BY in original)
-            if name_lower not in pkg_by_name:
-                pkg_by_name[name_lower] = (pkg_id, name, size)
-            pkg_by_id[pkg_id] = (name, size)
+        with self._conn_read() as conn:
+            # Load packages: name_lower -> (id, name, size)
+            cursor = conn.execute(f"""
+                SELECT id, name, name_lower, COALESCE(size, 0) FROM packages {media_filter}
+            """, params)
+            pkg_by_name = {}  # name_lower -> (id, name, size)
+            pkg_by_id = {}    # id -> (name, size)
+            for pkg_id, name, name_lower, size in cursor:
+                # Keep highest version (first seen due to ORDER BY in original)
+                if name_lower not in pkg_by_name:
+                    pkg_by_name[name_lower] = (pkg_id, name, size)
+                pkg_by_id[pkg_id] = (name, size)
 
-        # Load requires: pkg_id -> [capabilities]
-        cursor = self.conn.execute("SELECT pkg_id, capability FROM requires")
-        requires_by_pkg = {}
-        for pkg_id, cap in cursor:
-            if pkg_id not in requires_by_pkg:
-                requires_by_pkg[pkg_id] = []
-            requires_by_pkg[pkg_id].append(cap)
-
-        # Load recommends if needed: pkg_id -> [capabilities]
-        recommends_by_pkg = {}
-        if include_recommends:
-            cursor = self.conn.execute("SELECT pkg_id, capability FROM recommends")
+            # Load requires: pkg_id -> [capabilities]
+            cursor = conn.execute("SELECT pkg_id, capability FROM requires")
+            requires_by_pkg = {}
             for pkg_id, cap in cursor:
-                if pkg_id not in recommends_by_pkg:
-                    recommends_by_pkg[pkg_id] = []
-                recommends_by_pkg[pkg_id].append(cap)
+                if pkg_id not in requires_by_pkg:
+                    requires_by_pkg[pkg_id] = []
+                requires_by_pkg[pkg_id].append(cap)
 
-        # Load provides: capability_base -> [pkg_ids]
-        # We strip version info for matching
-        cursor = self.conn.execute("SELECT pkg_id, capability FROM provides")
-        provides_by_cap = {}
-        for pkg_id, cap in cursor:
-            cap_base = cap.split()[0]  # Remove version constraints
-            if cap_base not in provides_by_cap:
-                provides_by_cap[cap_base] = set()
-            provides_by_cap[cap_base].add(pkg_id)
+            # Load recommends if needed: pkg_id -> [capabilities]
+            recommends_by_pkg = {}
+            if include_recommends:
+                cursor = conn.execute("SELECT pkg_id, capability FROM recommends")
+                for pkg_id, cap in cursor:
+                    if pkg_id not in recommends_by_pkg:
+                        recommends_by_pkg[pkg_id] = []
+                    recommends_by_pkg[pkg_id].append(cap)
+
+            # Load provides: capability_base -> [pkg_ids]
+            # We strip version info for matching
+            cursor = conn.execute("SELECT pkg_id, capability FROM provides")
+            provides_by_cap = {}
+            for pkg_id, cap in cursor:
+                cap_base = cap.split()[0]  # Remove version constraints
+                if cap_base not in provides_by_cap:
+                    provides_by_cap[cap_base] = set()
+                provides_by_cap[cap_base].add(pkg_id)
 
         # Now do the recursive collection in memory
         result_ids = set()

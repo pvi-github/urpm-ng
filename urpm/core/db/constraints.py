@@ -9,7 +9,10 @@ class ConstraintsMixin:
     """Mixin providing package pins and holds operations.
 
     Requires:
-        - self.conn: sqlite3.Connection
+        - self._conn_read(): context manager yielding a per-thread
+          connection for read-only paths.
+        - self._conn_write(): context manager yielding a per-thread
+          connection with the write lock held.
         - self.get_media(name): method to get media info
     """
 
@@ -31,28 +34,31 @@ class ConstraintsMixin:
         Returns:
             Pin ID
         """
-        cursor = self.conn.execute("""
-            INSERT INTO pins (package_pattern, media_pattern, priority,
-                            version_pattern, comment, added_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (package_pattern, media_pattern, priority, version_pattern,
-              comment, int(time.time())))
-        self.conn.commit()
-        return cursor.lastrowid
+        with self._conn_write() as conn:
+            cursor = conn.execute("""
+                INSERT INTO pins (package_pattern, media_pattern, priority,
+                                version_pattern, comment, added_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (package_pattern, media_pattern, priority, version_pattern,
+                  comment, int(time.time())))
+            conn.commit()
+            return cursor.lastrowid
 
     def remove_pin(self, pin_id: int):
         """Remove a pin rule."""
-        self.conn.execute("DELETE FROM pins WHERE id = ?", (pin_id,))
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute("DELETE FROM pins WHERE id = ?", (pin_id,))
+            conn.commit()
 
     def list_pins(self) -> List[Dict]:
         """List all pin rules."""
-        cursor = self.conn.execute("""
-            SELECT id, package_pattern, media_pattern, priority,
-                   version_pattern, comment
-            FROM pins ORDER BY priority DESC
-        """)
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT id, package_pattern, media_pattern, priority,
+                       version_pattern, comment
+                FROM pins ORDER BY priority DESC
+            """)
+            return [dict(row) for row in cursor]
 
     def get_pin_priority(self, package_name: str, media_name: str) -> int:
         """Get effective priority for a package from a media, considering pins.
@@ -62,8 +68,9 @@ class ConstraintsMixin:
         import fnmatch
 
         # Get all pins that could match
-        cursor = self.conn.execute("SELECT * FROM pins ORDER BY priority DESC")
-        pins = [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute("SELECT * FROM pins ORDER BY priority DESC")
+            pins = [dict(row) for row in cursor]
 
         for pin in pins:
             pkg_match = fnmatch.fnmatch(package_name.lower(),
@@ -93,12 +100,13 @@ class ConstraintsMixin:
             True if hold was added, False if already held
         """
         try:
-            self.conn.execute("""
-                INSERT INTO held_packages (package_name, reason, added_timestamp)
-                VALUES (?, ?, ?)
-            """, (package_name, reason, int(time.time())))
-            self.conn.commit()
-            return True
+            with self._conn_write() as conn:
+                conn.execute("""
+                    INSERT INTO held_packages (package_name, reason, added_timestamp)
+                    VALUES (?, ?, ?)
+                """, (package_name, reason, int(time.time())))
+                conn.commit()
+                return True
         except sqlite3.IntegrityError:
             return False  # Already held
 
@@ -108,31 +116,35 @@ class ConstraintsMixin:
         Returns:
             True if hold was removed, False if not held
         """
-        cursor = self.conn.execute(
-            "DELETE FROM held_packages WHERE package_name = ?",
-            (package_name,)
-        )
-        self.conn.commit()
-        return cursor.rowcount > 0
+        with self._conn_write() as conn:
+            cursor = conn.execute(
+                "DELETE FROM held_packages WHERE package_name = ?",
+                (package_name,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def is_held(self, package_name: str) -> bool:
         """Check if a package is held."""
-        cursor = self.conn.execute(
-            "SELECT 1 FROM held_packages WHERE package_name = ?",
-            (package_name,)
-        )
-        return cursor.fetchone() is not None
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM held_packages WHERE package_name = ?",
+                (package_name,)
+            )
+            return cursor.fetchone() is not None
 
     def list_holds(self) -> List[Dict]:
         """List all held packages."""
-        cursor = self.conn.execute("""
-            SELECT package_name, reason, added_timestamp
-            FROM held_packages
-            ORDER BY package_name
-        """)
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT package_name, reason, added_timestamp
+                FROM held_packages
+                ORDER BY package_name
+            """)
+            return [dict(row) for row in cursor]
 
     def get_held_packages_set(self) -> Set[str]:
         """Get set of all held package names (for fast lookup)."""
-        cursor = self.conn.execute("SELECT package_name FROM held_packages")
-        return {row[0] for row in cursor}
+        with self._conn_read() as conn:
+            cursor = conn.execute("SELECT package_name FROM held_packages")
+            return {row[0] for row in cursor}

@@ -23,8 +23,10 @@ class ServerMixin:
     """Mixin providing server CRUD operations.
 
     Requires:
-        - self.conn: sqlite3.Connection
-        - self._get_connection(): method returning thread-safe connection
+        - self._conn_read(): context manager yielding a per-thread
+          connection for read-only paths.
+        - self._conn_write(): context manager yielding a per-thread
+          connection with the write lock held.
     """
 
     def add_server(self, name: str, protocol: str, host: str, base_path: str = '',
@@ -52,31 +54,34 @@ class ServerMixin:
         Returns:
             Server ID
         """
-        cursor = self.conn.execute("""
-            INSERT INTO server (name, protocol, host, base_path, is_official,
-                               enabled, priority, country, url_version,
-                               added_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, protocol, host, base_path, int(is_official),
-              int(enabled), priority, country, url_version,
-              int(time.time())))
-        self.conn.commit()
-        return cursor.lastrowid
+        with self._conn_write() as conn:
+            cursor = conn.execute("""
+                INSERT INTO server (name, protocol, host, base_path, is_official,
+                                   enabled, priority, country, url_version,
+                                   added_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (name, protocol, host, base_path, int(is_official),
+                  int(enabled), priority, country, url_version,
+                  int(time.time())))
+            conn.commit()
+            return cursor.lastrowid
 
     def get_server(self, name: str) -> Optional[Dict]:
         """Get server info by name."""
-        cursor = self.conn.execute(
-            "SELECT * FROM server WHERE name = ?", (name,)
-        )
-        row = cursor.fetchone()
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM server WHERE name = ?", (name,)
+            )
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     def get_server_by_id(self, server_id: int) -> Optional[Dict]:
         """Get server info by ID."""
-        cursor = self.conn.execute(
-            "SELECT * FROM server WHERE id = ?", (server_id,)
-        )
-        row = cursor.fetchone()
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM server WHERE id = ?", (server_id,)
+            )
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     def get_server_by_location(self, protocol: str, host: str,
@@ -86,45 +91,50 @@ class ServerMixin:
         *protocol* is accepted for call-site convenience but is **not**
         part of the lookup — the unique constraint is ``(host, base_path)``.
         """
-        cursor = self.conn.execute(
-            "SELECT * FROM server WHERE host = ? AND base_path = ?",
-            (host, base_path)
-        )
-        row = cursor.fetchone()
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM server WHERE host = ? AND base_path = ?",
+                (host, base_path)
+            )
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     def list_servers(self, enabled_only: bool = False) -> List[Dict]:
         """List all servers, ordered by priority (descending)."""
-        if enabled_only:
-            cursor = self.conn.execute(
-                "SELECT * FROM server WHERE enabled = 1 ORDER BY priority DESC, name"
-            )
-        else:
-            cursor = self.conn.execute(
-                "SELECT * FROM server ORDER BY priority DESC, name"
-            )
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            if enabled_only:
+                cursor = conn.execute(
+                    "SELECT * FROM server WHERE enabled = 1 ORDER BY priority DESC, name"
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM server ORDER BY priority DESC, name"
+                )
+            return [dict(row) for row in cursor]
 
     def remove_server(self, name: str):
         """Remove a server (cascades to server_media links)."""
-        self.conn.execute("DELETE FROM server WHERE name = ?", (name,))
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute("DELETE FROM server WHERE name = ?", (name,))
+            conn.commit()
 
     def enable_server(self, name: str, enabled: bool = True):
         """Enable or disable a server."""
-        self.conn.execute(
-            "UPDATE server SET enabled = ? WHERE name = ?",
-            (int(enabled), name)
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "UPDATE server SET enabled = ? WHERE name = ?",
+                (int(enabled), name)
+            )
+            conn.commit()
 
     def set_server_priority(self, name: str, priority: int):
         """Set server priority."""
-        self.conn.execute(
-            "UPDATE server SET priority = ? WHERE name = ?",
-            (priority, name)
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "UPDATE server SET priority = ? WHERE name = ?",
+                (priority, name)
+            )
+            conn.commit()
 
     def set_server_country_by_id(self, server_id: int, country: str):
         """Set the ISO 3166 country code for a server.
@@ -137,11 +147,12 @@ class ServerMixin:
             server_id: Server ID.
             country: Two-letter ISO 3166 country code (e.g. ``'FR'``).
         """
-        self.conn.execute(
-            "UPDATE server SET country = ? WHERE id = ?",
-            (country, server_id)
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "UPDATE server SET country = ? WHERE id = ?",
+                (country, server_id)
+            )
+            conn.commit()
 
     def set_server_ip_mode(self, name: str, ip_mode: str):
         """Set server IP mode.
@@ -152,11 +163,12 @@ class ServerMixin:
         """
         if ip_mode not in ('auto', 'ipv4', 'ipv6', 'dual'):
             raise ValueError(f"Invalid ip_mode: {ip_mode}")
-        self.conn.execute(
-            "UPDATE server SET ip_mode = ? WHERE name = ?",
-            (ip_mode, name)
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "UPDATE server SET ip_mode = ? WHERE name = ?",
+                (ip_mode, name)
+            )
+            conn.commit()
 
     def set_server_ip_mode_by_id(self, server_id: int, ip_mode: str):
         """Set server IP mode by ID.
@@ -167,11 +179,12 @@ class ServerMixin:
         """
         if ip_mode not in ('auto', 'ipv4', 'ipv6', 'dual'):
             raise ValueError(f"Invalid ip_mode: {ip_mode}")
-        self.conn.execute(
-            "UPDATE server SET ip_mode = ? WHERE id = ?",
-            (ip_mode, server_id)
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "UPDATE server SET ip_mode = ? WHERE id = ?",
+                (ip_mode, server_id)
+            )
+            conn.commit()
 
     # =========================================================================
     # Server-Media links
@@ -179,11 +192,12 @@ class ServerMixin:
 
     def link_server_media(self, server_id: int, media_id: int):
         """Create a link between a server and a media."""
-        self.conn.execute("""
-            INSERT OR IGNORE INTO server_media (server_id, media_id, added_timestamp)
-            VALUES (?, ?, ?)
-        """, (server_id, media_id, int(time.time())))
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute("""
+                INSERT OR IGNORE INTO server_media (server_id, media_id, added_timestamp)
+                VALUES (?, ?, ?)
+            """, (server_id, media_id, int(time.time())))
+            conn.commit()
 
     def link_official_mesh(self) -> int:
         """Ensure every official server is linked to every official media.
@@ -212,29 +226,31 @@ class ServerMixin:
             was already complete.
         """
         added_at = int(time.time())
-        cursor = self.conn.execute("""
-            INSERT OR IGNORE INTO server_media (server_id, media_id, added_timestamp)
-            SELECT s.id, m.id, ?
-            FROM server s
-            CROSS JOIN media m
-            WHERE s.is_official = 1
-              AND m.is_official = 1
-              AND NOT EXISTS (
-                  SELECT 1 FROM server_media sm
-                  WHERE sm.server_id = s.id AND sm.media_id = m.id
-              )
-        """, (added_at,))
-        added = cursor.rowcount or 0
-        self.conn.commit()
+        with self._conn_write() as conn:
+            cursor = conn.execute("""
+                INSERT OR IGNORE INTO server_media (server_id, media_id, added_timestamp)
+                SELECT s.id, m.id, ?
+                FROM server s
+                CROSS JOIN media m
+                WHERE s.is_official = 1
+                  AND m.is_official = 1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM server_media sm
+                      WHERE sm.server_id = s.id AND sm.media_id = m.id
+                  )
+            """, (added_at,))
+            added = cursor.rowcount or 0
+            conn.commit()
         return added
 
     def unlink_server_media(self, server_id: int, media_id: int):
         """Remove a link between a server and a media."""
-        self.conn.execute(
-            "DELETE FROM server_media WHERE server_id = ? AND media_id = ?",
-            (server_id, media_id)
-        )
-        self.conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "DELETE FROM server_media WHERE server_id = ? AND media_id = ?",
+                (server_id, media_id)
+            )
+            conn.commit()
 
     def update_server_stats(self, server_id: int, *,
                              bandwidth_kbps: int = None,
@@ -259,7 +275,6 @@ class ServerMixin:
         # when multiple download workers update the same server concurrently.
         ALPHA = 0.3
 
-        conn = self._get_connection()
         now = int(time.time())
 
         set_parts = ["last_check = ?"]
@@ -290,7 +305,7 @@ class ServerMixin:
             set_parts.append("failure_count = COALESCE(failure_count, 0) + 1")
 
         params.append(server_id)
-        with self._lock:
+        with self._conn_write() as conn:
             conn.execute(
                 f"UPDATE server SET {', '.join(set_parts)} WHERE id = ?",
                 params
@@ -332,7 +347,6 @@ class ServerMixin:
             List of server dicts, best server first.  Each dict carries
             a ``reputation_score`` key (integer 0-100) computed inline.
         """
-        conn = self._get_connection()
         cutoff = int(time.time()) - reputation_window_hours * 3600
         # Subquery uses the (server_id, ts) index for an efficient
         # sliding-window SUM(weight).  No event rows → 0 penalty →
@@ -360,8 +374,9 @@ class ServerMixin:
         if limit:
             query += f" LIMIT {limit}"
 
-        cursor = conn.execute(query, params)
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor]
 
     # ── Security blacklist ────────────────────────────────────────────
 
@@ -391,21 +406,21 @@ class ServerMixin:
                 self-explanatory.
         """
         now = int(time.time())
-        conn = self._get_connection()
-        # Reset acknowledgement: a fresh blacklisting event always
-        # re-arms the persistent banner reminder even if the user had
-        # acknowledged a previous one.
-        conn.execute(
-            "UPDATE server SET blacklisted_at = ?, blacklist_reason = ?, "
-            "blacklist_acknowledged_at = NULL WHERE id = ?",
-            (now, reason, server_id),
-        )
-        conn.execute(
-            "INSERT INTO server_failure_events "
-            "(server_id, ts, category, weight, detail) VALUES (?, ?, ?, ?, ?)",
-            (server_id, now, "signature", 0, detail or reason),
-        )
-        conn.commit()
+        with self._conn_write() as conn:
+            # Reset acknowledgement: a fresh blacklisting event always
+            # re-arms the persistent banner reminder even if the user had
+            # acknowledged a previous one.
+            conn.execute(
+                "UPDATE server SET blacklisted_at = ?, blacklist_reason = ?, "
+                "blacklist_acknowledged_at = NULL WHERE id = ?",
+                (now, reason, server_id),
+            )
+            conn.execute(
+                "INSERT INTO server_failure_events "
+                "(server_id, ts, category, weight, detail) VALUES (?, ?, ?, ?, ?)",
+                (server_id, now, "signature", 0, detail or reason),
+            )
+            conn.commit()
 
     def unblacklist_server(self, server_id: int) -> bool:
         """Clear the security blacklist on a server.
@@ -419,15 +434,15 @@ class ServerMixin:
             was blacklisted), False if it was not blacklisted to begin
             with.
         """
-        conn = self._get_connection()
-        cursor = conn.execute(
-            "UPDATE server SET blacklisted_at = NULL, blacklist_reason = NULL, "
-            "blacklist_acknowledged_at = NULL "
-            "WHERE id = ? AND blacklisted_at IS NOT NULL",
-            (server_id,),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+        with self._conn_write() as conn:
+            cursor = conn.execute(
+                "UPDATE server SET blacklisted_at = NULL, blacklist_reason = NULL, "
+                "blacklist_acknowledged_at = NULL "
+                "WHERE id = ? AND blacklisted_at IS NOT NULL",
+                (server_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def acknowledge_blacklist(self, server_id: int) -> bool:
         """Stop nagging the persistent banner for this server.
@@ -441,22 +456,22 @@ class ServerMixin:
             when the server is not blacklisted or already
             acknowledged.
         """
-        conn = self._get_connection()
-        cursor = conn.execute(
-            "UPDATE server SET blacklist_acknowledged_at = ? "
-            "WHERE id = ? AND blacklisted_at IS NOT NULL "
-            "AND blacklist_acknowledged_at IS NULL",
-            (int(time.time()), server_id),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+        with self._conn_write() as conn:
+            cursor = conn.execute(
+                "UPDATE server SET blacklist_acknowledged_at = ? "
+                "WHERE id = ? AND blacklisted_at IS NOT NULL "
+                "AND blacklist_acknowledged_at IS NULL",
+                (int(time.time()), server_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def is_blacklisted(self, server_id: int) -> bool:
         """Return True when ``server_id`` is currently blacklisted."""
-        conn = self._get_connection()
-        row = conn.execute(
-            "SELECT blacklisted_at FROM server WHERE id = ?", (server_id,),
-        ).fetchone()
+        with self._conn_read() as conn:
+            row = conn.execute(
+                "SELECT blacklisted_at FROM server WHERE id = ?", (server_id,),
+            ).fetchone()
         return bool(row and row["blacklisted_at"] is not None)
 
     def list_blacklisted_servers(self, unacknowledged_only: bool = False) -> List[Dict]:
@@ -473,13 +488,13 @@ class ServerMixin:
                 Used by the persistent banner so it stops nagging
                 after the user has seen the alert.
         """
-        conn = self._get_connection()
         query = "SELECT * FROM server WHERE blacklisted_at IS NOT NULL"
         if unacknowledged_only:
             query += " AND blacklist_acknowledged_at IS NULL"
         query += " ORDER BY blacklisted_at DESC"
-        cursor = conn.execute(query)
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute(query)
+            return [dict(row) for row in cursor]
 
     # ── Reputation event log ──────────────────────────────────────────
 
@@ -504,13 +519,13 @@ class ServerMixin:
         """
         if weight is None:
             weight = REPUTATION_WEIGHTS.get(category, 0)
-        conn = self._get_connection()
-        conn.execute(
-            "INSERT INTO server_failure_events "
-            "(server_id, ts, category, weight, detail) VALUES (?, ?, ?, ?, ?)",
-            (server_id, int(time.time()), category, weight, detail),
-        )
-        conn.commit()
+        with self._conn_write() as conn:
+            conn.execute(
+                "INSERT INTO server_failure_events "
+                "(server_id, ts, category, weight, detail) VALUES (?, ?, ?, ?, ?)",
+                (server_id, int(time.time()), category, weight, detail),
+            )
+            conn.commit()
 
     def get_server_reputation_score(self, server_id: int,
                                     window_hours: int = 24) -> int:
@@ -520,14 +535,14 @@ class ServerMixin:
         last ``window_hours`` hours, clamped to 0 below.  100 means no
         recent failures.
         """
-        conn = self._get_connection()
         cutoff = int(time.time()) - window_hours * 3600
-        row = conn.execute(
-            "SELECT COALESCE(SUM(weight), 0) AS total "
-            "FROM server_failure_events "
-            "WHERE server_id = ? AND ts > ?",
-            (server_id, cutoff),
-        ).fetchone()
+        with self._conn_read() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(weight), 0) AS total "
+                "FROM server_failure_events "
+                "WHERE server_id = ? AND ts > ?",
+                (server_id, cutoff),
+            ).fetchone()
         return max(0, 100 - (row["total"] if row else 0))
 
     def get_server_recent_failures(self, server_id: int,
@@ -538,26 +553,26 @@ class ServerMixin:
         Used by ``urpm server status <name>`` to show why a mirror's
         reputation is low.
         """
-        conn = self._get_connection()
         cutoff = int(time.time()) - window_hours * 3600
-        cursor = conn.execute(
-            "SELECT * FROM server_failure_events "
-            "WHERE server_id = ? AND ts > ? "
-            "ORDER BY ts DESC LIMIT ?",
-            (server_id, cutoff, limit),
-        )
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM server_failure_events "
+                "WHERE server_id = ? AND ts > ? "
+                "ORDER BY ts DESC LIMIT ?",
+                (server_id, cutoff, limit),
+            )
+            return [dict(row) for row in cursor]
 
     def get_media_for_server(self, server_id: int) -> List[Dict]:
         """Get all media served by a server. Thread-safe."""
-        conn = self._get_connection()
-        cursor = conn.execute("""
-            SELECT m.* FROM media m
-            JOIN server_media sm ON m.id = sm.media_id
-            WHERE sm.server_id = ?
-            ORDER BY m.name
-        """, (server_id,))
-        return [dict(row) for row in cursor]
+        with self._conn_read() as conn:
+            cursor = conn.execute("""
+                SELECT m.* FROM media m
+                JOIN server_media sm ON m.id = sm.media_id
+                WHERE sm.server_id = ?
+                ORDER BY m.name
+            """, (server_id,))
+            return [dict(row) for row in cursor]
 
     def get_best_server_for_media(self, media_id: int) -> Optional[Dict]:
         """Get the best available server for a media.
@@ -569,8 +584,9 @@ class ServerMixin:
 
     def server_media_link_exists(self, server_id: int, media_id: int) -> bool:
         """Check if a server-media link exists."""
-        cursor = self.conn.execute(
-            "SELECT 1 FROM server_media WHERE server_id = ? AND media_id = ?",
-            (server_id, media_id)
-        )
-        return cursor.fetchone() is not None
+        with self._conn_read() as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM server_media WHERE server_id = ? AND media_id = ?",
+                (server_id, media_id)
+            )
+            return cursor.fetchone() is not None
