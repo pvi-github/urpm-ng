@@ -15,6 +15,134 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.7] — 2026-09-01
+
+Robustness pass on the install / mkimage paths, plus the fix for
+the silent-drop behaviour that spent several hours making
+`urpm install` look like it was hallucinating installed packages.
+Distupgrade gains a pre-reboot gate to catch the classic « bulk
+urpmi + skipped reboot » scenario that used to brick machines mid-
+transaction.
+
+### Bug Fixes
+
+- **`urpm install` silently discarded impossible requests.**
+  When a requested package could not be installed (missing system
+  dep, unresolved capability), libsolv's first suggested solution
+  is « drop the user's install job ».  The atomic-retry loop
+  applied it blindly, cmd_install printed « Nothing to do » while
+  the user's request had vanished with no diagnostic.  In
+  interactive mode the loop now refuses to touch a `user_explicit`
+  job, propagates the problems to the caller, and prints an
+  urpmi-style « The requested package(s) cannot be installed:
+  <reason> » plus an optional partial-mode retry prompt.  `--auto`
+  keeps the historical silent-drop for conflict resolution so
+  urpmi -y semantics remain intact.
+
+- **`urpm image make` Phase 1 skipped every scriptlet in the
+  urpm-ng-core install cascade.**  `noscripts=True` was pinned
+  unconditionally, so `update-alternatives` never fired for
+  `gcc`/`python3`/`java` transitive deps and the finished image
+  died at « gcc: command not found » on the first C build.  Flipped
+  to `False` — filesystem/makedev/setup keep their own targeted
+  `--noscripts` calls.
+
+- **`podman import` was run inside a nested user namespace.**
+  Wrapping both `tar` and `podman import` in a single
+  `podman unshare sh -c '...'` redirected podman's rootless
+  storage into an ephemeral directory the caller could not see ;
+  the tag was registered nowhere, the subprocess returned 0, and
+  Phase 2 died on « did not resolve to an alias ».  Split into
+  `podman unshare tar | podman import` — only tar under the
+  userns, import runs in the operator's normal context.
+
+- **Operator `~/.rpmmacros` leaked into the mkimage chroot.**
+  A packager whose macros redefined `%_topdir` via
+  `$HOME/rpmbuild` broke the whole filesystem/shadow-utils/dbus/
+  systemd scriptlet cascade at seed time.  New
+  `urpm.core.userns_env.bootstrap_env` returns a hermetic env
+  (whitelisted PATH/HOME/TMPDIR/LC_*/TZ/SYSTEMD_OFFLINE, opt-in
+  proxy passthrough) threaded through every rpm and podman-unshare
+  call in the mkimage path.
+
+- **`urpm media discover` collapsed `noarch` siblings into their
+  arch cousin.**  Short-name computation clashed on
+  `core_release` — the last write won, blogdrake/mgabiz noarch
+  media disappeared silently.  Noarch media now carry an arch
+  suffix (`core_release_noarch`).  The `cauldron` URL segment is
+  also recognised alongside numeric releases at probe time.
+
+- **`urpm media link <name> +<server>` crashed with
+  `NameError`.**  A helper (`check_server_has_media`) removed by
+  the MD5-verified linking refactor was still called at one site,
+  so every named-server add bombed before touching the DB.  Swap
+  to the same `verify_media_match` the neighbouring
+  `try_add_server` already uses.
+
+- **`build_media_url` runtime substitution was a dormant-state
+  hazard.**  Rewriting the first segment of `media.relative_path`
+  with `server.url_version` at every download turned the mutable
+  server cache into an authoritative rewrite layer ; a VM whose
+  `url_version` was captured under one layout kept building wrong
+  URLs long after the mirror had moved on.  Dropped —
+  `relative_path` (written at add/discover time under « URL wins
+  for release identity ») is the single source of truth.
+
+- **`SQLITE_MISUSE` race in the container build path.**  SQLite
+  opened with `check_same_thread=False` plus direct `self.conn`
+  access from any caller thread bypassed the per-thread
+  connection + RLock discipline the mixins already had.  Every
+  `self.conn` call site across `database.py` + `db/*.py` now goes
+  through `_conn_read()` / `_conn_write()`.
+
+- **`urpm image make --release cauldron` failed on freshly-built
+  urpm-ng.**  GitHub asset picker did not recognise cauldron
+  target ; fixed alongside the discover-side cauldron detection.
+
+### Features
+
+- **Distupgrade refuses to start when a reboot is pending.**  New
+  Stage 0 gate (`check_pending_reboot`) compares each load-bearing
+  package's rpmdb `INSTALLTIME` to `/proc/stat`'s `btime` and
+  refuses when glibc or systemd is younger than the last boot.
+  Catches the « bulk urpmi + skipped reboot » scenario that used
+  to mix two glibc ABIs in a single rpm transaction and brick the
+  box.  Six unit tests via `boot_time` / `installed_times` seams.
+
+- **`urpm image make --forward-proxy` / `--no-forward-proxy`.**
+  Opt-in proxy forwarding for sites that can only reach Mageia
+  mirrors through an outbound HTTP proxy.  Defaults to the
+  `[image] forward_proxy` config key (off out of the box) so the
+  chroot runs hermetic by default.
+
+- **`urpm media update` shows the mirror that actually served each
+  media.**  Removes the guesswork when a discover pass grabbed
+  media from a mix of sources.
+
+- **`urpm media discover --import-keys`.**  Auto-imports the
+  media's GPG key alongside the discover pass.
+
+- **Progress widget survives terminal resize.**  New VT100
+  scroll-region implementation stays readable across resize
+  events during long-running transactions (distupgrade,
+  mkimage).
+
+### Refactoring
+
+- **Identity resolution unified over `version-mode`.**  The
+  `mageia-version` config key and `distro-switch` verb are gone ;
+  a single identity source drives every release-aware code path
+  (media filter, cauldron/numeric probe, distupgrade target).
+
+### Developer Experience
+
+- **`--debug` traces every solve step in `resolve_install`.**  When
+  the transaction comes back empty despite non-empty jobs, one
+  line per job dumps the solvable + repo libsolv actually matched
+  — makes silent-drop bugs debuggable at a glance.
+
+---
+
 ## [0.9.6] — 2026-08-27
 
 Hotfix release for four regressions surfaced by the 0.9.5 beta
