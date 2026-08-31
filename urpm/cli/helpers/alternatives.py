@@ -815,7 +815,8 @@ def _sort_alternatives_by_cascade(alternatives: list, pool) -> None:
 def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                                auto_mode: bool, preferences: 'PreferencesMatcher' = None,
                                local_packages: set = None,
-                               atomic: bool = True) -> tuple:
+                               atomic: bool = True,
+                               preserve_user_jobs: bool = False) -> tuple:
     """Resolve packages, handling alternatives interactively with bloc detection.
 
     Args:
@@ -972,6 +973,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
             preference_patterns=preferences.name_patterns,
             local_packages=local_packages,
             atomic=atomic,
+            preserve_user_jobs=preserve_user_jobs,
         )
 
         # Handle alternatives (multiple providers for same capability)

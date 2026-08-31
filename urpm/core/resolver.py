@@ -1002,6 +1002,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         *,
         atomic: bool = True,
         debug=None,
+        preserve_user_jobs: bool = False,
     ):
         """Solve, optionally dropping unsolvable user requests.
 
@@ -1071,11 +1072,41 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             seen_fingerprints.add(fingerprint)
 
             if atomic:
+                # A SOLVER_SOLUTION_JOB element replaces (or nulls out)
+                # an existing job.  Historically ``_solve`` applied
+                # whatever libsolv proposed as ``solutions[0]``, which
+                # for "nothing provides X needed by Y" is invariably
+                # "drop the user's install of Y".  The retry then loops
+                # to problems=0, transaction empty — the caller sees no
+                # problems and prints "Nothing to do" while the user's
+                # request has silently vanished.  Fix : refuse to apply
+                # any solution that would touch a ``user_explicit`` job
+                # (or one whose origin is unknown).  The problems propagate
+                # up to :func:`_format_problems` and land in
+                # ``result.problems`` where cmd_install renders them
+                # urpmi-style.
                 applied = False
+                touched_user_job = False
                 for problem in problems:
                     solutions = problem.solutions()
                     if not solutions:
                         continue
+                    if preserve_user_jobs:
+                        solution_touches_user = False
+                        for element in solutions[0].elements():
+                            if element.type == solv.Solver.SOLVER_SOLUTION_JOB:
+                                idx = element.jobidx
+                                origin_kind = (
+                                    job_origins[idx].kind
+                                    if job_origins and 0 <= idx < len(job_origins)
+                                    else None
+                                )
+                                if origin_kind in (None, "user_explicit"):
+                                    solution_touches_user = True
+                                    break
+                        if solution_touches_user:
+                            touched_user_job = True
+                            continue
                     for element in solutions[0].elements():
                         newjob = element.Job()
                         if element.type == solv.Solver.SOLVER_SOLUTION_JOB:
@@ -1093,6 +1124,15 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                                     ))
                                 applied = True
                 if not applied:
+                    # Either we ran out of applicable solutions or every
+                    # remaining solution touched a user job.  Break with
+                    # ``problems`` intact so the caller surfaces the real
+                    # reason to the user.
+                    if touched_user_job and debug:
+                        debug.log(
+                            "_solve: preserving user_explicit job(s) ; "
+                            "returning problems to caller",
+                        )
                     break
             else:
                 if not job_origins:
@@ -1180,7 +1220,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                         explicit_disfavor: set = None,
                         preference_patterns: list = None,
                         local_packages: set = None,
-                        atomic: bool = True) -> Resolution:
+                        atomic: bool = True,
+                        preserve_user_jobs: bool = False) -> Resolution:
         """Resolve packages to install.
 
         Args:
@@ -1477,7 +1518,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
         job_origins = self._classify_jobs(jobs, default_kind="user_explicit")
         problems, _skipped = self._solve(
-            solver, jobs, job_origins, atomic=atomic
+            solver, jobs, job_origins, atomic=atomic,
+            preserve_user_jobs=preserve_user_jobs,
         )
 
         debug.log_problems(problems)

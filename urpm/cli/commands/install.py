@@ -5,6 +5,7 @@ TODO: Add --config-policy=merge for interactive diff/merge of config files
 
 import logging
 import os
+import sys
 import subprocess
 import time
 from pathlib import Path
@@ -421,15 +422,42 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             resolver, resolved_packages, choices, args.auto, preferences,
             local_packages=local_pkg_names,
             atomic=not getattr(args, 'no_atomic', False),
+            preserve_user_jobs=not args.auto,
         )
     if aborted:
         return 1
 
     if not result.success:
-        print(_("Resolution failed:"))
+        print(colors.error(_("The requested package(s) cannot be installed:")))
         for p in result.problems:
             print(f"  {p}")
-        return 1
+        # urpmi-style courtesy : offer a partial retry when we still have
+        # a tty and the caller did not ask for full-auto.  Re-resolves in
+        # ``atomic=False`` mode, which drops only the unsolvable requests
+        # and installs whatever remains.  --auto users get a straight
+        # exit — no surprises for scripts.
+        atomic_ran = not getattr(args, 'no_atomic', False)
+        interactive = (not args.auto) and sys.stdin.isatty() and sys.stdout.isatty()
+        if atomic_ran and interactive:
+            try:
+                ans = input("\n" + _(
+                    "Retry in partial mode (skip the unsolvable request(s) and install the rest) ? [y/N] ")).strip()
+            except (EOFError, KeyboardInterrupt):
+                ans = ""
+            if confirm_yes(ans):
+                result, aborted = _resolve_with_alternatives(
+                    resolver, resolved_packages, choices, args.auto, preferences,
+                    local_packages=local_pkg_names,
+                    atomic=False,
+                )
+                if aborted or not result.success:
+                    return 1
+                # Fall through with the partial ``result`` — the
+                # skipped-jobs report below surfaces what was dropped.
+            else:
+                return 1
+        else:
+            return 1
 
     # Render skipped-jobs report (--no-atomic).  Exit code 2 surfaces
     # "transaction completed but at least one package was dropped" —
