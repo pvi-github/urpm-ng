@@ -1452,6 +1452,16 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 problems=[f"Package not found: {n}" for n in not_found]
             )
 
+        # Debug : dump pool state + jobs right before the solve so
+        # ``Rien à faire`` returns become traceable.  The pool_stats
+        # call at ``_create_pool`` fires before ``add_local_rpms``, so
+        # any @LocalRPMs contribution is invisible in that first
+        # listing — repeating here surfaces sibling scan content.
+        debug = get_solver_debug()
+        debug.log("=== resolve_install() : pre-solve ===")
+        debug.log_pool_stats(self.pool)
+        debug.log_jobs(jobs)
+
         # Solve
         solver = self.pool.Solver()
         # Prefer packages compatible with already installed packages
@@ -1470,6 +1480,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             solver, jobs, job_origins, atomic=atomic
         )
 
+        debug.log_problems(problems)
+
         if problems:
             return Resolution(
                 success=False,
@@ -1480,6 +1492,22 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         # Get transaction and order it for correct install sequence
         trans = solver.transaction()
         trans.order()
+
+        debug.log_transaction(trans)
+        if trans.isempty() and jobs:
+            # ``Rien à faire`` with actual jobs submitted is the
+            # nasty case — libsolv thought every requested target
+            # was already satisfied.  Dump each job's target so the
+            # operator can see WHICH solvable the solver matched
+            # (typically an @System row it should not have picked).
+            debug.log(
+                "Empty transaction despite non-empty job list :"
+                " libsolv considered every target already satisfied.",
+            )
+            for job in jobs:
+                for s in job.solvables():
+                    repo = s.repo.name if s.repo else "?"
+                    debug.log(f"job matched : {s} [{repo}]", indent=1)
 
         # Build set of explicitly requested package names (lowercase)
         # Extract the base name from NEVRAs and version constraints
