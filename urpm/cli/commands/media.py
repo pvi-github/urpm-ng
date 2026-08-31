@@ -2133,7 +2133,8 @@ def cmd_media_link(args, db: 'PackageDatabase') -> int:
             if db.server_media_link_exists(server['id'], media_id):
                 errors.append(f"Server '{server_name}' already linked")
                 continue
-            if not check_server_has_media(server):
+            from ...core.server_pool import verify_media_match
+            if not verify_media_match(build_server_url(server), media, db):
                 skipped.append(server_name)
                 continue
             db.link_server_media(server['id'], media_id)
