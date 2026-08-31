@@ -21,8 +21,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from .checks import (
+    BootSpaceError,
+    MinKernelError,
+    PendingRebootError,
     check_boot_space,
     check_min_kernel,
+    check_pending_reboot,
 )
 from .lock import (
     DistupgradeLockedError,
@@ -71,6 +75,9 @@ def run_stage0(
     Steps :
 
     1. Clock sanity — :func:`check_clock_sanity`.
+    1.5. Pending reboot — :func:`check_pending_reboot` refuses when
+       a load-bearing package (glibc / systemd) was installed since
+       the last boot without a reboot.
     2. Version detection — :func:`detect_target_release`.
     3. Distupgrade lock acquisition — :func:`acquire_distupgrade_lock`.
     4. Initial state write (stage=``pre_check_started``).
@@ -90,6 +97,19 @@ def run_stage0(
     try:
         check_clock_sanity()
     except ClockGateError as exc:
+        raise Stage0Error(str(exc)) from exc
+
+    # 1.5 Pending reboot — refuse if a load-bearing package was
+    # installed since the last boot. The classic « machine fichue »
+    # scenario : operator did a bulk ``urpmi`` that pulled a newer
+    # glibc / systemd, skipped the reboot, and now launches
+    # distupgrade against a system whose in-memory copies of libc /
+    # pid 1 no longer match what's on disk.  Better to bail here
+    # with a clear message than to mix two glibc ABIs across a
+    # single rpm transaction and brick the box mid-way.
+    try:
+        check_pending_reboot()
+    except PendingRebootError as exc:
         raise Stage0Error(str(exc)) from exc
 
     # 2. Version detection

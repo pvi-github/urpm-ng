@@ -17,9 +17,11 @@ from urpm.core.distupgrade.checks import (
     BOOT_MARGIN_BYTES,
     BootSpaceError,
     MinKernelError,
+    PendingRebootError,
     boot_files_size,
     check_boot_space,
     check_min_kernel,
+    check_pending_reboot,
     parse_min_kernel_from_readelf,
     parse_running_kernel,
 )
@@ -200,3 +202,71 @@ class TestCheckMinKernel:
                 stdout="Système : Linux, ABI : 3.2.0\n",  # translated
                 stderr="")
             check_min_kernel(libc, running_kernel="6.6.0")
+
+
+# ── pending reboot ──────────────────────────────────────────────────
+
+
+class TestCheckPendingReboot:
+    """Regression : ``urpm distupgrade`` running against an in-memory
+    glibc / systemd older than the on-disk one is the classic « machine
+    fichue » scenario.  The check compares each package's rpmdb
+    ``INSTALLTIME`` to ``/proc/stat``'s ``btime`` and refuses when
+    any critical package is younger than the boot."""
+
+    def test_all_pre_boot_passes(self):
+        """glibc installed 1h before boot — safe, no raise."""
+        check_pending_reboot(
+            boot_time=10_000,
+            installed_times={"glibc": 6_400, "systemd": 5_000},
+        )
+
+    def test_glibc_post_boot_raises(self):
+        """glibc installed 20 min after boot — refuse."""
+        with pytest.raises(PendingRebootError) as exc:
+            check_pending_reboot(
+                boot_time=10_000,
+                installed_times={"glibc": 11_200, "systemd": 5_000},
+            )
+        msg = str(exc.value)
+        assert "glibc" in msg
+        assert "20 min" in msg
+        # Actionable remedy present
+        assert "Reboot" in msg or "reboot" in msg
+
+    def test_systemd_post_boot_raises(self):
+        """systemd installed post-boot — pid 1 still runs the stale
+        binary until reboot, refuse."""
+        with pytest.raises(PendingRebootError) as exc:
+            check_pending_reboot(
+                boot_time=10_000,
+                installed_times={"glibc": 5_000, "systemd": 12_000},
+            )
+        assert "systemd" in str(exc.value)
+
+    def test_multiple_stale_reports_all(self):
+        """Both glibc and systemd stale — the message must list both
+        so the operator sees the full picture."""
+        with pytest.raises(PendingRebootError) as exc:
+            check_pending_reboot(
+                boot_time=10_000,
+                installed_times={"glibc": 11_000, "systemd": 12_000},
+            )
+        msg = str(exc.value)
+        assert "glibc" in msg and "systemd" in msg
+
+    def test_missing_boot_time_does_not_block(self):
+        """/proc/stat unreadable → check is inconclusive, don't
+        block a legitimate distupgrade on a diagnostic gap."""
+        check_pending_reboot(
+            boot_time=None,
+            installed_times={"glibc": 999_999_999},
+        )
+
+    def test_missing_package_ignored(self):
+        """No entry for a critical name (unlikely but possible in
+        weird chroots) → not flagged."""
+        check_pending_reboot(
+            boot_time=10_000,
+            installed_times={},
+        )

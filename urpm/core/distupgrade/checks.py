@@ -25,6 +25,8 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Tuple
 
+from ...i18n import _, ngettext
+
 
 # ── /boot check ─────────────────────────────────────────────────────
 
@@ -121,12 +123,15 @@ def check_boot_space(kernel_rpms: Iterable[Path],
     needed_mb = needed // (1024 * 1024)
     kernel_mb = kernel_bytes // (1024 * 1024)
     raise BootSpaceError(
-        f"{boot_path} n'a que {free_mb} Mo libres, il en faut "
-        f"{needed_mb} ({kernel_mb} Mo × 2 pour la regénération dracut, "
-        f"+ 50 Mo de marge). Purgez les anciens kernels / initramfs :\n\n"
-        f"  urpm autoremove --oldkernels\n"
-        f"  dracut --regenerate-all --nolvmconf   # après purge\n\n"
-        f"puis relancez `urpm distupgrade`."
+        _("{boot_path} has only {free_mb} MB free, {needed_mb} MB "
+          "are required ({kernel_mb} MB × 2 for the dracut "
+          "regeneration, + 50 MB margin). Purge old kernels / "
+          "initramfs:").format(
+            boot_path=boot_path, free_mb=free_mb,
+            needed_mb=needed_mb, kernel_mb=kernel_mb) + "\n\n"
+        "  urpm autoremove --oldkernels\n"
+        "  dracut --regenerate-all --nolvmconf   # after the purge\n\n"
+        + _("then re-run `urpm distupgrade`.")
     )
 
 
@@ -214,14 +219,127 @@ def check_min_kernel(libc_path: Path,
         rk = ".".join(str(x) for x in running)
         mk = ".".join(str(x) for x in min_kernel)
         raise MinKernelError(
-            f"Le kernel actuellement actif ({rk}) est trop ancien "
-            f"pour la glibc cible (qui exige au minimum kernel {mk}).\n\n"
-            "Après Tx A (qui installe la nouvelle glibc), si le "
-            "distupgrade doit s'interrompre, votre machine devrait "
-            "rebooter sur le kernel courant — qui ne pourrait plus "
-            "démarrer avec la nouvelle glibc.\n\n"
-            "Upgradez d'abord votre kernel dans la version courante :\n\n"
+            _("The running kernel ({rk}) is too old for the target "
+              "glibc (which requires at least kernel {mk}).").format(
+                rk=rk, mk=mk) + "\n\n"
+            + _("After Tx A installs the new glibc, if distupgrade "
+                "gets interrupted, the machine would try to reboot "
+                "on the current kernel — which the new glibc no "
+                "longer supports, leaving it unbootable.") + "\n\n"
+            + _("Upgrade the kernel in the current release first:") + "\n\n"
             "  urpm upgrade kernel\n"
             "  reboot\n\n"
-            "puis relancez `urpm distupgrade`."
+            + _("then re-run `urpm distupgrade`.")
         )
+
+
+# ── PENDING REBOOT ─────────────────────────────────────────────────
+
+
+class PendingRebootError(Exception):
+    """A critical package was installed after the last boot ; running
+    the distupgrade against the stale in-memory copy is unsafe."""
+
+
+# Packages whose in-memory copy is load-bearing for the transaction
+# itself : rpm scriptlets link against glibc, systemd runs pid 1, the
+# running kernel dictates syscall behaviour.  When any of them was
+# replaced under a running system, the kernel keeps executing the
+# stale copy in every long-lived process until reboot — running
+# distupgrade at that point mixes two glibc ABIs across a single
+# ``rpm --root /`` cycle and typically dies mid-transaction on a
+# scriptlet SIGABRT or PAM corruption.
+_REBOOT_CRITICAL_NAMES = ("glibc", "systemd")
+
+
+def _boot_time_epoch() -> Optional[int]:
+    """Return the last boot's epoch from ``/proc/stat``'s ``btime``.
+
+    Returns ``None`` when the file is unreadable — the caller then
+    treats the check as inconclusive and lets the distupgrade proceed
+    rather than blocking on a diagnostic gap.
+    """
+    try:
+        with open("/proc/stat", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("btime "):
+                    return int(line.split()[1])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def check_pending_reboot(
+    *,
+    boot_time: Optional[int] = None,
+    installed_times: Optional[dict] = None,
+    root: str = "/",
+) -> None:
+    """Refuse when a load-bearing package was installed after boot.
+
+    Catches the classic « machine fichue » scenario : the operator
+    ran a bulk ``urpmi`` that pulled glibc/systemd in, ignored the
+    « please reboot » notice, and now launches ``urpm distupgrade``
+    against a system whose in-memory copies of libc/pid-1 no longer
+    match what's on disk.  Scriptlets link the new libc while
+    long-lived processes still hold the old one ; typical failure
+    modes include silent scriptlet crashes, PAM stack corruption,
+    and DKMS build failures mid-transaction — leaving the machine
+    unbootable.
+
+    Args:
+        boot_time: Epoch of the last boot.  Test seam ; live callers
+            omit and the function reads ``/proc/stat``'s ``btime``
+            line.
+        installed_times: Mapping ``name → install_epoch``.  Test seam ;
+            live callers omit and the function queries the rpmdb via
+            :func:`urpm.core.rpmdb.open_ts`.
+        root: Alternative rpmdb root (for ``--root`` scenarios).
+            Ignored when ``installed_times`` is provided.
+
+    Raises:
+        PendingRebootError: with the offending package(s), the delay
+            past-boot, and the one-line remedy.
+    """
+    if boot_time is None:
+        boot_time = _boot_time_epoch()
+    if boot_time is None:
+        return
+    if installed_times is None:
+        import rpm  # noqa: PLC0415 — kept local per checks.py idiom
+        from ..rpmdb import open_ts
+        installed_times = {}
+        with open_ts(root) as ts:
+            for name in _REBOOT_CRITICAL_NAMES:
+                for hdr in ts.dbMatch("name", name):
+                    ts_installed = hdr[rpm.RPMTAG_INSTALLTIME]
+                    if ts_installed:
+                        prev = installed_times.get(name, 0)
+                        installed_times[name] = max(prev, int(ts_installed))
+    stale = [
+        (name, ts) for name, ts in installed_times.items()
+        if ts > boot_time
+    ]
+    if not stale:
+        return
+    lines = [
+        "  " + ngettext(
+            "{name} installed {minutes} min after the last boot",
+            "{name} installed {minutes} min after the last boot",
+            (ts - boot_time) // 60,
+        ).format(name=name, minutes=(ts - boot_time) // 60)
+        for name, ts in sorted(stale)
+    ]
+    raise PendingRebootError(
+        _("A critical system package was installed since the last "
+          "boot without rebooting:") + "\n\n"
+        + "\n".join(lines)
+        + "\n\n"
+        + _("The machine is still running the old in-memory copy "
+            "while a newer version sits on disk. Running distupgrade "
+            "in this state would mix two glibc ABIs across a single "
+            "rpm transaction — crashing scriptlets, corrupted PAM, "
+            "DKMS failing mid-run, and a machine that no longer "
+            "boots.") + "\n\n"
+        + _("Reboot before running `urpm distupgrade`.")
+    )
