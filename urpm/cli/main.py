@@ -1021,6 +1021,19 @@ Examples:
                'Overrides --build-cpus and --build-memory.')
     )
     build_parser.add_argument(
+        '--with-network',
+        action='store_true',
+        help=_('Leave the network open during the ``rpmbuild`` phase. '
+               'By default the build runs under ``unshare -n`` — the '
+               'spec\'s %%prep / %%build / %%install / %%check execute '
+               'with no network so a stray curl / pip install cannot '
+               'sneak unaudited content into the final RPM. Media '
+               'update and BuildRequires install stay networked '
+               'regardless.  Turn on for specs that legitimately need '
+               'network at build time (upstream snapshots, tarball '
+               'mirroring, …) — opt-in only.')
+    )
+    build_parser.add_argument(
         '--strict-memory',
         action='store_true',
         help=_('Tie --memory-swap to --build-memory so the container '

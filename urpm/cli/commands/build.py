@@ -1090,6 +1090,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     with_rpms_patterns = getattr(args, 'with_rpms', []) or []
     subrel = getattr(args, 'subrel', None) or None  # treat '' as unset
     rpmmacros_path = getattr(args, 'rpmmacros', None) or None
+    with_network = getattr(args, 'with_network', False)
     if rpmmacros_path:
         rpmmacros_path = Path(rpmmacros_path)
         if not rpmmacros_path.is_file():
@@ -1200,7 +1201,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             container, image, source_path, output_dir, keep_container,
             with_rpms, no_update=no_update, subrel=subrel,
             rpmmacros_path=rpmmacros_path, limits=limits,
-            bcond_args=bcond_args,
+            bcond_args=bcond_args, with_network=with_network,
         )
 
     stop_on_fail = getattr(args, 'stop_on_fail', False)
@@ -1238,6 +1239,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             rollback_between_builds=rollback_between_builds,
             limits=limits,
             bcond_args=bcond_args,
+            with_network=with_network,
             _find_workspace_fn=_find_workspace,
             _diagnose_fn=_diagnose_unsatisfied_buildrequires,
         )
@@ -1313,6 +1315,7 @@ def _build_single_package(
     rpmmacros_path: Path | None = None,
     limits: 'BuildLimits | None' = None,
     bcond_args: str = '',
+    with_network: bool = False,
 ) -> tuple:
     """Build a single package in a container.
 
@@ -1550,13 +1553,22 @@ def _build_single_package(
         # discovered deps stays visible — that's a real install with progress
         # the user expects to see.
 
+        # Network isolation for the ``rpmbuild`` invocations : the
+        # spec's %prep/%build/%install/%check runs in a net-less
+        # namespace so a stray ``curl`` or ``pip install`` cannot
+        # sneak unaudited content into the RPM.  Media update and
+        # BuildRequires install stay networked (they need it).
+        # ``--with-network`` on the CLI opts out — for specs that
+        # legitimately need net at build time.
+        net_wrap = '' if with_network else 'unshare -n '
+
         for dynbr_pass in range(MAX_DYNBR_PASSES):
             # `rpmbuild -br` runs only %prep + %generate_buildrequires (cheap:
             # no %build, no %install). `set -o pipefail` so we observe
             # rpmbuild's exit code, not tee's. Output captured + logged.
             result = container.exec(cid, [
                 'bash', '-c',
-                f'set -o pipefail; rpmbuild {smp_define}{bcond_args}-br {spec_path} 2>&1 | tee -a {container_log}'
+                f'set -o pipefail; {net_wrap}rpmbuild {smp_define}{bcond_args}-br {spec_path} 2>&1 | tee -a {container_log}'
             ])
             rc = result.returncode
             if rc == 0:
@@ -1627,7 +1639,7 @@ def _build_single_package(
         # 6. Build the package
         print(_("  Building..."))
         result = container.exec_stream(cid, [
-            'bash', '-c', f'set -o pipefail; rpmbuild {smp_define}{bcond_args}-ba {spec_path} 2>&1 | tee -a {container_log}'
+            'bash', '-c', f'set -o pipefail; {net_wrap}rpmbuild {smp_define}{bcond_args}-ba {spec_path} 2>&1 | tee -a {container_log}'
         ])
         build_failed = result != 0
 

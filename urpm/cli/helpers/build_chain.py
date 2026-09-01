@@ -281,6 +281,7 @@ def _build_one_spec_in_container(
     _diagnose_fn: Callable,
     limits: "BuildLimits | None" = None,
     bcond_args: str = '',
+    with_network: bool = False,
 ) -> Tuple[Path, bool, str, List[str]]:
     """Build one spec inside a container that has already been set up.
 
@@ -403,6 +404,10 @@ def _build_one_spec_in_container(
     if ret != 0:
         return (source_path, False, "BuildRequires install failed", [])
 
+    # Network isolation for the ``rpmbuild`` invocations : see the
+    # matching comment in ``build.py::_build_single_package``.
+    net_wrap = '' if with_network else 'unshare -n '
+
     # Dynamic BuildRequires convergence loop.  Identical logic to
     # ``_build_single_package`` — kept inline because factoring it
     # out would require an even bigger surface to move, and the
@@ -412,7 +417,7 @@ def _build_one_spec_in_container(
         result = container.exec(cid, [
             'bash', '-c',
             f'set -o pipefail; '
-            f'rpmbuild --define "_topdir {pkg_topdir}" {smp_define}{bcond_args}-br {spec_path} '
+            f'{net_wrap}rpmbuild --define "_topdir {pkg_topdir}" {smp_define}{bcond_args}-br {spec_path} '
             f'2>&1 | tee -a {container_log}',
         ])
         rc = result.returncode
@@ -469,7 +474,7 @@ def _build_one_spec_in_container(
     result = container.exec_stream(cid, [
         'bash', '-c',
         f'set -o pipefail; '
-        f'rpmbuild --define "_topdir {pkg_topdir}" {smp_define}{bcond_args}-ba {spec_path} '
+        f'{net_wrap}rpmbuild --define "_topdir {pkg_topdir}" {smp_define}{bcond_args}-ba {spec_path} '
         f'2>&1 | tee -a {container_log}',
     ])
     build_failed = result != 0
@@ -531,6 +536,7 @@ def run_shared_container_chain(
     _diagnose_fn: Callable,
     limits: "BuildLimits | None" = None,
     bcond_args: str = '',
+    with_network: bool = False,
 ) -> List[Tuple[Path, bool, str]]:
     """Compile each spec in ``valid_sources`` in a single container.
 
@@ -584,6 +590,7 @@ def run_shared_container_chain(
                 _diagnose_fn=_diagnose_fn,
                 limits=limits,
                 bcond_args=bcond_args,
+                with_network=with_network,
             )
             results.append((src, ok, msg))
             if ok:
