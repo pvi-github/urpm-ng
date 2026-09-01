@@ -191,6 +191,19 @@ def check_needs_restart_from_actions(
     # would otherwise appear at module load time.
     from .resolver import TransactionType
 
+    # ``--nodeps`` (and any other synthesise-actions-without-solve
+    # path) short-circuits ``resolve_install``, so ``_create_pool``
+    # is never called and ``resolver.pool`` stays ``None``.  Without
+    # a pool there is nothing to query — return no restart hint
+    # rather than crashing on ``NoneType.select``.  Legit case :
+    # ``rpm -ivh``-style installs where the caller has already
+    # decided the exact set and doesn't want the resolver in the
+    # loop ; they get the classic « install then remember to
+    # restart if you touched something core » behaviour, same as
+    # bare ``rpm``.
+    if resolver.pool is None:
+        return {}
+
     pkg_provides: Dict[str, List[str]] = {}
     for action in actions:
         if action.action not in (TransactionType.INSTALL,

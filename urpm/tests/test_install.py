@@ -2672,6 +2672,22 @@ class TestNeedsRestartFromActions:
             'session': ['polkit'],
         }
 
+    @pytest.mark.stable
+    def test_null_pool_returns_empty(self):
+        """--nodeps (and any synthesise-actions-without-solve path)
+        skips ``_create_pool``, so ``resolver.pool`` is ``None`` at
+        this call site.  Must return no restart hint instead of
+        crashing on ``NoneType.select``.  Regression captured after
+        a container-bootstrap install with ``--nodeps setup`` bombed
+        with « 'NoneType' object has no attribute 'select' »."""
+        from urpm.core.needs_restart import check_needs_restart_from_actions
+        from types import SimpleNamespace
+
+        resolver = SimpleNamespace(pool=None)
+        actions = [self._action('setup', 'INSTALL')]
+
+        assert check_needs_restart_from_actions(actions, resolver) == {}
+
 
 class TestSpecifyMedia(BaseUrpmiTest):
     """Tests for --media, --excludemedia and --sortmedia options.
