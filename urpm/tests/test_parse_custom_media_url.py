@@ -84,3 +84,40 @@ class TestReconstructionInvariant:
             f"{parsed['base_path']}/{parsed['relative_path']}"
         )
         assert rebuilt == original
+
+
+class TestNoarchArchSegment:
+    """Community layouts (blogdrake, mgabiz…) publish noarch-only
+    channels at ``.../<version>/<class>/noarch/``.  Import from
+    ``urpmi.cfg`` used to fail because ``noarch`` was not in
+    ``KNOWN_ARCHES`` — the parser rejected the URL as « does not
+    embed a recognised version/arch pattern »."""
+
+    def test_blogdrake_free_noarch(self):
+        """Blogdrake's free channel noarch : version prefix
+        ``mageia10`` + trailing ``noarch``."""
+        parsed = parse_custom_media_url(
+            "https://ftp.blogdrake.org/mageia/mageia10/free/noarch")
+        assert parsed is not None
+        assert parsed["version"] == "10"
+        assert parsed["arch"] == "noarch"
+        assert parsed["base_path"] == "/mageia"
+        assert parsed["relative_path"] == "mageia10/free/noarch"
+
+    def test_noarch_after_bare_version(self):
+        """Bare version + noarch (mgabiz-style layout)."""
+        parsed = parse_custom_media_url(
+            "https://example.org/repo/10/noarch/")
+        assert parsed is not None
+        assert parsed["version"] == "10"
+        assert parsed["arch"] == "noarch"
+
+    def test_noarch_alone_still_needs_a_version(self):
+        """A path with ``noarch`` but no recognisable version segment
+        still fails (parser lands in the version=None/arch=None
+        fallback branch)."""
+        parsed = parse_custom_media_url(
+            "https://example.org/random/pool/noarch/")
+        assert parsed is not None
+        assert parsed["version"] is None
+        assert parsed["arch"] is None

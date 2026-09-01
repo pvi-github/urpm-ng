@@ -11,6 +11,15 @@ KNOWN_VERSIONS = {'7', '8', '9', '10', 'cauldron'}
 
 # Known architectures
 KNOWN_ARCHES = {'x86_64', 'aarch64', 'armv7hl', 'i586', 'i686'}
+# ``parse_custom_media_url`` also accepts ``noarch`` as a valid URL
+# arch segment — community layouts (blogdrake, mgabiz…) publish
+# noarch-only channels at .../<version>/<class>/noarch/ that would
+# otherwise be rejected as "not a recognised version/arch pattern"
+# at ``urpmi.cfg`` import time.  Official Mageia URLs never carry
+# a ``/noarch/`` arch segment (their noarch RPMs are indexed inside
+# the arch-specific media), so ``parse_mageia_media_url`` keeps
+# the strict set.
+_CUSTOM_URL_ARCHES = KNOWN_ARCHES | {'noarch'}
 
 # Version segment with optional ``mageia`` / ``mga`` prefix — covers
 # community layouts like blogdrake (``mageia10``, ``mga10``) in
@@ -304,7 +313,7 @@ def parse_custom_media_url(url: str) -> dict | None:
         (i, _match_version_token(p)) for i, p in enumerate(parts)
         if _match_version_token(p) is not None
     ]
-    arch_hits = [(i, p) for i, p in enumerate(parts) if p in KNOWN_ARCHES]
+    arch_hits = [(i, p) for i, p in enumerate(parts) if p in _CUSTOM_URL_ARCHES]
 
     # Guard : require exactly one hit on each dimension.  Multiple
     # candidates on either side means the URL is either weird or
