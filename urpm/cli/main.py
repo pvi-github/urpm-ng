@@ -329,6 +329,21 @@ def create_parser() -> argparse.ArgumentParser:
         help=_('Use DIR as root for both urpm config and RPM install.')
     )
 
+    parser.add_argument(
+        '--rootless', '--allow-no-root',
+        action='store_true',
+        dest='allow_no_root',
+        help=_('Run rootless : skip the euid=0 check and route rpm '
+               'through ``podman unshare`` so a normal user can drive '
+               'an install into a user-owned chroot (typically '
+               '``--root ~/some-chroot``).  Used internally by '
+               '``urpm image make`` / ``urpm build`` ; exposing it '
+               'here lets you reproduce the same steps by hand for '
+               'debugging or to iterate on a chroot without a full '
+               'mkimage cycle.  ``--allow-no-root`` is a legacy alias '
+               'kept for backward compatibility.')
+    )
+
     # Parent parser for display options (inherited by subparsers)
     display_parent = argparse.ArgumentParser(add_help=False)
     display_parent.add_argument(
