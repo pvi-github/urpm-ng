@@ -268,6 +268,47 @@ def _list_rpmnew_files(root: str = "/") -> set:
     return {str(p) for p in etc_path.glob("**/*.rpmnew")}
 
 
+def _install_prob_filter(op) -> int:
+    """Compute the ``RPMPROB_FILTER_*`` bitmask for an install transaction.
+
+    Split out of :meth:`TransactionQueue._execute_install` so the policy is
+    testable in isolation (the executor itself is a 300-line method that
+    needs a real rpmdb to exercise).
+
+    Baseline flags — always on :
+
+    * ``DISKSPACE`` — RPM's disk-space check reports false positives with
+      plenty of space available.
+    * ``REPLACEPKG`` — tolerates PackageKit double-calls, where a second
+      call arrives before the first transaction has completed.
+
+    Recovery flags — added when the caller passed ``--force`` OR
+    ``--reinstall`` :
+
+    * ``OLDPACKAGE`` — accept a same-or-older NEVRA.
+    * ``REPLACENEWFILES`` and ``REPLACEOLDFILES`` — let cpio overwrite
+      files that are already on disk (typically leftovers from a prior
+      aborted transaction).
+
+    Rationale for the shared branch : both ``--force`` and ``--reinstall``
+    share the same contract at the RPM layer — « ship this package now,
+    trample obstacles left by a prior half-installed state ».  Without
+    the recovery flags, ``--reinstall`` on a chroot where a package
+    extracted partially then died hits « chown failed - Directory not
+    empty » on the leftover tree, which is precisely the class of
+    failure ``--reinstall`` exists to unstick.
+    """
+    import rpm
+    prob_filter = rpm.RPMPROB_FILTER_DISKSPACE | rpm.RPMPROB_FILTER_REPLACEPKG
+    if op.force or op.reinstall:
+        prob_filter |= (
+            rpm.RPMPROB_FILTER_OLDPACKAGE |
+            rpm.RPMPROB_FILTER_REPLACENEWFILES |
+            rpm.RPMPROB_FILTER_REPLACEOLDFILES
+        )
+    return prob_filter
+
+
 class TransactionPhase(str, Enum):
     """Phase of an RPM transaction lifecycle.
 
@@ -2031,19 +2072,7 @@ class TransactionQueue:
                     pass
                 return
 
-        # Set problem filters
-        # Always skip disk space check - RPM's check can be unreliable
-        # (reports false positives with plenty of space available)
-        # Always allow replacing same package - handles PackageKit double-calls
-        # where second call arrives before first transaction completes
-        prob_filter = rpm.RPMPROB_FILTER_DISKSPACE | rpm.RPMPROB_FILTER_REPLACEPKG
-        if op.force:
-            prob_filter |= (
-                rpm.RPMPROB_FILTER_OLDPACKAGE |
-                rpm.RPMPROB_FILTER_REPLACENEWFILES |
-                rpm.RPMPROB_FILTER_REPLACEOLDFILES
-            )
-        ts.setProbFilter(prob_filter)
+        ts.setProbFilter(_install_prob_filter(op))
 
         # Set transaction flags (noscripts for chroot/container builds)
         if op.noscripts:
