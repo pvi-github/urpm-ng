@@ -1789,14 +1789,17 @@ class TransactionQueue:
             "verify_start": set(),
             "verify_stop": set(),
             "cpio_error": set(),
+            "unpack_error": set(),
             "inst_open": set(),
             "inst_close": set(),
         }
-        # CPIO extraction failures do NOT show up in the ``problems`` list
-        # returned by ts.run() — they only surface here via callback.  The
-        # list tracks *which* packages failed so the returned error is
-        # actionable.  Checked right after ts.run(); an empty list still
-        # means "no extraction problems".
+        # Payload extraction failures do NOT show up in the ``problems``
+        # list returned by ts.run() — that list stays EMPTY for them.  They
+        # only surface through the callback, via ``UNPACK_ERROR`` (what
+        # rpm 4.20 fires for « unpacking of archive failed on file X ») or
+        # ``CPIO_ERROR``.  The list tracks *which* packages failed so the
+        # returned error is actionable.  Checked right after ts.run(); an
+        # empty list still means "no extraction problems".
         extraction_errors: list = []
         current_pkg_name = ['']
         in_verify = [True]        # True until VERIFY_STOP fires
@@ -1852,6 +1855,7 @@ class TransactionQueue:
             rpm.RPMCALLBACK_VERIFY_START: "verify_start",
             rpm.RPMCALLBACK_VERIFY_STOP: "verify_stop",
             rpm.RPMCALLBACK_CPIO_ERROR: "cpio_error",
+            rpm.RPMCALLBACK_UNPACK_ERROR: "unpack_error",
             rpm.RPMCALLBACK_INST_OPEN_FILE: "inst_open",
             rpm.RPMCALLBACK_INST_CLOSE_FILE: "inst_close",
         }
@@ -1955,10 +1959,22 @@ class TransactionQueue:
                                    bytes_total=total_pkg)
                 return
 
-            # ── CPIO extraction error ──
-            if reason == rpm.RPMCALLBACK_CPIO_ERROR:
+            # ── Payload extraction error ──
+            # Both constants must be handled.  Modern rpm (4.20) reports a
+            # failed payload extraction through ``UNPACK_ERROR`` — the
+            # « unpacking of archive failed on file X » message — and only
+            # falls back to ``CPIO_ERROR`` for older/other failure classes.
+            # Listening to ``CPIO_ERROR`` alone left the common case
+            # (a directory/symlink type conflict, e.g. ``filesystem``'s
+            # UsrMove links landing on real directories left by an earlier
+            # ``--noscripts`` pass) completely undetected : rpm returns an
+            # EMPTY ``problems`` list for it, so the transaction was
+            # reported as a full success while the package was absent from
+            # the rpmdb.
+            if reason in (rpm.RPMCALLBACK_UNPACK_ERROR,
+                          rpm.RPMCALLBACK_CPIO_ERROR):
                 extraction_errors.append(str(key))
-                _log_background(f"CPIO extraction error: {key}")
+                _log_background(f"Payload extraction error: {key}")
                 return
 
             # ── TRANS_START/PROGRESS/STOP: transaction preparation ──
