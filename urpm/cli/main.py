@@ -99,6 +99,7 @@ from .commands.media import (
 )
 from .commands.distupgrade import cmd_distupgrade
 from .commands.recover import cmd_recover
+from .commands.audit import cmd_audit
 from .commands.query import (
     cmd_search, cmd_show, cmd_list, cmd_provides, cmd_whatprovides, cmd_find,
 )
@@ -384,6 +385,20 @@ def create_parser() -> argparse.ArgumentParser:
         help=_('Target architecture (default: current system)'),
     )
 
+    # Opt-in post-transaction integrity checks, shared by the three
+    # verbs that change installed state.  A comma-separated selector
+    # rather than one boolean flag per check, so adding a check to
+    # ``urpm.core.audit`` needs no change here.  The help text lists
+    # what is registered, so it stays accurate on its own.
+    from ..core.audit import ALL as _CHECK_ALL, available_names
+    check_parent = argparse.ArgumentParser(add_help=False)
+    check_parent.add_argument(
+        '--check', metavar='NAMES',
+        help=_('Run integrity checks after the transaction. '
+               'Comma-separated, or "{all_}". Available: {names}').format(
+                   all_=_CHECK_ALL, names=', '.join(available_names())),
+    )
+
     # Register custom action for aliases
     parser.register('action', 'parsers', AliasedSubParsersAction)
 
@@ -477,7 +492,7 @@ Examples:
     install_parser = subparsers.add_parser(
         'install', aliases=['i'],
         help=_('Install packages'),
-        parents=[display_parent, debug_parent, arch_parent]
+        parents=[display_parent, debug_parent, arch_parent, check_parent]
     )
     install_parser.add_argument(
         'packages', nargs='*',
@@ -1157,7 +1172,7 @@ Examples:
     erase_parser = subparsers.add_parser(
         'erase', aliases=['e'],
         help=_('Erase (remove) packages'),
-        parents=[display_parent, arch_parent]
+        parents=[display_parent, arch_parent, check_parent]
     )
     erase_parser.add_argument(
         'packages', nargs='*',
@@ -1274,6 +1289,25 @@ Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.
     recover_parser = subparsers.add_parser(
         'recover',
         help=_('Reconcile transactions interrupted by crash/SIGKILL'),
+    )
+
+    # =========================================================================
+    # audit
+    # =========================================================================
+    audit_parser = subparsers.add_parser(
+        'audit',
+        help=_('Report broken symlinks in system directories, '
+               'grouped by owning package'),
+        description=_('''Scan /usr/{lib,lib64,bin,sbin,libexec} for symlinks
+whose target is missing, and group each finding by the rpm package
+that owns it — reinstalling that package (``urpm i --reinstall <pkg>``)
+usually restores the correct symlink.
+
+Motivating regression : a mga9→mga10 distupgrade left
+/usr/lib64/libproxy.so.1 pointing at a mga9-era name that mga10's
+lib64proxy1 no longer ships. firefox died on startup with no
+diagnostic short of running ldd by hand.
+'''),
     )
 
     # =========================================================================
@@ -1584,7 +1618,7 @@ Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.
     upgrade_parser = subparsers.add_parser(
         'upgrade', aliases=['u'],
         help=_('Upgrade packages (all if none specified)'),
-        parents=[display_parent, debug_parent, arch_parent]
+        parents=[display_parent, debug_parent, arch_parent, check_parent]
     )
     upgrade_parser.add_argument(
         'packages', nargs='*',
@@ -3007,6 +3041,7 @@ def main(argv=None) -> int:
         'mirror', 'proxy',
         'cache', 'c',
         'readme',
+        'audit',
     }
     _exempt_commands = {
         'distupgrade', 'recover',
@@ -3110,6 +3145,8 @@ def main(argv=None) -> int:
             return cmd_distupgrade(args, db)
         elif args.command == 'recover':
             return cmd_recover(args, db)
+        elif args.command == 'audit':
+            return cmd_audit(args, db)
         elif args.command in ('search', 's', 'query', 'q'):
             return cmd_search(args, db)
 

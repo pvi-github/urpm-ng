@@ -295,6 +295,16 @@ def run_install_transaction(
         from ..helpers.security import emit_blacklist_alert_if_any
         emit_blacklist_alert_if_any(ops.db)
 
+        # ── Opt-in integrity checks (``--check <names>``) ──
+        from ..helpers.audit_report import run_requested_checks
+        # Runs after the transaction so the checks see the final state.
+        # Silent when clean : the operator asked for a check, not for a
+        # paragraph confirming nothing happened.  Findings never change
+        # the exit code — the packages *were* installed, and a dangling
+        # symlink inherited from the payload is a separate concern the
+        # operator decides what to do about.
+        run_requested_checks(args)
+
         return 0
 
     except Exception:

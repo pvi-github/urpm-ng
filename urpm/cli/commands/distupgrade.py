@@ -1423,12 +1423,21 @@ def _render_stage4_report(summary: dict, *, db=None, auto: bool = False) -> None
                 "    (+ {n} more)").format(n=len(transposed_media) - 15)))
         _prompt_drop_transposed(db, transposed_media, auto=auto)
 
+    # ── Integrity checks (run unconditionally by Stage 4) ─────────
+    # A cross-release upgrade is where dangling symlinks and stale
+    # alternatives surface, so these are reported without the operator
+    # having to ask.  Silent when everything is clean — the all-clear
+    # line below already covers that case.
+    from ..helpers.audit_report import render_if_findings
+    check_outcomes = summary.get("check_outcomes") or []
+    check_findings = render_if_findings(check_outcomes)
+
     # ── All-clear line ────────────────────────────────────────────
     if not (failed or rpmnew or residuals or orphan_media
-            or transposed_media):
+            or transposed_media or check_findings):
         print("\n  " + colors.success(_(
             "No .rpmnew, no failed scriptlet, no residual, no "
-            "orphan media — clean upgrade.")))
+            "orphan media, no broken symlink — clean upgrade.")))
 
     # ── Orphan triage invitation ─────────────────────────────────
     _prompt_orphan_triage_after_dup(db, auto=auto)

@@ -10121,3 +10121,61 @@ msgstr ""
 "Om toch te forceren (niet aanbevolen, stille fouten te "
 "verwachten) :\n"
 "    {bypass}=1 <uw commando>"
+
+#: urpm/core/audit.py
+msgid "Broken symlinks in system directories"
+msgstr "Verbroken symbolische links in systeemmappen"
+
+#: urpm/core/audit.py
+msgid "target missing: {target}"
+msgstr "doel ontbreekt: {target}"
+
+#: urpm/core/audit.py
+msgid "Unknown check(s): {unknown}. Available: {available}, {all_}"
+msgstr "Onbekende controle(s): {unknown}. Beschikbaar: {available}, {all_}"
+
+#: urpm/core/audit.py
+msgid "  {check}: clean"
+msgstr "  {check}: schoon"
+
+#: urpm/core/audit.py
+msgid "not owned by any package"
+msgstr "hoort bij geen enkel pakket"
+
+#: urpm/core/audit.py
+msgid "    fix: {remedy}"
+msgstr "    oplossing: {remedy}"
+
+#: urpm/core/audit.py
+msgid "Running {n} check(s)…"
+msgstr "{n} controle(s) worden uitgevoerd…"
+
+#: urpm/core/audit.py
+msgid "Nothing to report."
+msgstr "Niets te melden."
+
+#: urpm/core/audit.py
+msgid "Run integrity checks after the transaction. Comma-separated, or \"{all_}\". Available: {names}"
+msgstr "Integriteitscontroles uitvoeren na de transactie. Kommagescheiden, of \"{all_}\". Beschikbaar: {names}"
+
+#: urpm/core/audit.py
+msgid "No .rpmnew, no failed scriptlet, no residual, no orphan media, no broken symlink — clean upgrade."
+msgstr "Geen .rpmnew, geen mislukte scriptlet, geen restanten, geen verweesde media, geen verbroken link — schone upgrade."
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{check}: {n} finding"
+msgid_plural "{check}: {n} findings"
+msgstr[0] "{check}: {n} bevinding"
+msgstr[1] "{check}: {n} bevindingen"
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{n} item"
+msgid_plural "{n} items"
+msgstr[0] "{n} item"
+msgstr[1] "{n} items"
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{n} finding in total."
+msgid_plural "{n} findings in total."
+msgstr[0] "{n} bevinding in totaal."
+msgstr[1] "{n} bevindingen in totaal."

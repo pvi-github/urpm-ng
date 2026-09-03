@@ -10144,3 +10144,61 @@ msgstr ""
 "Para forzar de todos modos (no recomendado, se esperan fallos "
 "silenciosos) :\n"
 "    {bypass}=1 <su comando>"
+
+#: urpm/core/audit.py
+msgid "Broken symlinks in system directories"
+msgstr "Enlaces simbólicos rotos en los directorios del sistema"
+
+#: urpm/core/audit.py
+msgid "target missing: {target}"
+msgstr "destino ausente: {target}"
+
+#: urpm/core/audit.py
+msgid "Unknown check(s): {unknown}. Available: {available}, {all_}"
+msgstr "Comprobación(es) desconocida(s): {unknown}. Disponibles: {available}, {all_}"
+
+#: urpm/core/audit.py
+msgid "  {check}: clean"
+msgstr "  {check}: sin problemas"
+
+#: urpm/core/audit.py
+msgid "not owned by any package"
+msgstr "no pertenece a ningún paquete"
+
+#: urpm/core/audit.py
+msgid "    fix: {remedy}"
+msgstr "    solución: {remedy}"
+
+#: urpm/core/audit.py
+msgid "Running {n} check(s)…"
+msgstr "Ejecutando {n} comprobación(es)…"
+
+#: urpm/core/audit.py
+msgid "Nothing to report."
+msgstr "Nada que informar."
+
+#: urpm/core/audit.py
+msgid "Run integrity checks after the transaction. Comma-separated, or \"{all_}\". Available: {names}"
+msgstr "Ejecutar comprobaciones de integridad tras la transacción. Separadas por comas, o \"{all_}\". Disponibles: {names}"
+
+#: urpm/core/audit.py
+msgid "No .rpmnew, no failed scriptlet, no residual, no orphan media, no broken symlink — clean upgrade."
+msgstr "Sin .rpmnew, sin scriptlet fallido, sin residuos, sin medios huérfanos, sin enlaces rotos — actualización limpia."
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{check}: {n} finding"
+msgid_plural "{check}: {n} findings"
+msgstr[0] "{check}: {n} hallazgo"
+msgstr[1] "{check}: {n} hallazgos"
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{n} item"
+msgid_plural "{n} items"
+msgstr[0] "{n} elemento"
+msgstr[1] "{n} elementos"
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{n} finding in total."
+msgid_plural "{n} findings in total."
+msgstr[0] "{n} hallazgo en total."
+msgstr[1] "{n} hallazgos en total."

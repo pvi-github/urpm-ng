@@ -110,6 +110,13 @@ def run_stage4(
       repos that had no target-release equivalent.  The user should
       either wait for the maintainer to publish a target tree or
       ``urpm media remove`` them.
+    - ``check_outcomes``  : list of
+      :class:`urpm.core.audit.CheckOutcome`, one per registered
+      integrity check, run unconditionally here because a
+      cross-release upgrade is where dangling symlinks and stale
+      alternatives appear.  Render with
+      ``urpm.cli.helpers.audit_report``.  Empty list when the checks
+      could not run — never fatal, Stage 4 still writes its marker.
     - ``version_from`` / ``version_to`` : identities the report is
       built against.  Threaded through so the CLI can render them
       in the human-readable summary.
@@ -148,6 +155,19 @@ def run_stage4(
     orphan_media = _orphan_media_from_stage1(db)
     transposed_media = _transposed_media_from_stage1(db)
 
+    # Integrity checks run unconditionally here.  A cross-release
+    # upgrade is exactly where this class of breakage appears — the
+    # motivating case was ``/usr/lib64/libproxy.so.1`` left pointing at
+    # a mga9-era name after a mga9→mga10 run, which killed firefox at
+    # startup with no diagnostic — so it is not left to the operator to
+    # remember a flag.  Best-effort : a check that blows up must not
+    # cost the user their Stage 5 marker, which is written below.
+    try:
+        from ..audit import run_all
+        check_outcomes = run_all()
+    except Exception:  # noqa: BLE001
+        check_outcomes = []
+
     # Stage 5 is fire-and-forget via the postboot marker file :
     # ``run_stage5_if_pending`` picks it up on next ``urpm`` startup
     # and needs no persisted state.  Clear ``.state`` here so the
@@ -179,6 +199,7 @@ def run_stage4(
         "residuals": residuals,
         "orphan_media": orphan_media,
         "transposed_media": transposed_media,
+        "check_outcomes": check_outcomes,
         "version_from": version_from,
         "version_to": version_to,
     }

@@ -7,6 +7,7 @@ urpm/cli/display.py
 urpm/cli/colors.py
 urpm/cli/commands/__init__.py
 urpm/cli/commands/install.py
+urpm/cli/commands/audit.py
 urpm/cli/commands/remove.py
 urpm/cli/commands/upgrade.py
 urpm/cli/commands/distupgrade.py
@@ -29,6 +30,7 @@ urpm/cli/commands/build.py
 urpm/cli/commands/appstream.py
 urpm/cli/commands/_install_pipeline.py
 urpm/cli/helpers/__init__.py
+urpm/cli/helpers/audit_report.py
 urpm/cli/helpers/alternatives.py
 urpm/cli/helpers/debug.py
 urpm/cli/helpers/kernel.py
@@ -56,6 +58,7 @@ urpm/core/rpmsrate.py
 urpm/core/sync_lock.py
 urpm/core/triggers.py
 urpm/core/userns.py
+urpm/core/audit.py
 urpm/auth/audit.py
 urpm/auth/context.py
 urpm/auth/polkit.py

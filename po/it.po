@@ -9868,3 +9868,61 @@ msgstr ""
 "Per forzare comunque (non raccomandato, sono attesi fallimenti "
 "silenziosi) :\n"
 "    {bypass}=1 <il tuo comando>"
+
+#: urpm/core/audit.py
+msgid "Broken symlinks in system directories"
+msgstr "Collegamenti simbolici interrotti nelle directory di sistema"
+
+#: urpm/core/audit.py
+msgid "target missing: {target}"
+msgstr "destinazione mancante: {target}"
+
+#: urpm/core/audit.py
+msgid "Unknown check(s): {unknown}. Available: {available}, {all_}"
+msgstr "Controllo/i sconosciuto/i: {unknown}. Disponibili: {available}, {all_}"
+
+#: urpm/core/audit.py
+msgid "  {check}: clean"
+msgstr "  {check}: nessun problema"
+
+#: urpm/core/audit.py
+msgid "not owned by any package"
+msgstr "non appartiene ad alcun pacchetto"
+
+#: urpm/core/audit.py
+msgid "    fix: {remedy}"
+msgstr "    correzione: {remedy}"
+
+#: urpm/core/audit.py
+msgid "Running {n} check(s)…"
+msgstr "Esecuzione di {n} controllo/i…"
+
+#: urpm/core/audit.py
+msgid "Nothing to report."
+msgstr "Nulla da segnalare."
+
+#: urpm/core/audit.py
+msgid "Run integrity checks after the transaction. Comma-separated, or \"{all_}\". Available: {names}"
+msgstr "Eseguire controlli di integrità dopo la transazione. Separati da virgole, o \"{all_}\". Disponibili: {names}"
+
+#: urpm/core/audit.py
+msgid "No .rpmnew, no failed scriptlet, no residual, no orphan media, no broken symlink — clean upgrade."
+msgstr "Nessun .rpmnew, nessuno scriptlet fallito, nessun residuo, nessun media orfano, nessun collegamento interrotto — aggiornamento pulito."
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{check}: {n} finding"
+msgid_plural "{check}: {n} findings"
+msgstr[0] "{check}: {n} riscontro"
+msgstr[1] "{check}: {n} riscontri"
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{n} item"
+msgid_plural "{n} items"
+msgstr[0] "{n} elemento"
+msgstr[1] "{n} elementi"
+
+#: urpm/cli/helpers/audit_report.py
+msgid "{n} finding in total."
+msgid_plural "{n} findings in total."
+msgstr[0] "{n} riscontro in totale."
+msgstr[1] "{n} riscontri in totale."

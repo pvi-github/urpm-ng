@@ -367,6 +367,13 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         erased_packages = [action.name for action in all_actions]
         resolver.unmark_packages(erased_packages)
 
+        # ── Opt-in integrity checks (``--check <names>``) ──
+        # Removing a package is a common way to strand symlinks that
+        # other packages still point at, so the same tail applies here
+        # as on install.  Silent when clean, never alters the exit code.
+        from ..helpers.audit_report import run_requested_checks
+        run_requested_checks(args)
+
         return 0
 
     except Exception as e:
