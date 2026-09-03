@@ -559,23 +559,56 @@ class TransactionQueue:
         self._script_error_packages: set[str] = set()
 
     @staticmethod
-    def _userns_available() -> bool:
-        """Check if podman unshare is available for proper UID/GID mapping."""
+    def _userns_available() -> tuple[bool, str]:
+        """Whether the current user can safely enter a podman rootless
+        userns.
+
+        Two things have to hold : ``podman`` must be installed, and
+        the current user must own a real ``subuid`` / ``subgid``
+        delegated range in ``/etc/subuid`` / ``/etc/subgid``.
+
+        Historically this method only ran ``podman unshare true`` —
+        that call returns 0 even when podman falls back to the
+        « single-uid mapping » degraded mode (no delegated range),
+        which was a false positive : the child ``rpm-cpio`` then
+        dies with « chown failed – Directory not empty » on
+        ``/var/spool/lpd`` because system users (``lp``, ``mail``,
+        …) aren't mappable.  We now short-circuit on
+        :func:`urpm.core.userns.probe_current_user` first so the
+        parent gets an actionable diagnostic instead of a mid-tx
+        failure.
+
+        Returns:
+            ``(available, reason)`` — ``reason`` is empty on success,
+            a human-readable message otherwise.  The tuple form lets
+            the caller surface *why* to the operator instead of the
+            old opaque « not available ».
+        """
         import subprocess
         import shutil
-        # We need podman unshare for proper subuid/subgid mapping
-        # Simple 'unshare --user --map-root-user' doesn't work because
-        # chown operations fail for UIDs outside the single-user mapping
+        from .userns import probe_current_user
+
         if not shutil.which('podman'):
-            return False
+            return False, "podman not installed"
+
+        cap = probe_current_user()
+        if not cap.usable:
+            from .userns import _format_error_message
+            return False, _format_error_message(cap)
+
         try:
             result = subprocess.run(
                 ['podman', 'unshare', 'true'],
                 capture_output=True, timeout=10
             )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, OSError):
-            return False
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return False, f"'podman unshare true' failed to launch : {exc}"
+        if result.returncode != 0:
+            return False, (
+                f"'podman unshare true' exited {result.returncode} — "
+                f"stderr : {result.stderr.decode(errors='replace').strip()}"
+            )
+        return True, ""
 
     def add_install(
         self,
@@ -712,15 +745,15 @@ class TransactionQueue:
 
         # For non-root chroot installs, use user namespaces
         if self.use_userns and os.geteuid() != 0:
-            if self._userns_available():
+            available, reason = self._userns_available()
+            if available:
                 return self._execute_with_userns(read_fd, write_fd, progress_callback, full_sync)
-            else:
-                os.close(read_fd)
-                os.close(write_fd)
-                return QueueResult(
-                    success=False,
-                    overall_error="podman unshare not available. Install 'podman' or run as root."
-                )
+            os.close(read_fd)
+            os.close(write_fd)
+            return QueueResult(
+                success=False,
+                overall_error=reason,
+            )
 
         # Fork
         pid = os.fork()

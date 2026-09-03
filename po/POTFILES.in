@@ -55,6 +55,7 @@ urpm/core/peer_client.py
 urpm/core/rpmsrate.py
 urpm/core/sync_lock.py
 urpm/core/triggers.py
+urpm/core/userns.py
 urpm/auth/audit.py
 urpm/auth/context.py
 urpm/auth/polkit.py

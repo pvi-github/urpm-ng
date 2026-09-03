@@ -82,6 +82,15 @@ class Container:
     _ARCH_NEEDS_LINUX32 = frozenset({'i386', 'i486', 'i586', 'i686'})
 
     def __init__(self, runtime: ContainerRuntime):
+        # Rootless userns preflight — fail at construction rather than
+        # let a downstream ``podman run`` / ``podman unshare`` hit the
+        # « single-uid mapping » fallback and die mid-cpio with a
+        # confusing « chown failed » error.  Root and rootful docker
+        # skip the check via ``UserNamespaceCapability.usable``.
+        # See :mod:`urpm.core.userns` for the full rationale.
+        if runtime.name == 'podman' and os.geteuid() != 0:
+            from .userns import require_userns
+            require_userns()
         self.runtime = runtime
         self.cmd = runtime.path
         self._arch_by_cid: dict[str, str] = {}
