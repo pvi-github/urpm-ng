@@ -67,6 +67,26 @@ RPMBUILD_MISSING_BR = 11
 MAX_DYNBR_PASSES = 16
 _VER_RE = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
 
+# Command prefix that runs ``rpmbuild`` without network access, so a
+# spec's %prep/%build/%install/%check cannot pull unaudited content
+# into the RPM.
+#
+# Every word here is load-bearing.  A plain ``unshare -n`` needs
+# CAP_SYS_ADMIN ; a rootless podman container does not have it
+# (``CapEff`` lacks bit 21) and the call dies with « unshare failed:
+# Operation not permitted », taking the whole build with it.  Creating
+# a nested *user* namespace first grants CAP_SYS_ADMIN inside that
+# namespace, which then allows the network namespace unprivileged.
+# ``--map-root-user`` pins uid 0 inside, so rpmbuild sees the same
+# identity and produces the same file ownership as it would unwrapped
+# — without it the build would run as nobody and ownership in the
+# buildroot would be wrong.
+#
+# Verified inside ``mageia:10-build`` : interface count drops from 2
+# to 1 (loopback only) and name resolution fails, while ``id -u``
+# still reports 0 and writes keep root ownership.
+NET_ISOLATION_WRAP = 'unshare --user --map-root-user --net '
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -404,9 +424,10 @@ def _build_one_spec_in_container(
     if ret != 0:
         return (source_path, False, "BuildRequires install failed", [])
 
-    # Network isolation for the ``rpmbuild`` invocations : see the
-    # matching comment in ``build.py::_build_single_package``.
-    net_wrap = '' if with_network else 'unshare -n '
+    # Network isolation for the ``rpmbuild`` invocations : see
+    # ``NET_ISOLATION_WRAP`` above for why the wrapper is shaped the
+    # way it is.
+    net_wrap = '' if with_network else NET_ISOLATION_WRAP
 
     # Dynamic BuildRequires convergence loop.  Identical logic to
     # ``_build_single_package`` — kept inline because factoring it

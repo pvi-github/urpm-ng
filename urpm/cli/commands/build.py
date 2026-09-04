@@ -1560,7 +1560,17 @@ def _build_single_package(
         # BuildRequires install stay networked (they need it).
         # ``--with-network`` on the CLI opts out — for specs that
         # legitimately need net at build time.
-        net_wrap = '' if with_network else 'unshare -n '
+        #
+        # ``--user --map-root-user`` is not optional : a plain
+        # ``unshare -n`` needs CAP_SYS_ADMIN, which a rootless podman
+        # container does not have (CapEff lacks bit 21), and fails with
+        # « unshare failed: Operation not permitted ».  Creating a
+        # nested user namespace first grants CAP_SYS_ADMIN *within it*,
+        # so the network namespace can then be created unprivileged.
+        # ``--map-root-user`` keeps uid 0 inside, so rpmbuild sees the
+        # same identity and file ownership as without the wrapper.
+        from ..helpers.build_chain import NET_ISOLATION_WRAP
+        net_wrap = '' if with_network else NET_ISOLATION_WRAP
 
         for dynbr_pass in range(MAX_DYNBR_PASSES):
             # `rpmbuild -br` runs only %prep + %generate_buildrequires (cheap:
