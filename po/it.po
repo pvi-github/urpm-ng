@@ -9926,3 +9926,57 @@ msgid "{n} finding in total."
 msgid_plural "{n} findings in total."
 msgstr[0] "{n} riscontro in totale."
 msgstr[1] "{n} riscontri in totale."
+
+#: session 0.9.8
+msgid "No media matches '{identifier}'."
+msgstr "Nessun media corrisponde a «{identifier}»."
+
+#: session 0.9.8
+msgid "Did you mean: {names}?"
+msgstr "Intendevi: {names}?"
+
+#: session 0.9.8
+msgid "  Did you mean: {names}?"
+msgstr "  Intendevi: {names}?"
+
+#: session 0.9.8
+msgid "Run: urpm media update {names}"
+msgstr "Eseguire: urpm media update {names}"
+
+#: session 0.9.8
+msgid "  Media '{name}': {verb} for this build..."
+msgstr "  Media «{name}»: {verb} per questa compilazione..."
+
+#: session 0.9.8
+msgid "Cannot {verb} media '{name}' in the build container. Name it as the container knows it — an older image may only accept the exact display name, not the short name."
+msgstr "Impossibile {verb} il media «{name}» nel container di compilazione. Nominarlo come lo conosce il container: un'immagine datata può accettare solo il nome esatto, non quello breve."
+
+#: session 0.9.8
+msgid "Not enough space in {directory}: {required} needed, {available} available.\nFree some space, or point the download elsewhere with --download-dir, or set 'payload_dir' in the [download] section of /etc/urpm/conf.d/ to move it for good."
+msgstr "Spazio insufficiente in {directory}: {required} necessari, {available} disponibili.\nLiberare spazio, oppure reindirizzare il download con --download-dir, oppure impostare «payload_dir» nella sezione [download] di /etc/urpm/conf.d/ per spostarlo definitivamente."
+
+#: session 0.9.8
+msgid "Write downloaded RPMs to DIR instead of the default cache. Overrides the download.payload_dir setting."
+msgstr "Scrivere gli RPM scaricati in DIR invece che nella cache predefinita. Prevale sull'impostazione download.payload_dir."
+
+#: session 0.9.8
+msgid "Use a normally-disabled media for this transaction only. Repeatable, or comma-separated. The media stays disabled afterwards."
+msgstr "Usare un media normalmente disattivato, solo per questa transazione. Ripetibile, o separato da virgole. Il media resta disattivato in seguito."
+
+#: session 0.9.8
+msgid "Ignore an enabled media for this transaction only. Repeatable, or comma-separated."
+msgstr "Ignorare un media attivato, solo per questa transazione. Ripetibile, o separato da virgole."
+
+#: session 0.9.8
+msgid "Enable a media inside the build container for this build only. Repeatable, or comma-separated. Named as the container knows it, not the host."
+msgstr "Attivare un media nel container di compilazione, solo per questa compilazione. Ripetibile, o separato da virgole. Nominato come lo conosce il container, non l'host."
+
+#: session 0.9.8
+msgid "Disable a media inside the build container for this build only. Repeatable, or comma-separated."
+msgstr "Disattivare un media nel container di compilazione, solo per questa compilazione. Ripetibile, o separato da virgole."
+
+#: session 0.9.8
+msgid "Media '{names}' has never been synced, so it holds no package metadata locally."
+msgid_plural "Media '{names}' have never been synced, so they hold no package metadata locally."
+msgstr[0] "Il media «{names}» non è mai stato sincronizzato, quindi non contiene metadati di pacchetto in locale."
+msgstr[1] "I media «{names}» non sono mai stati sincronizzati, quindi non contengono metadati di pacchetto in locale."

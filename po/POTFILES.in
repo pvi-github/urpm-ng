@@ -31,6 +31,7 @@ urpm/cli/commands/appstream.py
 urpm/cli/commands/_install_pipeline.py
 urpm/cli/helpers/__init__.py
 urpm/cli/helpers/audit_report.py
+urpm/cli/helpers/build_chain.py
 urpm/cli/helpers/alternatives.py
 urpm/cli/helpers/debug.py
 urpm/cli/helpers/kernel.py

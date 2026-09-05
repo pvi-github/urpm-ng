@@ -10179,3 +10179,57 @@ msgid "{n} finding in total."
 msgid_plural "{n} findings in total."
 msgstr[0] "{n} bevinding in totaal."
 msgstr[1] "{n} bevindingen in totaal."
+
+#: session 0.9.8
+msgid "No media matches '{identifier}'."
+msgstr "Geen enkel medium komt overeen met '{identifier}'."
+
+#: session 0.9.8
+msgid "Did you mean: {names}?"
+msgstr "Bedoelde u: {names}?"
+
+#: session 0.9.8
+msgid "  Did you mean: {names}?"
+msgstr "  Bedoelde u: {names}?"
+
+#: session 0.9.8
+msgid "Run: urpm media update {names}"
+msgstr "Voer uit: urpm media update {names}"
+
+#: session 0.9.8
+msgid "  Media '{name}': {verb} for this build..."
+msgstr "  Medium '{name}': {verb} voor deze build..."
+
+#: session 0.9.8
+msgid "Cannot {verb} media '{name}' in the build container. Name it as the container knows it — an older image may only accept the exact display name, not the short name."
+msgstr "Kan medium '{name}' niet {verb} in de build-container. Noem het zoals de container het kent — een ouder image accepteert mogelijk alleen de exacte weergavenaam, niet de korte naam."
+
+#: session 0.9.8
+msgid "Not enough space in {directory}: {required} needed, {available} available.\nFree some space, or point the download elsewhere with --download-dir, or set 'payload_dir' in the [download] section of /etc/urpm/conf.d/ to move it for good."
+msgstr "Onvoldoende ruimte in {directory}: {required} nodig, {available} beschikbaar.\nMaak ruimte vrij, of stuur de download elders heen met --download-dir, of stel 'payload_dir' in onder [download] in /etc/urpm/conf.d/ om het blijvend te verplaatsen."
+
+#: session 0.9.8
+msgid "Write downloaded RPMs to DIR instead of the default cache. Overrides the download.payload_dir setting."
+msgstr "Gedownloade RPM's naar DIR schrijven in plaats van de standaardcache. Gaat voor op de instelling download.payload_dir."
+
+#: session 0.9.8
+msgid "Use a normally-disabled media for this transaction only. Repeatable, or comma-separated. The media stays disabled afterwards."
+msgstr "Een normaal uitgeschakeld medium alleen voor deze transactie gebruiken. Herhaalbaar, of kommagescheiden. Het medium blijft daarna uitgeschakeld."
+
+#: session 0.9.8
+msgid "Ignore an enabled media for this transaction only. Repeatable, or comma-separated."
+msgstr "Een ingeschakeld medium alleen voor deze transactie negeren. Herhaalbaar, of kommagescheiden."
+
+#: session 0.9.8
+msgid "Enable a media inside the build container for this build only. Repeatable, or comma-separated. Named as the container knows it, not the host."
+msgstr "Een medium in de build-container alleen voor deze build inschakelen. Herhaalbaar, of kommagescheiden. Genoemd zoals de container het kent, niet de host."
+
+#: session 0.9.8
+msgid "Disable a media inside the build container for this build only. Repeatable, or comma-separated."
+msgstr "Een medium in de build-container alleen voor deze build uitschakelen. Herhaalbaar, of kommagescheiden."
+
+#: session 0.9.8
+msgid "Media '{names}' has never been synced, so it holds no package metadata locally."
+msgid_plural "Media '{names}' have never been synced, so they hold no package metadata locally."
+msgstr[0] "Medium '{names}' is nooit gesynchroniseerd en bevat daarom lokaal geen pakketmetadata."
+msgstr[1] "Media '{names}' zijn nooit gesynchroniseerd en bevatten daarom lokaal geen pakketmetadata."
