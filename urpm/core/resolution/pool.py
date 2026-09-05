@@ -132,6 +132,23 @@ class PoolMixin:
             debug.log(f"Accepted versions: {accepted_versions}")
 
         media_list = self.db.list_media()
+
+        # ``get_accepted_versions`` only looks at *enabled* media, so a
+        # media force-enabled for this transaction would clear the
+        # enabled gate below and then be dropped by the version gate for
+        # a version nobody declared.  Fold its version in here — the
+        # operator asked for that media by name, which is a stronger
+        # signal of intent than the enabled flag they are overriding.
+        if self.enablemedia and accepted_versions:
+            forced_versions = {
+                m['mageia_version'] for m in media_list
+                if m['name'] in self.enablemedia and m.get('mageia_version')
+            }
+            if forced_versions - set(accepted_versions):
+                accepted_versions = frozenset(accepted_versions) | forced_versions
+                debug.log(
+                    f"Accepted versions widened by --enablemedia: "
+                    f"{accepted_versions}")
         debug.log(f"Found {len(media_list)} media in database")
 
         # Sort media by priority if --sortmedia is specified
@@ -140,9 +157,20 @@ class PoolMixin:
             media_list = sorted(media_list, key=lambda m: priority_map.get(m['name'], len(self.sortmedia)))
 
         for media in media_list:
-            if not media['enabled']:
+            # ``--enablemedia`` lifts a media into this transaction only.
+            # The DB row stays disabled : the point is to pull one
+            # package out of, say, backports without leaving backports
+            # on for every later operation.  Names here are canonical
+            # display names, already resolved from whatever the operator
+            # typed (see ``PackageDatabase.resolve_media``).
+            force_enabled = media['name'] in self.enablemedia
+            if not media['enabled'] and not force_enabled:
                 debug.log(f"Skipping disabled media: {media['name']}")
                 continue
+            if force_enabled and not media['enabled']:
+                debug.log(
+                    f"Media {media['name']}: enabled for this "
+                    f"transaction by --enablemedia")
 
             # --media filter: only load specified media
             if self.media_filter and media['name'] not in self.media_filter:

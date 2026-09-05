@@ -399,6 +399,25 @@ def create_parser() -> argparse.ArgumentParser:
                    all_=_CHECK_ALL, names=', '.join(available_names())),
     )
 
+    # Per-transaction media scoping.  Neither flag writes to the
+    # database : the point is to reach into a normally-disabled media
+    # for one operation without leaving it on afterwards, which today
+    # takes three commands and an easily-forgotten cleanup.
+    # Media are named by their short name (``core_backports``) or their
+    # display name, in any case — see ``PackageDatabase.resolve_media``.
+    media_scope_parent = argparse.ArgumentParser(add_help=False)
+    media_scope_parent.add_argument(
+        '--enablemedia', metavar='MEDIA', action='append',
+        help=_('Use a normally-disabled media for this transaction only. '
+               'Repeatable, or comma-separated. The media stays disabled '
+               'afterwards.'),
+    )
+    media_scope_parent.add_argument(
+        '--disablemedia', metavar='MEDIA', action='append',
+        help=_('Ignore an enabled media for this transaction only. '
+               'Repeatable, or comma-separated.'),
+    )
+
     # Register custom action for aliases
     parser.register('action', 'parsers', AliasedSubParsersAction)
 
@@ -492,7 +511,8 @@ Examples:
     install_parser = subparsers.add_parser(
         'install', aliases=['i'],
         help=_('Install packages'),
-        parents=[display_parent, debug_parent, arch_parent, check_parent]
+        parents=[display_parent, debug_parent, arch_parent, check_parent,
+                 media_scope_parent]
     )
     install_parser.add_argument(
         'packages', nargs='*',
@@ -952,6 +972,21 @@ Examples:
     build_parser.add_argument(
         'sources', nargs='+',
         help=_('Source RPM files (.src.rpm) or spec files (.spec) to build')
+    )
+    # Same two flags as install/upgrade, but they cannot share
+    # ``media_scope_parent`` : there the identifier is resolved against
+    # the host database, here it is handed to the container, which has
+    # its own media and its own short names.  Distinct help text says so.
+    build_parser.add_argument(
+        '--enablemedia', metavar='MEDIA', action='append',
+        help=_('Enable a media inside the build container for this build '
+               'only. Repeatable, or comma-separated. Named as the '
+               'container knows it, not the host.'),
+    )
+    build_parser.add_argument(
+        '--disablemedia', metavar='MEDIA', action='append',
+        help=_('Disable a media inside the build container for this build '
+               'only. Repeatable, or comma-separated.'),
     )
     build_parser.add_argument(
         '--image', '-i',
@@ -1618,7 +1653,8 @@ diagnostic short of running ldd by hand.
     upgrade_parser = subparsers.add_parser(
         'upgrade', aliases=['u'],
         help=_('Upgrade packages (all if none specified)'),
-        parents=[display_parent, debug_parent, arch_parent, check_parent]
+        parents=[display_parent, debug_parent, arch_parent, check_parent,
+                 media_scope_parent]
     )
     upgrade_parser.add_argument(
         'packages', nargs='*',

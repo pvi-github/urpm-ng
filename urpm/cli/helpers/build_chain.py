@@ -88,6 +88,70 @@ _VER_RE = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
 NET_ISOLATION_WRAP = 'unshare --user --map-root-user --net '
 
 
+def apply_media_scope(container, cid, enablemedia, disablemedia) -> None:
+    """Apply ``--enablemedia`` / ``--disablemedia`` inside the container.
+
+    Unlike the install/upgrade path, this cannot resolve anything
+    host-side : the container has its own package database, its own
+    media, and its own short names.  Identifiers are passed through
+    verbatim to the container's ``urpm media enable|disable``.
+
+    That subcommand pair has existed for a long time, which is the whole
+    reason this needs no new inner flag.  The ``urpm`` inside the image
+    is whatever version the image was built with — possibly older than
+    the host — and handing an unknown flag to it aborts the run outright
+    (see the ``--no-readme`` regression noted in
+    ``cli/commands/build.py``).  Reusing a long-standing subcommand
+    sidesteps version skew entirely.
+
+    Name the media as the *container* knows it.  Short-name resolution
+    in ``media enable|disable`` is newer than most images, so against
+    one of those only the exact display name matches.
+
+    A media that cannot be applied aborts the build.  Continuing would
+    produce a package whose build inputs are not the ones the operator
+    specified, and they would have no way to tell from the artefact —
+    an unusable result is better than a misleading one.
+
+    Raises:
+        RuntimeError: naming the media that could not be applied.  The
+            shared-chain caller already turns this into a per-source
+            failure; ``_build_single_package`` catches it likewise.
+    """
+    # Disable before enable : an operator doing both wants the widening
+    # applied last, so it is the one that wins on any overlap.
+    for verb, values in (('disable', disablemedia), ('enable', enablemedia)):
+        for identifier in _iter_media_identifiers(values):
+            print(_("  Media '{name}': {verb} for this build...").format(
+                name=identifier, verb=verb))
+            if container.exec(
+                cid, ['urpm', 'media', verb, identifier],
+            ).returncode != 0:
+                raise RuntimeError(_(
+                    "Cannot {verb} media '{name}' in the build container. "
+                    "Name it as the container knows it — an older image "
+                    "may only accept the exact display name, not the "
+                    "short name."
+                ).format(verb=verb, name=identifier))
+
+
+def _iter_media_identifiers(values):
+    """Flatten argparse ``append`` values, each possibly comma-separated.
+
+    ``--enablemedia a --enablemedia b`` and ``--enablemedia a,b`` are
+    equivalent, matching the install/upgrade flags.
+    """
+    if not values:
+        return
+    if isinstance(values, str):
+        values = [values]
+    for raw in values:
+        for part in str(raw).split(','):
+            part = part.strip()
+            if part:
+                yield part
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -204,6 +268,8 @@ def _setup_shared_container(
     no_update: bool,
     rpmmacros_path: Optional[Path],
     subrel: Optional[str],
+    enablemedia=None,
+    disablemedia=None,
 ) -> Optional[int]:
     """Run the phases every spec shares against an already-created cid.
 
@@ -242,6 +308,10 @@ def _setup_shared_container(
     # Bootstrap CA trust so signed downloads through pip/curl inside
     # rpmbuild resolve properly.
     container.exec(cid, ['/bin/update-ca-trust', 'extract'])
+
+    # Media scoping, before the first ``media update`` so the sync
+    # already reflects the requested perimeter.
+    apply_media_scope(container, cid, enablemedia, disablemedia)
 
     if not no_update:
         print(_("  Updating media..."))
@@ -558,6 +628,8 @@ def run_shared_container_chain(
     limits: "BuildLimits | None" = None,
     bcond_args: str = '',
     with_network: bool = False,
+    enablemedia=None,
+    disablemedia=None,
 ) -> List[Tuple[Path, bool, str]]:
     """Compile each spec in ``valid_sources`` in a single container.
 
@@ -592,6 +664,7 @@ def run_shared_container_chain(
                 container, cid,
                 with_rpms=with_rpms, no_update=no_update,
                 rpmmacros_path=rpmmacros_path, subrel=subrel,
+                enablemedia=enablemedia, disablemedia=disablemedia,
             )
         except RuntimeError as e:
             # Setup failure — nothing built, mark every source as

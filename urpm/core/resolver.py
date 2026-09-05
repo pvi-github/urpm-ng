@@ -456,7 +456,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                  ignore_installed: bool = False,
                  allowed_arches: list = None,
                  media: str = None, excludemedia: str = None,
-                 sortmedia: str = None):
+                 sortmedia: str = None, enablemedia=None):
         """Initialize resolver.
 
         Args:
@@ -487,10 +487,18 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         else:
             from .config import get_compatible_arches
             self.allowed_arches = get_compatible_arches(arch)
-        # Media filtering
+        # Media filtering.  All three take canonical *display* names —
+        # the CLI resolves whatever the operator typed (short name,
+        # display name, any case) through ``db.resolve_media`` and fails
+        # there, where it can suggest alternatives.
         self.media_filter = set(media.split(',')) if media else None
         self.excludemedia = set(excludemedia.split(',')) if excludemedia else None
         self.sortmedia = sortmedia.split(',') if sortmedia else None
+        # Media lifted into this transaction only : ``_create_pool``
+        # loads them even though their DB row says disabled, and the
+        # row is never written.  Empty frozenset rather than None so the
+        # pool's membership test needs no guard.
+        self.enablemedia = frozenset(enablemedia or ())
         self.pool = None
         self._solvable_to_pkg = {}  # Map solvable id -> pkg dict
         self._localrpm_nevra_to_id = {}  # Map NEVRA -> solvable id for @LocalRPMs

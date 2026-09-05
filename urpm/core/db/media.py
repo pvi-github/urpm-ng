@@ -76,6 +76,94 @@ class MediaMixin:
             cursor = conn.execute("SELECT * FROM media ORDER BY priority, name")
             return [dict(row) for row in cursor]
 
+    def resolve_media(self, identifier: str) -> Optional[Dict]:
+        """Find one media from whatever the operator typed.
+
+        :meth:`get_media` matches the display name exactly and
+        case-sensitively, which forces ``'Core Backports Testing'`` —
+        quoting included — on the command line.  Every media also carries
+        a filesystem-safe ``short_name`` (``core_backports_testing``)
+        that until now was only ever *generated*, never used for lookup.
+
+        Resolution order, first hit wins:
+
+        1. ``short_name``, exact
+        2. ``name`` (display), exact
+        3. ``short_name``, case-insensitive
+        4. ``name``, case-insensitive
+
+        Exact matches are tried before any case-folding so a media whose
+        short name differs from another's only by case can still be
+        addressed unambiguously.  Within a step, ties are broken by
+        ``priority`` then ``name`` — the same order :meth:`list_media`
+        returns — so the answer never depends on row insertion order.
+
+        Args:
+            identifier: What the user typed — a short name or a display
+                name, in any case.
+
+        Returns:
+            The media row, or ``None`` when nothing matches.  Callers
+            that want to tell the user what they *could* have typed
+            should pair this with :meth:`suggest_media_names`.
+        """
+        if not identifier:
+            return None
+
+        media = self.list_media()
+        folded = identifier.casefold()
+
+        for key, wanted in (
+            ('short_name', identifier),
+            ('name', identifier),
+        ):
+            for row in media:
+                if row.get(key) == wanted:
+                    return row
+
+        for key in ('short_name', 'name'):
+            for row in media:
+                value = row.get(key)
+                if value is not None and value.casefold() == folded:
+                    return row
+
+        return None
+
+    def suggest_media_names(
+        self, identifier: str, limit: int = 5,
+    ) -> List[str]:
+        """Short names close to *identifier*, for a « did you mean » hint.
+
+        A rejected media name is only useful to the operator if it comes
+        with what they could have typed instead — that is the whole point
+        of introducing short names as an addressable handle.
+
+        Ranking is substring-first (a typed fragment is the common case:
+        ``backports`` for ``core_backports``), then edit-distance via
+        :func:`difflib.get_close_matches` for genuine typos
+        (``core_bakports``).  Falls back to the plain alphabetical list
+        when nothing is close, so the caller always has something to
+        show.
+        """
+        names = sorted(
+            row['short_name'] for row in self.list_media()
+            if row.get('short_name')
+        )
+        if not identifier:
+            return names[:limit]
+
+        folded = identifier.casefold()
+        ranked = [n for n in names if folded in n.casefold()]
+
+        if len(ranked) < limit:
+            import difflib
+            close = difflib.get_close_matches(
+                identifier, names, n=limit, cutoff=0.5,
+            )
+            ranked += [n for n in close if n not in ranked]
+
+        return (ranked or names)[:limit]
+
     def enable_media(self, name: str, enabled: bool = True):
         """Enable or disable a media source."""
         with self._conn_write() as conn:

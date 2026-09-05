@@ -1091,6 +1091,11 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     subrel = getattr(args, 'subrel', None) or None  # treat '' as unset
     rpmmacros_path = getattr(args, 'rpmmacros', None) or None
     with_network = getattr(args, 'with_network', False)
+    # Media scoping for this build only.  Identifiers are passed to
+    # the container verbatim : it has its own database and its own
+    # media, so host-side resolution would be meaningless here.
+    enablemedia = getattr(args, 'enablemedia', None)
+    disablemedia = getattr(args, 'disablemedia', None)
     if rpmmacros_path:
         rpmmacros_path = Path(rpmmacros_path)
         if not rpmmacros_path.is_file():
@@ -1202,6 +1207,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             with_rpms, no_update=no_update, subrel=subrel,
             rpmmacros_path=rpmmacros_path, limits=limits,
             bcond_args=bcond_args, with_network=with_network,
+            enablemedia=enablemedia, disablemedia=disablemedia,
         )
 
     stop_on_fail = getattr(args, 'stop_on_fail', False)
@@ -1240,6 +1246,8 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             limits=limits,
             bcond_args=bcond_args,
             with_network=with_network,
+            enablemedia=enablemedia,
+            disablemedia=disablemedia,
             _find_workspace_fn=_find_workspace,
             _diagnose_fn=_diagnose_unsatisfied_buildrequires,
         )
@@ -1316,6 +1324,8 @@ def _build_single_package(
     limits: 'BuildLimits | None' = None,
     bcond_args: str = '',
     with_network: bool = False,
+    enablemedia=None,
+    disablemedia=None,
 ) -> tuple:
     """Build a single package in a container.
 
@@ -1460,6 +1470,14 @@ def _build_single_package(
 
         else:
             return (source_path, False, f"Unsupported source type: {source_path.suffix}")
+
+        # 3a-bis. Media scoping, before the sync so it reflects the
+        # requested perimeter.  Mirrors the shared-chain path in
+        # ``helpers/build_chain.py`` — see ``apply_media_scope`` there
+        # for why this goes through the container's own subcommands
+        # rather than a new inner flag.
+        from ..helpers.build_chain import apply_media_scope
+        apply_media_scope(container, cid, enablemedia, disablemedia)
 
         # 3b. Update media and packages (unless --no-update)
         if not no_update:

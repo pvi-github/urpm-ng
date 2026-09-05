@@ -1225,17 +1225,36 @@ def cmd_media_remove(args, db: 'PackageDatabase') -> int:
     return rc
 
 
+def _resolve_media_or_report(db, identifier: str):
+    """Resolve *identifier* to a media row, or print why not and return None.
+
+    Accepts the short name (``core_backports``) as readily as the display
+    name (``Core Backports``) — typing a spaced, quoted display name for
+    every media operation is the friction short names exist to remove.
+    On failure, names what could have been typed instead rather than a
+    bare « not found ».
+    """
+    media = db.resolve_media(identifier)
+    if media is not None:
+        return media
+    print(_("Media '{name}' not found").format(name=identifier))
+    suggestions = db.suggest_media_names(identifier)
+    if suggestions:
+        print(_("  Did you mean: {names}?").format(
+            names=", ".join(suggestions)))
+    return None
+
+
 def cmd_media_enable(args, db: 'PackageDatabase') -> int:
     """Handle media enable command."""
     from ...auth.privileges import require_privileges
 
     require_privileges(action_id="org.mageia.urpm.media-manage")
 
-    name = args.name
-
-    if not db.get_media(name):
-        print(_("Media '{name}' not found").format(name=name))
+    media = _resolve_media_or_report(db, args.name)
+    if media is None:
         return 1
+    name = media['name']
 
     db.enable_media(name, enabled=True)
     print(_("Enabled media '{name}'").format(name=name))
@@ -1248,11 +1267,10 @@ def cmd_media_disable(args, db: 'PackageDatabase') -> int:
 
     require_privileges(action_id="org.mageia.urpm.media-manage")
 
-    name = args.name
-
-    if not db.get_media(name):
-        print(_("Media '{name}' not found").format(name=name))
+    media = _resolve_media_or_report(db, args.name)
+    if media is None:
         return 1
+    name = media['name']
 
     db.enable_media(name, enabled=False)
     print(_("Disabled media '{name}'").format(name=name))
