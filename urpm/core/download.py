@@ -31,6 +31,41 @@ from .peer_client import (
 logger = logging.getLogger(__name__)
 
 
+class InsufficientSpaceError(Exception):
+    """Not enough room where the RPM payload would be written.
+
+    Raised before the first byte is fetched.  Carries the figures and
+    the directory : « no space left on device » a few GB into a
+    distupgrade says nothing about *which* filesystem, and by then the
+    partial payload is occupying the space that ran out.
+
+    Mentions ``download.payload_dir`` because relocating the payload is
+    the fix on a machine whose ``/var`` is simply too small — a lasting
+    property that no amount of cleaning changes.
+    """
+
+    def __init__(self, directory, required: int, available: int):
+        from ..i18n import _
+        self.directory = directory
+        self.required = required
+        self.available = available
+
+        def _gb(n: int) -> str:
+            return f"{n / (1024 ** 3):.1f} GB"
+
+        super().__init__(_(
+            "Not enough space in {directory}: {required} needed, "
+            "{available} available.\n"
+            "Free some space, or point the download elsewhere with "
+            "--download-dir, or set 'payload_dir' in the [download] "
+            "section of /etc/urpm/conf.d/ to move it for good."
+        ).format(
+            directory=directory,
+            required=_gb(required),
+            available=_gb(available),
+        ))
+
+
 # ── Network error grammar ─────────────────────────────────────────────
 
 
@@ -1019,7 +1054,8 @@ class Downloader:
     def __init__(self, cache_dir: Path = None,
                  use_peers: bool = True, only_peers: bool = False,
                  db: 'PackageDatabase' = None,
-                 target_version: str = None, target_arch: str = None):
+                 target_version: str = None, target_arch: str = None,
+                 payload_dir: str = None):
         """Initialize downloader.
 
         Args:
@@ -1029,6 +1065,9 @@ class Downloader:
             db: Database for provenance tracking and blacklist (optional)
             target_version: Target Mageia version for P2P queries (e.g., "10")
             target_arch: Target architecture for P2P queries (e.g., "x86_64")
+            payload_dir: Override for where ``.rpm`` files are written.
+                Wins over the ``download.payload_dir`` config key.
+                ``None`` falls back to that key, then to *cache_dir*.
 
         Note:
             The number of parallel workers is read from
@@ -1039,7 +1078,20 @@ class Downloader:
         self.cache_dir = cache_dir or get_base_dir()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         from .settings import get_settings
-        self.max_workers = get_settings().download.parallel
+        _settings = get_settings()
+        self.max_workers = _settings.download.parallel
+        # Where the ``.rpm`` payload lands.  Defaults to ``cache_dir``,
+        # so the on-disk layout is unchanged unless someone asks
+        # otherwise.  Only the payload moves : the database and the
+        # media metadata stay put, being small and permanently needed.
+        # Precedence : explicit argument (``--download-dir``) beats the
+        # ``download.payload_dir`` config key beats the default.
+        _configured = (payload_dir or _settings.download.payload_dir or '')
+        self.payload_dir = (
+            Path(_configured).expanduser() if _configured else self.cache_dir
+        )
+        if self.payload_dir != self.cache_dir:
+            self.payload_dir.mkdir(parents=True, exist_ok=True)
         self.use_peers = use_peers or only_peers  # only_peers implies use_peers
         self.only_peers = only_peers
         self.db = db
@@ -1075,24 +1127,31 @@ class Downloader:
     def get_cache_path(self, item: DownloadItem) -> Path:
         """Get cache path for a download item.
 
-        New schema: <base_dir>/medias/official/<relative_path>/*.rpm
-                    <base_dir>/medias/custom/<short_name>/*.rpm
-        Legacy:     <base_dir>/medias/<hostname>/<media_name>/*.rpm
+        New schema: <payload_dir>/medias/official/<relative_path>/*.rpm
+                    <payload_dir>/medias/custom/<short_name>/*.rpm
+        Legacy:     <payload_dir>/medias/<hostname>/<media_name>/*.rpm
+
+        Anchored on ``payload_dir`` rather than ``cache_dir`` so a
+        relocated payload keeps the same layout.  ``is_cached`` goes
+        through here too, so a package written to the relocated
+        directory is still found there afterwards — the two must never
+        disagree on where a file lives.
         """
+        base = self.payload_dir
         if item.uses_new_schema():
             # New schema - use relative_path
             if item.is_official:
-                media_dir = self.cache_dir / "medias" / "official" / item.relative_path
+                media_dir = base / "medias" / "official" / item.relative_path
             else:
-                media_dir = self.cache_dir / "medias" / "custom" / item.media_name
+                media_dir = base / "medias" / "custom" / item.media_name
             media_dir.mkdir(parents=True, exist_ok=True)
             return media_dir / item.filename
         elif item.media_name and item.media_url:
             # Legacy schema
-            media_dir = self.cache_dir / "medias" / item.hostname / item.media_name
+            media_dir = base / "medias" / item.hostname / item.media_name
             media_dir.mkdir(parents=True, exist_ok=True)
             return media_dir / item.filename
-        return self.cache_dir / item.filename
+        return base / item.filename
 
     def is_cached(self, item: DownloadItem) -> bool:
         """Check if package is already in cache and is a valid RPM.
@@ -1663,6 +1722,46 @@ class Downloader:
                 except OSError:
                     pass
 
+    #: Slack kept free beyond the payload itself.  RPMs are unpacked
+    #: from this same filesystem in the common case, and a filesystem
+    #: driven to exactly zero free bytes fails in far uglier ways than
+    #: one that refuses early.
+    SPACE_MARGIN_BYTES = 200 * 1024 * 1024
+
+    def assert_space_for(self, items: List[DownloadItem]) -> None:
+        """Refuse to start when the payload cannot fit.
+
+        Nothing checked the download target before : a distupgrade
+        pulling several GB across a few thousand packages would fill
+        the filesystem and fail deep into the transfer, with the
+        partial payload still occupying the space that just ran out.
+
+        Args:
+            items: What remains to download — cached entries excluded
+                by the caller, since they cost nothing.
+
+        Raises:
+            InsufficientSpaceError: with required and available figures,
+                and the directory concerned, so the operator can act
+                without having to work out which filesystem is meant.
+        """
+        if not items:
+            return
+        required = sum(item.size for item in items) + self.SPACE_MARGIN_BYTES
+        try:
+            st = os.statvfs(self.payload_dir)
+        except OSError:
+            # Unreadable target : let the download surface the real
+            # error rather than guess at a space problem.
+            return
+        available = st.f_bavail * st.f_frsize
+        if available < required:
+            raise InsufficientSpaceError(
+                directory=self.payload_dir,
+                required=required,
+                available=available,
+            )
+
     def download_all(self, items: List[DownloadItem],
                      progress_callback: Callable[[str, int, int, int, int], None] = None
                      ) -> Tuple[List[DownloadResult], int, int, dict]:
@@ -1702,6 +1801,13 @@ class Downloader:
                 downloaded_bytes += item.size
             else:
                 to_download.append(item)
+
+        # Space preflight, once the cached set is known so we only
+        # account for what will actually be written.  Checked against
+        # the filesystem the payload lands on, which may not be the one
+        # holding /var.  Failing here with a figure beats failing at
+        # 90% of a multi-GB distupgrade download.
+        self.assert_space_for(to_download)
 
         if progress_callback and cached_count > 0:
             progress_callback("(cache)", cached_count, len(items), downloaded_bytes, total_bytes)

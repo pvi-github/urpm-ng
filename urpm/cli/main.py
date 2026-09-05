@@ -405,6 +405,17 @@ def create_parser() -> argparse.ArgumentParser:
     # takes three commands and an easily-forgotten cleanup.
     # Media are named by their short name (``core_backports``) or their
     # display name, in any case — see ``PackageDatabase.resolve_media``.
+    # Where the .rpm payload is written, for this run.  Overrides the
+    # ``download.payload_dir`` config key, which is the durable answer
+    # for a machine whose /var is simply too small.  Only the payload
+    # moves : database and media metadata stay in /var/lib/urpm.
+    download_dir_parent = argparse.ArgumentParser(add_help=False)
+    download_dir_parent.add_argument(
+        '--download-dir', metavar='DIR',
+        help=_('Write downloaded RPMs to DIR instead of the default '
+               'cache. Overrides the download.payload_dir setting.'),
+    )
+
     media_scope_parent = argparse.ArgumentParser(add_help=False)
     media_scope_parent.add_argument(
         '--enablemedia', metavar='MEDIA', action='append',
@@ -512,7 +523,7 @@ Examples:
         'install', aliases=['i'],
         help=_('Install packages'),
         parents=[display_parent, debug_parent, arch_parent, check_parent,
-                 media_scope_parent]
+                 media_scope_parent, download_dir_parent]
     )
     install_parser.add_argument(
         'packages', nargs='*',
@@ -1654,7 +1665,7 @@ diagnostic short of running ldd by hand.
         'upgrade', aliases=['u'],
         help=_('Upgrade packages (all if none specified)'),
         parents=[display_parent, debug_parent, arch_parent, check_parent,
-                 media_scope_parent]
+                 media_scope_parent, download_dir_parent]
     )
     upgrade_parser.add_argument(
         'packages', nargs='*',

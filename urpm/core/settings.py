@@ -96,6 +96,28 @@ class DownloadSettings:
     rather sweep more peers before giving up.
     """
 
+    payload_dir: str = ""
+    """Where downloaded ``.rpm`` files are stored.  Empty = default.
+
+    By default the RPM payload lands under ``/var/lib/urpm/medias/``,
+    alongside the media metadata.  On a machine whose ``/var`` is too
+    small for a full distupgrade — several GB across a few thousand
+    packages — that filesystem fills up mid-download.
+
+    Setting this moves **only the payload**.  The database, the media
+    metadata (synthesis, ``files.xml``) and everything else stay in
+    ``/var/lib/urpm``: they are small, permanently needed, and moving
+    them is what ``--urpm-root`` is for.
+
+    A small ``/var`` is a lasting property of a machine, not a
+    circumstance, hence a config key rather than a flag to remember.
+    ``--download-dir`` overrides it for a one-off.
+
+    The directory is created if missing.  Packages already cached at
+    the old location are not migrated — they simply get re-downloaded
+    on first use, and can be reclaimed with ``urpm cleanup``.
+    """
+
 
 @dataclass
 class TransactionSettings:

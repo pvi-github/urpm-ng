@@ -54,6 +54,13 @@ class InstallOptions:
     only_peers: bool = False
     root: str = "/"
     use_userns: bool = False
+    payload_dir: str = ""
+    """Override for where ``.rpm`` files are written (``--download-dir``).
+
+    Empty falls back to the ``download.payload_dir`` config key, then
+    to the default cache.  Only the payload moves — the database and
+    media metadata stay in place.
+    """
     # Only meaningful when ``use_userns=True`` — asks the bootstrap
     # wrapper to preserve the operator's proxy env vars.  Off by
     # default (see :mod:`urpm.core.userns_env`) ; wired by
@@ -315,6 +322,7 @@ class PackageOperations:
             db=self.db,
             target_version=target_version,
             target_arch=target_arch,
+            payload_dir=getattr(options, 'payload_dir', '') or None,
         )
 
         dl_results, downloaded, cached, peer_stats = downloader.download_all(

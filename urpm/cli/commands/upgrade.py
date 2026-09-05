@@ -352,6 +352,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         dl_opts = InstallOptions(
             use_peers=not getattr(args, 'no_peers', False),
             only_peers=getattr(args, 'only_peers', False),
+            payload_dir=getattr(args, 'download_dir', '') or '',
         )
 
         # Multi-line progress display using DownloadProgressDisplay
@@ -462,6 +463,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         root=rpm_root or "/",
         use_userns=bool(getattr(args, 'allow_no_root', False) and rpm_root),
         config_policy=getattr(args, 'config_policy', 'keep'),
+        payload_dir=getattr(args, 'download_dir', '') or '',
     )
 
     remove_names = [a.name for a in removes] if removes else []
