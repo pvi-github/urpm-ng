@@ -137,19 +137,35 @@ class AppStreamManager:
     # store information for packages after extraction
     results = {}
 
-    def __init__(self, db: 'PackageDatabase', base_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        db: 'PackageDatabase',
+        base_dir: Optional[Path] = None,
+        cache_path: Optional[Path] = None,
+    ):
         """
         Initialize AppStream manager.
 
         Args:
             db: Package database instance
             base_dir: Base directory for urpm data (default: /var/lib/urpm)
+            cache_path: Directory holding the per-RPM extraction cache and
+                its ``state.json`` index — typically
+                ``<rpms_dir>/.genhdlist`` when generating a media.  MUST be
+                anchored on the media being processed : the state is
+                per-media, and resolving it against the current working
+                directory (as an earlier version did) makes two media
+                share one index and makes the cache invisible to whoever
+                runs the tool from elsewhere.  ``None`` disables state
+                persistence entirely, mirroring
+                :class:`urpm.core.hdlist.HdlistWriter`.
         """
         self.db = db
         if base_dir is None:
             base_dir = Path('/var/lib/urpm')
         self.appstream_dir = base_dir / 'appstream'
         self.catalog_path = Path('/var/cache/swcatalog/xml/mageia-urpm.xml.gz')
+        self.cache_path = cache_path
 
     def _ensure_dirs(self) -> None:
         """Ensure required directories exist."""
@@ -1310,7 +1326,16 @@ class AppStreamManager:
         # for metadata alone is "CC0-1.0" or "FSFAP".
         ET.SubElement(component, "metadata_license").text = license_
         ET.SubElement(component, "summary").text          = summary
-        ET.SubElement(component, "pkgname").text          = name  # RPM package name
+        # ``pkgname`` MUST be the RPM package name, never the display
+        # name : it is the sole key a software centre uses to map a
+        # component back to something installable.  ``name`` above is
+        # the *display* name, which comes from the .desktop entry's
+        # ``Name=`` when there is one — reusing it here made every
+        # application whose desktop name differs from its package name
+        # invisible in Discover and GNOME Software, while its
+        # ``-devel`` / ``-lang-*`` subpackages (no .desktop, so they
+        # fell back to the RPM name) showed up instead.
+        ET.SubElement(component, "pkgname").text          = package_info.name
 
         # Description: AppStream requires tagged XML (<p>, <ul>...)
         # Lines not ending with a period are joined with a space
@@ -1618,8 +1643,13 @@ class AppStreamManager:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     def _save_state(self, state: dict) -> None:
-        """Save unified state to .genhdlist/state.json."""
-        cache_path = Path(self.CACHE_DIR)
+        """Save unified state to ``<cache_path>/state.json``.
+
+        No-op when ``cache_path`` is unset — same contract as
+        :meth:`urpm.core.hdlist.HdlistWriter._save_state`, whose state
+        file this one shares.
+        """
+        cache_path = self.cache_path
         if cache_path is None:
             return
         cache_path.mkdir(parents=True, exist_ok=True)
@@ -1648,7 +1678,9 @@ class AppStreamManager:
             }, ...
         }
         """
-        state_file = Path(self.CACHE_DIR) / self.STATE_FILENAME
+        if self.cache_path is None:
+            return {}
+        state_file = self.cache_path / self.STATE_FILENAME
         if state_file.exists():
             try:
                 return json.loads(state_file.read_text(encoding="utf-8"))
@@ -1660,8 +1692,12 @@ class AppStreamManager:
         """
         Remove from state (and cache) entries corresponding
         to RPMs that no longer exist in source directory.
+
+        Deleting per-RPM cache directories makes the anchoring critical :
+        resolved against the current working directory this would walk
+        the wrong tree entirely.
         """
-        cache_path = Path(self.CACHE_DIR)
+        cache_path = self.cache_path
         missing = [name for name in list(state) if name not in self.results.keys()]
 
         for name in missing:

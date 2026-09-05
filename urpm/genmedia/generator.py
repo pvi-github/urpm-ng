@@ -212,10 +212,15 @@ class MediaGenerator:
                 if force:
                     logger.info("⚡ Force mode: all packages will be re-extracted.\n")
 
-                # AppStreamManager needs a db instance, but for generation
-                # from RPM dir we use extract_from_rpm + build_catalog
-                # which don't need the database.
-                appstream_mgr = AppStreamManager.__new__(AppStreamManager)
+                # Generating from an RPM directory goes through
+                # extract_from_rpm + build_catalog, neither of which
+                # touches the database — hence ``db=None``.  Constructed
+                # normally (an earlier version used ``__new__`` to skip
+                # __init__ entirely) so ``cache_path`` is set : the
+                # extraction state index lives beside the per-RPM cache,
+                # anchored on the media being generated rather than on
+                # the caller's current directory.
+                appstream_mgr = AppStreamManager(db=None, cache_path=cache_dir)
                 # Loading persistent state
                 state = appstream_mgr._load_state()
                 for pkg in packages:
