@@ -560,6 +560,31 @@ def iter_file_matches(
 # ─── Write API (used by urpm.genmedia) ────────────────────────────
 
 
+# Header every ``media_info`` XML file starts with, matching what
+# Mageia's genhdlist2 emits.  Legacy urpmi tolerates its absence, but
+# matching byte-for-byte removes one more way for the two toolchains
+# to disagree.
+XML_DECLARATION = '<?xml version="1.0" encoding="utf-8"?>\n'
+
+
+def _media_info_fn(pkg) -> str:
+    """Value for the ``fn`` attribute : the NEVRA, without ``.rpm``.
+
+    genhdlist2 writes ``fn="foo-1.0-1.mga10.x86_64"``.  Emitting the
+    full filename instead — ``foo-1.0-1.mga10.x86_64.rpm`` — parses
+    fine and then silently fails to match anything, which is worse
+    than an error : nothing surfaces, the lookup just comes back
+    empty.
+
+    It also poisons our own pipeline.  ``appstream_scan`` feeds this
+    value to :func:`parse_nevra`, and a trailing ``.rpm`` still
+    matches the pattern — yielding ``arch='rpm'`` and
+    ``release='1.noarch'`` rather than failing loudly.
+    """
+    name = os.path.basename(pkg.filename)
+    return name[:-4] if name.endswith('.rpm') else name
+
+
 def _xml_escape(text: str) -> str:
     """Escape XML special characters in text content and attributes."""
     if text is not None:
@@ -607,12 +632,19 @@ def write_files_xml(
     compressor, level = parse_compress_filter(compression_filter)
     count = 0
     with compress_open(output_path, compressor, level) as f:
-        f.write('<media_info>\n')
+        f.write(XML_DECLARATION)
+        # No whitespace between ``media_info``'s element children : the
+        # legacy urpmi parser walks them expecting an ``fn`` attribute
+        # on each, and a newline between two of them is a ``#text``
+        # node it then rejects with « missing attribute "fn" in tag
+        # "#text" ».  Whitespace *inside* an element is content and
+        # stays — genhdlist2 emits it too.
+        f.write('<media_info>')
         for pkg in packages:
-            f.write(f'<files fn="{_xml_escape(os.path.basename(pkg.filename))}">\n')
+            f.write(f'<files fn="{_xml_escape(_media_info_fn(pkg))}">\n')
             for filepath in pkg.files:
                 f.write(_xml_escape(filepath) + '\n')
-            f.write('</files>\n')
+            f.write('</files>')
             count += 1
         f.write('</media_info>\n')
     return count
@@ -649,16 +681,19 @@ def write_info_xml(
     compressor, level = parse_compress_filter(compression_filter)
     count = 0
     with compress_open(output_path, compressor, level) as f:
-        f.write('<media_info>\n')
+        f.write(XML_DECLARATION)
+        # See ``write_files_xml`` for why nothing separates the
+        # element children.
+        f.write('<media_info>')
         for pkg in packages:
             f.write(
-                f"  <info fn='{_xml_escape(os.path.basename(pkg.filename))}'"
+                f"<info fn=\"{_xml_escape(_media_info_fn(pkg))}\""
                 f" sourcerpm='{_xml_escape(pkg.sourcerpm)}'"
                 f" url='{_xml_escape(pkg.url)}'"
                 f" license='{_xml_escape(pkg.license)}'>"
             )
             f.write(_xml_escape(pkg.description))
-            f.write('  </info>\n')
+            f.write('</info>')
             count += 1
         f.write('</media_info>\n')
     return count
@@ -698,15 +733,21 @@ def write_changelog_xml(
     compressor, level = parse_compress_filter(compression_filter)
     count = 0
     with compress_open(output_path, compressor, level) as f:
-        f.write('<media_info>\n')
+        f.write(XML_DECLARATION)
+        # See ``write_files_xml`` for why nothing separates the
+        # element children.  The newlines kept inside ``<changelogs>``
+        # and around ``<log_name>`` / ``<log_text>`` mirror what
+        # genhdlist2 emits — the parser only enforces ``fn`` one level
+        # down from ``media_info``.
+        f.write('<media_info>')
         for pkg in packages:
-            f.write(f"  <changelogs fn='{_xml_escape(os.path.basename(pkg.filename))}'>\n")
+            f.write(f'<changelogs fn="{_xml_escape(_media_info_fn(pkg))}">\n')
             for ts, author, text in pkg.changelog:
-                f.write(f"    <log time='{ts}'>\n")
-                f.write(f'      <log_name>{_xml_escape(author)}</log_name>\n')
-                f.write(f'      <log_text>{_xml_escape(text)}</log_text>\n')
-                f.write('    </log>\n')
-            f.write('  </changelogs>\n')
+                f.write(f'<log time="{ts}">\n')
+                f.write(f'<log_name>{_xml_escape(author)}</log_name>\n')
+                f.write(f'<log_text>{_xml_escape(text)}</log_text>\n')
+                f.write('</log>')
+            f.write('</changelogs>')
             count += 1
         f.write('</media_info>\n')
     return count

@@ -281,7 +281,11 @@ class TestWriteFilesXml:
         with lzma.open(out, 'rt') as f:
             content = f.read()
         assert '<media_info>' in content
-        assert 'fn="foo-1.0-1.mga10.x86_64.rpm"' in content
+        # ``fn`` is the bare NEVRA, as genhdlist2 writes it.  These
+        # assertions used to expect a ``.rpm`` suffix, which legacy
+        # urpmi matches against nothing — see
+        # ``test_media_info_xml_format.py`` for the full contract.
+        assert 'fn="foo-1.0-1.mga10.x86_64"' in content
         assert '/usr/bin/foo' in content
 
     def test_roundtrip(self, sample_packages, tmp_path):
@@ -290,8 +294,8 @@ class TestWriteFilesXml:
         out = tmp_path / 'files.xml.lzma'
         write_files_xml(out, sample_packages)
         parsed = dict(parse_files_xml(out))
-        assert 'foo-1.0-1.mga10.x86_64.rpm' in parsed
-        assert '/usr/bin/foo' in parsed['foo-1.0-1.mga10.x86_64.rpm']
+        assert 'foo-1.0-1.mga10.x86_64' in parsed
+        assert '/usr/bin/foo' in parsed['foo-1.0-1.mga10.x86_64']
 
 
 # ─── Info XML writer contract ────────────────────────────────────
