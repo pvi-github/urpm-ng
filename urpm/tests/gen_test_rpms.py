@@ -1,10 +1,73 @@
 #!/usr/bin/python3
 from pathlib import Path
+import hashlib
 import shutil
 from subprocess import run
 import os, sys
 
 # generate packages for testing urpm
+
+#: Written into media/ once generation completes, holding the digest of
+#: the inputs it was built from.  Its absence means the media predate
+#: this mechanism and cannot be vouched for.
+STAMP_NAME = ".generated-from"
+
+
+def find_gendistrib(base_dir: Path) -> str:
+    """Locate ``gendistrib`` (package ``rpmtools``), or return ``''``.
+
+    It builds the distribution-level ``media_info/`` from ``media.cfg``,
+    which ``genhdlist2`` does not do -- that one works per medium.  It
+    is optional : without it the ``media_info`` medium is not built and
+    the tests needing it skip.
+    """
+    for path in os.environ.get('PATH', '').split(':') + [str(base_dir)]:
+        candidate = os.path.join(path, 'gendistrib')
+        if os.path.isfile(candidate):
+            return candidate
+    return ''
+
+
+def input_digest(base_dir: Path) -> str:
+    """Digest every input this generator reads.
+
+    Covers ``data/`` (specs and the trees copied verbatim into media)
+    plus this module, since new media come from code as much as from
+    spec files -- ``rpm-i586-to-i686``, ``reconfig`` and ``media_info``
+    are all created by lines below rather than by a spec.
+
+    Hashes *content*, not mtimes : git sets mtimes to checkout time, so
+    a fresh clone of unchanged data would otherwise look modified while
+    a stale media/ touched by a test run would look current.  Both
+    mistakes were observed before this existed.
+    """
+    h = hashlib.sha256()
+    for path in sorted((base_dir / "data").rglob("*")):
+        if not path.is_file():
+            continue
+        # Name and content both, so swapping two specs is not a no-op.
+        h.update(str(path.relative_to(base_dir)).encode())
+        h.update(path.read_bytes())
+    # The generator is an input in its own right, under a fixed label
+    # rather than a path : it does not have to live under *base_dir*.
+    h.update(b"gen_test_rpms.py")
+    h.update(Path(__file__).resolve().read_bytes())
+    # Whether gendistrib was reachable belongs in the digest as much as
+    # the specs do : without it the media_info medium is simply not
+    # built, so two runs over identical data yield different media.
+    # Installing rpmtools afterwards must invalidate the stamp, or the
+    # missing medium would stay missing while looking current.
+    h.update(b"gendistrib:" + (b"yes" if find_gendistrib(base_dir) else b"no"))
+    return h.hexdigest()
+
+
+def media_are_current(base_dir: Path) -> bool:
+    """Whether ``media/`` was generated from the inputs present now."""
+    stamp = base_dir / "media" / STAMP_NAME
+    try:
+        return stamp.read_text().strip() == input_digest(base_dir)
+    except OSError:
+        return False
 
 def rpmbuild(spec_file: Path, base_dir: Path, medium_name: str = None) -> str | None:
     """Build a binary RPM from a spec file and move it to media/<medium_name>.
@@ -67,12 +130,7 @@ def main():
     # caller invoked us from (repo root, worktree, urpm/, tests/).
     base_dir = Path(__file__).resolve().parent
 
-    # Look for gendistrib executable (optional, only needed for media_info tests)
-    gendistrib_cmd = ''
-    for path in os.environ.get('PATH', '').split(':') + [base_dir]:
-        if os.path.isfile(os.path.join(path, 'gendistrib')):
-            gendistrib_cmd = os.path.join(path, 'gendistrib')
-            break
+    gendistrib_cmd = find_gendistrib(base_dir)
     if gendistrib_cmd == '':
         print("Warning: gendistrib not found (install rpmtools). "
               "media_info tests will be skipped.")
@@ -146,6 +204,10 @@ def main():
         (base_dir / 'media/media_info').mkdir(exist_ok=True)
         run( ["cp", "-r", "data/media.cfg", "media/media_info"], cwd=base_dir, check=True)
         run([gendistrib_cmd,'-s', base_dir.absolute()], check=True)
+
+    # Last, so a run that dies partway leaves no stamp and the next
+    # caller regenerates rather than trusting half a media set.
+    (base_dir / "media" / STAMP_NAME).write_text(input_digest(base_dir) + "\n")
 
 
 if __name__ == '__main__':

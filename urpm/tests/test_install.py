@@ -41,6 +41,41 @@ def is_mageia():
 # ---------------------------------------------------------------------------
 
 
+#: Guard so the media check runs once per session rather than once per
+#: test: ``prepare()`` is called by every test method, and the digest
+#: walks a few hundred files.
+_MEDIA_CHECKED = False
+
+
+def _ensure_media(base_dir) -> None:
+    """Regenerate the test media when they do not match the inputs.
+
+    The previous check asked only whether ``media/`` existed.  A media
+    set built by an older ``data/`` -- missing whole media, or missing
+    packages inside a medium that did survive -- satisfied it forever
+    and was never repaired.  That produced failures which looked like
+    code regressions: the same commit gave 117 passed in one checkout
+    and 6 failed in another, the difference being how old each
+    ``media/`` happened to be.
+
+    Regeneration costs one rpmbuild per medium, so it is announced
+    rather than dropped silently into a test run.
+    """
+    global _MEDIA_CHECKED
+    if _MEDIA_CHECKED:
+        return
+    from urpm.tests.gen_test_rpms import main as generate, media_are_current
+    if not media_are_current(base_dir):
+        print(
+            "\nTest media are missing or were built from different data; "
+            "regenerating (one rpmbuild per medium, this takes a while).\n"
+            "You can run it yourself with: make test-media",
+            flush=True,
+        )
+        generate()
+    _MEDIA_CHECKED = True
+
+
 class BaseUrpmiTest:
     """Shared helpers for all urpmi test classes.
 
@@ -108,11 +143,7 @@ class BaseUrpmiTest:
         self.chroot_db = PackageDatabase(db_path=chroot_db_path)
         self.root = str(self.chroot_tmp_path.absolute())
 
-        # check media/
-        print(self.base_dir)
-        if not self.media_dir.exists():
-            from urpm.tests.gen_test_rpms import main as main_gen_tests
-            main_gen_tests()
+        _ensure_media(self.base_dir)
         # determine prefix to rpm command
         if os.geteuid() == 0:
             self.prefix_rpm = ['rpm',]

@@ -8,6 +8,7 @@ TAR = /usr/bin/tar
 RM = /usr/bin/rm
 BM = /usr/bin/bm
 MKDIR = /usr/bin/mkdir
+PYTHON = /usr/bin/python3
 
 version:
 	$(SED) -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' urpm/__init__.py
@@ -175,9 +176,17 @@ po-stats:
 		msgfmt --statistics $(PO_DIR)/$$lang.po 2>&1 | sed 's/^/  /'; \
 	done
 
+test-media:
+	# Regenerate the test media consumed by urpm/tests/test_install.py.
+	# The generator wipes urpm/tests/media/ and rebuilds every medium
+	# from urpm/tests/data/, so this is a full refresh, never a patch.
+	# Costly (one rpmbuild per medium) -- run it when the test data
+	# changes, not routinely.
+	$(PYTHON) urpm/tests/gen_test_rpms.py
+
 clean-i18n:
 	$(RM) -rf $(PO_DIR)/locale
 
 .PHONY: version tarball install-completion rpm rpm-rpmdrake rpm-all \
         install-core install install-all \
-        clean pot po-update mo po-stats clean-i18n
+        clean pot po-update mo po-stats clean-i18n test-media
