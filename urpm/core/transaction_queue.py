@@ -1845,9 +1845,29 @@ class TransactionQueue:
         #               key = triggering package name (e.g. "shared-mime-info").
         #               This is often the slowest phase (e.g. 39s for shared-mime-info).
         #
+        # Two counters, because two questions are being asked and they
+        # had been collapsed into one.
+        #
+        # ``packages_done`` / ``total`` : *extractions*.  Drives the
+        # README collection, which must fire once every payload is on
+        # disk and before the triggers start — it has nothing to do with
+        # how many elements the transaction holds.
+        #
+        # ``elements_done`` / ``elements_total`` : *everything rpm will
+        # do*, installs and erases alike.  This is what the progress bar
+        # reports against.  Measured against real rpm : ELEM_PROGRESS
+        # carries exactly this total (2 installs + 1 erase → total=3),
+        # so the two agree by construction.
+        #
+        # Collapsing them froze the bar for the whole erase phase — a
+        # single stall at the very end while erases were batched there,
+        # but one stall per batch as soon as they are interleaved.
         total = len(rpm_paths)
         packages_done = [0]       # Unique packages with extraction complete
+        elements_total = len(rpm_paths) + len(erase_names or [])
+        elements_done = [0]       # Installs *and* erases completed
         seen_paths = set()        # Paths already counted (dedup multi-installed)
+        seen_erases = set()       # Erase names already counted
         # Diagnostic : capture t0 per active scriptlet so SCRIPT_STOP can
         # emit its duration.  Key = ``(script_name, script_type)`` so two
         # scriptlets on the same package (e.g. %post + %posttrans) don't
@@ -1953,7 +1973,7 @@ class TransactionQueue:
             # ── VERIFY phase: header signature checks ──
             if reason == rpm.RPMCALLBACK_VERIFY_START:
                 in_verify[0] = True
-                _send_progress(name='', current=0, total=total,
+                _send_progress(name='', current=0, total=elements_total,
                                phase='verify')
                 return
 
@@ -1989,8 +2009,9 @@ class TransactionQueue:
                     # trigger OPEN/CLOSE multiple times for the same file.
                     seen_paths.add(path)
                     packages_done[0] += 1
+                    elements_done[0] += 1
                     _send_progress(name=current_pkg_name[0],
-                                   current=packages_done[0], total=total,
+                                   current=elements_done[0], total=elements_total,
                                    phase='install')
                     # All packages extracted — collect READMEs now, before
                     # triggers start.  In smart sync the parent releases at
@@ -2004,7 +2025,12 @@ class TransactionQueue:
                                     msg_type='progress',
                                     operation_id=op.operation_id,
                                     name='',
-                                    current=total, total=total,
+                                    # Extractions are done, erases may not
+                                    # be : report where we actually are,
+                                    # not a 100% the transaction has not
+                                    # reached.
+                                    current=elements_done[0],
+                                    total=elements_total,
                                     phase='install_done',
                                     readme_messages=readme_data_early,
                                 ).to_json() + "\n")
@@ -2020,15 +2046,15 @@ class TransactionQueue:
                 if not in_verify[0]:
                     name = Path(key).stem.rsplit('-', 2)[0] if key else ''
                     current_pkg_name[0] = name
-                    _send_progress(name=name, current=packages_done[0],
-                                   total=total, phase='install')
+                    _send_progress(name=name, current=elements_done[0],
+                                   total=elements_total, phase='install')
                 return
 
             # ── INST_PROGRESS: byte-level extraction progress ──
             if reason == rpm.RPMCALLBACK_INST_PROGRESS:
                 if not in_verify[0]:
                     _send_progress(name=current_pkg_name[0],
-                                   current=packages_done[0], total=total,
+                                   current=elements_done[0], total=elements_total,
                                    phase='install',
                                    bytes_done=amount,
                                    bytes_total=total_pkg)
@@ -2054,7 +2080,7 @@ class TransactionQueue:
 
             # ── TRANS_START/PROGRESS/STOP: transaction preparation ──
             if reason == rpm.RPMCALLBACK_TRANS_START:
-                _send_progress(name='', current=0, total=total,
+                _send_progress(name='', current=0, total=elements_total,
                                phase='prepare')
                 return
 
@@ -2077,19 +2103,27 @@ class TransactionQueue:
                 erase_name = key if isinstance(key, str) else str(key)
                 current_pkg_name[0] = erase_name
                 _send_progress(name=erase_name,
-                               current=packages_done[0], total=total,
+                               current=elements_done[0], total=elements_total,
                                phase='erase')
                 return
 
             if reason == rpm.RPMCALLBACK_UNINST_STOP:
+                # An erase completing advances the bar exactly like an
+                # extraction : both are elements rpm has finished with.
+                # Deduped on name because a package matched by several
+                # dbMatch rows would otherwise be counted twice.
+                erased = current_pkg_name[0]
+                if erased and erased not in seen_erases:
+                    seen_erases.add(erased)
+                    elements_done[0] += 1
                 _send_progress(name=current_pkg_name[0],
-                               current=packages_done[0], total=total,
+                               current=elements_done[0], total=elements_total,
                                phase='erase')
                 return
 
             if reason == rpm.RPMCALLBACK_UNINST_PROGRESS:
                 _send_progress(name=current_pkg_name[0],
-                               current=packages_done[0], total=total,
+                               current=elements_done[0], total=elements_total,
                                phase='erase',
                                bytes_done=amount,
                                bytes_total=total_pkg)
@@ -2112,7 +2146,7 @@ class TransactionQueue:
                 except OSError:
                     pass
                 _send_progress(name=script_name,
-                               current=packages_done[0], total=total,
+                               current=elements_done[0], total=elements_total,
                                phase='script', script=script_name,
                                script_type=int(amount or 0))
                 # Diag : timestamp when this scriptlet starts.
@@ -2126,7 +2160,7 @@ class TransactionQueue:
             if reason == rpm.RPMCALLBACK_SCRIPT_STOP:
                 script_name = _clean_script_key(key)
                 _send_progress(name=script_name,
-                               current=packages_done[0], total=total,
+                               current=elements_done[0], total=elements_total,
                                phase='script_done', script=script_name,
                                script_type=int(amount or 0))
                 # Diag : emit duration.
