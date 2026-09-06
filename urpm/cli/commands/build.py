@@ -1781,7 +1781,7 @@ def _extract_buildrequires(path: str) -> list[str] | None:
     :func:`urpm.core.buildrequires.parse_buildrequires_from_srpm`
     (which uses ``rpm -qp --requires``) for .src.rpm files.  Both
     honour ``%if`` / ``%{?flag:…}`` / macros the way rpmbuild does at
-    build time — a previous per\-file regex implementation here
+    build time — a previous per-file regex implementation here
     silently pulled every literal ``BuildRequires:`` regardless of
     the surrounding conditional block.
 
