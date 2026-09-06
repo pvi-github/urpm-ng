@@ -38,7 +38,7 @@ def cmd_distupgrade(args, db: 'PackageDatabase') -> int:
         _dupd.enable()
 
     if getattr(args, 'abort', False):
-        return _cmd_abort(db)
+        return _cmd_abort(db, args)
 
     if getattr(args, 'resume', False):
         # SPEC_DISTUPGRADE §3.D : distupgrade-aware resume — reads
@@ -326,10 +326,57 @@ def _rollback_stage1(db: 'PackageDatabase') -> tuple:
     return n_deleted_media, n_deleted_servers, n_restored
 
 
-def _cmd_abort(db: 'PackageDatabase') -> int:
+#: Stages at or beyond which Tx A has begun writing to the rpmdb.
+#: Before these, ``--abort`` only undoes media bookkeeping ; from here
+#: on it leaves a machine whose packages are half-migrated but whose
+#: repositories point back at the old release.
+_ABORT_UNSAFE_STAGES = frozenset({
+    "tx_a_committing", "tx_a_done", "tx_b_running",
+    "transactions_done", "stage4_running",
+})
+
+
+def _cmd_abort(db: 'PackageDatabase', args=None) -> int:
     """Undo Stage 1 side-effects from ``.state.stage1_undo`` and clear
-    state.  Thin wrapper around :func:`_rollback_stage1`."""
-    from ...core.distupgrade import delete_state
+    state.  Thin wrapper around :func:`_rollback_stage1`.
+
+    Refuses past ``tx_a_committing`` unless forced.  ``_rollback_stage1``
+    restores the media DB to its pre-distupgrade shape and
+    ``delete_state`` drops the Tx B plan, the NEVRA→path map and the
+    undo journal — none of which touches the rpmdb.  Run once packages
+    have started moving, that combination leaves a half-migrated system
+    pointing at the previous release's repositories, with no automatic
+    way forward and the plan needed to finish now deleted.
+
+    A tester reached exactly that state: an unreadable error, a resume
+    that failed for an unrelated reason, then ``--abort`` as the only
+    remaining idea.  Nothing warned them it was the destructive option.
+    """
+    from ...core.distupgrade import delete_state, read_state
+
+    state = read_state(db) or {}
+    stage = state.get("stage")
+    forced = bool(getattr(args, 'yes', False) or getattr(args, 'auto', False))
+
+    if stage in _ABORT_UNSAFE_STAGES and not forced:
+        print(colors.error(_(
+            "Refusing to abort at stage '{stage}': packages have already "
+            "been installed.").format(stage=stage)))
+        print(_(
+            "Aborting now would restore the previous release's media "
+            "while leaving the system half-migrated, and would delete "
+            "the plan needed to finish."))
+        print(_(
+            "Finish the migration with :  urpm distupgrade --resume"))
+        print(colors.dim(_(
+            "If you understand the consequences and want to abort "
+            "anyway :  urpm distupgrade --abort --yes")))
+        return 1
+
+    if stage in _ABORT_UNSAFE_STAGES:
+        print(colors.warning(_(
+            "Aborting at stage '{stage}' — the system stays "
+            "half-migrated.").format(stage=stage)))
 
     n_del_m, n_del_s, n_up = _rollback_stage1(db)
     delete_state(db)
