@@ -127,14 +127,33 @@ class TestExecvp:
 def _fake_queue_result(*, success=True, errors=(),
                        rpmnew=(), scriptlet_json="{}",
                        script_errs=()):
-    """A QueueResult-like object the stage3 wiring can consume."""
-    op = SimpleNamespace(rpmnew_files=list(rpmnew))
-    return SimpleNamespace(
+    """A real :class:`QueueResult` the stage3 wiring can consume.
+
+    Deliberately the production class, not a ``SimpleNamespace``.  The
+    previous double carried an ``errors`` attribute that ``QueueResult``
+    does not have — so every test here validated the wiring against an
+    object shaped like what the code *assumed*, and the ``getattr(...,
+    "errors", None)`` bug survived all thirty of them.  A stand-in that
+    is more permissive than the real thing tests nothing.
+
+    ``errors`` lands on the operation, which is where rpm problems
+    actually live.
+    """
+    from urpm.core.transaction_queue import (
+        OperationResult, OperationType, QueueResult,
+    )
+    op = OperationResult(
+        operation_id="install",
+        op_type=OperationType.INSTALL,
         success=success,
         errors=list(errors),
+        rpmnew_files=list(rpmnew),
+    )
+    return QueueResult(
+        success=success,
         operations=[op],
         scriptlet_output=scriptlet_json,
-        script_error_packages=set(script_errs),
+        script_error_packages=list(script_errs),
     )
 
 
@@ -217,7 +236,10 @@ class TestRunStage3TxA:
             success=False, errors=["boom"])
         with patch("urpm.core.operations.PackageOperations",
                    return_value=ops):
-            with pytest.raises(Stage3Error, match="did not converge"):
+            # ``boom`` must reach the message, not just ``did not
+            # converge``.  The placeholder that used to replace it is
+            # what left a tester with nothing to act on, twice.
+            with pytest.raises(Stage3Error, match="boom"):
                 run_stage3_tx_a(
                     state_db,
                     tx_a_plan=["foo-1-1.mga11.x86_64"],
@@ -227,6 +249,29 @@ class TestRunStage3TxA:
                     smoke=lambda: None,
                 )
         ops.abort_transaction.assert_called_once_with(100)
+
+    def test_queue_level_error_reaches_the_message(self, state_db):
+        """A failure caught before any operation could report lives in
+        ``overall_error`` — typically the whole diagnostic, e.g. the
+        ENOSPC or the purged .rpm a tester hit on ``--resume``."""
+        from urpm.core.transaction_queue import QueueResult
+        ops = MagicMock()
+        ops.begin_transaction.return_value = 100
+        ops.execute_install.return_value = QueueResult(
+            success=False, operations=[],
+            overall_error="[Errno 28] No space left on device",
+        )
+        with patch("urpm.core.operations.PackageOperations",
+                   return_value=ops):
+            with pytest.raises(Stage3Error, match="No space left on device"):
+                run_stage3_tx_a(
+                    state_db,
+                    tx_a_plan=["foo-1-1.mga11.x86_64"],
+                    rpm_paths_by_nevra={
+                        "foo-1-1.mga11.x86_64": "/cache/foo.rpm"},
+                    version_from="10", version_to="11",
+                    smoke=lambda: None,
+                )
 
 
 class TestRunStage3TxB:

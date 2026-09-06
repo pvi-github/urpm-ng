@@ -323,8 +323,18 @@ def _run_one_side(
 
     if queue_result is None or not getattr(queue_result, "success", False):
         ops.abort_transaction(tx_id)
-        errs = "; ".join(str(e) for e in getattr(
-            queue_result, "errors", None) or ["queue reported failure"])
+        # ``QueueResult`` has no ``errors`` attribute — the previous
+        # ``getattr(queue_result, "errors", None)`` therefore always
+        # yielded None and printed the placeholder, discarding the real
+        # message.  A tester hit this twice on one machine : the
+        # original ENOSPC and then, on ``--resume``, a
+        # « No such file or directory » naming the purged .rpm.  Both
+        # were available in ``overall_error`` ; both were thrown away,
+        # and « queue reported failure » is what drove them to
+        # ``--abort``.
+        errs = "; ".join(
+            queue_result.collect_errors() if queue_result is not None else []
+        ) or "queue reported failure (no detail available)"
         raise Stage3Error(
             f"Tx {side.upper()} did not converge: {errs}")
 
@@ -349,9 +359,14 @@ def _run_one_side(
             "side": side, "tx_id": tx_id,
             "rpmnew_files_count": len(rpmnew_files),
             "queue_success": getattr(queue_result, "success", None),
-            "queue_errors": [
-                str(e) for e in getattr(queue_result, "errors", None) or []
-            ],
+            # Same trap as the convergence check above : ``QueueResult``
+            # has no ``errors`` attribute, so this diagnostic recorded an
+            # empty list on every failed run — precisely the runs whose
+            # post-mortem it exists for.
+            "queue_errors": (
+                queue_result.collect_errors()
+                if queue_result is not None else []
+            ),
         })
     except Exception:  # noqa: BLE001
         pass

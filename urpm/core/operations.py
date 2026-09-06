@@ -597,13 +597,13 @@ class PackageOperations:
         # queue-level overall_error only when no per-op error is available,
         # otherwise the detailed list is silently dropped and the user
         # sees "Installation failed:" with nothing after.
+        #
+        # The decoding moved onto QueueResult so the distupgrade path,
+        # which bypasses this method and calls execute_install directly,
+        # shares it instead of reinventing a broken variant.
         op_errors: List[str] = []
         if queue_result and not queue_result.success:
-            for op in queue_result.operations:
-                if not op.success:
-                    op_errors.extend(op.errors)
-            if not op_errors and queue_result.overall_error:
-                op_errors = [queue_result.overall_error]
+            op_errors = queue_result.collect_errors()
 
         return InstallResult(
             success=success,

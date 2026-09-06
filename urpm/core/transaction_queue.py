@@ -406,12 +406,47 @@ class OperationResult:
 
 @dataclass
 class QueueResult:
-    """Result of the entire queue execution."""
+    """Result of the entire queue execution.
+
+    Note there is deliberately **no** ``errors`` field : failures live
+    either on the individual :class:`OperationResult` (the detailed rpm
+    problems) or in ``overall_error`` (a queue-level failure that never
+    reached an operation, typically an exception raised while building
+    the transaction).  Callers must go through :meth:`collect_errors`
+    rather than reach for an attribute that does not exist — a
+    ``getattr(result, "errors", None)`` silently yields ``None`` and
+    discards a perfectly good diagnostic.
+    """
     success: bool
     operations: List[OperationResult] = field(default_factory=list)
     overall_error: str = ""
     scriptlet_output: str = ""  # Captured stdout from RPM scriptlets
     script_error_packages: List[str] = field(default_factory=list)  # Packages with scriptlet errors
+
+    def collect_errors(self) -> List[str]:
+        """Every actionable error, most specific first.
+
+        Per-operation errors carry the real rpm problems — file
+        conflicts, failed extractions, a missing cached ``.rpm``.  They
+        are what the operator needs.  ``overall_error`` is the
+        queue-level fallback, used only when no operation reported
+        anything : it holds exceptions caught while building or running
+        the transaction, and its message is often the whole diagnostic
+        (``[Errno 2] No such file or directory: /…/foo.rpm``).
+
+        Returns an empty list on success, or when a failure left no
+        message anywhere — callers decide what to print in that case
+        rather than being handed a placeholder.
+        """
+        op_errors: List[str] = []
+        for op in self.operations:
+            if not op.success:
+                op_errors.extend(op.errors)
+        if op_errors:
+            return op_errors
+        if self.overall_error:
+            return [self.overall_error]
+        return []
 
 
 @dataclass
@@ -1570,7 +1605,14 @@ class TransactionQueue:
                         _debug_write(f"[install] added: {Path(path).name}")
                 finally:
                     os.close(fd)
-            except rpm.error as e:
+            except (rpm.error, OSError) as e:
+                # ``OSError`` matters as much as ``rpm.error`` here :
+                # ``os.open`` on a cached .rpm that no longer exists
+                # raises ``FileNotFoundError``, not ``rpm.error``.  That
+                # is the normal state on ``--resume``, where the payload
+                # of already-installed packages has been purged batch by
+                # batch — so the one path that most needs a clean error
+                # was the one escaping this handler entirely.
                 print(f"[_execute_install] ERROR adding {path}: {e}",
                       file=sys.stderr)
                 sys.stderr.flush()
