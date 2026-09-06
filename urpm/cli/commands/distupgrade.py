@@ -206,6 +206,11 @@ def _resume_from_tx_a(db, state: dict) -> int:
         )
     except (Stage3Error, SmokeTestFailure) as exc:
         print(colors.error(_("Tx A retry failed : {err}").format(err=exc)))
+        # Same remedy as the first-attempt handler below : the critical
+        # stack is what failed, and `urpm recover` is what resumes it.
+        print(colors.info(_(
+            "Interrupted at the last failure boundary — run "
+            "`urpm recover` once the underlying issue is fixed.")))
         return 1
 
     print(colors.success(_(
@@ -1378,6 +1383,14 @@ def _cmd_continue_after_execvp(args, db) -> int:
             print(colors.error(_(
                 "Installation of remaining components failed : "
                 "{err}").format(err=exc)))
+            # The plan and the NEVRA->path map stay persisted, and the
+            # resume path now reconciles them against the rpmdb instead
+            # of replaying blind, so this is a real way forward -- it
+            # was not before that reconciliation existed.  Saying
+            # nothing here is what left one tester with --abort as the
+            # only remaining idea.
+            print(colors.info(_(
+                "Finish the migration with :  urpm distupgrade --resume")))
             return 1
         tx_b_progress.cleanup()
         # Erase the widget's 3-line region (header + bar + sub) so
