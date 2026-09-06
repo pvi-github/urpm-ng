@@ -27,6 +27,7 @@ from .checks import (
     check_boot_space,
     check_min_kernel,
     check_pending_reboot,
+    RebootRequiredError,
 )
 from .lock import (
     DistupgradeLockedError,
@@ -152,6 +153,29 @@ def run_stage0(
             )
         except PhaseAError as exc:
             raise Stage0Error(str(exc)) from exc
+
+    # 6.5 Phase A may itself have installed the init or glibc — on a
+    # machine left un-updated for months that is the likely case, since
+    # bringing it up to date is exactly what Phase A does.  Ask the
+    # same question as at the door, but answer it differently: this is
+    # our own doing, so stop cleanly and ask for a reboot rather than
+    # refuse.  Here is the only point where rebooting costs nothing —
+    # no media swapped, nothing of the target release installed.
+    #
+    # Deliberately NOT repeated before Tx A or Tx B: Tx A installs
+    # glibc by design (see TRANSACTION_A_PROVIDES), so the check would
+    # fire on every single distupgrade and a reboot prompt mid-migration
+    # would leave the machine in the half-state 1.3 exists to prevent.
+    try:
+        check_pending_reboot()
+    except PendingRebootError as exc:
+        write_state({
+            "version_from": current or "unknown",
+            "version_to": target.display(),
+            "started_at": started_at,
+            "stage": "reboot_required",
+        }, db)
+        raise RebootRequiredError(str(exc)) from exc
 
     # 7. Phase B checks — rpmdb integrity dropped from v1 (5-10 min
     # walk on ~3000 pkgs and doesn't catch anything not surfaced by

@@ -555,6 +555,7 @@ def _cmd_export_plan(args, db, *, to_arg: str, export_file: str) -> int:
     from pathlib import Path
     from ...core.distupgrade import (
         Stage0Error,
+        RebootRequiredError,
         Stage1Error,
         Stage2Error,
         run_stage0,
@@ -684,6 +685,7 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
     """
     from ...core.distupgrade import (
         Stage0Error,
+        RebootRequiredError,
         Stage1Error,
         Stage2Aborted,
         Stage2EmptyPlanError,
@@ -848,6 +850,23 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
             phase_a_download_progress=_pa_dl,
             phase_a_install_progress=_pa_install,
         )
+    except RebootRequiredError as exc:
+        if _pa["dl_display"] is not None:
+            _pa["dl_display"].finish()
+        if _pa["install_progress"] is not None:
+            _pa["install_progress"].cleanup()
+        print(colors.warning(str(exc)))
+        print()
+        print(colors.info(_(
+        "Bringing the machine up to date replaced a package the running "
+        "system cannot swap while it runs.")))
+        print(_(
+        "Nothing of the new release has been installed and no repository "
+        "has changed, so rebooting now costs nothing."))
+        print()
+        print(colors.info(_(
+        "Reboot, then continue with :  urpm distupgrade --resume")))
+        return 2
     except Stage0Error as exc:
         if _pa["dl_display"] is not None:
             _pa["dl_display"].finish()

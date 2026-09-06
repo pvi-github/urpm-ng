@@ -21,6 +21,7 @@ from .checks import (
 )
 from .orchestrator import (
     Stage0Error,
+    RebootRequiredError,
     Stage0Result,
     run_stage0,
 )
@@ -96,6 +97,7 @@ __all__ = [
     "PhaseAError",
     "ReleaseIdentity",
     "Stage0Error",
+    "RebootRequiredError",
     "Stage0Result",
     "Stage1Error",
     "BOOT_CRITICAL_LOCKS_BASE",

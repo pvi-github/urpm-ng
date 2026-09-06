@@ -241,6 +241,24 @@ class PendingRebootError(Exception):
     the distupgrade against the stale in-memory copy is unsafe."""
 
 
+class RebootRequiredError(Exception):
+    """Phase A itself installed a package that needs a reboot.
+
+    Same condition as :class:`PendingRebootError`, different moment and
+    therefore a different remedy.  At the door, the stale in-memory copy
+    is something the operator brought with them and the answer is to
+    refuse.  Here it is our own doing: bringing the machine up to date
+    is the first thing a distupgrade does, and on a system left
+    un-updated for months that will pull glibc or the init.
+
+    Raised after Phase A and before anything of the migration proper.
+    That point is the only one where rebooting is free: no media have
+    been swapped, no package of the target release installed, nothing
+    half-migrated.  The state is persisted so ``--resume`` picks up
+    after the reboot.
+    """
+
+
 # Packages whose in-memory copy is load-bearing for the transaction
 # itself : rpm scriptlets link against glibc, systemd runs pid 1, the
 # running kernel dictates syscall behaviour.  When any of them was
@@ -249,7 +267,27 @@ class PendingRebootError(Exception):
 # distupgrade at that point mixes two glibc ABIs across a single
 # ``rpm --root /`` cycle and typically dies mid-transaction on a
 # scriptlet SIGABRT or PAM corruption.
-_REBOOT_CRITICAL_NAMES = ("glibc", "systemd")
+# Expressed as capabilities, not package names.  ``systemd`` as a Name
+# is blind on a sysvinit or openrc machine — the guard would sail past
+# exactly the case it exists for, on the systems where our zero-systemd
+# rule says we must work.  ``/sbin/init`` resolves to whatever is pid 1,
+# and ``libc.so.6`` to glibc on both 32- and 64-bit.
+_REBOOT_CRITICAL_CAPABILITIES = ("/sbin/init", "libc.so.6")
+
+
+def _providers_of(ts, capability: str):
+    """rpmdb entries providing *capability*, file paths included.
+
+    ``dbMatch(RPMTAG_PROVIDENAME, "/sbin/init")`` returns nothing:
+    file provides live under ``RPMTAG_BASENAMES``, and only the
+    ``rpm --whatprovides`` front-end papers over the difference.
+    Querying the wrong tag would leave this guard silently blind,
+    which is worse than the hard-coded names it replaces.
+    """
+    import rpm  # noqa: PLC0415 — kept local per checks.py idiom
+    tag = (rpm.RPMTAG_BASENAMES if capability.startswith("/")
+           else rpm.RPMTAG_PROVIDENAME)
+    return ts.dbMatch(tag, capability)
 
 
 def _boot_time_epoch() -> Optional[int]:
@@ -310,10 +348,16 @@ def check_pending_reboot(
         from ..rpmdb import open_ts
         installed_times = {}
         with open_ts(root) as ts:
-            for name in _REBOOT_CRITICAL_NAMES:
-                for hdr in ts.dbMatch("name", name):
+            for capability in _REBOOT_CRITICAL_CAPABILITIES:
+                for hdr in _providers_of(ts, capability):
                     ts_installed = hdr[rpm.RPMTAG_INSTALLTIME]
                     if ts_installed:
+                        # Report the package, not the capability : an
+                        # operator reads "systemd installed 12 min after
+                        # the last boot", not "/sbin/init".
+                        name = hdr[rpm.RPMTAG_NAME]
+                        if isinstance(name, bytes):
+                            name = name.decode()
                         prev = installed_times.get(name, 0)
                         installed_times[name] = max(prev, int(ts_installed))
     stale = [
