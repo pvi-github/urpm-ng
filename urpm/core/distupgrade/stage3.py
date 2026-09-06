@@ -111,6 +111,63 @@ def bump_stage(new_stage: str, db: "PackageDatabase") -> None:
     write_state(prior, db)
 
 
+# ── Plan entries ───────────────────────────────────────────────────
+#
+# A Tx B plan entry is either an install or an erase, and its position
+# in the list is libsolv's answer to "when is this safe to do".
+#
+# Erases used to be lifted out into a flat ``erase_names`` list and
+# replayed at the very last batch, which discarded that position.  On a
+# cross-release upgrade most of the volume moves through SONAME renames
+# (``lib64foo1`` → ``lib64foo2``): different names, so libsolv emits an
+# ERASE plus an INSTALL rather than an upgrade pair.  Deferring every
+# one of them keeps the whole outgoing library set on disk until the
+# end — measured at ×2 the nominal footprint on a real mga9→mga10, on a
+# partition sized for one release.
+#
+# Encoding, chosen so an older ``.state`` stays readable:
+#
+#   "foo-1.0-1.mga10.x86_64"   → install (a plain string, as before)
+#   {"erase": "libfoo1"}       → erase
+#
+# A state written by an earlier version holds only strings, so it
+# decodes as an all-install plan and its separate ``erase_names`` field
+# still applies — the previous behaviour, exactly. No version marker is
+# needed and a machine interrupted mid-migration stays resumable.
+
+ERASE_KEY = "erase"
+
+
+def is_erase_entry(entry) -> bool:
+    """True when a plan entry denotes an erase rather than an install."""
+    return isinstance(entry, dict) and ERASE_KEY in entry
+
+
+def erase_entry(name: str) -> dict:
+    """Build the plan entry that erases *name*."""
+    return {ERASE_KEY: name}
+
+
+def entry_name(entry) -> str:
+    """Package name for an erase entry, NEVRA for an install one."""
+    return entry[ERASE_KEY] if is_erase_entry(entry) else entry
+
+
+def split_entries(plan) -> "tuple[list, list]":
+    """Return ``(install_nevras, erase_names)`` for one plan slice.
+
+    Order is preserved within each list.  rpm receives both in a single
+    ``TransactionSet`` and runs ``ts.order()`` on it, so the relative
+    order between the two natures is rpm's business, not ours — what
+    matters is that they travel in the same batch.
+    """
+    installs, erases = [], []
+    for entry in plan:
+        (erases if is_erase_entry(entry) else installs).append(
+            entry_name(entry))
+    return installs, erases
+
+
 def _strip_epoch(nevra: str) -> str:
     """Return ``nevra`` with the ``epoch:`` segment removed.
 
@@ -271,8 +328,16 @@ def _run_one_side(
     """
     from ..operations import InstallOptions, PackageOperations
 
+    # A plan slice carries installs and erases interleaved at the
+    # positions libsolv assigned them.  Erases have no payload, so they
+    # are separated out here and handed to the same rpm transaction as
+    # names — ``_build_rpm_ts`` adds both and lets ``ts.order()`` decide
+    # the intra-transaction sequence.
+    plan_installs, plan_erases = split_entries(plan)
+    erase_names = list(erase_names or []) + plan_erases
+
     ordered_paths: List[str] = []
-    for nevra in plan:
+    for nevra in plan_installs:
         # Try the plan's NEVRA verbatim first (may include epoch),
         # then a version without epoch — RPM filenames drop it, so
         # the download map is keyed both possibilities coalesced.
@@ -440,6 +505,13 @@ def _split_plan_by_size(
     current: List[str] = []
     current_bytes = 0
     for nevra in plan:
+        # An erase consumes nothing — it frees.  Weighing it zero keeps
+        # the budget on what it exists for (capping the payload peak)
+        # and lets an erase travel in whichever slice its position puts
+        # it, rather than pushing a boundary for no reason.
+        if is_erase_entry(nevra):
+            current.append(nevra)
+            continue
         rpm_path = (rpm_paths_by_nevra.get(nevra)
                     or rpm_paths_by_nevra.get(_strip_epoch(nevra)))
         try:
@@ -478,6 +550,12 @@ def _purge_installed_batch_rpms(
     freed_files = 0
     freed_bytes = 0
     for nevra in batch:
+        # Erase entries carry no payload to reclaim.  Skipped
+        # explicitly rather than relying on ``_canonical_nevra``
+        # rejecting a bare package name — that would work today and
+        # break the day the helper grows more tolerant.
+        if is_erase_entry(nevra):
+            continue
         canon = _canonical_nevra(nevra)
         if canon is None or canon not in installed:
             continue
@@ -597,6 +675,12 @@ def _retry_missing_installs(
     missing_paths: list = []
     missing_nevras: list = []
     for nevra in planned_nevras:
+        # An erase is *supposed* to be absent from the rpmdb.  Without
+        # this guard the retry pass would read every planned removal as
+        # a silently-failed install and try to put it back — the exact
+        # opposite of the plan.
+        if is_erase_entry(nevra):
+            continue
         canon = _canonical_nevra(nevra)
         if canon is None or canon in installed:
             continue
@@ -817,9 +901,11 @@ def run_stage3_tx_b(
             progress_callback(tp)
 
     for i, batch in enumerate(batches, start=1):
-        # erase_names go with the LAST batch : the packages they name
-        # are typically obsoleted by an install in the plan, so they
-        # need to survive until that install runs.
+        # Erases interleaved in the plan travel with their own batch —
+        # ``_run_one_side`` pulls them out of the slice.  Only the
+        # legacy flat ``erase_names`` (a ``.state`` written before the
+        # plan carried both natures) still lands wholesale on the last
+        # batch, which is the behaviour it was persisted under.
         batch_erase = erase_names if i == len(batches) else None
         _run_one_side(
             db,
@@ -833,6 +919,8 @@ def run_stage3_tx_b(
         )
         # Accumulate from the *planned* count, not an observed callback
         # value — see the invariants block above.
+        # ``batch`` already counts its own erases — they are entries of
+        # the slice.  Only the legacy flat list adds on top.
         _prog_state["done_before_batch"] += len(batch) + len(batch_erase or [])
         # Free the .rpm cache of packages this batch successfully
         # committed to rpmdb : failed ones keep their .rpm so the

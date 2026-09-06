@@ -1135,6 +1135,31 @@ def _cmd_run_stage3_tx_a_and_execvp(
     tx_a_plan, tx_b_plan = split_plan_for_tx_a_and_b(
         install_actions, resolver=resolver,
     )
+
+    # Put the REMOVE actions back where libsolv placed them.
+    #
+    # ``split_plan_for_tx_a_and_b`` works on installs only and returns
+    # bare NEVRAs, so the interleaving of erases among them is lost at
+    # that point.  Rebuilding it here — by walking the original ordered
+    # plan and keeping whatever belongs to Tx B — restores the one piece
+    # of information that says when each removal is safe.
+    #
+    # Deferring them all to the last batch instead kept every outgoing
+    # package on disk for the whole of Tx B.  On a cross-release upgrade
+    # that is most of the library set, because a SONAME bump
+    # (``lib64foo1`` → ``lib64foo2``) is an ERASE plus an INSTALL rather
+    # than an upgrade pair : measured at ×2 the nominal footprint on a
+    # real mga9→mga10.
+    #
+    # Erases all belong to Tx B : Tx A is the critical stack needed to
+    # re-exec, and removing anything there would risk the handoff.
+    from ...core.distupgrade.stage3 import erase_entry
+    tx_b_set = set(tx_b_plan)
+    tx_b_plan = [
+        erase_entry(p.name) if p.action.value == 'remove' else p.nevra
+        for p in plan
+        if p.action.value == 'remove' or p.nevra in tx_b_set
+    ]
     print(colors.info(_(
         "Install plan : {n_a} critical system component(s) first, then "
         "{n_b} remaining component(s), with {n_rm} package(s) to "
