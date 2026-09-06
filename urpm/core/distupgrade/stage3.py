@@ -631,6 +631,44 @@ def _installed_nevras_canonical(root: str = "/") -> set:
         return set()
 
 
+def _drop_already_applied(plan: List) -> List:
+    """Return *plan* without the entries the rpmdb says are already done.
+
+    An install already present at its planned NEVRA has nothing left to
+    do, and its cached ``.rpm`` was very likely purged by the per-batch
+    cleanup — keeping it would make ``_run_one_side`` open a file that
+    is gone.  An erase whose package is already absent is equally moot.
+
+    Best-effort: when the rpmdb probe comes back empty (bindings
+    missing, unreadable root) the plan is returned untouched rather
+    than guessed at.  A replay of an already-applied entry is wasteful ;
+    dropping one that still needed doing would be a silent hole.
+    """
+    installed = _installed_nevras_canonical()
+    if not installed:
+        return list(plan)
+
+    kept = []
+    for entry in plan:
+        if is_erase_entry(entry):
+            # No cheap NEVRA for an erase — the plan carries a bare
+            # name.  Keeping it is safe: erasing an absent package is
+            # a no-op for rpm.
+            kept.append(entry)
+            continue
+        canon = _canonical_nevra(entry)
+        if canon is not None and canon in installed:
+            continue
+        kept.append(entry)
+
+    dropped = len(plan) - len(kept)
+    if dropped:
+        logger.info(
+            "Tx B : %d of %d plan entries already applied, skipping them",
+            dropped, len(plan))
+    return kept
+
+
 def _retry_missing_installs(
     db: "PackageDatabase",
     *,
@@ -798,6 +836,22 @@ def run_stage3_tx_b(
     ``progress_callback`` : forwarded to :func:`_run_one_side` /
     :meth:`PackageOperations.execute_install`.
     """
+    # Drop what the rpmdb says is already done.
+    #
+    # ``--resume`` at ``tx_b_running`` replays the persisted plan from
+    # the top, but ``_purge_installed_batch_rpms`` unlinked the payload
+    # of every package a previous run committed.  Replaying them means
+    # opening .rpm files that no longer exist — so any Tx B that got
+    # past its first batch was structurally unresumable.
+    #
+    # The comparison already existed thirty lines below, in
+    # ``_retry_missing_installs``; it just was not applied on the way
+    # in.  Same predicate, reused here.
+    #
+    # Harmless on a first pass: nothing of Tx B is installed yet, so
+    # nothing is dropped.
+    tx_b_plan = _drop_already_applied(tx_b_plan)
+
     persist_tx_b_plan(
         db, tx_b_plan,
         version_from=version_from,

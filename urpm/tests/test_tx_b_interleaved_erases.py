@@ -213,3 +213,76 @@ class TestLegacyStateStillWorks:
             f.write_bytes(b"\0" * 100)
             paths[n] = str(f)
         assert _split_plan_by_size(["a", "b"], paths, 100) == [["a"], ["b"]]
+
+
+class TestResumeDropsAlreadyApplied:
+    """``--resume`` at ``tx_b_running`` replays the persisted plan.
+
+    ``_purge_installed_batch_rpms`` unlinks the payload of everything a
+    batch committed, so replaying the whole plan means opening files
+    that are gone — any Tx B past its first batch was structurally
+    unresumable.  A tester hit exactly this: the resume failed, the
+    message was swallowed, and they reached for ``--abort``.
+    """
+
+    def test_installed_entries_are_dropped(self, monkeypatch):
+        from urpm.core.distupgrade import stage3
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda: {stage3._canonical_nevra("done-1.0-1.mga10.x86_64")})
+        plan = ["done-1.0-1.mga10.x86_64", "todo-1.0-1.mga10.x86_64"]
+        assert stage3._drop_already_applied(plan) == [
+            "todo-1.0-1.mga10.x86_64"]
+
+    def test_order_of_survivors_is_preserved(self, monkeypatch):
+        """Batch slicing relies on libsolv's order — filtering must not
+        reshuffle what it keeps."""
+        from urpm.core.distupgrade import stage3
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda: {stage3._canonical_nevra("b-1.0-1.mga10.x86_64")})
+        plan = ["a-1.0-1.mga10.x86_64", "b-1.0-1.mga10.x86_64",
+                "c-1.0-1.mga10.x86_64"]
+        assert stage3._drop_already_applied(plan) == [
+            "a-1.0-1.mga10.x86_64", "c-1.0-1.mga10.x86_64"]
+
+    def test_erases_are_kept(self, monkeypatch):
+        """A bare name gives no NEVRA to compare, and erasing an absent
+        package is a no-op for rpm — keeping it is the safe side."""
+        from urpm.core.distupgrade import stage3
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda: {"whatever-1.0-1.mga10.x86_64"})
+        plan = [erase_entry("lib64foo1")]
+        assert stage3._drop_already_applied(plan) == plan
+
+    def test_first_pass_drops_nothing(self, monkeypatch):
+        """Nothing of Tx B is installed yet, so a fresh run is
+        untouched — the filter must not cost the normal path anything."""
+        from urpm.core.distupgrade import stage3
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda: {"unrelated-1.0-1.mga10.x86_64"})
+        plan = ["a-1.0-1.mga10.x86_64", erase_entry("old"),
+                "b-1.0-1.mga10.x86_64"]
+        assert stage3._drop_already_applied(plan) == plan
+
+    def test_empty_rpmdb_probe_keeps_everything(self, monkeypatch):
+        """No rpm bindings, unreadable root : replaying an applied entry
+        is wasteful, dropping a pending one would be a silent hole."""
+        from urpm.core.distupgrade import stage3
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical", lambda: set())
+        plan = ["a-1.0-1.mga10.x86_64", "b-1.0-1.mga10.x86_64"]
+        assert stage3._drop_already_applied(plan) == plan
+
+    def test_fully_applied_plan_becomes_empty(self, monkeypatch):
+        """The state a resume lands in when the previous run actually
+        finished Tx B but died before Stage 4."""
+        from urpm.core.distupgrade import stage3
+        monkeypatch.setattr(
+            stage3, "_installed_nevras_canonical",
+            lambda: {stage3._canonical_nevra("a-1.0-1.mga10.x86_64"),
+                     stage3._canonical_nevra("b-1.0-1.mga10.x86_64")})
+        assert stage3._drop_already_applied(
+            ["a-1.0-1.mga10.x86_64", "b-1.0-1.mga10.x86_64"]) == []

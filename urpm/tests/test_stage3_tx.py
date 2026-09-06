@@ -283,14 +283,23 @@ class TestRunStage3TxB:
         ops.begin_transaction.return_value = 200
         ops.execute_install.return_value = _fake_queue_result(
             rpmnew=["/etc/bar.rpmnew"])
-        # Retry pass probes the rpmdb : pretend the planned NEVRA is
-        # already installed so the retry short-circuits.  Testing the
-        # retry path itself lives in TestRetryMissingInstalls below.
+        # The rpmdb probe is consulted twice, at two different moments,
+        # and a single fixed answer cannot be right for both : the
+        # re-entry reconciliation asks *before* the transaction (the
+        # package must be absent, or it is dropped from the plan as
+        # already applied) and the retry pass asks *after* (it must be
+        # present, or the retry fires).  Stateful stub, mirroring what
+        # actually happens.  The retry path itself is covered by
+        # TestRetryMissingInstalls below.
         canon = stage3._canonical_nevra("bar-2-1.mga11.x86_64")
+        probe_calls = {"n": 0}
+
+        def _probe(root="/"):
+            probe_calls["n"] += 1
+            return set() if probe_calls["n"] == 1 else {canon}
+
         monkeypatch.setattr(
-            stage3, "_installed_nevras_canonical",
-            lambda root="/": {canon},
-        )
+            stage3, "_installed_nevras_canonical", _probe)
         with patch("urpm.core.operations.PackageOperations",
                    return_value=ops):
             run_stage3_tx_b(
