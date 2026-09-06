@@ -15,6 +15,7 @@ from ..helpers.resolver import create_resolver as _create_resolver
 # from disk before we try to read it.  Python keeps the function
 # reference in memory regardless of the source file's fate.
 from ..helpers.progress import display_scriptlet_output as _display_scriptlet_output
+from ..helpers.failure_report import print_errors
 
 
 def cmd_erase(args, db: 'PackageDatabase') -> int:
@@ -330,11 +331,7 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
 
         if not queue_result.success:
             print(colors.error("\n" + _("Erase failed:")))
-            if queue_result.operations:
-                for err in queue_result.operations[0].errors[:3]:
-                    print(f"  {colors.error(err)}")
-            elif queue_result.overall_error:
-                print(f"  {colors.error(queue_result.overall_error)}")
+            print_errors(queue_result.collect_errors(), limit=3)
             if not erase_opts.force:
                 print(colors.dim(_("  Use --force to ignore dependency problems")))
             ops.abort_transaction(transaction_id)

@@ -13,6 +13,7 @@ from ..helpers.kernel import (
     find_faildeps as _find_faildeps,
 )
 from ..helpers.package import extract_pkg_name as _extract_pkg_name
+from ..helpers.failure_report import print_errors
 
 
 def cmd_autoremove(args, db: 'PackageDatabase') -> int:
@@ -318,11 +319,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
         if not queue_result.success:
             print(colors.error("\n" + _("Removal failed:")))
-            if queue_result.operations:
-                for err in queue_result.operations[0].errors[:3]:
-                    print(f"  {colors.error(err)}")
-            elif queue_result.overall_error:
-                print(f"  {colors.error(queue_result.overall_error)}")
+            print_errors(queue_result.collect_errors(), limit=3)
             db.abort_transaction(transaction_id)
             return 1
 
@@ -517,11 +514,7 @@ def _cmd_autoremove_interactive(
 
         if not queue_result.success:
             print(colors.error("\n" + _("Removal failed:")))
-            if queue_result.operations:
-                for err in queue_result.operations[0].errors[:3]:
-                    print(f"  {colors.error(err)}")
-            elif queue_result.overall_error:
-                print(f"  {colors.error(queue_result.overall_error)}")
+            print_errors(queue_result.collect_errors(), limit=3)
             db.abort_transaction(transaction_id)
             return 1
 
@@ -883,11 +876,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
 
         if not queue_result.success:
             print(colors.error("\n" + _("Erase failed:")))
-            if queue_result.operations:
-                for err in queue_result.operations[0].errors[:5]:
-                    print(f"  {colors.error(err)}")
-            elif queue_result.overall_error:
-                print(f"  {colors.error(queue_result.overall_error)}")
+            print_errors(queue_result.collect_errors(), limit=5)
             db.abort_transaction(transaction_id)
             return 1
 

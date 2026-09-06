@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ...i18n import _, ngettext, confirm_yes
+from ..helpers.failure_report import print_errors
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -349,11 +350,7 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
 
             if not queue_result.success:
                 print(colors.error(_("\nErase failed:")))
-                if queue_result.operations:
-                    for err in queue_result.operations[0].errors[:10]:
-                        print(f"  {colors.error(err)}")
-                elif queue_result.overall_error:
-                    print(f"  {colors.error(queue_result.overall_error)}")
+                print_errors(queue_result.collect_errors(), limit=10)
                 db.abort_transaction(undo_trans_id)
                 return 1
 
@@ -541,9 +538,8 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
 
                 if not install_result.success:
                     print(colors.error(_("  Reinstall failed:")))
-                    if install_result.operations:
-                        for err in install_result.operations[0].errors[:5]:
-                            print(f"    {colors.error(err)}")
+                    print_errors(install_result.collect_errors(),
+                                 limit=5, indent="    ")
                     # Don't fail the whole undo - removal was successful
                 else:
                     # Record reinstalled packages
@@ -811,11 +807,7 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
 
             if not queue_result.success:
                 print(colors.error(_("\nErase failed:")))
-                if queue_result.operations:
-                    for err in queue_result.operations[0].errors[:10]:
-                        print(f"  {colors.error(err)}")
-                elif queue_result.overall_error:
-                    print(f"  {colors.error(queue_result.overall_error)}")
+                print_errors(queue_result.collect_errors(), limit=10)
                 db.abort_transaction(trans_id)
                 return 1
 

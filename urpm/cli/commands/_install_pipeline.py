@@ -52,6 +52,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .. import colors
 from ...i18n import _, ngettext
+from ..helpers.failure_report import print_errors
 
 if TYPE_CHECKING:
     from ...core.install import InstallResult
@@ -233,8 +234,7 @@ def run_install_transaction(
         if not resilient_result.success:
             verb = _("Installation failed:") if mode == "install" else _("Upgrade failed:")
             print(colors.error("\n" + verb))
-            for err in resilient_result.errors[:3]:
-                print(f"  {colors.error(str(err))}")
+            print_errors(resilient_result.errors, limit=3)
             ops.abort_transaction(transaction_id)
             return 1
 
