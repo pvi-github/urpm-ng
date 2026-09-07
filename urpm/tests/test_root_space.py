@@ -31,13 +31,11 @@ import pytest
 from urpm.core.distupgrade import root_space
 from urpm.core.distupgrade.live_system import LiveSystemSnapshot
 from urpm.core.distupgrade.root_space import (
-    TOLERATED_SHORTFALL_RATIO,
-    UNCERTAINTY_RATIO,
+    HEADROOM_RATIO,
     FilesystemNeed,
-    batch_transient_bytes,
-    RootSpaceError,
     RootSpaceEstimate,
-    check_root_space,
+    assess_root_space,
+    batch_transient_bytes,
     deferred_erase_bytes,
     estimate,
 )
@@ -162,13 +160,14 @@ class TestThePayloadAndTheFootprintNeverCoexist:
         assert need.required == 5 * GB
 
     def test_the_terms_that_really_are_simultaneous_still_add(self):
-        """One batch mid-commit, the deferred erases and the declared
-        allowance sit on top of the peak, not beside it."""
+        """One batch mid-commit and the deferred erases sit on top of
+        the peak.  The headroom does not : it is advice, not a
+        quantity the migration consumes."""
         need = FilesystemNeed(mountpoint=Path("/"), payload=3 * GB,
                               unpacked=4 * GB, deferred=100 * MB,
-                              transient=600 * MB, uncertainty=GB,
+                              transient=600 * MB, headroom=GB,
                               available=8 * GB)
-        assert need.required == 4 * GB + 100 * MB + 600 * MB + GB
+        assert need.required == 4 * GB + 100 * MB + 600 * MB
 
 
 class TestTheTransientIsOneBatchUnpacked:
@@ -203,39 +202,55 @@ class TestTheTransientIsOneBatchUnpacked:
         assert "200" not in source
 
 
-class TestTheAllowanceIsDeclaredNotHidden:
-    """The one figure here that is chosen rather than read.  It is
-    proportional, named, and printed on its own line — a visible
-    allowance stays arguable, a hidden one becomes dogma."""
+class TestTheHeadroomIsAdviceNotARequirement:
+    """The one figure here that is chosen rather than read.  Charging
+    it into the estimated need read as « 6.15 GB needed, 5.98 GB
+    available » on a machine whose real peak was 5.33 — a number no
+    operator starts a two-hour migration against.  The veto had left
+    the code and stayed in the figure."""
+
+    def test_it_stays_out_of_the_estimated_need(self):
+        need = FilesystemNeed(mountpoint=Path("/"), unpacked=5 * GB,
+                              headroom=GB, available=8 * GB)
+        assert need.required == 5 * GB, (
+            "advice about a margin is not a quantity the migration "
+            "will consume"
+        )
+
+    def test_a_plan_that_fits_without_it_fits(self):
+        """The tester's machine : 5.06 GB of plan against 5.98 free."""
+        need = FilesystemNeed(mountpoint=Path("/"), unpacked=int(5.06 * GB),
+                              headroom=int(1.10 * GB),
+                              available=int(5.98 * GB))
+        assert need.fits
+        assert not need.comfortable, "the margin is thin, and worth saying"
 
     def test_it_scales_with_the_plan(self, no_live_packages):
         actions = [Action("install", "new", size=10 * GB, filesize=3 * GB)]
         need = _only(estimate(actions))
-        assert need.uncertainty == int(10 * GB * UNCERTAINTY_RATIO)
+        assert need.headroom == int(10 * GB * HEADROOM_RATIO)
 
     def test_a_small_plan_gets_a_small_allowance(self, no_live_packages):
         """A point release must not be charged a cross-release margin."""
         actions = [Action("install", "new", size=100 * MB, filesize=30 * MB)]
         need = _only(estimate(actions))
-        assert need.uncertainty == int(100 * MB * UNCERTAINTY_RATIO)
+        assert need.headroom == int(100 * MB * HEADROOM_RATIO)
 
     def test_it_has_its_own_line_in_the_report(self):
         need = FilesystemNeed(mountpoint=Path("/"), unpacked=GB,
-                              uncertainty=100 * MB, available=8 * GB)
+                              headroom=100 * MB, available=8 * GB)
         est = RootSpaceEstimate(filesystems=(need,))
-        assert "allowance" in root_space.describe(est)
+        text = root_space.describe(est)
+        assert "headroom advised" in text
+        assert "estimated need" in text
 
-    def test_a_payload_only_filesystem_carries_none(self, no_live_packages,
-                                                    tmp_path):
+    def test_a_payload_only_filesystem_carries_none(self, tmp_path):
         """Nothing is unpacked on the download partition, so no
-        scriptlet runs there and no allowance applies."""
-        payload = tmp_path / "payload"
-        payload.mkdir()
-        from urpm.core.distupgrade import live_system
-        need = FilesystemNeed(mountpoint=payload, payload=GB,
+        scriptlet runs there and no headroom applies."""
+        need = FilesystemNeed(mountpoint=tmp_path / "payload", payload=GB,
                               available=3 * GB)
         assert need.holds_payload_only
-        assert need.uncertainty == 0
+        assert need.headroom == 0
 
 
 class TestTheMeasuredMigration:
@@ -249,8 +264,10 @@ class TestTheMeasuredMigration:
 
     @pytest.fixture
     def plan(self):
+        # from_size chosen so the net lands on the 4.42 GB the machine
+        # actually reported, rather than on a round guess.
         return [Action("upgrade", "everything", size=11 * GB,
-                       filesize=int(3.43 * GB), from_size=int(7.5 * GB))]
+                       filesize=int(3.43 * GB), from_size=int(6.58 * GB))]
 
     @pytest.fixture
     def measured(self, monkeypatch, no_live_packages):
@@ -264,18 +281,28 @@ class TestTheMeasuredMigration:
 
     def test_the_prediction_lands_near_the_observed_low_water_mark(
             self, plan, measured):
-        """Observed: about 700 MB free at the worst moment."""
+        """Observed: about 650 MB free at the worst moment, so the
+        estimate under-calls by roughly 300 MB — the direction the
+        headroom is advice about."""
         need = _only(estimate(plan, payload_dir=Path("/")))
-        left = need.available - need.required
-        assert 0.5 * GB < left < GB, (
-            f"predicted {left / GB:.2f} GB left, observed about 0.7"
+        left = need.remaining
+        assert 0.7 * GB < left < 1.2 * GB, (
+            f"predicted {left / GB:.2f} GB left, observed about 0.65"
         )
+
+    def test_it_fits_without_needing_the_headroom_to_be_spent(self, plan,
+                                                              measured):
+        """5.05 GB of plan against 5.98 free : it goes through, and the
+        thin margin is worth a word rather than a refusal."""
+        need = _only(estimate(plan, payload_dir=Path("/")))
+        assert need.fits
+        assert not need.comfortable
 
     def test_the_net_footprint_is_no_longer_the_gross_one(self, plan,
                                                           measured):
-        """11 GB arrives, 7.5 GB of it replaces something."""
+        """11 GB arrives, 6.58 GB of it replaces something."""
         need = _only(estimate(plan, payload_dir=Path("/")))
-        assert 3 * GB < need.unpacked < 4 * GB
+        assert 4.3 * GB < need.unpacked < 4.5 * GB
 
 
 class TestEachFilesystemGetsItsOwnVerdict:
@@ -333,8 +360,7 @@ class TestEachFilesystemGetsItsOwnVerdict:
                           filesize=200 * MB)]
         need = _only(estimate(actions, payload_dir=Path("/")))
         assert need.payload == 200 * MB
-        assert need.required == (500 * MB + need.transient
-                                 + need.uncertainty), (
+        assert need.required == 500 * MB + need.transient, (
             "one filesystem, one verdict : the footprint sets the base "
             "and the payload is subsumed by it, not added to it"
         )
@@ -455,179 +481,158 @@ class TestTheFilesystemMeasuredIsTheRightOne:
         assert var not in est.unmodelled
 
 
-class TestTheRefusal:
+class TestNothingHereRefuses:
+    """An earlier cut raised, and stopped a tester 169 MB short on a
+    machine that had completed the same migration three times.
 
-    @pytest.fixture
-    def cramped(self, monkeypatch):
-        monkeypatch.setattr(
-            root_space, "estimate",
-            lambda *a, **kw: RootSpaceEstimate(filesystems=(
-                FilesystemNeed(mountpoint=Path("/"), unpacked=3 * GB,
-                               deferred=500 * MB, payload=GB,
-                               available=2 * GB, reserved=300 * MB),)))
-
-    @pytest.fixture
-    def payload_partition_full(self, monkeypatch):
-        monkeypatch.setattr(
-            root_space, "estimate",
-            lambda *a, **kw: RootSpaceEstimate(filesystems=(
-                FilesystemNeed(mountpoint=Path("/"), unpacked=GB,
-                               available=50 * GB),
-                FilesystemNeed(mountpoint=Path("/var"), payload=9 * GB,
-                               available=2 * GB),)))
-
-    def test_it_raises_with_the_shortfall(self, cramped):
-        with pytest.raises(RootSpaceError) as excinfo:
-            check_root_space([])
-        assert "short" in str(excinfo.value)
-
-    def test_it_names_the_commands_that_recover_space(self, cramped):
-        with pytest.raises(RootSpaceError) as excinfo:
-            check_root_space([])
-        message = str(excinfo.value)
-        for command in ("urpm cache flush", "urpm autoremove --oldkernels",
-                        "urpm autoremove"):
-            assert command in message
-
-    def test_a_full_payload_partition_does_not_send_you_to_autoremove(
-            self, payload_partition_full):
-        """Removing packages from a root with 50 GB free frees nothing
-        on the partition that is actually full."""
-        with pytest.raises(RootSpaceError) as excinfo:
-            check_root_space([])
-        message = str(excinfo.value)
-        assert "urpm cache flush" in message
-        assert "urpm autoremove" not in message
-        assert "payload_dir" in message, (
-            "the durable fix for a small cache partition is to move the "
-            "payload, and distupgrade has no --download-dir flag"
-        )
-
-    def test_only_the_short_filesystem_is_named(self, payload_partition_full):
-        with pytest.raises(RootSpaceError) as excinfo:
-            check_root_space([])
-        first_line = str(excinfo.value).splitlines()[0]
-        assert "/var" in first_line
-        assert not first_line.startswith("/ ")
-
-    def test_it_says_what_it_does_not_count(self, cramped):
-        """Scriptlet output -- initramfs, font caches -- is owned by no
-        package and appears in no plan.  Stating it beats padding the
-        figures with a coefficient that pretends to know."""
-        with pytest.raises(RootSpaceError) as excinfo:
-            check_root_space([])
-        assert "initramfs" in str(excinfo.value)
-
-    def test_a_plan_that_fits_returns_the_estimate(self, no_live_packages):
-        est = check_root_space([])
-        assert est.fits
-        assert _only(est).required == 0
-
-
-class TestARefusalCannotBeSurerThanTheEstimate:
-    """The check carries a declared allowance for what the plan cannot
-    describe.  Stopping a migration for less than half of that claims a
-    precision it does not have — which is what happened to a tester
-    stopped 169 MB short by a figure hedged by 1.1 GB, on a machine
-    that had completed the same migration three times.
+    A false refusal is strictly worse than no check at all: it aborts a
+    migration that would have worked, and since the pre-flight cannot
+    run before Stage 1 has swapped the media, each one costs a
+    switchover, a sync, a solve and a rollback.  A false pass costs
+    what the status quo costs.  A model calibrated on one machine does
+    not earn a veto against that.
     """
 
     @staticmethod
-    def _need(shortfall, uncertainty=GB):
+    def _need(shortfall, headroom=GB):
         """A filesystem short by exactly *shortfall*."""
         return FilesystemNeed(
-            mountpoint=Path("/"), unpacked=4 * GB, uncertainty=uncertainty,
-            available=4 * GB + uncertainty - shortfall)
+            mountpoint=Path("/"), unpacked=4 * GB, headroom=GB,
+            available=4 * GB - shortfall)
 
-    def test_the_band_is_half_the_allowance(self):
-        need = self._need(0, uncertainty=GB)
-        assert need.tolerance == int(GB * TOLERATED_SHORTFALL_RATIO)
-
-    def test_a_shortfall_inside_the_band_does_not_block(self):
-        need = self._need(100 * MB)
-        assert not need.fits
-        assert not need.blocks
-
-    def test_a_shortfall_past_the_band_blocks(self):
-        need = self._need(600 * MB)
-        assert need.blocks
-
-    def test_the_boundary_belongs_to_the_tolerant_side(self):
-        """Exactly at the band is still inside it : a strict > keeps
-        the refusal for gaps the model can actually resolve."""
-        need = self._need(int(GB * TOLERATED_SHORTFALL_RATIO))
-        assert not need.blocks
-
-    def test_a_payload_partition_gets_no_band(self):
-        """Its figure is a sum of file sizes, known to the byte.  There
-        is no uncertainty to spend, so any shortfall is real."""
-        need = FilesystemNeed(mountpoint=Path("/var"), payload=2 * GB,
-                              available=2 * GB - MB)
-        assert need.tolerance == 0
-        assert need.blocks
-
-    def test_check_returns_instead_of_raising_inside_the_band(self,
-                                                              monkeypatch):
+    def test_a_thin_margin_returns(self, monkeypatch):
         monkeypatch.setattr(
             root_space, "estimate",
             lambda *a, **kw: RootSpaceEstimate(
-                filesystems=(self._need(100 * MB),)))
-        est = check_root_space([])
-        assert est.tight, "the operator must still be told"
-        assert not est.blocking
+                filesystems=(self._need(-100 * MB),)))
+        est = assess_root_space([])
+        assert est.short == () and est.filesystems[0].fits
 
-    def test_check_still_raises_past_the_band(self, monkeypatch):
+    def test_a_real_shortfall_returns_too(self, monkeypatch):
+        """The one the old cut refused on."""
         monkeypatch.setattr(
             root_space, "estimate",
             lambda *a, **kw: RootSpaceEstimate(
                 filesystems=(self._need(600 * MB),)))
-        with pytest.raises(RootSpaceError):
-            check_root_space([])
+        est = assess_root_space([])
+        assert est.short
 
-    def test_one_blocking_filesystem_stops_the_lot(self, monkeypatch):
-        """A tolerable gap elsewhere does not soften a real one."""
+    def test_a_hopeless_shortfall_returns_as_well(self, monkeypatch):
+        """8 GB missing is a warning, not a veto : the operator has the
+        plan in front of them and answers the prompt."""
         monkeypatch.setattr(
             root_space, "estimate",
             lambda *a, **kw: RootSpaceEstimate(filesystems=(
-                self._need(100 * MB),
-                FilesystemNeed(mountpoint=Path("/var"), payload=2 * GB,
-                               available=GB))))
-        with pytest.raises(RootSpaceError) as excinfo:
-            check_root_space([])
-        assert "/var" in str(excinfo.value)
+                FilesystemNeed(mountpoint=Path("/"), unpacked=10 * GB,
+                               headroom=GB, available=2 * GB),)))
+        est = assess_root_space([])
+        assert not est.fits
+        assert est.short
+
+    def test_the_module_raises_nothing_at_all(self):
+        """No exception class left to catch, and no ``raise`` in the
+        module : the guarantee is structural, not a code path someone
+        can re-enable by accident."""
+        import inspect
+        source = inspect.getsource(root_space)
+        assert "raise " not in source
+        assert not hasattr(root_space, "RootSpaceError")
 
 
-class TestTheWarningSaysWhatItDoesNotKnow:
+class TestTheThreeThingsItCanSay:
+    """Comfortable, thin, or too small.  Nothing else, and none of them
+    stops anything."""
+
+    @staticmethod
+    def _need(available):
+        return FilesystemNeed(mountpoint=Path("/"), unpacked=4 * GB,
+                              headroom=GB, available=available)
+
+    def test_room_to_spare_says_nothing(self):
+        est = RootSpaceEstimate(filesystems=(self._need(6 * GB),))
+        assert est.filesystems[0].comfortable
+        assert root_space.shortfall_warning(est) == ""
+
+    def test_a_thin_margin_advises_more(self):
+        """Fits on the plan's own figures, but with less room than the
+        headroom worth having."""
+        est = RootSpaceEstimate(filesystems=(self._need(4 * GB + 300 * MB),))
+        need = est.filesystems[0]
+        assert need.fits and not need.comfortable
+        text = root_space.shortfall_warning(est)
+        assert "thin margin" in text
+        assert "would be safer" in text, (
+            "the operator has to be told more room is preferable"
+        )
+        assert "300.0 MB" in text, "what would actually be left"
+
+    def test_too_small_says_so_plainly(self):
+        est = RootSpaceEstimate(filesystems=(self._need(2 * GB),))
+        text = root_space.shortfall_warning(est)
+        assert "too small" in text
+        assert "thin margin" not in text, (
+            "hedging a real shortfall wastes the one warning that matters"
+        )
+
+    def test_the_boundary_of_comfort_is_inclusive(self):
+        """Exactly the headroom left is comfortable, not thin."""
+        need = self._need(5 * GB)
+        assert need.comfortable
+
+    def test_a_payload_partition_needs_no_headroom(self):
+        """Its figure is a sum of file sizes, known to the byte, and
+        nothing unpacks there."""
+        need = FilesystemNeed(mountpoint=Path("/var"), payload=2 * GB,
+                              available=2 * GB + MB)
+        assert need.headroom == 0
+        assert need.comfortable
+
+
+class TestTheWarningCarriesTheDecision:
+    """Nothing stops the operator, so the warning has to be enough to
+    decide on : the figures, the way out, and what is not counted."""
 
     @staticmethod
     def _tight():
         return RootSpaceEstimate(filesystems=(FilesystemNeed(
-            mountpoint=Path("/"), unpacked=4 * GB, uncertainty=GB,
-            available=4 * GB + GB - 100 * MB),))
+            mountpoint=Path("/"), unpacked=4 * GB, headroom=GB,
+            available=4 * GB + 300 * MB),))
 
-    def test_nothing_tight_says_nothing(self, no_live_packages):
+    def test_nothing_short_says_nothing(self):
         est = RootSpaceEstimate(filesystems=(FilesystemNeed(
             mountpoint=Path("/"), unpacked=GB, available=8 * GB),))
         assert root_space.shortfall_warning(est) == ""
 
-    def test_it_gives_both_figures(self):
-        """The gap alone reads as a verdict; the gap next to the band
-        it sits inside reads as what it is."""
+    def test_it_gives_the_figures_a_reader_can_act_on(self):
+        """What the upgrade needs, what the disk has, what would be
+        left, and what would be comfortable.  Not a shortfall — there
+        is none, and printing one would read as a refusal."""
         text = root_space.shortfall_warning(self._tight())
-        assert "100.0 MB" in text
-        assert "512.0 MB" in text
+        assert "4.00 GB" in text, "what the upgrade is estimated to need"
+        assert "4.29 GB" in text, "what the filesystem has"
+        assert "300.0 MB" in text, "what would be left"
+        assert "1.00 GB" in text, "what would be comfortable"
 
     def test_it_offers_the_way_out(self):
-        assert "urpm cache flush" in root_space.shortfall_warning(
-            self._tight()) or "autoremove" in root_space.shortfall_warning(
-                self._tight())
-
-    def test_it_does_not_pretend_to_a_verdict(self):
-        """« may still fit » is the honest claim ; « cannot hold » is
-        the one reserved for a gap past the band."""
         text = root_space.shortfall_warning(self._tight())
-        assert "may still fit" in text
-        assert "cannot hold" not in text
+        assert "urpm autoremove" in text
+
+    def test_it_says_what_it_does_not_count(self):
+        """Someone deciding on their own has to know the figure is a
+        floor, not a total — said in terms of what the machine does,
+        not of which RPM owns what."""
+        text = root_space.shortfall_warning(self._tight())
+        assert "initramfs" in text
+        assert "Allow for more" in text
+
+    def test_a_full_payload_partition_names_its_durable_fix(self):
+        est = RootSpaceEstimate(filesystems=(FilesystemNeed(
+            mountpoint=Path("/var"), payload=9 * GB, available=2 * GB),))
+        text = root_space.shortfall_warning(est)
+        assert "payload_dir" in text
+        assert "urpm autoremove" not in text, (
+            "removing packages frees nothing on the cache partition"
+        )
 
 
 class TestDescribeIsShownEvenWhenItFits:
@@ -637,11 +642,12 @@ class TestDescribeIsShownEvenWhenItFits:
     def test_the_figures_are_all_there(self):
         est = RootSpaceEstimate(filesystems=(
             FilesystemNeed(mountpoint=Path("/"), unpacked=2 * GB,
-                           deferred=500 * MB, payload=GB,
+                           deferred=500 * MB, payload=GB, headroom=GB,
                            available=8 * GB, reserved=400 * MB),))
         text = root_space.describe(est)
         for expected in ("free space", "net footprint", "downloaded RPMs",
-                         "held to the end", "peak needed"):
+                         "held to the end", "estimated need",
+                         "headroom advised"):
             assert expected in text
 
     def test_a_net_negative_upgrade_shows_its_sign(self):

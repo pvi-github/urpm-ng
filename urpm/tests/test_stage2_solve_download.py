@@ -15,6 +15,7 @@ import pytest
 
 from urpm.core.database import PackageDatabase
 from urpm.core.distupgrade.stage2 import (
+    Stage2Aborted,
     Stage2Error,
     download_plan,
     run_stage2,
@@ -275,16 +276,15 @@ class TestRunStage2:
         assert confirm_called["n"] == 0, "confirm must not fire on empty plan"
         assert download_called["n"] == 0, "download must not fire on empty plan"
 
-    def test_a_plan_too_big_for_the_disk_stops_before_download(
-            self, state_db):
-        """The root-space pre-flight has to be wired into Stage 2, not
-        merely importable : rpm's own disk check fires at commit time,
-        which is several GB of download too late to be any use.
+    def test_the_space_estimate_reaches_the_confirm_gate(self, state_db):
+        """The pre-flight has to be wired into Stage 2, not merely
+        importable : rpm's own disk check fires at commit time, several
+        GB of download too late to be any use to anyone deciding.
 
-        Refusing before the confirm prompt is deliberate — there is
-        nothing to confirm about a migration that will run the disk out
-        half-way through, and asking only invites a « yes »."""
-        from urpm.core.distupgrade.root_space import RootSpaceError
+        It never refuses — a false refusal aborts a migration that
+        would have worked, after Stage 1 has already swapped the media.
+        What it owes the operator is the figures, next to the plan they
+        are confirming."""
         from urpm.core.distupgrade.state import write_state
         write_state({
             "version_from": "10", "version_to": "11",
@@ -297,24 +297,23 @@ class TestRunStage2:
             _pkg("huge", "huge-1-1.mga11.x86_64", size=1 << 50),
         ])
         huge._resolver = MagicMock()
-        confirm_called = {"n": 0}
-        download_called = {"n": 0}
+        seen = {}
 
-        def _confirm(_r, _space):
-            confirm_called["n"] += 1
-            return True
-
-        def _dp(*_a, **_kw):
-            download_called["n"] += 1
-            return {}
+        def _confirm(_r, space):
+            seen["space"] = space
+            return False          # decline : nothing downloads
 
         with patch("urpm.core.distupgrade.stage2.solve_distupgrade",
                    return_value=huge), \
-             patch("urpm.core.distupgrade.stage2.download_plan",
-                   side_effect=_dp):
-            with pytest.raises(RootSpaceError):
+             patch("urpm.core.distupgrade.stage2.download_plan") as _dl:
+            with pytest.raises(Stage2Aborted):
                 run_stage2(state_db, target=target,
                            confirm_callback=_confirm)
 
-        assert confirm_called["n"] == 0
-        assert download_called["n"] == 0
+        assert seen["space"] is not None, (
+            "the gate cannot weigh what it is not given"
+        )
+        assert seen["space"].short, (
+            "a package larger than any disk must show up as short"
+        )
+        _dl.assert_not_called()

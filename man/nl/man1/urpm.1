@@ -160,26 +160,18 @@ de rest, en een post-transactierapport (\fB.rpmnew\fR-bestanden,
 overgebleven mga-N-pakketten, weesmedia van derden). Herstart
 zodat de post-boot-aanpassingen bij de volgende opstart worden
 uitgevoerd.
-Vóór de download wordt het plan afgemeten tegen elk bestandssysteem
-dat er een deel van moet dragen. Aan dat met \fI/usr\fR wordt
-toegerekend wat de binnenkomende pakketten innemen min wat de
-vertrekkende teruggeven, plus de pakketten die nog in gebruik zijn en
-waarvan de ruimte pas met de laatste reeksen vrijkomt. Aan dat met de
-downloadcache worden de nog op te halen RPM's toegerekend. Staat
-\fI/var\fR op een eigen partitie, dan krijgen beide een eigen oordeel;
-ze optellen zou een opwaardering weigeren waarvan de pakketten ruim in
-\fI/var\fR passen. De blokken die een bestandssysteem voor root
-reserveert, tellen niet als beschikbaar. Ook op één bestandssysteem
-worden pakketten en beslag niet opgeteld: de RPM's van elke reeks
-worden gewist zodra die geïnstalleerd is, dus de piek is de grootste
-van de twee, plus één reeks midden in zijn commit en een aangegeven
-reserve van 10% van het geïnstalleerde beslag voor wat geen enkel
-pakket beschrijft. Past een van beide niet, dan
-wordt de repository-omschakeling teruggedraaid en worden de cijfers
-getoond met de commando's die ruimte vrijmaken waar die werkelijk
-ontbreekt. Wat scriptlets aanmaken (initramfs, lettertype- en
-pictogramcaches), hoort bij geen enkel pakket en wordt niet
-meegeteld.
+Vóór de download wordt het plan afgemeten tegen elk bestandssysteem dat
+er een deel van moet dragen, en de cijfers worden naast de
+bevestigingsprompt getoond. Er wordt niets geweigerd: de schatting is op
+één gemeten opwaardering geijkt, en een onterechte weigering zou een
+opwaardering afbreken die alle kans maakte. Aan het bestandssysteem met
+\fI/usr\fR wordt het netto beslag toegerekend plus één reeks midden in
+zijn commit en de tot het eind bewaarde verwijderingen; aan dat met de
+downloadcache de nog op te halen RPM's; een apart \fI/var\fR krijgt een
+eigen oordeel. Naast de schatting, nooit erin, staat een aangeraden
+marge van 10% van het geïnstalleerde beslag voor wat geen enkel pakket
+aangeeft \(em de opnieuw aangemaakte initramfs, de lettertype- en
+pictogramcaches.
 .RS
 .TP
 .B \-\-to \fIversion\fR

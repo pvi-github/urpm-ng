@@ -542,10 +542,10 @@ def _render_plan_and_confirm(result, *, space, source: str, target: str,
     from ...core.distupgrade.root_space import describe, shortfall_warning
     print("\n" + colors.dim(describe(space)))
 
-    # A margin inside the estimate's own noise is not a refusal, but it
-    # is not nothing either : printed in full, and printed under
-    # ``--auto`` too.  Someone running unattended is precisely the one
-    # who will find out the hard way.
+    # The pre-flight never refuses ; this is the whole of what it has
+    # to say, and the prompt below is where the operator answers it.
+    # Printed under ``--auto`` too : someone running unattended is
+    # precisely the one who would otherwise find out the hard way.
     tight = shortfall_warning(space)
     if tight:
         print("\n" + colors.warning(tight))
@@ -733,7 +733,6 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         Stage2Aborted,
         Stage2EmptyPlanError,
         Stage2Error,
-        RootSpaceError,
         release_distupgrade_lock,
         run_stage0,
         run_stage1,
@@ -1087,16 +1086,6 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         if _dp["display"] is not None:
             _dp["display"].finish()
         _render_empty_plan_diagnosis(exc.result)
-        _undo_stage1_media_swap(db, stage0.lock_fd)
-        return 1
-    except RootSpaceError as exc:
-        # Same unwind as the empty plan, same reason : Stage 1 has
-        # already flipped the media to the target release.  Leaving
-        # them that way on a machine that is staying on mga N is the
-        # brick-at-reboot the empty-plan guard exists to prevent.
-        if _dp["display"] is not None:
-            _dp["display"].finish()
-        print(colors.error(str(exc)))
         _undo_stage1_media_swap(db, stage0.lock_fd)
         return 1
     except Stage2Error as exc:

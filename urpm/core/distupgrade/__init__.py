@@ -40,9 +40,9 @@ from .stage2 import (
 from .root_space import (
     FilesystemNeed,
     RootSpaceEstimate,
-    RootSpaceError,
-    check_root_space,
+    assess_root_space,
     estimate as estimate_root_space,
+    shortfall_warning,
 )
 from .manifest import (
     BOOT_CRITICAL_LOCKS_BASE,
@@ -107,9 +107,9 @@ __all__ = [
     "RebootRequiredError",
     "FilesystemNeed",
     "RootSpaceEstimate",
-    "RootSpaceError",
-    "check_root_space",
+    "assess_root_space",
     "estimate_root_space",
+    "shortfall_warning",
     "Stage0Result",
     "Stage1Error",
     "BOOT_CRITICAL_LOCKS_BASE",

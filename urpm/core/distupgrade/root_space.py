@@ -67,9 +67,10 @@ margin is deciding not to.  The number follows the machine — one
 formatted with ``-m 0`` has no reserve, which is exactly what its
 administrator asked for.
 
-**Uncertainty** — the one figure here that is chosen rather than read,
+**Headroom** — the one figure here that is chosen rather than read,
 so it is named, displayed on its own line, and kept proportional:
-``UNCERTAINTY_RATIO`` of the gross installed footprint.  It stands for
+``HEADROOM_RATIO`` of the gross installed footprint.  It is advice
+about a margin, never part of the estimated need.  It stands for
 what the plan genuinely cannot describe — files scriptlets create (a
 regenerated initramfs, font and icon caches, ``ldconfig`` output, none
 of them owned by any RPM), rpmdb growth, and how much of the deferred
@@ -87,35 +88,38 @@ term                         predicted  measured
 ===========================  =========  ========
 net footprint                  4.42 GB   4.88 GB
 one batch unpacked             0.64 GB   0.45 GB
-peak                           6.15 GB   5.33 GB
+estimated need                 5.06 GB   5.33 GB
 ===========================  =========  ========
 
-So the terms that are read off the plan land within a few hundred MB
-either way, and without an allowance the model would have under-called
-the peak by 0.27 GB — under-calling is the direction that fills a disk
-mid-migration.  10% is roughly four times that on this machine, which
-is deliberate: it is one measurement, on one desktop, and what it
-stands for (initramfs regeneration, font caches) scales with how many
-kernels and how much of KDE a machine carries.  Shrinking it to fit
-this run would be fitting the noise.
+So the terms read off the plan land within a few hundred MB, and the
+estimate under-calls the peak by 0.27 GB — under-calling is the
+direction that fills a disk mid-migration, which is exactly what the
+headroom is advice about.  10% is roughly four times what this machine
+needed, deliberately: it is one measurement, on one desktop, and what
+it stands for (initramfs regeneration, font caches) scales with how
+many kernels and how much of KDE a machine carries.  Shrinking it to
+fit this run would be fitting the noise.
 
-It also sets how sure the refusal is allowed to sound.  A check that
-carries 1.1 GB of declared uncertainty has no business stopping a
-migration 170 MB short — and that is exactly what happened to a tester
-whose machine had completed the same migration three times.  Below
-``TOLERATED_SHORTFALL_RATIO`` of the allowance the figures cannot tell
-fit from no-fit, so the operator is warned and left to decide; above
-it, the gap is larger than the model's own noise and the refusal
-stands.
+**Nothing here refuses.**  An earlier cut did, and stopped a tester
+169 MB short on a machine that had completed the same migration three
+times.  The asymmetry is what settles it: a false refusal is strictly
+worse than no check at all — it aborts a migration that would have
+worked, and since the pre-flight cannot run before Stage 1 has swapped
+the media, every refusal costs a switchover, an eight-medium sync, a
+solve and a rollback.  A false pass costs what the status quo costs,
+which is nothing extra.  A model calibrated on one machine, on one
+run, does not earn a veto against those odds.
 
-The two ratios work as a pair, and it is the *refusal* threshold that
-wants to be well placed, not the figure on screen.  On the measured
-migration above the peak is displayed 0.82 GB high, but the point at
-which the check actually stops an operator — net + one batch + half
-the allowance — sits at 5.61 GB against a real peak of 5.33.  A
-generous allowance paired with a half band keeps the printed estimate
-safely pessimistic while keeping the decision within a few hundred MB
-of what the machine really does.
+Nor does the *display* refuse, which took a second pass to get right.
+Charging the headroom into the estimated need read as « 6.15 GB needed,
+5.98 GB available » on a machine whose real peak was 5.33 — a figure
+no operator would start a two-hour migration against.  The veto had
+left the code and stayed in the number.  So the estimate is the plan's
+own arithmetic, the headroom sits beside it as advice, and there are
+three things to say : nothing when the margin is comfortable, that the
+margin is thin and more would be safer when it fits without it, and
+that the filesystem is too small when the plan's own figures do not
+fit.  The operator reads it next to the plan they are confirming.
 
 One thing is knowingly not counted: package metadata carries no file
 list, so a plan's footprint cannot be split across filesystems.
@@ -140,26 +144,18 @@ from ..transaction_sizes import compute_sizes
 logger = logging.getLogger(__name__)
 
 
-class RootSpaceError(Exception):
-    """A filesystem the upgrade needs cannot hold its share of it."""
-
-
-#: Share of the gross installed footprint held back for what the plan
-#: cannot describe : scriptlet output, rpmdb growth, and how much of
-#: the deferred erase set a given machine really holds back.  The one
-#: figure in this module that is chosen rather than measured — see the
-#: module docstring for where 10% comes from and why it is shown on its
-#: own line rather than folded into the total.
-UNCERTAINTY_RATIO = 0.10
-
-#: Share of the allowance a shortfall may eat before the refusal turns
-#: hard.  Refusing a migration for 170 MB while carrying a declared
-#: 1.1 GB of uncertainty would be claiming a precision this estimate
-#: does not have; letting a shortfall spend the whole allowance would
-#: be spending the safety it exists for.  Half of it is the deliberate
-#: middle: below that the figures cannot tell fit from no-fit and the
-#: operator is warned rather than stopped, above it they are stopped.
-TOLERATED_SHORTFALL_RATIO = 0.5
+#: Headroom worth having beyond the estimate, as a share of the gross
+#: installed footprint.  It covers what the plan cannot describe :
+#: scriptlet output, rpmdb growth, and how much of the deferred erase
+#: set a given machine really holds back.
+#:
+#: It is a recommendation, not a requirement, and it is kept out of the
+#: estimated need for that reason.  Folded in, it turned a measurement
+#: into a verdict — « 6.15 GB needed, 5.98 GB available » on a machine
+#: whose real peak was 5.33, which no operator would take a two-hour
+#: migration on.  Removing the veto from the code and leaving it in the
+#: figure would have refused just the same, only without saying so.
+HEADROOM_RATIO = 0.10
 
 
 @dataclass(frozen=True)
@@ -183,14 +179,18 @@ class FilesystemNeed:
     #: One batch, unpacked : what rpm writes before its commit frees
     #: the versions it replaces.
     transient: int = 0
-    #: Allowance for what the plan cannot describe.  Chosen, not read.
-    uncertainty: int = 0
+    #: Room worth having on top.  A recommendation, deliberately kept
+    #: out of :attr:`required` — see :data:`HEADROOM_RATIO`.
+    headroom: int = 0
     available: int = 0
     reserved: int = 0
 
     @property
     def required(self) -> int:
-        """Peak usage over the whole of Stage 3.
+        """What the plan says this filesystem has to hold, at its peak.
+
+        Every term here is read off the plan or the machine, which is
+        what makes it worth putting in front of an operator.
 
         The payload and the unpacked footprint never coexist at full
         size — Tx B unlinks each batch's ``.rpm`` as soon as it commits,
@@ -201,43 +201,38 @@ class FilesystemNeed:
         migration needs.
 
         On top of that sit the terms that really are simultaneous : one
-        batch caught between its writes and its commit, the erases held
-        back to the last batches, and the declared uncertainty.
+        batch caught between its writes and its commit, and the erases
+        held back to the last batches.
+
+        :attr:`headroom` is *not* part of this.  It is advice about a
+        margin, not a quantity the migration will consume, and mixing
+        the two made an estimate read as a refusal.
 
         Floored at zero: a filesystem that gives back more than it takes
         needs no extra room, and a negative peak is not a quantity
         anyone can act on.
         """
         return max(0, max(self.payload, self.unpacked)
-                   + self.deferred + self.transient + self.uncertainty)
+                   + self.deferred + self.transient)
 
     @property
     def fits(self) -> bool:
+        """The plan's own figures fit in what is free."""
         return self.required <= self.available
+
+    @property
+    def comfortable(self) -> bool:
+        """Fits, and leaves the headroom worth having on top."""
+        return self.required + self.headroom <= self.available
+
+    @property
+    def remaining(self) -> int:
+        """What would be left free once the upgrade has landed."""
+        return self.available - self.required
 
     @property
     def shortfall(self) -> int:
         return max(0, self.required - self.available)
-
-    @property
-    def tolerance(self) -> int:
-        """How far past ``available`` the figures mean nothing.
-
-        Half the declared allowance.  Inside it the estimate cannot
-        tell a migration that fits from one that does not, so it says
-        so instead of pretending; outside it, the gap is bigger than
-        the model's own uncertainty and the refusal stands.
-
-        Zero where there is no allowance — a filesystem that only holds
-        the download.  Its figure is the sum of file sizes, known to
-        the byte, so there is no band to grant it.
-        """
-        return int(self.uncertainty * TOLERATED_SHORTFALL_RATIO)
-
-    @property
-    def blocks(self) -> bool:
-        """Short by more than the estimate's own precision."""
-        return self.shortfall > self.tolerance
 
     @property
     def holds_payload_only(self) -> bool:
@@ -245,13 +240,13 @@ class FilesystemNeed:
 
         Its report has no footprint line to show — only what the
         download will park there.  Nothing is unpacked on it, so it
-        carries no transient and no uncertainty either.
+        carries no transient and needs no headroom either.
         """
         return (bool(self.payload)
                 and not self.unpacked
                 and not self.deferred
                 and not self.transient
-                and not self.uncertainty)
+                and not self.headroom)
 
 
 @dataclass(frozen=True)
@@ -274,19 +269,16 @@ class RootSpaceEstimate:
         return tuple(need for need in self.filesystems if not need.fits)
 
     @property
-    def blocking(self) -> Tuple[FilesystemNeed, ...]:
-        """Those short by more than the estimate's own precision."""
-        return tuple(need for need in self.filesystems if need.blocks)
-
-    @property
     def tight(self) -> Tuple[FilesystemNeed, ...]:
-        """Those short by less — a warning, not a refusal.
+        """Those that fit, but with less than the headroom worth having.
 
-        The figures put them on the wrong side of the line by less than
-        the model can resolve, so the operator gets them and decides.
+        Not a problem to report as one — the plan's own figures say it
+        goes through.  Worth saying anyway: those figures do not count
+        what scriptlets regenerate, and the operator is the one who
+        knows whether their machine has room to be surprised.
         """
         return tuple(need for need in self.filesystems
-                     if not need.fits and not need.blocks)
+                     if need.fits and not need.comfortable)
 
 
 def _device(path: Path) -> Optional[int]:
@@ -423,7 +415,7 @@ def estimate(actions: Sequence,
         deferred=deferred_erase_bytes(actions, root=root),
         payload=pending if payload_device == target_device else 0,
         transient=batch_transient_bytes(sizes),
-        uncertainty=int(sizes.installed * UNCERTAINTY_RATIO),
+        headroom=int(sizes.installed * HEADROOM_RATIO),
         available=footprint_free,
         reserved=footprint_reserved,
     )]
@@ -535,11 +527,10 @@ def _rows(need: FilesystemNeed) -> List[Tuple[str, str, str]]:
     if need.transient:
         rows.append((_("one batch unpacked"), format_size(need.transient),
                      _("written before its commit frees what it replaces")))
-    if need.uncertainty:
-        rows.append((_("allowance"), format_size(need.uncertainty),
-                     _("scriptlet output and rpmdb growth, which no "
-                       "package declares")))
-    rows.append((_("peak needed"), format_size(need.required), ""))
+    rows.append((_("estimated need"), format_size(need.required), ""))
+    if need.headroom:
+        rows.append((_("headroom advised"), format_size(need.headroom),
+                     _("for what the system regenerates while installing")))
     return rows
 
 
@@ -564,89 +555,98 @@ def _recovery_commands(needs: Sequence[FilesystemNeed]) -> List[str]:
 
 
 def shortfall_warning(est: RootSpaceEstimate) -> str:
-    """What to tell an operator whose margin is inside the noise.
+    """What to tell an operator the figures put on the wrong side.
 
-    Empty when nothing is tight.  Says the figure and says it is not
-    trusted to that precision, because « 170 MB short » from an
-    estimate carrying a declared gigabyte of uncertainty is a number
-    the operator has to be able to weigh, not obey.
+    Empty when everything fits.  Two registers, because being 170 MB
+    short and being 8 GB short are not the same news : inside the band
+    the estimate cannot tell fit from no-fit and says so, outside it
+    the gap is larger than anything the model's own noise explains.
+
+    Neither stops anything.  The operator has the plan in front of them
+    and the prompt right below; this gives them the figures to answer
+    it with.
     """
     lines = [
-        _("{mountpoint} is {shortfall} short on the estimate, within the "
-          "{tolerance} this figure cannot resolve : the migration may "
-          "still fit. Freeing some space first would remove the "
-          "doubt.").format(
+        _("{mountpoint} : {required} estimated, {available} available, so "
+          "about {remaining} would be left. That is a thin margin — "
+          "{headroom} would be safer. Freeing some space first is "
+          "worth it.").format(
               mountpoint=need.mountpoint,
-              shortfall=format_size(need.shortfall),
-              tolerance=format_size(need.tolerance))
+              required=format_size(need.required),
+              available=format_size(need.available),
+              remaining=format_size(max(0, need.remaining)),
+              headroom=format_size(need.headroom))
         for need in est.tight
+    ]
+    lines += [
+        _("{mountpoint} is too small : {required} estimated, {available} "
+          "available. Going ahead is likely to run out of space part-way "
+          "through the upgrade.").format(
+              mountpoint=need.mountpoint,
+              required=format_size(need.required),
+              available=format_size(need.available))
+        for need in est.short
     ]
     if not lines:
         return ""
-    commands = _recovery_commands(est.tight)
+
+    commands = _recovery_commands(est.short + est.tight)
     if commands:
-        lines += [""] + ["  " + command for command in commands]
+        lines += ["", _("Freeing space :"), ""]
+        lines += ["  " + command for command in commands]
+
+    if any(need.holds_payload_only for need in est.short + est.tight):
+        lines += ["", _(
+            "The download cache can be moved to another filesystem for "
+            "good : set `payload_dir` in the [download] section of the "
+            "configuration. Only the payload moves ; the database and "
+            "the media metadata stay put.")]
+
+    lines += ["", _(
+        "These figures do not count what the system regenerates while "
+        "installing — the initramfs, the font and icon caches. Allow for "
+        "more than they show.")]
     return "\n".join(lines)
 
 
-def check_root_space(actions: Sequence,
-                     *,
-                     root: Path = Path("/"),
-                     payload_dir: Optional[Path] = None,
-                     payload_bytes: Optional[int] = None) -> RootSpaceEstimate:
-    """Stop the upgrade when a filesystem plainly cannot hold its share.
+def assess_root_space(actions: Sequence,
+                      *,
+                      root: Path = Path("/"),
+                      payload_dir: Optional[Path] = None,
+                      payload_bytes: Optional[int] = None
+                      ) -> RootSpaceEstimate:
+    """Measure and report.  Never refuses.
 
-    « Plainly » is the point.  The estimate carries a declared
-    allowance for what the plan cannot describe, and refusing a
-    migration for less than half of that would be claiming a precision
-    it does not have — a tester was stopped 169 MB short by a figure
-    hedged by 1.1 GB, on a machine that had completed the same
-    migration three times.  Inside that band the caller gets the
-    estimate and :func:`shortfall_warning`; outside it,
-    :class:`RootSpaceError` with the figures and the commands that
-    recover space where it is missing.
+    This used to raise, and it was wrong to.  A false refusal is
+    strictly worse than no check at all — it stops a migration that
+    would have worked, after Stage 1 has already swapped the media, so
+    every one of them costs a full switchover, an eight-medium sync, a
+    solve and a rollback.  A false pass costs exactly what the status
+    quo costs: nothing extra.  With that asymmetry, and a model
+    calibrated against one machine on one run, the estimate has no
+    business holding a veto.
+
+    So it reports.  The operator is already looking at the plan and a
+    confirmation prompt; the figures belong there, and the decision is
+    theirs.  ``--yes`` is that decision taken in advance, and is not
+    second-guessed either.
+
+    The pre-flight cannot move any earlier, whatever its verdict: it
+    needs the plan, the plan needs a pool built on the target-release
+    synthesis, and those exist only once Stage 1 has swapped the media
+    and they have been synced.
     """
     est = estimate(actions, root=root, payload_dir=payload_dir,
                    payload_bytes=payload_bytes)
     for need in est.filesystems:
         logger.info("space on %s : need %s, have %s", need.mountpoint,
                     format_size(need.required), format_size(need.available))
-    for need in est.tight:
+    for need in est.short:
         # ``info``, not ``warning`` : the console already gets this
         # through :func:`shortfall_warning`, translated and in context.
         # A second copy in English, unlocalised, above the block it
         # duplicates is noise at the exact moment the operator needs to
         # read carefully.
-        logger.info("space on %s : %s short, within the %s tolerance",
-                    need.mountpoint, format_size(need.shortfall),
-                    format_size(need.tolerance))
-    if not est.blocking:
-        return est
-
-    message = [
-        _("{mountpoint} cannot hold its share of this upgrade : "
-          "{required} needed, {available} available — {shortfall} "
-          "short.").format(
-              mountpoint=need.mountpoint,
-              required=format_size(need.required),
-              available=format_size(need.available),
-              shortfall=format_size(need.shortfall))
-        for need in est.blocking
-    ]
-    message += ["", describe(est), "",
-                _("Free some space, then re-run `urpm distupgrade` :"), ""]
-    message += ["  " + command
-                for command in _recovery_commands(est.blocking)]
-
-    if any(need.holds_payload_only for need in est.blocking):
-        message += ["", _(
-            "The download cache can be moved to another filesystem for "
-            "good : set `payload_dir` in the [download] section of the "
-            "configuration. Only the payload moves ; the database and "
-            "the media metadata stay put.")]
-
-    message += ["", _(
-        "This estimate does not include what scriptlets generate "
-        "(initramfs, font and icon caches), which is not owned by any "
-        "package : leave some room beyond the figures above.")]
-    raise RootSpaceError("\n".join(message))
+        logger.info("space on %s : %s short of the estimate",
+                    need.mountpoint, format_size(need.shortfall))
+    return est

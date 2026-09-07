@@ -241,23 +241,16 @@ post-transazione (file \fB.rpmnew\fR, pacchetti mga N residui,
 media di terze parti orfani). Riavviare per eseguire gli
 aggiustamenti post-avvio al prossimo avvio.
 Prima del download, il piano viene misurato rispetto a ogni filesystem
-che deve ospitarne una parte. A quello che ospita \fI/usr\fR viene
-imputato quanto occupano i pacchetti in arrivo meno quanto
-restituiscono quelli che se ne vanno, più i pacchetti ancora in uso il
-cui spazio torna solo con gli ultimi lotti. A quello che ospita la
-cache dei download vengono imputati gli RPM ancora da recuperare.
-Quando \fI/var\fR è una partizione separata, ciascuno ha il proprio
-verdetto; sommarli rifiuterebbe un aggiornamento i cui pacchetti
-stanno comodamente in \fI/var\fR. I blocchi che un filesystem riserva
-a root non contano come disponibili. Su un solo filesystem payload e
-impronta non si sommano comunque: gli RPM di ogni lotto vengono
-cancellati appena installato, quindi il picco è il maggiore dei due,
-più un lotto in pieno commit e una riserva dichiarata del 10%
-dell'impronta installata per ciò che nessun pacchetto descrive. Se uno dei due non ci sta, il
-cambio dei repository viene annullato e le cifre vengono stampate
-insieme ai comandi che liberano spazio dove manca davvero. Ciò che
-generano gli scriptlet (initramfs, cache di font e icone) non
-appartiene ad alcun pacchetto e non viene conteggiato.
+che deve ospitarne una parte, e le cifre vengono stampate accanto al
+prompt di conferma. Non viene rifiutato nulla: la stima è calibrata su
+una sola migrazione misurata, e un rifiuto sbagliato annullerebbe un
+aggiornamento che aveva tutte le carte in regola. Al filesystem che
+ospita \fI/usr\fR viene imputata l'impronta netta più un lotto in pieno
+commit e le rimozioni tenute per la fine; a quello che ospita la cache
+dei download, gli RPM ancora da recuperare; un \fI/var\fR separato ha il
+proprio verdetto. Accanto alla stima, mai dentro, sta un margine
+consigliato del 10% dell'impronta installata per ciò che nessun
+pacchetto dichiara \(em l'initramfs rigenerata, le cache di font e icone.
 .RS
 .TP
 .B \-\-to \fIversion\fR

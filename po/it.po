@@ -9967,10 +9967,6 @@ msgstr "tenuti per la fine"
 msgid "packages in use, freed by the last batches"
 msgstr "pacchetti in uso, liberati dagli ultimi lotti"
 
-#: urpm/core/distupgrade/root_space.py:236
-msgid "peak needed"
-msgstr "picco necessario"
-
 #: urpm/core/distupgrade/root_space.py:239
 msgid "Disk space on {mountpoint} :"
 msgstr "Spazio su disco su {mountpoint} :"
@@ -9979,10 +9975,6 @@ msgstr "Spazio su disco su {mountpoint} :"
 msgid "({value} of reserved blocks left untouched)"
 msgstr "({value} di blocchi riservati lasciati intatti)"
 
-#: urpm/core/distupgrade/root_space.py:290
-msgid "Free some space, then re-run `urpm distupgrade` :"
-msgstr "Liberare spazio, poi rilanciare `urpm distupgrade` :"
-
 #: urpm/core/distupgrade/root_space.py:328
 msgid ""
 "note : {mountpoint} is a separate filesystem ; whatever the plan installs "
@@ -9990,14 +9982,6 @@ msgid ""
 msgstr ""
 "nota : {mountpoint} è un filesystem separato ; quel che il piano vi installa"
 " è conteggiato sopra"
-
-#: urpm/core/distupgrade/root_space.py:389
-msgid ""
-"{mountpoint} cannot hold its share of this upgrade : {required} needed, "
-"{available} available — {shortfall} short."
-msgstr ""
-"{mountpoint} non può contenere la sua parte di questo aggiornamento : "
-"{required} necessari, {available} disponibili — ne mancano {shortfall}."
 
 #: urpm/core/distupgrade/root_space.py:404
 msgid ""
@@ -10009,16 +9993,6 @@ msgstr ""
 " : impostare `payload_dir` nella sezione [download] della configurazione. Si"
 " spostano solo i pacchetti ; il database e i metadati dei media restano dove"
 " sono."
-
-#: urpm/core/distupgrade/root_space.py:410
-msgid ""
-"This estimate does not include what scriptlets generate (initramfs, font and"
-" icon caches), which is not owned by any package : leave some room beyond "
-"the figures above."
-msgstr ""
-"Questa stima non comprende ciò che generano gli scriptlet (initramfs, cache "
-"di font e icone), che non appartiene ad alcun pacchetto : lasciare margine "
-"oltre le cifre qui sopra."
 
 #: urpm/core/distupgrade/checks.py:126
 msgid ""
@@ -10095,24 +10069,47 @@ msgstr "un lotto scompattato"
 msgid "written before its commit frees what it replaces"
 msgstr "scritto prima che il suo commit liberi ciò che sostituisce"
 
-#: urpm/core/distupgrade/root_space.py:459
-msgid "allowance"
-msgstr "riserva"
+#: urpm/core/distupgrade/root_space.py:596
+msgid "Freeing space :"
+msgstr "Liberare spazio :"
 
-#: urpm/core/distupgrade/root_space.py:460
-msgid "scriptlet output and rpmdb growth, which no package declares"
-msgstr ""
-"output degli scriptlet e crescita del rpmdb, che nessun pacchetto dichiara"
-
-#: urpm/core/distupgrade/root_space.py:548
+#: urpm/core/distupgrade/root_space.py:583
 msgid ""
-"{mountpoint} is {shortfall} short on the estimate, within the {tolerance} "
-"this figure cannot resolve : the migration may still fit. Freeing some space"
-" first would remove the doubt."
+"{mountpoint} is too small : {required} estimated, {available} available. "
+"Going ahead is likely to run out of space part-way through the upgrade."
 msgstr ""
-"A {mountpoint} mancano {shortfall} secondo la stima, entro i {tolerance} che"
-" questa cifra non sa distinguere : l'aggiornamento potrebbe comunque starci."
-" Liberare spazio prima toglierebbe il dubbio."
+"{mountpoint} è troppo piccolo : {required} stimati, {available} disponibili."
+" Proseguire finirà molto probabilmente lo spazio a metà aggiornamento."
+
+#: urpm/core/distupgrade/root_space.py:607
+msgid ""
+"These figures do not count what the system regenerates while installing — "
+"the initramfs, the font and icon caches. Allow for more than they show."
+msgstr ""
+"Queste cifre non contano ciò che il sistema rigenera durante l'installazione"
+" — l'initramfs, le cache di font e icone. Prevedere più di quanto indichino."
+
+#: urpm/core/distupgrade/root_space.py:530
+msgid "estimated need"
+msgstr "fabbisogno stimato"
+
+#: urpm/core/distupgrade/root_space.py:532
+msgid "headroom advised"
+msgstr "margine consigliato"
+
+#: urpm/core/distupgrade/root_space.py:533
+msgid "for what the system regenerates while installing"
+msgstr "per ciò che il sistema rigenera durante l'installazione"
+
+#: urpm/core/distupgrade/root_space.py:570
+msgid ""
+"{mountpoint} : {required} estimated, {available} available, so about "
+"{remaining} would be left. That is a thin margin — {headroom} would be "
+"safer. Freeing some space first is worth it."
+msgstr ""
+"{mountpoint} : {required} stimati, {available} disponibili, resterebbero "
+"quindi circa {remaining}. Il margine è risicato — {headroom} sarebbe più "
+"sicuro. Vale la pena liberare un po' di spazio prima."
 
 #, python-brace-format
 #~ msgid "Total download size: {size}"

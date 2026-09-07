@@ -6,11 +6,12 @@ Three steps :
   uses the ``SOLVER_DISTUPGRADE | SOLVER_SOLVABLE_ALL`` job with
   ``SOLVER_FLAG_DUP_ALLOW_NAMECHANGE``.  Returns a standard
   :class:`Resolution` — same shape ``resolve_upgrade`` returns.
-- **Root-space pre-flight** — :func:`root_space.check_root_space`
-  measures the plan against the filesystem holding ``/usr`` and
-  refuses before anything is fetched.  It has to sit between the two
-  other steps : the plan does not exist before the solve, and after
-  the download the payload it has to account for is already on disk.
+- **Root-space pre-flight** — :func:`root_space.assess_root_space`
+  measures the plan against every filesystem that has to hold part of
+  it, and hands the figures to the confirmation gate.  It has to sit
+  between the two other steps : the plan does not exist before the
+  solve, and after the download the payload it has to account for is
+  already on disk.
 - **Download** — delegated to :meth:`PackageOperations.build_download_items`
   + :meth:`download_packages`.  Same pipeline ``cmd_install`` /
   ``cmd_upgrade`` use — HTTPS + pinned IP + parallel workers + GPG
@@ -258,13 +259,13 @@ def run_stage2(
     exits cleanly and ``.state`` is not persisted.  Returning ``True``
     (or leaving the callback ``None``) proceeds with download.
 
-    The root-filesystem pre-flight runs *before* that gate and raises
-    :class:`RootSpaceError` when the plan cannot fit : there is nothing
-    to confirm about a migration that will run the disk out half-way
-    through, and asking would only invite a « yes ».
+    The root-filesystem pre-flight runs *before* that gate and feeds
+    it : the operator sees what each filesystem has to absorb next to
+    the plan they are confirming.  It never refuses on its own — see
+    :func:`root_space.assess_root_space` for why.
     """
     from ..download import resolve_payload_dir
-    from .root_space import check_root_space
+    from .root_space import assess_root_space
     from .state import read_state, write_state
 
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -296,8 +297,9 @@ def run_stage2(
     # be unpacked : the payload check sizes the download directory and
     # rpm only notices at commit time, several GB too late.  Runs
     # before the download so the estimate can count the payload that is
-    # not yet on disk.
-    space = check_root_space(
+    # not yet on disk.  It reports and never refuses — the confirm
+    # callback below is where the operator decides.
+    space = assess_root_space(
         result.actions,
         payload_dir=resolve_payload_dir(),
         payload_bytes=bytes_still_to_download(db, result))

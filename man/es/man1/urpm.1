@@ -158,24 +158,17 @@ descarga, instalación de los componentes críticos del sistema
 post-transacción (archivos \fB.rpmnew\fR, paquetes mga N residuales,
 medios de terceros huérfanos). Reinicie para que los ajustes
 post-arranque se ejecuten en el siguiente inicio.
-Antes de la descarga, el plan se mide frente a cada sistema de
-archivos que debe alojar una parte. Al que aloja \fI/usr\fR se le
-imputa lo que ocupan los paquetes entrantes menos lo que devuelven los
-que salen, más los paquetes en uso cuyo espacio solo se libera con los
-últimos lotes. Al que aloja la caché de descargas se le imputan los
-RPM que faltan por recuperar. Cuando \fI/var\fR es una partición
-aparte, cada uno tiene su propio veredicto; sumarlos rechazaría una
-actualización cuyos paquetes caben holgadamente en \fI/var\fR. Los
-bloques que un sistema de archivos reserva para root no cuentan como
-disponibles. En un solo sistema de archivos tampoco se suman la caché y
-la huella: los RPM de cada lote se borran nada más instalarse, así que
-el pico es el mayor de los dos, más un lote en pleno commit y una
-provisión declarada del 10% de la huella instalada para lo que ningún
-paquete describe. Si uno de los dos no cabe, el cambio de repositorios se
-deshace y se muestran las cifras junto con las órdenes que liberan
-espacio allí donde realmente falta. Lo que generan los scriptlets
-(initramfs, cachés de fuentes e iconos) no pertenece a ningún paquete
-y no se cuenta.
+Antes de la descarga, el plan se mide frente a cada sistema de archivos
+que debe alojar una parte, y las cifras se muestran junto al aviso de
+confirmación. No se rechaza nada: la estimación está calibrada sobre una
+única migración medida, y un rechazo equivocado abortaría una
+actualización que tenía todas las de ganar. Al sistema de archivos que
+aloja \fI/usr\fR se le imputa la huella neta más un lote en pleno commit
+y las eliminaciones reservadas al final; al que aloja la caché de
+descargas, los RPM que faltan; un \fI/var\fR aparte tiene su propio
+veredicto. Junto a la estimación, nunca dentro, hay un margen aconsejado
+del 10% de la huella instalada para lo que ningún paquete declara \(em
+la initramfs regenerada, las cachés de fuentes e iconos.
 .RS
 .TP
 .B \-\-to \fIversion\fR

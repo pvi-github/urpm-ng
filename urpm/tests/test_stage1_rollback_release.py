@@ -41,12 +41,17 @@ class TestTheLockIsReleasedWithItsDescriptor:
         assert released["fd"] == 42
 
     def test_every_call_site_supplies_it(self):
-        """Both refusal paths unwind through the same helper."""
+        """Whoever unwinds Stage 1 has to hand over the descriptor.
+
+        The count is deliberately not pinned : the space pre-flight used
+        to unwind here too and no longer refuses at all, so a call site
+        coming or going is a design change, not a regression.  Calling
+        without a descriptor is the regression."""
         source = inspect.getsource(cli)
         calls = [line for line in source.splitlines()
                  if "_undo_stage1_media_swap(" in line
                  and "def " not in line]
-        assert len(calls) == 2, f"unexpected call sites: {calls}"
+        assert calls, "nothing unwinds Stage 1 any more"
         for line in calls:
             assert "lock_fd" in line, (
                 f"call without a descriptor would raise TypeError: {line}"
