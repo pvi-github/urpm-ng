@@ -1865,6 +1865,9 @@ class TransactionQueue:
         total = len(rpm_paths)
         packages_done = [0]       # Unique packages with extraction complete
         elements_total = len(rpm_paths) + len(erase_names or [])
+        # What the total accounts for, so the callback can tell an erase
+        # we planned from one rpm performs on its own while upgrading.
+        planned_erases = set(erase_names or [])
         elements_done = [0]       # Installs *and* erases completed
         seen_paths = set()        # Paths already counted (dedup multi-installed)
         seen_erases = set()       # Erase names already counted
@@ -2110,10 +2113,21 @@ class TransactionQueue:
             if reason == rpm.RPMCALLBACK_UNINST_STOP:
                 # An erase completing advances the bar exactly like an
                 # extraction : both are elements rpm has finished with.
-                # Deduped on name because a package matched by several
+                #
+                # Only the erases we *asked* for, though.  rpm also
+                # fires UNINST_STOP for the old version it drops when
+                # upgrading a package in 'u' mode, and those are not in
+                # ``elements_total`` — they are the other half of an
+                # install already counted.  Counting them made Tx A
+                # reach 22/11 on a plan of eleven upgrades, and the
+                # widget rendered a bar twice its own width that pushed
+                # the counter off the screen.
+                #
+                # Deduped on name too: a package matched by several
                 # dbMatch rows would otherwise be counted twice.
                 erased = current_pkg_name[0]
-                if erased and erased not in seen_erases:
+                if erased and erased in planned_erases \
+                        and erased not in seen_erases:
                     seen_erases.add(erased)
                     elements_done[0] += 1
                 _send_progress(name=current_pkg_name[0],

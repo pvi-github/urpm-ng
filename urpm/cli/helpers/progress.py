@@ -365,11 +365,27 @@ def make_progress_callback(
         return line[:term_width]
 
     def _build_main_bar(done, pkg_total, pct):
+        """Render the bar, clamped so a bad count cannot break the widget.
+
+        ``filled`` used to be ``int(bw * pct / 100)`` with nothing
+        bounding ``pct``.  Past 100% the fill exceeded the bar width and
+        ``'░' * (bw - filled)`` — a negative repeat — rendered empty, so
+        the bar itself grew past its box and pushed the counter off the
+        right edge until it vanished.  A tester watched exactly that
+        happen on the critical phase.
+
+        Whatever the counter says, the widget stays inside the terminal:
+        the three lines are painted with cursor-up moves, and one line
+        wrapping desynchronises all of them.  The header line has always
+        been clipped ; this one never was.
+        """
         bw = _state['bar_width']
         dw = _state['dw']
-        filled = int(bw * pct / 100)
+        pct = max(0, min(pct, 100))
+        filled = max(0, min(int(bw * pct / 100), bw))
         count_suffix = f" {done:>{dw}}/{pkg_total} {pct:>3}%"
-        return f"[{'█' * filled}{'░' * (bw - filled)}]{count_suffix}"
+        line = f"[{'█' * filled}{'░' * (bw - filled)}]{count_suffix}"
+        return line[:term_width]
 
     def _recompute_lines_for(progress: TransactionProgress) -> None:
         """Rebuild header_line / bar_line / sub_line from a raw event.
