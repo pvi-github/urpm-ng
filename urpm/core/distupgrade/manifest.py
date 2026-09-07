@@ -67,6 +67,31 @@ BOOT_CRITICAL_LOCKS_BASE: List[str] = [
 ]
 
 
+#: What process attributes cannot separate.
+#:
+#: Under Wayland the compositor and Xwayland run as the session user,
+#: children of the session, exactly like Firefox — same uid, same
+#: session, not our ancestor.  Nothing in /proc tells them apart, so
+#: the display stack is named here rather than guessed at.
+#:
+#: Expressed as Provides, and deliberately short: these are roles every
+#: distribution has, and they move slowly.  A capability nobody
+#: provides simply matches nothing.
+SESSION_CRITICAL_LOCKS: List[str] = [
+    "/usr/bin/Xwayland",
+    "/usr/bin/Xorg",
+    "/usr/bin/X",
+    # Compositors that are also the display server.
+    "kwin_wayland",
+    "mutter",
+    "sway",
+    "weston",
+    # The path the operator reaches the machine through.
+    "openssh-server",
+    "NetworkManager",
+]
+
+
 BOOT_CRITICAL_LOCKS_UEFI: List[str] = [
     "grub2-efi",
     "efibootmgr",

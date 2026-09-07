@@ -529,6 +529,15 @@ def _split_plan_by_size(
     return batches
 
 
+#: Payload budget for one Tx B batch, in bytes of compressed ``.rpm``.
+#: Caps the disk peak : a batch's payloads are unlinked as soon as it
+#: commits, so this is the most the download cache holds beyond what is
+#: already installed.  :mod:`root_space` reads it to size the same peak
+#: before Stage 2 starts — deriving it twice is how the two answers
+#: would end up disagreeing.
+TX_B_BATCH_BYTES = 200 * 1024 * 1024
+
+
 def _purge_installed_batch_rpms(
     batch: List[str],
     rpm_paths_by_nevra: dict,
@@ -816,6 +825,71 @@ def _retry_missing_installs(
     }
 
 
+def _defer_erases_the_system_is_using(batches: List[List]) -> List[List]:
+    """Move erases the running system still needs towards the end.
+
+    rpm keeps files in place until a transaction commits, so an erase
+    interleaved at its libsolv position is safe *within* one batch.
+    Across batches it is not: the package is gone from disk while the
+    later batches run, and whatever was using it is still running.
+    That froze a tester's desktop mid-migration.
+
+    Three ranks, from :mod:`live_system` :
+
+    * not running — left exactly where libsolv put it, which is where
+      the disk saving comes from and is the bulk of the volume ;
+    * running but expendable (Firefox, LibreOffice) — moved to the
+      penultimate batch, so their space comes back before the core is
+      touched but after everything safe has gone ;
+    * load-bearing — the final batch only.
+
+    Snapshot taken once here rather than per batch: a package in use
+    when Tx B started stays protected even if its process exits
+    half-way, and re-sampling between batches would make the ordering
+    depend on timing.
+
+    A snapshot that could not be taken ranks everything as
+    interleaved, which is the behaviour before this existed — degraded,
+    but never a wrong ordering.
+    """
+    if len(batches) < 2:
+        return batches
+
+    from .live_system import TIER_CRITICAL, TIER_SACRIFICIAL, snapshot
+
+    live = snapshot()
+    if not live.critical and not live.sacrificial:
+        return batches
+
+    kept: List[List] = []
+    sacrificial: List = []
+    critical: List = []
+    for batch in batches:
+        remainder = []
+        for entry in batch:
+            if not is_erase_entry(entry):
+                remainder.append(entry)
+                continue
+            rank = live.tier(entry_name(entry))
+            if rank == TIER_CRITICAL:
+                critical.append(entry)
+            elif rank == TIER_SACRIFICIAL:
+                sacrificial.append(entry)
+            else:
+                remainder.append(entry)
+        kept.append(remainder)
+
+    if sacrificial:
+        kept[-2].extend(sacrificial)
+    if critical:
+        kept[-1].extend(critical)
+
+    logger.info(
+        "Tx B : %d erase(s) held back to the penultimate batch, "
+        "%d to the last", len(sacrificial), len(critical))
+    return kept
+
+
 def run_stage3_tx_b(
     db: "PackageDatabase",
     *,
@@ -866,11 +940,14 @@ def run_stage3_tx_b(
     # already-committed .rpm files further limits the peak.
     batches = _split_plan_by_size(
         tx_b_plan, rpm_paths_by_nevra,
-        max_batch_bytes=200 * 1024 * 1024,
+        max_batch_bytes=TX_B_BATCH_BYTES,
     )
+    batches = _defer_erases_the_system_is_using(batches)
+
     logger.info(
         "Stage 3 Tx B : %d package(s) split into %d batch(es) "
-        "(~%d MB max)", len(tx_b_plan), len(batches), 200)
+        "(~%d MB max)", len(tx_b_plan), len(batches),
+        TX_B_BATCH_BYTES // (1024 * 1024))
 
     # Global progress across batches.  The caller's widget is built for
     # a single transaction ; without this wrap its bar resets to 0 at
