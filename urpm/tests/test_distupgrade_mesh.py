@@ -82,8 +82,14 @@ class TestStateFilePresent:
         _write_state(state_db, stage="tx_a_committing")
         check_distupgrade_mesh("install", state_db, is_escape_hatch=True)
         out = capsys.readouterr().out
-        assert "ATTENTION" in out
-        assert "suspendu" in out
+        # The message was written in French in the source -- msgids must
+        # be English, or a German or Spanish user reads French and
+        # translators translate from it.  Asserting on the English now,
+        # and on what the operator needs to see rather than one word:
+        # that it is a warning, why, and that the operation is allowed.
+        assert "WARNING" in out
+        assert "suspended" in out
+        assert "tx_a_committing" in out, "the stage must be named"
 
 
 class TestLiveLock:

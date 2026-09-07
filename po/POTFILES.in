@@ -40,6 +40,13 @@ urpm/cli/helpers/package.py
 urpm/cli/helpers/progress.py
 urpm/cli/helpers/resolver.py
 urpm/cli/helpers/orphans_triage.py
+urpm/cli/helpers/build_limits.py
+urpm/cli/helpers/distupgrade_mesh.py
+urpm/cli/helpers/failure_report.py
+urpm/cli/helpers/security.py
+urpm/cli/helpers/short_names.py
+urpm/cli/helpers/suggests.py
+urpm/cli/helpers/transaction_sizes.py
 urpm/core/operations.py
 urpm/core/resolver.py
 urpm/core/download.py

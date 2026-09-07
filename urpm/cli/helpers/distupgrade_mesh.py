@@ -170,34 +170,35 @@ def check_distupgrade_mesh(command_name: str, db,
             # Distupgrade actively running — even the escape hatch
             # would race with it.  Refuse.
             raise DistupgradeMeshRefusal(_(
-                "un distupgrade Mageia est actuellement en cours (PID {pid}).\n"
-                "Attendez la fin ou utilisez `urpm distupgrade --abort` "
-                "pour l'abandonner."
+                "a Mageia distupgrade is currently running (PID {pid}).\n"
+                "Wait for it to finish, or give it up with "
+                "`urpm distupgrade --abort`."
             ).format(pid=lock_pid))
         # `.state` present but no live PID — distupgrade is suspended
         # (SIGKILL / power cut).  Escape hatch is intended for exactly
         # this dépannage case.  Warn but allow.
         print(colors.warning(_(
-            "ATTENTION : un distupgrade Mageia est en cours à l'état "
-            "'{stage}' et actuellement suspendu (pas de process vivant).\n"
-            "Cette opération va manipuler le rpmdb source pendant que "
-            "le distupgrade est suspendu.\n\n"
-            "L'échappatoire install/erase est prévue pour du dépannage "
-            "ciblé (retirer un paquet qui a fait crasher Tx A, installer "
-            "une dépendance manquante). Toute autre manipulation risque "
-            "de rendre le distupgrade non-reprisible."
+            "WARNING: a Mageia distupgrade is at stage '{stage}' and "
+            "currently suspended (no live process).\n"
+            "This operation will touch the source rpmdb while the "
+            "distupgrade is suspended.\n\n"
+            "The install/erase escape hatch is meant for targeted "
+            "repair — removing a package that crashed Tx A, installing "
+            "a missing dependency.  Anything else risks leaving the "
+            "distupgrade unresumable."
         ).format(stage=stage or "?")))
         return
 
     if lock_alive:
         raise DistupgradeMeshRefusal(_(
-            "distupgrade Mageia en cours (PID {pid}).\n"
-            "Attendez la fin ou utilisez `urpm distupgrade --abort` "
-            "pour l'abandonner."
+            "a Mageia distupgrade is running (PID {pid}).\n"
+            "Wait for it to finish, or give it up with "
+            "`urpm distupgrade --abort`."
         ).format(pid=lock_pid))
 
     raise DistupgradeMeshRefusal(_(
-        "distupgrade Mageia à l'état '{stage}' (transaction interrompue).\n"
-        "Utilisez `urpm distupgrade --resume` pour reprendre ou "
-        "`urpm distupgrade --abort` pour abandonner."
+        "a Mageia distupgrade is at stage '{stage}' (transaction "
+        "interrupted).\n"
+        "Continue with `urpm distupgrade --resume`, or give it up with "
+        "`urpm distupgrade --abort`."
     ).format(stage=stage or "?"))
