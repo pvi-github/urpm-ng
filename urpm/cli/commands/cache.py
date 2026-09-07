@@ -32,8 +32,14 @@ def cmd_cache_clean(args, db: 'PackageDatabase') -> int:
     """Handle cache clean command - remove orphan RPMs from cache."""
     from .. import display
 
-    cache_dir = Path.home() / ".cache" / "urpm"
-    medias_dir = cache_dir / "medias"
+    # ``CacheManager`` knows where payloads actually live — under
+    # ``get_base_dir()``, i.e. /var/lib/urpm/medias.  This used to be
+    # ``Path.home()/".cache"/"urpm"/"medias"``, which does not exist:
+    # the only thing under ``~/.cache/urpm`` is the mkimage chroots.
+    # So the command reported « no RPM cache found » and did nothing,
+    # on a machine holding several gigabytes of orphan payloads.
+    from ...core.cache import CacheManager
+    medias_dir = CacheManager(db).medias_dir
 
     if not medias_dir.exists():
         print(_("No RPM cache found"))
@@ -261,3 +267,47 @@ def cmd_cache_stats(args, db: 'PackageDatabase') -> int:
     return 0
 
 
+def cmd_cache_flush(args, db: 'PackageDatabase') -> int:
+    """Handle ``urpm cache flush`` — drop every cached RPM payload.
+
+    Distinct from ``clean``, which removes only what the database no
+    longer references.  ``flush`` removes the lot: after an install a
+    payload is only good for reinstalling without re-downloading, and
+    that is a trade an operator short of disk should be able to make.
+
+    Metadata stays — synthesis, media_info and AppStream are small and
+    read on every operation, and losing them would force a full
+    ``urpm media update`` for no space worth having.
+    """
+    from ...core.cache import flush_payloads
+    from .. import colors
+    from ..display import format_size
+
+    files, total = flush_payloads(db, dry_run=True)
+    if not files:
+        print(_("No cached RPM to flush"))
+        return 0
+
+    print(_("{count} cached RPM to remove ({size})").format(
+        count=files, size=format_size(total)))
+    print(colors.dim(_(
+        "  Metadata is kept ; only the package payloads go.")))
+
+    if getattr(args, 'dry_run', False):
+        print(colors.dim(_("  --dry-run : nothing removed.")))
+        return 0
+
+    if not getattr(args, 'auto', False):
+        try:
+            answer = input(_("\nProceed? [y/N] "))
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 1
+        if not confirm_yes(answer):
+            print(_("Aborted"))
+            return 1
+
+    files, total = flush_payloads(db)
+    print(colors.success(_("Freed {size} ({count} file(s))").format(
+        size=format_size(total), count=files)))
+    return 0

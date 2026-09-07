@@ -73,6 +73,7 @@ from .helpers.media import (
 from .commands.cache import (
     cmd_cache_info,
     cmd_cache_clean,
+    cmd_cache_flush,
     cmd_cache_rebuild,
     cmd_cache_stats,
 )
@@ -2498,6 +2499,16 @@ Set auto_add = false to disable all automatic server addition.
         help=_('List all orphan files')
     )
 
+    cache_flush_parser = cache_subparsers.add_parser(
+        'flush',
+        help=_('Remove every cached RPM payload (keeps metadata)'))
+    cache_flush_parser.add_argument(
+        '--dry-run', '-n', action='store_true',
+        help=_('Show what would be removed without removing'))
+    cache_flush_parser.add_argument(
+        '--auto', '-y', action='store_true',
+        help=_('Do not ask for confirmation'))
+
     cache_subparsers.add_parser('rebuild', help=_('Rebuild database from synthesis files'))
     cache_subparsers.add_parser('stats', help=_('Detailed cache statistics'))
 
@@ -3285,6 +3296,8 @@ def main(argv=None) -> int:
                 return cmd_cache_info(args, db)
             elif args.cache_command == 'clean':
                 return cmd_cache_clean(args, db)
+            elif args.cache_command == 'flush':
+                return cmd_cache_flush(args, db)
             elif args.cache_command == 'rebuild':
                 return cmd_cache_rebuild(args, db)
             elif args.cache_command == 'stats':
