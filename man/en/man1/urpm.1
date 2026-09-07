@@ -230,6 +230,24 @@ components (rpm / python / glibc) first, then the rest, and a
 post-transaction report (\fB.rpmnew\fR files, residual mga N
 packages, orphan third-party media). Reboot so post-boot
 adjustments run at next startup.
+Before the download, the plan is measured against every filesystem
+that has to hold part of it. The one carrying \fI/usr\fR is charged
+what the incoming packages occupy minus what the departing ones give
+back, plus the packages still in use whose space only comes back with
+the last batches. The one carrying the download cache is charged the
+RPMs still to fetch. Where \fI/var\fR is a separate partition the two
+get separate verdicts; adding them together would refuse an upgrade
+whose payload fits \fI/var\fR comfortably. Blocks a filesystem
+reserves for root are not counted as available. On a single
+filesystem the payload and the footprint are still not added: each
+batch's RPMs are deleted as soon as it installs, so the peak is the
+larger of the two plus one batch caught mid-commit and a declared
+allowance of 10% of the installed footprint for what no package
+describes. When one of them does
+not fit, the repository switchover is rolled back and the figures are
+printed with the commands that free space where it is actually
+missing. What scriptlets generate (initramfs, font and icon caches)
+belongs to no package and is not counted.
 .RS
 .TP
 .B \-\-to \fIversion\fR

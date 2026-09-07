@@ -159,6 +159,26 @@ Systemkomponenten (rpm / python / glibc) zuerst, dann der Rest, und
 ein Post-Transaktions-Bericht (\fB.rpmnew\fR-Dateien, verbliebene
 mga-N-Pakete, verwaiste Drittanbieter-Medien). Neustart, damit die
 Post-Boot-Anpassungen beim nächsten Start ausgeführt werden.
+Vor dem Download wird der Plan gegen jedes Dateisystem gemessen, das
+einen Teil davon aufnehmen muss. Dem Dateisystem mit \fI/usr\fR wird
+angerechnet, was die eingehenden Pakete belegen, minus dem, was die
+abgehenden zurückgeben, plus die noch laufenden Pakete, deren Platz
+erst mit den letzten Stapeln zurückkommt. Dem Dateisystem mit dem
+Download-Cache werden die noch zu ladenden RPMs angerechnet. Liegt
+\fI/var\fR auf einer eigenen Partition, bekommen beide ein eigenes
+Urteil; sie zu addieren würde eine Systemaktualisierung ablehnen,
+deren Pakete bequem in \fI/var\fR passen. Die Blöcke, die ein
+Dateisystem für root reserviert, zählen nicht als verfügbar. Auf einem
+einzigen Dateisystem werden Pakete und Fußabdruck ebenfalls nicht
+addiert: die RPMs jedes Stapels werden nach seiner Installation
+gelöscht, die Spitze ist also der größere der beiden Werte, plus ein
+Stapel mitten im Commit und eine erklärte Reserve von 10% des
+installierten Fußabdrucks für das, was kein Paket beschreibt. Passt
+eines von beiden nicht, wird der Repository-Wechsel zurückgenommen und
+die Zahlen werden mit den Befehlen ausgegeben, die dort Platz
+schaffen, wo er wirklich fehlt. Was Scriptlets erzeugen (initramfs,
+Schrift- und Symbol-Caches), gehört zu keinem Paket und wird nicht
+mitgezählt.
 .RS
 .TP
 .B \-\-to \fIversion\fR

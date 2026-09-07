@@ -399,6 +399,8 @@ multi-version-jump prompt) → repository switchover → target-release solve
 (`.rpmnew` files, residual mga N packages, orphan third-party media). Reboot
 so post-boot adjustments run at next startup.
 
+Before anything is downloaded, the plan is measured against every filesystem that has to hold part of it. The one carrying `/usr` is charged what the incoming packages occupy minus what the departing ones give back, plus the packages still in use whose space only comes back with the last batches. The one carrying the download cache is charged the RPMs still to fetch. Where `/var` is a separate partition the two get separate verdicts — adding them together would refuse an upgrade whose payload fits `/var` comfortably because `/usr` is tight. On a single filesystem the payload and the footprint are still not added: each batch's RPMs are deleted as soon as it is installed, so the cache drains at the rate the new files arrive and the peak is the larger of the two, not their sum. On top sit one batch caught between its writes and its commit, and a declared allowance of 10% of the installed footprint for what no package describes — scriptlet output, rpmdb growth. That allowance is printed on its own line rather than folded into the total. Blocks a filesystem reserves for root are not counted as available. When one of them does not fit, the repository switchover is rolled back and the figures are printed with the commands that free space where it is actually missing. What scriptlets generate — the initramfs, the font and icon caches — belongs to no package and is not counted.
+
 ## Search and Query
 
 ### Search packages

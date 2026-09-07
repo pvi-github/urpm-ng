@@ -237,6 +237,25 @@ téléchargement, installation des composants critiques du système
 post-transaction (fichiers \fB.rpmnew\fR, paquets mga N résiduels,
 médias tiers orphelins). Redémarrez pour que les correctifs
 post-démarrage s'exécutent au prochain démarrage.
+Avant le téléchargement, le plan est mesuré face à chaque système de
+fichiers qui doit en accueillir une part. Celui qui porte \fI/usr\fR
+se voit imputer ce qu'occupent les paquets entrants moins ce que
+rendent ceux qui partent, plus les paquets en cours d'utilisation dont
+la place n'est rendue que par les derniers lots. Celui qui porte le
+cache de téléchargement se voit imputer les RPM restant à récupérer.
+Quand \fI/var\fR est une partition distincte, les deux ont chacun leur
+verdict ; les additionner refuserait une mise à niveau dont le payload
+tient largement dans \fI/var\fR. Les blocs qu'un système de fichiers
+réserve à root ne sont pas comptés comme disponibles. Sur un système de
+fichiers unique, payload et empreinte ne s'additionnent pas davantage :
+les RPM de chaque lot sont supprimés dès son installation, donc le pic
+vaut le plus grand des deux, plus un lot pris en plein commit et une
+provision déclarée de 10 % de l'empreinte installée pour ce qu'aucun
+paquet ne décrit. Si l'un des deux
+ne tient pas, la bascule des dépôts est annulée et les chiffres sont
+affichés avec les commandes qui libèrent de la place là où elle manque
+vraiment. Ce que génèrent les scriptlets (initramfs, caches de polices
+et d'icônes) n'appartient à aucun paquet et n'est pas compté.
 .RS
 .TP
 .B \-\-to \fIversion\fR

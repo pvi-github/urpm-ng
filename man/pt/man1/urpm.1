@@ -159,6 +159,23 @@ descarga, instalação dos componentes críticos do sistema
 pós-transação (ficheiros \fB.rpmnew\fR, pacotes mga N residuais,
 media de terceiros órfãos). Reinicie para que os ajustes
 pós-arranque sejam executados no próximo arranque.
+Antes da descarga, o plano é medido face a cada sistema de ficheiros
+que tem de alojar uma parte. Ao que aloja \fI/usr\fR é imputado o que
+os pacotes que chegam ocupam menos o que devolvem os que saem, mais os
+pacotes ainda em uso cujo espaço só volta com os últimos lotes. Ao que
+aloja a cache de descargas são imputados os RPM que faltam obter.
+Quando \fI/var\fR é uma partição separada, cada um tem o seu próprio
+veredicto; somá-los recusaria uma atualização cujos pacotes cabem
+folgadamente em \fI/var\fR. Os blocos que um sistema de ficheiros
+reserva para o root não contam como disponíveis. Num único sistema de
+ficheiros a cache e a pegada também não se somam: os RPM de cada lote
+são apagados assim que instala, portanto o pico é o maior dos dois,
+mais um lote a meio do commit e uma provisão declarada de 10% da
+pegada instalada para o que nenhum pacote descreve. Se um deles não
+couber, a mudança de repositórios é revertida e os valores são
+apresentados com os comandos que libertam espaço onde falta de facto.
+O que os scriptlets geram (initramfs, caches de tipos de letra e
+ícones) não pertence a nenhum pacote e não é contado.
 .RS
 .TP
 .B \-\-to \fIversion\fR

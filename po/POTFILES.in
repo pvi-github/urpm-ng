@@ -67,6 +67,8 @@ urpm/core/sync_lock.py
 urpm/core/triggers.py
 urpm/core/userns.py
 urpm/core/audit.py
+urpm/core/distupgrade/checks.py
+urpm/core/distupgrade/root_space.py
 urpm/auth/audit.py
 urpm/auth/context.py
 urpm/auth/polkit.py
