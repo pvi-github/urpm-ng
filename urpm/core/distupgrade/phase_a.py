@@ -170,7 +170,7 @@ def run_phase_a_upgrade(
     tx_id = ops.begin_transaction('upgrade', 'urpm distupgrade phase A',
                                   result.actions)
     try:
-        ops.execute_upgrade(
+        queue_result = ops.execute_upgrade(
             rpm_paths=rpm_paths,
             erase_names=remove_names or None,
             options=InstallOptions(),
@@ -182,6 +182,24 @@ def run_phase_a_upgrade(
         raise PhaseAError(
             f"Phase A upgrade failed at commit: {exc}.  See "
             f"/var/log/urpm/*.log for detailed error output.") from exc
+
+    # A transaction can fail without raising : rpm reports per-package
+    # problems on the result, and only an exception was being looked
+    # at.  Everything below — mark_dependencies, complete_transaction —
+    # then ran as if the upgrade had succeeded, and Stage 1 started
+    # against a machine that is not, in fact, up to date.
+    #
+    # That matters more here than anywhere else: the whole point of
+    # Phase A is to reach a known state before the migration proper
+    # computes its plan against it.
+    if not queue_result.success:
+        ops.abort_transaction(tx_id)
+        errors = queue_result.collect_errors()
+        detail = "; ".join(errors) if errors else "no error reported"
+        raise PhaseAError(
+            f"Phase A upgrade did not complete: {detail}.  "
+            f"Fix it with `urpm upgrade` before retrying "
+            f"`urpm distupgrade`.")
     ops.mark_dependencies(resolver, result.actions)
     ops.complete_transaction(tx_id)
     return 0
