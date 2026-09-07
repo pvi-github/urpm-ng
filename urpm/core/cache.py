@@ -434,3 +434,47 @@ def format_size(size_bytes: int) -> str:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
     else:
         return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+def flush_payloads(db, base_dir=None, dry_run: bool = False) -> "tuple[int, int]":
+    """Drop every cached ``.rpm``, keeping metadata and the database.
+
+    Payloads are pure cache: once a package is installed its ``.rpm`` is
+    only useful to reinstall without re-downloading.  Metadata is not —
+    synthesis, media_info and the AppStream blobs live in the same tree,
+    are small, and are read on every operation.  So the sweep is
+    restricted to ``*.rpm`` under ``medias/`` rather than emptying the
+    directory.
+
+    ``reconcile()`` afterwards drops the index rows whose file just
+    went; failing at that costs accuracy in ``urpm cache``, never
+    correctness, so it is logged rather than raised.
+
+    Returns ``(files, bytes)`` — what was removed, or what would be
+    when *dry_run*.
+    """
+    manager = CacheManager(db, base_dir)
+    files = 0
+    total = 0
+    if not manager.medias_dir.exists():
+        return 0, 0
+
+    for rpm_path in manager.medias_dir.rglob("*.rpm"):
+        try:
+            size = rpm_path.stat().st_size
+            if not dry_run:
+                rpm_path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:  # noqa: BLE001
+            logger.debug("flush: cannot remove %s: %s", rpm_path, exc)
+            continue
+        files += 1
+        total += size
+
+    if files and not dry_run:
+        try:
+            manager.reconcile()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cache index reconcile failed: %s", exc)
+    return files, total

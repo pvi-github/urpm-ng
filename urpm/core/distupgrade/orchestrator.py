@@ -33,7 +33,12 @@ from .lock import (
     DistupgradeLockedError,
     acquire_distupgrade_lock,
 )
-from .phase_a import PhaseAError, run_phase_a_refresh, run_phase_a_upgrade
+from .phase_a import (
+    PhaseAError,
+    purge_source_release_payloads,
+    run_phase_a_refresh,
+    run_phase_a_upgrade,
+)
 from .stage0 import ClockGateError, check_clock_sanity
 from .state import write_state
 from .version import ReleaseIdentity, VersionDetectionError, detect_target_release, read_current_release
@@ -153,6 +158,19 @@ def run_stage0(
             )
         except PhaseAError as exc:
             raise Stage0Error(str(exc)) from exc
+
+    # 6.4 The release-N cache is spent : the machine is up to date, so
+    # those payloads have done their job, and Stage 2 is about to pull
+    # the whole target release onto the same partition.  Freeing them
+    # here is the difference between a migration that fits and one that
+    # fills the root partition half-way through.
+    try:
+        purge_source_release_payloads(db)
+    except Exception as exc:  # noqa: BLE001
+        # Reclaiming space is an optimisation ; failing to do it must
+        # not stop a migration that would otherwise have run.
+        logger.warning("could not free the release-%s cache: %s",
+                       current or "N", exc)
 
     # 6.5 Phase A may itself have installed the init or glibc — on a
     # machine left un-updated for months that is the likely case, since

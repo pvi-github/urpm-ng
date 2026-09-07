@@ -64,6 +64,34 @@ def run_phase_a_refresh(
     return results
 
 
+def purge_source_release_payloads(db, base_dir=None) -> "tuple[int, int]":
+    """Drop the release-N cache before the target release is fetched.
+
+    By this point the machine is up to date, so those payloads are
+    spent: they were needed to reach the state Stage 2 computes its plan
+    against, and nothing after this reads them.  Stage 2 is meanwhile
+    about to pull the whole of release N+1 onto the same partition.
+
+    Deliberately the whole cache, not just what Phase A downloaded.  An
+    operator who ran ``urpm upgrade`` themselves the day before — the
+    careful ones do — leaves Phase A with nothing to fetch and several
+    hundred megabytes already sitting there.  Purging only our own
+    downloads would reclaim nothing in exactly the case where the
+    machine is most likely to be short of room.
+
+    The sweep itself is :func:`urpm.core.cache.flush_payloads`, shared
+    with ``urpm cache flush`` : what is safe to delete is a property of
+    the cache, not of the distupgrade.
+    """
+    from ..cache import flush_payloads
+
+    files, freed = flush_payloads(db, base_dir)
+    if files:
+        logger.info("Freed %d cached .rpm before Stage 2 (%.1f MB)",
+                    files, freed / (1024 * 1024))
+    return files, freed
+
+
 def run_phase_a_upgrade(
     db: "PackageDatabase",
     *,
