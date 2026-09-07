@@ -48,6 +48,7 @@ Modes:
 from __future__ import annotations
 
 import dataclasses
+import configparser
 import logging
 import re
 from typing import Callable, Optional, Tuple
@@ -517,7 +518,20 @@ def upsert_media_tree(
             "",
             None,
         ).rstrip("/")
-        info, medias = parse_media_cfg(raw, media_root)
+        try:
+            info, medias = parse_media_cfg(raw, media_root)
+        except configparser.Error as exc:
+            # The body reached us but is not a media.cfg.  A filtering
+            # proxy answering 200 with its own HTML page is the common
+            # cause (e2guardian and friends); a soft-404 does it too.
+            #
+            # This has to land in the same place as an unreachable URL,
+            # not escape as a library exception: the caller loops over
+            # mirrors and is written to warn and move on.  Leaving the
+            # catalogue empty routes us into the fallback below, which
+            # raises MediaTreeFetchError -- what every caller catches.
+            logger.debug("catalogue parse failed for %s: %s", url, exc)
+            info, medias = None, []
 
     if not medias:
         # ── Step 1 fallback: try to derive a single media from the URL. ─

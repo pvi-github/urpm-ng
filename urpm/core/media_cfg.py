@@ -76,6 +76,44 @@ _KNOWN_ARCHES = {'x86_64', 'i586', 'i686', 'aarch64', 'armv7hl', 'noarch'}
 # ── Public API ───────────────────────────────────────────────────────────
 
 
+#: How a media.cfg opens.  Every Mageia catalogue starts with the
+#: ``[media_info]`` section; anything else is not one, whatever the
+#: server said in its status line.
+_MEDIA_CFG_OPENING = '[media_info]'
+
+
+def _reject_if_not_media_cfg(url: str, body: str, content_type: str) -> None:
+    """Raise unless *body* actually looks like a media.cfg.
+
+    A 200 is not proof of a catalogue.  A filtering proxy interposing
+    on the connection answers 200 with its own HTML page -- e2guardian
+    does exactly this, and a beta tester's whole ``urpm image make``
+    died on ``configparser`` reporting « File contains no section
+    headers » with ``'<html>\n'`` as the offending line.  A soft-404
+    produces the same shape.
+
+    Named here rather than left to the parser because the parser cannot
+    tell the operator anything useful: it sees a malformed INI file,
+    not an intercepted connection.
+    """
+    head = body.lstrip()[:400]
+    looks_html = (
+        'html' in content_type.lower()
+        or head[:1] == '<'
+    )
+    if looks_html:
+        raise RuntimeError(
+            f"Failed to fetch {url}: the server returned an HTML page "
+            f"instead of the media catalogue.  A proxy or content "
+            f"filter is probably intercepting the connection."
+        )
+    if _MEDIA_CFG_OPENING not in head:
+        raise RuntimeError(
+            f"Failed to fetch {url}: the response is not a media.cfg "
+            f"(no {_MEDIA_CFG_OPENING} section)."
+        )
+
+
 def fetch_media_cfg(base_url: str, timeout: int = 10) -> str:
     """Fetch ``media_info/media.cfg`` from *base_url*.
 
@@ -110,7 +148,10 @@ def fetch_media_cfg(base_url: str, timeout: int = 10) -> str:
             raise RuntimeError(
                 f"Failed to fetch {url}: HTTP {http_code}")
 
-        return buf.getvalue().decode('utf-8')
+        content_type = (c.getinfo(pycurl.CONTENT_TYPE) or '')
+        body = buf.getvalue().decode('utf-8', errors='replace')
+        _reject_if_not_media_cfg(url, body, content_type)
+        return body
     except pycurl.error as e:
         raise RuntimeError(f"Failed to fetch {url}: {e}") from e
     finally:
