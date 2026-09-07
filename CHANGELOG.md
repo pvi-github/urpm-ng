@@ -15,6 +15,117 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.8] — 2026-09-08
+
+A distupgrade release, written almost entirely from beta-tester
+reports on real mga9 → mga10 migrations: a frozen desktop, a filled
+root partition, a progress bar past its own total, and figures that
+announced three times what a migration actually needed.  Plus
+disk-space reporting that was wrong everywhere, not only during a
+migration.
+
+### Features
+
+- **Erases are ranked by what the running system needs.**
+  Tx B runs in batches, so an erase applied at its libsolv position is
+  gone from disk while later batches run — and the X server, the
+  display manager and the terminal driving the upgrade may still be
+  using it.  A tester's desktop froze there.  Deferring every erase to
+  the last batch is not the alternative: that is what doubled the
+  on-disk footprint and filled another tester's root partition.  Three
+  ranks instead — not running travels at its libsolv position and
+  frees space early, running but expendable (Firefox, LibreOffice)
+  goes in the penultimate batch, load-bearing goes last.  The critical
+  set is derived from `/proc` rather than listed: our own ancestor
+  chain protects the terminal without naming it, so `su -` in a
+  Konsole works like any other.  Wayland compositors resist
+  derivation — they run as the session user, children of the session,
+  indistinguishable from Firefox by every process attribute — so they
+  are named as Provides in the manifest.
+
+- **Every filesystem is measured before anything is downloaded.**
+  Nothing checked whether `/usr` could hold a cross-release upgrade:
+  the payload check sizes the download directory, `check_boot_space`
+  sizes `/boot`, and rpm only notices at commit time, thousands of
+  packages too late.  The filesystem carrying `/usr` and the one
+  carrying the download cache get separate verdicts when they are
+  separate partitions.  The payload and the footprint are never added
+  together: Tx B unlinks each batch's `.rpm` as it commits, so the
+  cache drains as the new files arrive and the peak is the larger of
+  the two.  A recommended headroom of 10% of the installed footprint
+  sits beside the estimate, never inside it.  Nothing is refused — a
+  false refusal aborts an upgrade that would have worked, after the
+  repositories have already been switched over, and the pre-flight
+  cannot run any earlier because the plan needs the target-release
+  synthesis.
+
+- **`urpm cache flush`** drops every cached RPM payload and keeps the
+  metadata.  The release-N payloads are freed automatically between
+  the pre-upgrade and the target-release download; on a tight root
+  that is the difference between a migration that fits and one that
+  does not.
+
+- `urpm build` runs with the network off by default.
+- `--enablemedia` / `--disablemedia` per transaction.
+- Relocatable download payload, with a space pre-flight.
+- `--rootless` for chroot installs, with a subuid/subgid pre-flight.
+- Integrity check registry, including a broken-links check.
+
+### Bug Fixes
+
+- **Disk-space figures were wrong across the whole CLI.**  An upgrade
+  is a single libsolv step carrying only the new solvable, so the
+  space its replaced version gives back appeared nowhere: 11 GB of
+  apparent growth where the measured net was 4.9.  `urpm upgrade` and
+  `urpm install` were affected too, not just `distupgrade`.  Download
+  volume and installed footprint are now told apart, and what removals
+  give back is shown.
+- Progress counted rpm's implicit erases and ran past its own total;
+  the bar also drew wider than the terminal and corrupted every line
+  above it for the rest of a two-hour migration.
+- A failed Phase A transaction stopped being treated as success, and
+  failed transactions now report every error instead of the first one,
+  truncated.
+- A pending reboot after Phase A is detected and asked for, instead of
+  mixing two glibc ABIs across one rpm transaction.
+- `--abort` is refused past Tx A, where it could no longer restore
+  anything; the plan is reconciled against the rpmdb on `--resume`.
+- A content filter answering 200 with an HTML block page is recognised
+  as such, instead of being handed to configparser.
+- A missing AppStream blob is an expected absence on official media
+  and no longer warns once per medium per sync.
+- `urpm cache clean` looked under a path that predates the
+  configurable payload directory and reported « no RPM cache found »
+  on 6.1 GB of payloads.
+- `--nodeps` skipped the resolver pool; `--reinstall` did not force
+  past leftover state.
+- rpm payload failures (`UNPACK_ERROR`) are detected instead of
+  passing silently.
+- `genmedia` matches `genhdlist2`'s `media_info` XML.
+- AppStream `pkgname` must be the RPM name.
+- Network isolation during a build needs a nested user namespace.
+
+### Packaging & Distribution
+
+- Bash completion offers `urpm cache flush`, and no longer offers
+  `rebuild-fts`, which had no parser behind it.  A test now compares
+  the completion's verb lists against argparse's subparser tree in
+  both directions.
+- Test media are regenerated when their inputs change, instead of
+  going stale silently.
+
+### Documentation
+
+- The Stage 0 safety checks were never listed in `POTFILES.in`: the
+  three refusals that stop a migration before it starts — `/boot` too
+  small, kernel too old for the target glibc, critical package
+  installed without rebooting — reached every operator in English
+  whatever their locale.  Now translated.
+- README and man pages document the space pre-flight in seven
+  languages.
+- First-pass translations for every string added since 0.9.7, in the
+  six shipped languages.
+
 ## [0.9.7] — 2026-09-01
 
 Robustness pass on the install / mkimage paths, plus the fix for
