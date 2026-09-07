@@ -37,6 +37,13 @@ from .stage2 import (
     run_stage2,
     solve_distupgrade,
 )
+from .root_space import (
+    FilesystemNeed,
+    RootSpaceEstimate,
+    RootSpaceError,
+    check_root_space,
+    estimate as estimate_root_space,
+)
 from .manifest import (
     BOOT_CRITICAL_LOCKS_BASE,
     BOOT_CRITICAL_LOCKS_UEFI,
@@ -98,6 +105,11 @@ __all__ = [
     "ReleaseIdentity",
     "Stage0Error",
     "RebootRequiredError",
+    "FilesystemNeed",
+    "RootSpaceEstimate",
+    "RootSpaceError",
+    "check_root_space",
+    "estimate_root_space",
     "Stage0Result",
     "Stage1Error",
     "BOOT_CRITICAL_LOCKS_BASE",

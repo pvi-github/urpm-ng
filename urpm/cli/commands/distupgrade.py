@@ -435,7 +435,48 @@ def _render_empty_plan_diagnosis(result) -> None:
             "    (+ {n} more)").format(n=len(skipped) - 20)))
 
 
-def _render_plan_and_confirm(result, *, source: str, target: str,
+def _undo_stage1_media_swap(db, lock_fd: int) -> None:
+    """Put the media back the way they were before Stage 1.
+
+    Called when Stage 2 refuses to go on — an empty plan, or a
+    filesystem that cannot hold the upgrade.  Stage 1 has already
+    disabled the source-release media and enabled the target ones, so
+    a machine that stays on mga N would be left pointing at mga N+1
+    catalogues : no updates, and a repair that needs the very tool
+    whose media are now wrong.
+
+    ``lock_fd`` is the descriptor :func:`run_stage0` acquired.  It has
+    to be passed in : releasing the lock is what lets the operator
+    re-run once they have freed some space, and calling the release
+    with no argument raised a ``TypeError`` that swallowed the whole
+    rollback report — the media were already restored by then, but the
+    operator was told the rollback had failed.
+
+    Never raises : the caller is already reporting a failure, and a
+    second traceback on top of it would bury the actionable message.
+    Falls back to telling the operator to run ``--abort`` by hand.
+    """
+    from ...core.distupgrade import delete_state, release_distupgrade_lock
+
+    print(colors.info(_(
+        "Rolling back Stage 1 media changes so the DB matches the "
+        "pre-distupgrade state...")))
+    try:
+        n_del_m, n_del_s, n_up = _rollback_stage1(db)
+        delete_state(db)
+        release_distupgrade_lock(lock_fd)
+        print(colors.success(_(
+            "Rolled back : {n_del_m} target media + "
+            "{n_del_s} server(s) removed, {n_up} row(s) restored."
+        ).format(n_del_m=n_del_m, n_del_s=n_del_s, n_up=n_up)))
+    except Exception as rb_exc:  # noqa: BLE001
+        print(colors.error(_(
+            "Rollback failed: {err}.  Run `urpm distupgrade --abort` "
+            "manually to restore the pre-distupgrade state."
+        ).format(err=rb_exc)))
+
+
+def _render_plan_and_confirm(result, *, space, source: str, target: str,
                              auto: bool) -> bool:
     """Show the Stage 2 plan (``urpm u``-style) and prompt Y/N.
 
@@ -445,6 +486,12 @@ def _render_plan_and_confirm(result, *, source: str, target: str,
     ~10 lines unless ``--show-all``), sums download size, then
     prompts the user unless ``auto=True``.  Returns ``True`` when
     the user proceeds, ``False`` on decline or Ctrl+C / EOF.
+
+    ``space`` is the :class:`RootSpaceEstimate` Stage 2 already had to
+    compute to decide whether to get this far.  Shown here rather than
+    only on refusal : « it fits, with 3 GB to spare » and « it fits,
+    with 40 MB to spare » are the same verdict and not the same
+    decision.
 
     All user-facing strings pass through ``_()`` — translations
     are updated in the ``.po`` files.
@@ -491,6 +538,17 @@ def _render_plan_and_confirm(result, *, source: str, target: str,
             nevras, indent=4, color_func=colors.error)
 
     print("\n" + colors.bold(format_totals(sizes, count=len(result.actions))))
+
+    from ...core.distupgrade.root_space import describe, shortfall_warning
+    print("\n" + colors.dim(describe(space)))
+
+    # A margin inside the estimate's own noise is not a refusal, but it
+    # is not nothing either : printed in full, and printed under
+    # ``--auto`` too.  Someone running unattended is precisely the one
+    # who will find out the hard way.
+    tight = shortfall_warning(space)
+    if tight:
+        print("\n" + colors.warning(tight))
 
     if auto:
         print(colors.dim(_(
@@ -675,6 +733,7 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         Stage2Aborted,
         Stage2EmptyPlanError,
         Stage2Error,
+        RootSpaceError,
         release_distupgrade_lock,
         run_stage0,
         run_stage1,
@@ -974,9 +1033,10 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
     print(colors.info(_(
         "Resolving the target-release package plan...")))
 
-    def _stage2_confirm(result) -> bool:
+    def _stage2_confirm(result, space) -> bool:
         return _render_plan_and_confirm(
             result,
+            space=space,
             source=stage0.current or "?",
             target=stage0.target.display(),
             auto=getattr(args, "auto", False))
@@ -1027,25 +1087,17 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         if _dp["display"] is not None:
             _dp["display"].finish()
         _render_empty_plan_diagnosis(exc.result)
-        print(colors.info(_(
-            "Rolling back Stage 1 media changes so the DB matches the "
-            "pre-distupgrade state...")))
-        from ...core.distupgrade import (
-            delete_state, release_distupgrade_lock,
-        )
-        try:
-            n_del_m, n_del_s, n_up = _rollback_stage1(db)
-            delete_state(db)
-            release_distupgrade_lock()
-            print(colors.success(_(
-                "Rolled back : {n_del_m} target media + "
-                "{n_del_s} server(s) removed, {n_up} row(s) restored."
-            ).format(n_del_m=n_del_m, n_del_s=n_del_s, n_up=n_up)))
-        except Exception as rb_exc:  # noqa: BLE001
-            print(colors.error(_(
-                "Rollback failed: {err}.  Run `urpm distupgrade --abort` "
-                "manually to restore the pre-distupgrade state."
-            ).format(err=rb_exc)))
+        _undo_stage1_media_swap(db, stage0.lock_fd)
+        return 1
+    except RootSpaceError as exc:
+        # Same unwind as the empty plan, same reason : Stage 1 has
+        # already flipped the media to the target release.  Leaving
+        # them that way on a machine that is staying on mga N is the
+        # brick-at-reboot the empty-plan guard exists to prevent.
+        if _dp["display"] is not None:
+            _dp["display"].finish()
+        print(colors.error(str(exc)))
+        _undo_stage1_media_swap(db, stage0.lock_fd)
         return 1
     except Stage2Error as exc:
         if _dp["display"] is not None:

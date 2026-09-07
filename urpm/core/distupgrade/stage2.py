@@ -1,11 +1,16 @@
 """Stage 2 — distupgrade solve + pre-load download (SPEC_DISTUPGRADE §4.2).
 
-Two steps :
+Three steps :
 
 - **Solve** — delegated to :meth:`Resolver.resolve_distupgrade`, which
   uses the ``SOLVER_DISTUPGRADE | SOLVER_SOLVABLE_ALL`` job with
   ``SOLVER_FLAG_DUP_ALLOW_NAMECHANGE``.  Returns a standard
   :class:`Resolution` — same shape ``resolve_upgrade`` returns.
+- **Root-space pre-flight** — :func:`root_space.check_root_space`
+  measures the plan against the filesystem holding ``/usr`` and
+  refuses before anything is fetched.  It has to sit between the two
+  other steps : the plan does not exist before the solve, and after
+  the download the payload it has to account for is already on disk.
 - **Download** — delegated to :meth:`PackageOperations.build_download_items`
   + :meth:`download_packages`.  Same pipeline ``cmd_install`` /
   ``cmd_upgrade`` use — HTTPS + pinned IP + parallel workers + GPG
@@ -200,6 +205,39 @@ def download_plan(
     return summary
 
 
+def bytes_still_to_download(db: "PackageDatabase", result: "Resolution") -> int:
+    """Payload bytes the plan has yet to fetch.
+
+    Uses the download pipeline's own primitives —
+    :meth:`PackageOperations.build_download_items` to turn actions into
+    items, :meth:`Downloader.is_cached` to test each one — so the
+    answer cannot drift from what :func:`download_plan` will actually
+    do a moment later.  Reconstructing RPM filenames here to check them
+    against the cache tree would be a second, quietly diverging
+    implementation of the same rule.
+
+    Returns 0 rather than raising when the plan carries no resolver or
+    the items cannot be built : the caller uses this to size a space
+    check, and a check that refuses to run is worth more than one that
+    aborts the migration over its own bookkeeping.
+    """
+    from ..download import Downloader
+    from ..operations import PackageOperations
+
+    resolver = getattr(result, "_resolver", None)
+    if resolver is None:
+        return 0
+    try:
+        items, _local = PackageOperations(db).build_download_items(
+            result.actions, resolver)
+        downloader = Downloader(db=db)
+        return sum(item.size for item in items
+                   if not downloader.is_cached(item))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("cannot size the pending payload: %s", exc)
+        return 0
+
+
 def run_stage2(
     db: "PackageDatabase",
     *,
@@ -214,12 +252,19 @@ def run_stage2(
     ``downloaded`` on success.  Returns a summary the CLI renders +
     hands to Stage 3.
 
-    ``confirm_callback(result: Resolution) -> bool`` — optional gate
-    called after solve, before download.  Returning ``False`` raises
-    :class:`Stage2Aborted` ; the caller exits cleanly and ``.state``
-    is not persisted.  Returning ``True`` (or leaving the callback
-    ``None``) proceeds with download.
+    ``confirm_callback(result: Resolution, space: RootSpaceEstimate)
+    -> bool`` — optional gate called after solve, before download.
+    Returning ``False`` raises :class:`Stage2Aborted` ; the caller
+    exits cleanly and ``.state`` is not persisted.  Returning ``True``
+    (or leaving the callback ``None``) proceeds with download.
+
+    The root-filesystem pre-flight runs *before* that gate and raises
+    :class:`RootSpaceError` when the plan cannot fit : there is nothing
+    to confirm about a migration that will run the disk out half-way
+    through, and asking would only invite a « yes ».
     """
+    from ..download import resolve_payload_dir
+    from .root_space import check_root_space
     from .state import read_state, write_state
 
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -247,7 +292,17 @@ def run_stage2(
     if not result.actions:
         raise Stage2EmptyPlanError(result)
 
-    if confirm_callback is not None and not confirm_callback(result):
+    # Nothing else measures whether ``/usr`` can hold what is about to
+    # be unpacked : the payload check sizes the download directory and
+    # rpm only notices at commit time, several GB too late.  Runs
+    # before the download so the estimate can count the payload that is
+    # not yet on disk.
+    space = check_root_space(
+        result.actions,
+        payload_dir=resolve_payload_dir(),
+        payload_bytes=bytes_still_to_download(db, result))
+
+    if confirm_callback is not None and not confirm_callback(result, space):
         raise Stage2Aborted()
 
     download_summary = download_plan(

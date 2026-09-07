@@ -338,6 +338,13 @@ class PackageAction:
     media_name: str = ""
     reason: InstallReason = InstallReason.DEPENDENCY
     from_evr: str = ""  # Previous version for upgrades
+    #: Installed size of the version this action replaces, in bytes.
+    #: Zero for a plain install and for a removal.  An upgrade is a
+    #: single libsolv step carrying only the new solvable, so without
+    #: this the space the old version gives back is invisible : a
+    #: cross-release plan looked like 11 GB of pure growth when the
+    #: net was under 4.
+    from_size: int = 0
     solvable_id: Optional[int] = None
 
 
@@ -1635,11 +1642,14 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
             # Get previous version for upgrades/downgrades
             from_evr = ""
+            from_size = 0
             if action in (TransactionType.UPGRADE, TransactionType.DOWNGRADE,
                           TransactionType.REINSTALL):
                 old = trans.othersolvable(s)
                 if old:
                     from_evr = old.evr
+                    from_size = installed_size_of(
+                        old, self._solvable_to_pkg)
 
             actions.append(PackageAction(
                 action=action,
@@ -1651,6 +1661,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 media_name=pkg_info.get('media_name', ''),
                 reason=reason,
                 from_evr=from_evr,
+                from_size=from_size,
                 solvable_id=s.id,
             ))
 
@@ -2215,11 +2226,14 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
             # Get previous version for upgrades/downgrades
             from_evr = ""
+            from_size = 0
             if action in (TransactionType.UPGRADE, TransactionType.DOWNGRADE,
                           TransactionType.REINSTALL):
                 old = trans.othersolvable(s)
                 if old:
                     from_evr = old.evr
+                    from_size = installed_size_of(
+                        old, self._solvable_to_pkg)
 
             actions.append(PackageAction(
                 action=action,
@@ -2232,6 +2246,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 media_name=pkg_info.get('media_name', ''),
                 reason=reason,
                 from_evr=from_evr,
+                from_size=from_size,
                 solvable_id=s.id,
             ))
 
@@ -2483,6 +2498,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 remove_size += size
 
             from_evr = ""
+            from_size = 0
             if action in (
                 TransactionType.UPGRADE,
                 TransactionType.DOWNGRADE,
@@ -2491,6 +2507,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 old = trans.othersolvable(s)
                 if old:
                     from_evr = old.evr
+                    from_size = installed_size_of(
+                        old, self._solvable_to_pkg)
 
             actions.append(PackageAction(
                 action=action,
@@ -2503,6 +2521,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 media_name=pkg_info.get('media_name', ''),
                 reason=InstallReason.DEPENDENCY,
                 from_evr=from_evr,
+                from_size=from_size,
                 solvable_id=s.id,
             ))
 
@@ -2624,6 +2643,28 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             problems=[],
             remove_size=remove_size
         )
+
+
+def installed_size_of(solvable, solvable_to_pkg: dict) -> int:
+    """Installed size in bytes of an already-installed *solvable*.
+
+    Two rpmdb loaders feed ``@System`` and they store this in different
+    places (see :mod:`urpm.core.resolution.pool`) :
+
+    * on a normal system, ``repo.add_rpmdb()`` — libsolv's own reader —
+      populates ``SOLVABLE_INSTALLSIZE`` and nothing else.  Measured
+      against ``rpm -q --qf %{SIZE}``: identical, in bytes.
+    * against a chroot, ``_load_rpmdb_ts()`` builds each solvable by
+      hand and records the size in ``_solvable_to_pkg`` instead.
+
+    Reading only one of them yields a silent zero on the other half of
+    the installs — which is how an upgrade's replaced version came to
+    weigh nothing and a cross-release plan looked like pure growth.
+    """
+    size = solvable_to_pkg.get(solvable.id, {}).get('size', 0)
+    if size:
+        return size
+    return solvable.lookup_num(solv.SOLVABLE_INSTALLSIZE) or 0
 
 
 def format_size(size_bytes: int) -> str:

@@ -129,6 +129,32 @@ _CHUNK_SIZE = 1048576
 RPM_MAGIC = b'\xed\xab\xee\xdb'
 
 
+def resolve_payload_dir(payload_dir: str = None,
+                        *,
+                        default: Path = None) -> Path:
+    """Where ``.rpm`` payloads land.
+
+    Defaults to the cache directory, so the on-disk layout is unchanged
+    unless someone asks otherwise.  Only the payload moves : the
+    database and the media metadata stay put, being small and
+    permanently needed.
+
+    Precedence : explicit argument (``--download-dir``) beats the
+    ``download.payload_dir`` config key beats the default.
+
+    Shared with :mod:`urpm.core.distupgrade.root_space`, which needs to
+    know whether the payload will land on the same filesystem as
+    ``/usr`` before any downloader exists.  Deriving it twice is how
+    the two answers would end up disagreeing.
+    """
+    from .settings import get_settings
+
+    configured = (payload_dir or get_settings().download.payload_dir or '')
+    if configured:
+        return Path(configured).expanduser()
+    return default if default is not None else get_base_dir()
+
+
 def is_valid_rpm(file_path: Path) -> Tuple[bool, str]:
     """Quick check if a file is a valid RPM by checking magic bytes.
 
@@ -1080,16 +1106,8 @@ class Downloader:
         from .settings import get_settings
         _settings = get_settings()
         self.max_workers = _settings.download.parallel
-        # Where the ``.rpm`` payload lands.  Defaults to ``cache_dir``,
-        # so the on-disk layout is unchanged unless someone asks
-        # otherwise.  Only the payload moves : the database and the
-        # media metadata stay put, being small and permanently needed.
-        # Precedence : explicit argument (``--download-dir``) beats the
-        # ``download.payload_dir`` config key beats the default.
-        _configured = (payload_dir or _settings.download.payload_dir or '')
-        self.payload_dir = (
-            Path(_configured).expanduser() if _configured else self.cache_dir
-        )
+        self.payload_dir = resolve_payload_dir(payload_dir,
+                                               default=self.cache_dir)
         if self.payload_dir != self.cache_dir:
             self.payload_dir.mkdir(parents=True, exist_ok=True)
         self.use_peers = use_peers or only_peers  # only_peers implies use_peers

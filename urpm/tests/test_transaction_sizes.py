@@ -29,9 +29,11 @@ from urpm.cli.helpers.transaction_sizes import (
 MB = 1024 * 1024
 
 
-def _action(kind: str, size: int, filesize: int | None = None):
+def _action(kind: str, size: int, filesize: int | None = None,
+            from_size: int = 0):
     return SimpleNamespace(
-        action=SimpleNamespace(value=kind), size=size, filesize=filesize)
+        action=SimpleNamespace(value=kind), size=size, filesize=filesize,
+        from_size=from_size)
 
 
 class TestTheTwoAreKeptApart:
@@ -147,3 +149,53 @@ class TestTheLine:
         ]), count=2)
         low = line.lower()
         assert "freed" in low or "libér" in low
+
+
+class TestTheReplacedVersionsAreFreedToo:
+    """An upgrade is one libsolv step carrying only the *new* solvable.
+
+    The version it replaces never becomes an action, so counting only
+    explicit removals made a cross-release plan look like pure growth:
+    11 GB announced where the net was under 4, and a distupgrade
+    refused for want of 8 GB that were never going to be needed.
+    """
+
+    def test_an_upgrade_gives_back_what_it_replaces(self):
+        sizes = compute_sizes(
+            [_action("upgrade", 9 * MB, 3 * MB, from_size=8 * MB)])
+        assert sizes.installed == 9 * MB
+        assert sizes.freed == 8 * MB
+        assert sizes.net == MB, "a 9 MB package over an 8 MB one grows by 1"
+
+    def test_explicit_removals_still_count(self):
+        """Both kinds of freeing land in the same figure."""
+        sizes = compute_sizes([
+            _action("upgrade", 9 * MB, 3 * MB, from_size=8 * MB),
+            _action("remove", 4 * MB),
+        ])
+        assert sizes.freed == 12 * MB
+
+    def test_a_plain_install_replaces_nothing(self):
+        sizes = compute_sizes([_action("install", 5 * MB, 2 * MB)])
+        assert sizes.freed == 0
+        assert sizes.net == 5 * MB
+
+    def test_a_shrinking_upgrade_is_net_negative(self):
+        """mga N+1 is usually bigger, but not package by package."""
+        sizes = compute_sizes(
+            [_action("upgrade", 2 * MB, MB, from_size=6 * MB)])
+        assert sizes.net == -4 * MB
+
+    def test_the_download_is_unaffected(self):
+        """What crosses the network does not depend on what it
+        replaces."""
+        sizes = compute_sizes(
+            [_action("upgrade", 9 * MB, 3 * MB, from_size=8 * MB)])
+        assert sizes.download == 3 * MB
+
+    def test_an_action_without_the_field_is_tolerated(self):
+        """Actions synthesised outside the solver -- rpmdb-only orphan
+        detection, the --nodeps fast path -- carry no ``from_size``."""
+        bare = SimpleNamespace(action=SimpleNamespace(value="upgrade"),
+                               size=5 * MB, filesize=2 * MB)
+        assert compute_sizes([bare]).freed == 0

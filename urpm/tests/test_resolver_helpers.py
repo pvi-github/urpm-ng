@@ -136,3 +136,81 @@ def test_upgrade_no_arch_falls_back(stub_resolver, monkeypatch):
 
     r = resolver_helpers.create_resolver(db=None, args=args)
     assert r.arch == 'x86_64'
+
+
+class TestInstalledSizeOf:
+    """Where an installed package's size lives depends on which rpmdb
+    loader ran, and reading only one of them is a silent zero.
+
+    ``@System`` is filled two ways (see ``urpm.core.resolution.pool``):
+    ``repo.add_rpmdb()`` on a normal system, which populates
+    ``SOLVABLE_INSTALLSIZE`` and leaves ``_solvable_to_pkg`` empty; and
+    ``_load_rpmdb_ts()`` against a chroot, which does the opposite.
+
+    A first cut of the distupgrade space check read only the map. Every
+    unit test passed on synthetic actions, and on a real machine every
+    replaced version weighed nothing — which is the whole bug it was
+    written to fix.
+    """
+
+    def test_it_reads_libsolv_when_the_map_is_empty(self):
+        """The production path : ``add_rpmdb()``, no map."""
+        import solv
+
+        from urpm.core.resolver import installed_size_of
+
+        pool = solv.Pool()
+        pool.setarch()
+        repo = pool.add_repo("@System")
+        repo.add_rpmdb()
+        sizes = [installed_size_of(s, {}) for s in repo.solvables]
+        assert sizes, "no installed packages to check against"
+        assert any(sizes), (
+            "every installed package weighed nothing -- the lookup is "
+            "reading a field this loader does not populate"
+        )
+
+    def test_libsolv_agrees_with_rpm(self):
+        """``SOLVABLE_INSTALLSIZE`` is ``RPMTAG_SIZE``, in bytes.  If
+        libsolv ever switched to kilobytes the estimate would be off by
+        1024 and still look plausible."""
+        import solv
+
+        from urpm.core.resolver import installed_size_of
+        from urpm.core.rpmdb import open_ts
+
+        pool = solv.Pool()
+        pool.setarch()
+        repo = pool.add_repo("@System")
+        repo.add_rpmdb()
+
+        import rpm as _rpm
+        with open_ts("/") as ts:
+            for solvable in repo.solvables:
+                if solvable.name != "bash":
+                    continue
+                headers = list(ts.dbMatch(_rpm.RPMTAG_NAME, "bash"))
+                if not headers:
+                    pytest.skip("bash is not installed")
+                assert (installed_size_of(solvable, {})
+                        == headers[0][_rpm.RPMTAG_SIZE])
+                return
+        pytest.skip("bash not found in the pool")
+
+    def test_the_map_wins_when_it_has_the_answer(self):
+        """The chroot path : the loader built the solvable by hand and
+        recorded the size itself."""
+        from urpm.core.resolver import installed_size_of
+
+        from types import SimpleNamespace
+        solvable = SimpleNamespace(id=7, lookup_num=lambda _tag: 0)
+        assert installed_size_of(solvable, {7: {"size": 4096}}) == 4096
+
+    def test_an_unknown_solvable_weighs_nothing(self):
+        """Never raises : a missing size must degrade to zero, not
+        abort a migration over its own bookkeeping."""
+        from urpm.core.resolver import installed_size_of
+
+        from types import SimpleNamespace
+        solvable = SimpleNamespace(id=99, lookup_num=lambda _tag: 0)
+        assert installed_size_of(solvable, {}) == 0

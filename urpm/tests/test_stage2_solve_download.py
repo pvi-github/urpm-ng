@@ -30,6 +30,18 @@ def state_db(tmp_path, monkeypatch):
     db.close()
 
 
+def _pkg(name, nevra, action="install", size=0, filesize=0):
+    """A ``PackageAction``-shaped namespace.
+
+    Carries ``action`` / ``size`` / ``filesize`` because Stage 2 sums
+    them for the root-space pre-flight before it hands the plan on : a
+    stand-in with only a name would test a pipeline shape that no
+    longer exists.
+    """
+    return SimpleNamespace(action=action, name=name, nevra=nevra,
+                           size=size, filesize=filesize)
+
+
 def _mock_resolution(actions, success=True, problems=()):
     """A Resolution-like object the pipeline accepts."""
     return SimpleNamespace(
@@ -41,7 +53,7 @@ def _mock_resolution(actions, success=True, problems=()):
 
 class TestSolveDistupgrade:
     def test_delegates_to_resolver_and_attaches_it(self, state_db):
-        actions = [SimpleNamespace(name="foo", nevra="foo-1-1.mga11.x86_64")]
+        actions = [_pkg("foo", "foo-1-1.mga11.x86_64")]
         fake_resolver = MagicMock()
         fake_resolver.resolve_distupgrade.return_value = (
             _mock_resolution(actions))
@@ -128,6 +140,44 @@ class TestDownloadPlan:
         assert summary["nevra_to_path"] == {}
 
 
+class TestPendingPayloadSizing:
+    """What the space check charges for the download must be what the
+    download is actually going to fetch.  Getting it wrong makes
+    ``--resume`` refuse a migration whose payload is already on disk."""
+
+    def _items(self, *sizes):
+        return [SimpleNamespace(name=f"p{i}", size=size)
+                for i, size in enumerate(sizes)]
+
+    def test_cached_items_are_excluded(self, state_db):
+        from urpm.core.distupgrade.stage2 import bytes_still_to_download
+        items = self._items(100, 200, 400)
+        result = _mock_resolution([_pkg("p", "p-1-1.x86_64")])
+        result._resolver = MagicMock()
+        downloader = MagicMock()
+        downloader.is_cached.side_effect = lambda item: item.name == "p1"
+        with patch("urpm.core.operations.PackageOperations") as ops, \
+             patch("urpm.core.download.Downloader", return_value=downloader):
+            ops.return_value.build_download_items.return_value = (items, [])
+            assert bytes_still_to_download(state_db, result) == 500
+
+    def test_a_plan_without_a_resolver_sizes_nothing(self, state_db):
+        """Rather than raise : this figure only sizes a check, and a
+        check that declines to run beats one that aborts the migration
+        over its own bookkeeping."""
+        from urpm.core.distupgrade.stage2 import bytes_still_to_download
+        assert bytes_still_to_download(
+            state_db, _mock_resolution([])) == 0
+
+    def test_a_failure_to_build_items_sizes_nothing(self, state_db):
+        from urpm.core.distupgrade.stage2 import bytes_still_to_download
+        result = _mock_resolution([_pkg("p", "p-1-1.x86_64")])
+        result._resolver = MagicMock()
+        with patch("urpm.core.operations.PackageOperations",
+                   side_effect=RuntimeError("pool gone")):
+            assert bytes_still_to_download(state_db, result) == 0
+
+
 class TestRunStage2:
     def test_state_bumped_stage2_running_then_downloaded(self, state_db):
         from urpm.core.distupgrade.state import read_state, write_state
@@ -139,10 +189,8 @@ class TestRunStage2:
 
         target = ReleaseIdentity(identity="11", numeric="11")
         resolution = _mock_resolution([
-            SimpleNamespace(name="foo",
-                            nevra="foo-1-1.mga11.x86_64"),
-            SimpleNamespace(name="bar",
-                            nevra="bar-2-1.mga11.x86_64"),
+            _pkg("foo", "foo-1-1.mga11.x86_64", size=1024),
+            _pkg("bar", "bar-2-1.mga11.x86_64", size=2048),
         ])
         resolution._resolver = MagicMock()
         with patch(
@@ -207,7 +255,7 @@ class TestRunStage2:
         confirm_called = {"n": 0}
         download_called = {"n": 0}
 
-        def _confirm(_r):
+        def _confirm(_r, _space):
             confirm_called["n"] += 1
             return True
 
@@ -226,3 +274,47 @@ class TestRunStage2:
         assert excinfo.value.result is empty
         assert confirm_called["n"] == 0, "confirm must not fire on empty plan"
         assert download_called["n"] == 0, "download must not fire on empty plan"
+
+    def test_a_plan_too_big_for_the_disk_stops_before_download(
+            self, state_db):
+        """The root-space pre-flight has to be wired into Stage 2, not
+        merely importable : rpm's own disk check fires at commit time,
+        which is several GB of download too late to be any use.
+
+        Refusing before the confirm prompt is deliberate — there is
+        nothing to confirm about a migration that will run the disk out
+        half-way through, and asking only invites a « yes »."""
+        from urpm.core.distupgrade.root_space import RootSpaceError
+        from urpm.core.distupgrade.state import write_state
+        write_state({
+            "version_from": "10", "version_to": "11",
+            "stage": "media_swapped",
+        }, state_db)
+        target = ReleaseIdentity(identity="11", numeric="11")
+
+        # One package larger than any filesystem the tests could run on.
+        huge = _mock_resolution([
+            _pkg("huge", "huge-1-1.mga11.x86_64", size=1 << 50),
+        ])
+        huge._resolver = MagicMock()
+        confirm_called = {"n": 0}
+        download_called = {"n": 0}
+
+        def _confirm(_r, _space):
+            confirm_called["n"] += 1
+            return True
+
+        def _dp(*_a, **_kw):
+            download_called["n"] += 1
+            return {}
+
+        with patch("urpm.core.distupgrade.stage2.solve_distupgrade",
+                   return_value=huge), \
+             patch("urpm.core.distupgrade.stage2.download_plan",
+                   side_effect=_dp):
+            with pytest.raises(RootSpaceError):
+                run_stage2(state_db, target=target,
+                           confirm_callback=_confirm)
+
+        assert confirm_called["n"] == 0
+        assert download_called["n"] == 0
