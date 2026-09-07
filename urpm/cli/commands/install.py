@@ -741,7 +741,6 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     dep_size = sum(a.size for a in dep_pkgs)
     rec_size = sum(a.size for a in rec_pkgs)
     sug_size = sum(a.size for a in sug_pkgs)
-    total_size = sum(a.size for a in final_actions if a.action.value in ('install', 'upgrade', 'reinstall'))
 
     # Show final transaction summary
     print("\n" + colors.bold(_("Transaction summary:")) + "\n")
@@ -774,10 +773,16 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         display.print_package_list(pkg_names, indent=4)
 
     # Final confirmation
+    # The parenthesised figure used to be `total_size` with no label at
+    # all — an installed footprint that read as a download total to
+    # anyone who assumed the usual meaning.  Both are named now.
+    from ..helpers.transaction_sizes import compute_sizes, format_totals
+    summary_sizes = compute_sizes(final_actions)
     if remove_pkgs:
-        print("\n" + colors.bold(_("Total: {install} to install, {remove} to remove").format(install=len(install_actions), remove=len(remove_pkgs))) + " (" + format_size(total_size) + ")")
+        print("\n" + colors.bold(_("Total: {install} to install, {remove} to remove").format(install=len(install_actions), remove=len(remove_pkgs))))
     else:
-        print("\n" + colors.bold(ngettext("Total: {count} package", "Total: {count} packages", len(install_actions)).format(count=len(install_actions))) + " (" + format_size(total_size) + ")")
+        print("\n" + colors.bold(ngettext("Total: {count} package", "Total: {count} packages", len(install_actions)).format(count=len(install_actions))))
+    print("  " + format_totals(summary_sizes, count=len(final_actions)))
 
     if not args.auto:
         try:
@@ -794,7 +799,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         success=True,
         actions=final_actions,
         problems=[],
-        install_size=total_size
+        install_size=summary_sizes.installed
     )
 
     if args.test:
@@ -1301,7 +1306,8 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
         return 0
 
     # Calculate total size
-    total_size = sum(a.size for a in install_actions if a.size)
+    from ..helpers.transaction_sizes import compute_sizes, format_totals
+    sizes = compute_sizes(install_actions)
 
     # Show summary
     print(colors.info("\n" + _("Packages to download ({count}):").format(count=len(install_actions))))
@@ -1313,7 +1319,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     if not show_all and len(install_actions) > 20:
         print("  " + _("... and {count} more (use --show-all to list them)").format(
             count=len(install_actions) - 20))
-    print("\n" + _("Total download size: {size}").format(size=format_size(total_size)))
+    print("\n" + format_totals(sizes, count=len(install_actions)))
 
     # Confirm unless --auto
     if not auto_mode:

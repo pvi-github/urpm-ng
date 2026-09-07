@@ -457,18 +457,8 @@ def _render_plan_and_confirm(result, *, source: str, target: str,
     installs = [a for a in result.actions if a.action.value == "install"]
     removes = [a for a in result.actions if a.action.value == "remove"]
 
-    # ``filesize`` = compressed RPM download size (SOLVABLE_DOWNLOADSIZE) ;
-    # ``size`` = installed footprint (SOLVABLE_INSTALLSIZE).  Prefer
-    # ``filesize`` for the download-total line ; fall back to ``size``
-    # only when the resolver couldn't populate it.
-    total_download = sum(
-        (getattr(a, "filesize", 0) or getattr(a, "size", 0) or 0)
-        for a in result.actions
-        if a.action.value in ("install", "upgrade", "reinstall"))
-    total_install = sum(
-        getattr(a, "size", 0) or 0
-        for a in result.actions
-        if a.action.value in ("install", "upgrade", "reinstall"))
+    from ..helpers.transaction_sizes import compute_sizes, format_totals
+    sizes = compute_sizes(result.actions)
 
     print("\n" + colors.bold(_(
         "Distupgrade summary : Mageia {src} → {tgt}").format(
@@ -500,12 +490,7 @@ def _render_plan_and_confirm(result, *, source: str, target: str,
         display.print_package_list(
             nevras, indent=4, color_func=colors.error)
 
-    print("\n" + colors.bold(_(
-        "Total : {n} package(s), download {dl}, "
-        "installed footprint {inst}.").format(
-            n=len(result.actions),
-            dl=format_size(total_download),
-            inst=format_size(total_install))))
+    print("\n" + colors.bold(format_totals(sizes, count=len(result.actions))))
 
     if auto:
         print(colors.dim(_(

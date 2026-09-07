@@ -288,8 +288,10 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         pkg_names = [a.nevra for a in sorted(orphans, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.error)
 
-    if result.install_size > 0:
-        print("\n" + _("Download size: {size}").format(size=format_size(result.install_size)))
+    from ..helpers.transaction_sizes import compute_sizes, format_totals
+    sizes = compute_sizes(result.actions)
+    if sizes.download or sizes.installed or sizes.freed:
+        print("\n" + format_totals(sizes, count=len(result.actions)))
 
     # Confirmation
     if not getattr(args, 'auto', False):
