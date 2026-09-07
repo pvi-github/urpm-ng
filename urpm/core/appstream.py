@@ -542,7 +542,13 @@ class AppStreamManager:
             # blob (FileNotFoundError wrapped in URLError).
             logger.debug(f"Network error fetching AppStream for {media_name}: {e}")
         except lzma.LZMAError as e:
-            logger.warning(f"Failed to decompress AppStream for {media_name}: {e}")
+            # Same outcome as a 404, and the same non-event: whatever
+            # came back is not an AppStream blob, and the fallback just
+            # below generates one from synthesis.  Mageia's official
+            # media publish no AppStream at all, so on a normal machine
+            # this fires on every medium at every sync -- a warning
+            # there trains the operator to ignore warnings.
+            logger.debug(f"No usable AppStream for {media_name}: {e}")
         except Exception as e:
             logger.warning(f"Error fetching AppStream for {media_name}: {e}")
 
