@@ -919,7 +919,7 @@ enable-version clean sync rate-limit"
 }
 
 _urpm_cache() {
-    local cache_subcmds="info clean rebuild rebuild-fts stats"
+    local cache_subcmds="info clean flush rebuild stats"
 
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$cache_subcmds" -- "$cur"))
@@ -930,6 +930,11 @@ _urpm_cache() {
         clean)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--dry-run -n --auto -y --verbose -v $_URPM_DISPLAY_FLAGS" -- "$cur"))
+            fi
+            ;;
+        flush)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--dry-run -n --auto -y $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
         *)
