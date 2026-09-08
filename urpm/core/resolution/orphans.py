@@ -104,12 +104,31 @@ class UpgradeOrphanPlan:
 def _parse_synthesis_cap(cap: str) -> Tuple[str, int, str]:
     """Parse a synthesis capability string into ``(name, sense, evr)``.
 
-    The Mageia synthesis format stores a versioned capability with a
-    bracket suffix: ``libpng[>= 1.6.0]``.  Non-versioned capabilities
-    have no bracket, e.g. ``perl(Foo::Bar)`` or
-    ``libfoo.so.1()(64bit)``.  Brackets never appear inside unversioned
-    capability names in this format, so a plain ``find('[')`` is
-    unambiguous.
+    Mageia's synthesis encodes a capability as a bare name followed by
+    zero or more **trailing** bracket groups::
+
+        NAME               perl(Foo::Bar), libfoo.so.1()(64bit)
+        NAME[*]            /bin/sh[*]
+        NAME[op evr]       libpng[>= 1.6.0]
+        NAME[*][op evr]    apache[*][>= 2.0.54]
+
+    ``[*]`` is a qualifier carrying no version information; ``[op evr]``
+    is the version constraint.
+
+    Groups are peeled **from the right**, and only while they are
+    recognised, because brackets also occur *inside* capability names:
+    a Python extras capability such as ``python3.13dist(coverage[toml])``
+    is an ordinary name that happens to contain a bracket pair.  A
+    leading ``find('[')`` would truncate it to
+    ``python3.13dist(coverage`` and silently break every dependency
+    edge that goes through it.  Anything not recognised as a trailing
+    group is therefore part of the name.
+
+    Shapes measured on the mga10 ``core/release`` synthesis (716 763
+    capabilities): 253 493 ``[op evr]``, 4 685 ``[*]``, 752
+    ``[*][op evr]``, 7 names carrying inner brackets.  The only
+    operators present are those of :data:`_SYNTHESIS_SENSE_MAP` plus
+    the ``*`` marker.
 
     Args:
         cap: Raw capability string from ``synthesis.hdlist.cz``.
@@ -119,17 +138,29 @@ def _parse_synthesis_cap(cap: str) -> Tuple[str, int, str]:
         bitmask (``0`` for an unversioned capability) and ``evr`` is the
         version string (empty for an unversioned capability).
     """
-    idx = cap.find('[')
-    if idx < 0:
-        return cap, 0, ''
-    name = cap[:idx]
-    end = cap.rfind(']')
-    inside = cap[idx + 1:end] if end > idx else cap[idx + 1:]
-    parts = inside.split(None, 1)
-    if len(parts) != 2:
-        return name, 0, ''
-    op, evr = parts
-    return name, _SYNTHESIS_SENSE_MAP.get(op, 0), evr
+    name = cap
+    sense = 0
+    evr = ''
+    while name.endswith(']'):
+        start = name.rfind('[')
+        if start < 0:
+            break
+        inside = name[start + 1:-1]
+        if inside == '*':
+            name = name[:start]
+            continue
+        parts = inside.split(None, 1)
+        if len(parts) == 2 and parts[0] in _SYNTHESIS_SENSE_MAP:
+            # Peeling right-to-left, so the first constraint met is the
+            # right-most one; keep it and ignore any further constraint
+            # group (genhdlist2 and genmedia never emit two).
+            if not evr:
+                sense = _SYNTHESIS_SENSE_MAP[parts[0]]
+                evr = parts[1]
+            name = name[:start]
+            continue
+        break
+    return name, sense, evr
 
 
 def _evr_tuple(evr: str) -> Tuple[str, str, str]:
