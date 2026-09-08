@@ -15,6 +15,69 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.9] — 2026-09-09
+
+A short bugfix release, all of it from beta-tester reports on 0.9.8.
+Three figures the tool was getting wrong — a cauldron target it could
+never match, an erase that claimed to free nothing, and capability
+names cut in half — plus the distupgrade messages that still reached
+every operator in English.
+
+### Bug Fixes
+
+- **`urpm distupgrade --to cauldron` refused every critical package.**
+  The check looked for a release marker built as `mga` + the target's
+  name, so it searched for `mgacauldron` — a tag that does not exist
+  and never will, since cauldron packages are tagged `.mga11`.  The
+  documented freeze form `--to cauldron:11` failed identically: the
+  call site kept the identity and discarded the numeric.  Keying on
+  the numeric would still have been wrong, because a cauldron
+  repository ships `.mga10` and `.mga11` side by side — whatever has
+  not been rebuilt keeps its previous tag, and a disttag names the
+  release a package was *built for*, never the medium it came from.
+  Nor is presence in the plan the right test: a package the target
+  ships at the version already installed produces no action at all.
+  The question is now whether each critical package will be on disk
+  once the core transaction commits, and it is asked right after the
+  solve instead of after the download — a refusal no longer costs
+  2.2 GB.
+
+- **`urpm erase` announced a few kilobytes for hundreds of megabytes.**
+  Every removal weighed zero: an outgoing package is an *installed*
+  one, and the size lookup only ever described packages coming from
+  media.  Four call sites read it anyway and got zero back, silently,
+  since zero is a plausible-looking number.  Beyond `urpm erase` this
+  restores the « freed » figure on `upgrade` and `install`, and the
+  distupgrade space estimate, whose deferred-erase term was summing
+  zeros.  Verified against `rpm -q --qf %{SIZE}`: same total, to the
+  byte.
+
+- **A bracket inside a capability name was read as a version.**
+  `python3dist(yt-dlp[secretstorage])[== 2026.6.9]` was cut at the
+  first bracket, leaving a capability nothing provides — and every
+  dependency edge through it vanished from the orphan graph.  Trailing
+  groups are now peeled from the right and only while they are
+  recognised; anything else is part of the name.  Measured over the 14
+  synthesis files of a mga10 install: 212 984 distinct capabilities,
+  12 truncated by the old split, all Python extras.
+
+- Media whose URL carries the release as a glued prefix (`mga10`,
+  `mageia9`) are no longer transposed onto a target that has no
+  number.  A mirror serves `/cauldron/`, never `/mageiacauldron/`.
+
+- The disttag parser no longer accepts a `.mgacauldron` suffix, and a
+  dead `mga<identity>` term left the third-party media query.
+
+### Documentation
+
+- Twenty-two distupgrade strings had no translation and reached every
+  operator in English whatever their locale — « Rolling back Stage 1
+  media changes… » in the middle of a French run being the one testers
+  kept reporting.  Now 137/137 on that path, in the six shipped
+  languages: the resume and abort messages, the Stage 0 and Stage 4
+  summaries, the empty-plan diagnosis, the rollback report, and the
+  missing-anchor refusal.
+
 ## [0.9.8] — 2026-09-08
 
 A distupgrade release, written almost entirely from beta-tester
