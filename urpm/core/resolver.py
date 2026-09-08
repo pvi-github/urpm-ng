@@ -1634,11 +1634,21 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 elif decision_reason == solv.Solver.SOLVER_REASON_RESOLVE_JOB:
                     reason = InstallReason.EXPLICIT
 
-            size = pkg_info.get('filesize', 0)
-            if action in (TransactionType.INSTALL, TransactionType.UPGRADE):
-                install_size += size
-            elif action == TransactionType.REMOVE:
+            # An outgoing package is an *installed* solvable, and
+            # ``_solvable_to_pkg`` only describes media ones : the
+            # production pool fills ``@System`` with libsolv's own
+            # ``add_rpmdb()``, which populates SOLVABLE_INSTALLSIZE and
+            # nothing else.  Reading the map here reported every erase
+            # as weighing zero — « urpm erase libreoffice » announced a
+            # few kB for 323 MB.
+            if action == TransactionType.REMOVE:
+                size = installed_size_of(s, self._solvable_to_pkg)
                 remove_size += size
+            else:
+                size = pkg_info.get('filesize', 0)
+                if action in (TransactionType.INSTALL,
+                              TransactionType.UPGRADE):
+                    install_size += size
 
             # Get previous version for upgrades/downgrades
             from_evr = ""
@@ -2218,11 +2228,21 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                       if s.name.lower() in upgrade_explicit
                       else InstallReason.DEPENDENCY)
 
-            size = pkg_info.get('size', 0)
-            if action in (TransactionType.INSTALL, TransactionType.UPGRADE):
-                install_size += size
-            elif action == TransactionType.REMOVE:
+            # An outgoing package is an *installed* solvable, and
+            # ``_solvable_to_pkg`` only describes media ones : the
+            # production pool fills ``@System`` with libsolv's own
+            # ``add_rpmdb()``, which populates SOLVABLE_INSTALLSIZE and
+            # nothing else.  Reading the map here reported every erase
+            # as weighing zero — « urpm erase libreoffice » announced a
+            # few kB for 323 MB.
+            if action == TransactionType.REMOVE:
+                size = installed_size_of(s, self._solvable_to_pkg)
                 remove_size += size
+            else:
+                size = pkg_info.get('size', 0)
+                if action in (TransactionType.INSTALL,
+                              TransactionType.UPGRADE):
+                    install_size += size
 
             # Get previous version for upgrades/downgrades
             from_evr = ""
@@ -2491,11 +2511,21 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             else:
                 continue
 
-            size = pkg_info.get('size', 0)
-            if action in (TransactionType.INSTALL, TransactionType.UPGRADE):
-                install_size += size
-            elif action == TransactionType.REMOVE:
+            # An outgoing package is an *installed* solvable, and
+            # ``_solvable_to_pkg`` only describes media ones : the
+            # production pool fills ``@System`` with libsolv's own
+            # ``add_rpmdb()``, which populates SOLVABLE_INSTALLSIZE and
+            # nothing else.  Reading the map here reported every erase
+            # as weighing zero — « urpm erase libreoffice » announced a
+            # few kB for 323 MB.
+            if action == TransactionType.REMOVE:
+                size = installed_size_of(s, self._solvable_to_pkg)
                 remove_size += size
+            else:
+                size = pkg_info.get('size', 0)
+                if action in (TransactionType.INSTALL,
+                              TransactionType.UPGRADE):
+                    install_size += size
 
             from_evr = ""
             from_size = 0
@@ -2615,7 +2645,8 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 continue
             for s in cl.solvables():
                 pkg_info = self._solvable_to_pkg.get(s.id, {})
-                size = pkg_info.get('size', 0)
+                # Installed solvable : see :func:`installed_size_of`.
+                size = installed_size_of(s, self._solvable_to_pkg)
                 remove_size += size
 
                 actions.append(PackageAction(
