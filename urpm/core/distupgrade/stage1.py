@@ -134,15 +134,25 @@ def _try_transpose_string(s: str, src: str, tgt: str) -> Optional[str]:
     it can't transpose the row and must mark it orphan.  Non-numeric
     source identities (``"cauldron"``) don't transpose : cauldron is
     a rolling target, N→N+1 arithmetic doesn't apply.
+
+    The *target* has to be numeric for the first two patterns and need
+    not be for the third, which is the whole difference between a
+    release number and a release name.  ``mageia9`` and ``mga9`` glue
+    the number to a prefix, and there is no ``mageiacauldron`` path on
+    any mirror nor any ``.mgacauldron`` package — that tag does not
+    exist and never will.  A standalone path segment is another
+    matter : mirrors do serve ``/cauldron/x86_64/…``, so ``9`` →
+    ``cauldron`` is exactly right there.
     """
     if not s or not src.isdigit():
         return None
-    prefixed_src, prefixed_tgt = f"mageia{src}", f"mageia{tgt}"
-    if prefixed_src in s:
-        return s.replace(prefixed_src, prefixed_tgt)
-    tag_src, tag_tgt = f"mga{src}", f"mga{tgt}"
-    if tag_src in s:
-        return s.replace(tag_src, tag_tgt)
+    if tgt.isdigit():
+        prefixed_src, prefixed_tgt = f"mageia{src}", f"mageia{tgt}"
+        if prefixed_src in s:
+            return s.replace(prefixed_src, prefixed_tgt)
+        tag_src, tag_tgt = f"mga{src}", f"mga{tgt}"
+        if tag_src in s:
+            return s.replace(tag_src, tag_tgt)
     # Segment-wise bump — treats the string as ``/``-separated tokens
     # and only rewrites tokens that are exactly ``src``.  Handles
     # ``9/x86_64/...`` (leading), ``.../x86_64/9`` (trailing),
@@ -264,8 +274,8 @@ def _transpose_third_party_media(
                allow_unsigned, update_media, enabled, disabled_by
         FROM media
         WHERE is_official = 0
-          AND mageia_version IN (?, ?)
-    """, (source_identity, f"mga{source_identity}")).fetchall()
+          AND mageia_version = ?
+    """, (source_identity,)).fetchall()
 
     activated: List[dict] = []
     orphaned: List[dict] = []

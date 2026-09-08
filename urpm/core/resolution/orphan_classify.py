@@ -64,7 +64,7 @@ class OrphanInfo:
 # ``cauldron`` is treated as the current development release: we do
 # NOT classify it as a previous release even when the running system
 # is a numbered release.
-_DISTTAG_RE = re.compile(r"\.mga(\d+|cauldron)\b")
+_DISTTAG_RE = re.compile(r"\.mga(\d+)\b")
 
 
 def parse_disttag(evr: str) -> Optional[str]:
@@ -73,6 +73,12 @@ def parse_disttag(evr: str) -> Optional[str]:
     ``"0.2-4.mga10"`` → ``"mga10"``.
     ``"1:17.0.19.0.10-1.mga9"`` → ``"mga9"``.
     ``"1.0-1"`` (no disttag) → ``None``.
+
+    Numeric only.  There is no ``.mgacauldron`` suffix and there never
+    will be : a cauldron repository ships ``.mga10`` and ``.mga11``
+    side by side, whatever has not been rebuilt keeping its previous
+    tag.  A disttag names the release a package was *built for*, never
+    the medium it came from.
     """
     m = _DISTTAG_RE.search(evr or "")
     return f"mga{m.group(1)}" if m else None
@@ -81,8 +87,11 @@ def parse_disttag(evr: str) -> Optional[str]:
 def disttag_major(disttag: Optional[str]) -> Optional[int]:
     """Extract the numeric major from a disttag string.
 
-    ``"mga10"`` → ``10``.  ``"mgacauldron"`` → ``None`` (rolling —
-    never comparable to a numbered release).  ``None`` → ``None``.
+    ``"mga10"`` → ``10``.  ``None`` → ``None``.
+
+    Anything whose tail is not numeric yields ``None`` : the value can
+    reach here straight from a user filter (``disttag=…``), where it
+    is arbitrary text.
     """
     if not disttag:
         return None

@@ -212,3 +212,73 @@ def split_plan_for_tx_a_and_b(
         else:
             tx_b_nevras.append(a.nevra)
     return tx_a_nevras, tx_b_nevras
+
+
+def which_anchors_available(actions, *, resolver, anchors,
+                             erased_names=()) -> dict:
+    """Return ``{anchor: True/False}`` — will it be there after Tx A?
+
+    That is the only question worth asking.  ``execvp`` restarts urpm
+    under the rpm and the Python that Tx A has just committed; an
+    anchor missing at that moment leaves the machine stranded
+    mid-migration.  So an anchor is satisfied when either
+
+    * the plan installs it from a target medium, or
+    * it is already installed and the plan does not remove it.
+
+    The second case is not a loophole, it is the common one.  A
+    package the target release ships at the version already on the
+    machine produces no action at all: there is nothing to do with it.
+    Requiring it in the plan refused ``--to cauldron`` over
+    ``rpm-helper``, a noarch bag of shell macros identical in mga10 and
+    cauldron, along with three python modules in the same situation.
+
+    What this deliberately does *not* try to re-derive is whether the
+    new Python can import those modules.  That is a dependency
+    question, and the solver has already answered it: had the new
+    python3 needed a rebuilt ``python3-zstandard``, the plan would
+    carry one or would not have resolved.
+
+    Two earlier cuts asked the wrong question.  The first required the
+    solvable's release tag to match ``f"mga{identity}"`` — but
+    ``mgacauldron`` does not exist and never will, so ``--to
+    cauldron`` and the documented ``--to cauldron:11`` both refused
+    all ten anchors on a plan that contained every one of them.  Nor
+    would keying on the numeric have been right: a cauldron repository
+    ships ``.mga10`` and ``.mga11`` side by side, whatever has not
+    been rebuilt keeping its previous tag, so an anchor legitimately
+    served as ``.mga10`` would have been rejected too.  A disttag names
+    the release a package was *built for*, never the medium it came
+    from.
+
+    Anchors are Provides, not names, so everything here goes through
+    ``whatprovides`` — ``python3-pyyaml`` is provided by the package
+    Mageia calls ``python3-yaml``.
+    """
+    plan_ids = {a.solvable_id for a in actions
+                if getattr(a, "solvable_id", None) is not None}
+    if resolver is None or not plan_ids:
+        # Best-effort: treat every anchor as present (older tests /
+        # dry-runs that don't have a pool).
+        return {name: True for name in anchors}
+    pool = resolver.pool
+    installed = pool.installed
+    erased = set(erased_names or ())
+    result: dict = {}
+    for name in anchors:
+        try:
+            dep = pool.Dep(name)
+        except Exception:  # noqa: BLE001
+            result[name] = False
+            continue
+        found = False
+        for s in pool.whatprovides(dep):
+            from_installed = installed is not None and s.repo == installed
+            if s.id in plan_ids and not from_installed:
+                found = True          # Tx A installs it
+                break
+            if from_installed and s.name not in erased:
+                found = True          # already there, and staying
+                break
+        result[name] = found
+    return result

@@ -58,8 +58,13 @@ class TestParseDisttag:
     def test_double_digit(self):
         assert parse_disttag("2.0-3.mga11") == "mga11"
 
-    def test_cauldron(self):
-        assert parse_disttag("5-1.mgacauldron") == "mgacauldron"
+    def test_there_is_no_cauldron_disttag(self):
+        """A cauldron repository ships `.mga10` and `.mga11` side by
+        side — whatever has not been rebuilt keeps its previous tag.
+        Nothing is ever tagged `.mgacauldron`, so the parser has no
+        business recognising it."""
+        assert parse_disttag("5-1.mgacauldron") is None
+        assert parse_disttag("5-1.mga11") == "mga11"
 
     def test_no_disttag(self):
         assert parse_disttag("1.0-1") is None
@@ -76,8 +81,11 @@ class TestDisttagMajor:
         assert disttag_major("mga10") == 10
         assert disttag_major("mga9") == 9
 
-    def test_cauldron_returns_none(self):
+    def test_a_non_numeric_tail_returns_none(self):
+        """The value can arrive straight from a user filter
+        (`disttag=…`), where it is arbitrary text."""
         assert disttag_major("mgacauldron") is None
+        assert disttag_major("mga") is None
 
     def test_none_input(self):
         assert disttag_major(None) is None
@@ -157,7 +165,9 @@ class TestIsPreviousReleaseRelic:
         pkg = _mk("foo", evr="1.0-1")
         assert not is_previous_release_relic(pkg, current_major=10)
 
-    def test_cauldron_returns_false(self):
+    def test_an_unparseable_tag_returns_false(self):
+        """No disttag to compare means no verdict — never a relic by
+        default."""
         pkg = _mk("foo", evr="1.0-1.mgacauldron")
         assert not is_previous_release_relic(pkg, current_major=10)
 

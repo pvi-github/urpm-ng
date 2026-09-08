@@ -731,6 +731,7 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         RebootRequiredError,
         Stage1Error,
         Stage2Aborted,
+        Stage2AnchorsMissingError,
         Stage2EmptyPlanError,
         Stage2Error,
         release_distupgrade_lock,
@@ -1088,6 +1089,23 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         _render_empty_plan_diagnosis(exc.result)
         _undo_stage1_media_swap(db, stage0.lock_fd)
         return 1
+    except Stage2AnchorsMissingError as exc:
+        # Same unwind as the empty plan : Stage 1 has already flipped
+        # the media, and a machine staying on mga N must not be left
+        # pointing at mga N+1 catalogues.
+        if _dp["display"] is not None:
+            _dp["display"].finish()
+        print(colors.error(_(
+            "{n} critical package(s) would be missing once the core "
+            "transaction commits : {names}").format(
+                n=len(exc.missing), names=", ".join(exc.missing))))
+        print(colors.info(_(
+            "urpm restarts under the newly installed rpm and python at "
+            "that point, and cannot without them.  The {target} "
+            "repositories have to provide each one.").format(
+                target=stage0.target.display())))
+        _undo_stage1_media_swap(db, stage0.lock_fd)
+        return 1
     except Stage2Error as exc:
         if _dp["display"] is not None:
             _dp["display"].finish()
@@ -1133,43 +1151,6 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
     )
 
 
-def _which_anchors_in_plan(actions, *, resolver, anchors,
-                            target_identity: str) -> dict:
-    """Return ``{anchor: True/False}`` for each Tx A anchor.
-
-    ``True`` when at least one plan solvable provides the anchor AND
-    its ``release`` tag mentions the target release marker
-    (``mgaN``).  This catches the case where the pool contains a
-    stale mga N version of an anchor because no mga N+1 build was
-    published — Tx A would then install a broken cross-mga stack.
-    """
-    marker = f"mga{target_identity}"
-    plan_ids = {a.solvable_id: a for a in actions
-                if getattr(a, "solvable_id", None) is not None}
-    if resolver is None or not plan_ids:
-        # Best-effort: treat every anchor as present (older tests /
-        # dry-runs that don't have a pool).
-        return {name: True for name in anchors}
-    pool = resolver.pool
-    result: dict = {}
-    for name in anchors:
-        try:
-            dep = pool.Dep(name)
-        except Exception:  # noqa: BLE001
-            result[name] = False
-            continue
-        found = False
-        for s in pool.whatprovides(dep):
-            if s.id not in plan_ids:
-                continue
-            # Release tag must carry the target marker.
-            if marker in (s.evr or ""):
-                found = True
-                break
-        result[name] = found
-    return result
-
-
 def _cmd_run_stage3_tx_a_and_execvp(
     db,
     *,
@@ -1203,31 +1184,10 @@ def _cmd_run_stage3_tx_a_and_execvp(
     install_actions = [p for p in plan if p.action.value != 'remove']
     remove_names = [p.name for p in plan if p.action.value == 'remove']
 
-    # Validate every Tx A anchor has a target-release counterpart in
-    # the plan.  Missing an anchor is a fatal design mismatch — Tx A
-    # will commit a partial critical stack, execvp will land on a
-    # Python where the anchor's module tree isn't installed, and the
-    # post-execvp instance can't run.  Refuse loudly with a
-    # per-anchor status so the user knows what's missing.
-    from ...core.distupgrade.manifest import TRANSACTION_A_PROVIDES
-    plan_by_provides = _which_anchors_in_plan(
-        install_actions,
-        resolver=resolver,
-        anchors=TRANSACTION_A_PROVIDES,
-        target_identity=version_to.split(":", 1)[0],
-    )
-    missing = [n for n, ok in plan_by_provides.items() if not ok]
-    if missing:
-        print(colors.error(_(
-            "Stage 3 refused : {n} critical Tx A anchor(s) missing "
-            "from the target-release plan : {names}").format(
-                n=len(missing), names=", ".join(missing))))
-        print(colors.info(_(
-            "The target-release repositories must ship a mga{v}-"
-            "tagged build of each anchor.  Rebuild and publish the "
-            "missing packages, then `urpm distupgrade --abort` and "
-            "retry.").format(v=version_to.split(":", 1)[0])))
-        return 1
+    # The Tx A anchors were validated in Stage 2, straight after the
+    # solve : the answer depends only on the plan and the pool, and a
+    # refusal here would arrive after the whole payload had been
+    # fetched.  See :func:`manifest.which_anchors_available`.
 
     tx_a_plan, tx_b_plan = split_plan_for_tx_a_and_b(
         install_actions, resolver=resolver,

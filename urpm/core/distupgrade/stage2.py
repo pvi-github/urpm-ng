@@ -53,6 +53,22 @@ class Stage2Aborted(Exception):
     """
 
 
+class Stage2AnchorsMissingError(Stage2Error):
+    """A Tx A anchor would not be on disk once Tx A commits.
+
+    Fatal by nature, unlike the space estimate : ``execvp`` restarts
+    urpm under the rpm and the Python Tx A has just installed, and
+    cannot without them.  Carries ``missing`` so the caller can name
+    them.
+    """
+
+    def __init__(self, missing):
+        self.missing = list(missing)
+        super().__init__(
+            "Tx A anchors unavailable after Tx A: "
+            + ", ".join(self.missing))
+
+
 class Stage2EmptyPlanError(Stage2Error):
     """Raised when the resolver returns zero actions.
 
@@ -265,6 +281,7 @@ def run_stage2(
     :func:`root_space.assess_root_space` for why.
     """
     from ..download import resolve_payload_dir
+    from .manifest import TRANSACTION_A_PROVIDES, which_anchors_available
     from .root_space import assess_root_space
     from .state import read_state, write_state
 
@@ -292,6 +309,23 @@ def run_stage2(
     # reboot.  Caller catches this and rolls back Stage 1.
     if not result.actions:
         raise Stage2EmptyPlanError(result)
+
+    # Every Tx A anchor has to be on disk once Tx A commits — installed
+    # by it, or already there and left alone.  Checked here rather than
+    # at Stage 3 because the answer depends only on the plan and the
+    # pool : a tester spent five minutes and 2.2 GB of download before
+    # being told four anchors were missing, and they were not.
+    anchors = which_anchors_available(
+        [a for a in result.actions
+         if getattr(a.action, "value", a.action) != "remove"],
+        resolver=getattr(result, "_resolver", None),
+        anchors=TRANSACTION_A_PROVIDES,
+        erased_names=[a.name for a in result.actions
+                      if getattr(a.action, "value", a.action) == "remove"],
+    )
+    missing = [name for name, ok in anchors.items() if not ok]
+    if missing:
+        raise Stage2AnchorsMissingError(missing)
 
     # Nothing else measures whether ``/usr`` can hold what is about to
     # be unpacked : the payload check sizes the download directory and

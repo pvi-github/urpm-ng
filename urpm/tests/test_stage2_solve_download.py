@@ -276,6 +276,38 @@ class TestRunStage2:
         assert confirm_called["n"] == 0, "confirm must not fire on empty plan"
         assert download_called["n"] == 0, "download must not fire on empty plan"
 
+    def test_missing_anchors_stop_before_the_download(self, state_db):
+        """The check moved here from Stage 3, where it fired after the
+        whole payload had been fetched — five minutes and 2.2 GB for a
+        verdict that depends only on the plan and the pool."""
+        from urpm.core.distupgrade.stage2 import Stage2AnchorsMissingError
+        from urpm.core.distupgrade.state import write_state
+        write_state({
+            "version_from": "10", "version_to": "11",
+            "stage": "media_swapped",
+        }, state_db)
+        target = ReleaseIdentity(identity="11", numeric="11")
+
+        plan = _mock_resolution([_pkg("foo", "foo-1-1.mga11.x86_64")])
+        plan._resolver = MagicMock()
+        confirmed = {"n": 0}
+
+        with patch("urpm.core.distupgrade.stage2.solve_distupgrade",
+                   return_value=plan), \
+             patch("urpm.core.distupgrade.manifest.which_anchors_available",
+                   return_value={"rpm": True, "glibc": False}), \
+             patch("urpm.core.distupgrade.stage2.download_plan") as _dl:
+            with pytest.raises(Stage2AnchorsMissingError) as excinfo:
+                run_stage2(state_db, target=target,
+                           confirm_callback=lambda *_a: confirmed.update(
+                               n=confirmed["n"] + 1) or True)
+
+        assert excinfo.value.missing == ["glibc"]
+        _dl.assert_not_called()
+        assert confirmed["n"] == 0, (
+            "nothing to confirm about a plan that cannot run"
+        )
+
     def test_the_space_estimate_reaches_the_confirm_gate(self, state_db):
         """The pre-flight has to be wired into Stage 2, not merely
         importable : rpm's own disk check fires at commit time, several
