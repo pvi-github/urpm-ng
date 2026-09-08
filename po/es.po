@@ -3330,13 +3330,15 @@ msgstr "No hay medios migrados para eliminar."
 #: urpm/cli/commands/distupgrade.py:119
 #, python-brace-format
 msgid "Resuming distupgrade from stage '{stage}'..."
-msgstr ""
+msgstr "Reanudando la actualización desde la fase «{stage}»..."
 
 #: urpm/cli/commands/distupgrade.py:143
 msgid ""
 "cannot resume : ``.state`` lacks ``version_to``.  Run ``urpm distupgrade "
 "--abort`` and start over."
 msgstr ""
+"No se puede reanudar : falta ``version_to`` en ``.state``.  Ejecute ``urpm "
+"distupgrade --abort`` y empiece de nuevo."
 
 #: urpm/cli/commands/distupgrade.py:164
 #, python-brace-format
@@ -3346,11 +3348,11 @@ msgstr "  reentrada en ``_cmd_run_to`` — se omite {parts} (ya hecho)"
 #: urpm/cli/commands/distupgrade.py:168
 #, python-brace-format
 msgid "  re-entering Stage 0 → target={t}"
-msgstr ""
+msgstr "  volviendo a la fase 0 → destino={t}"
 
 #: urpm/cli/commands/distupgrade.py:196
 msgid "cannot resume Tx A : plan absent from .state."
-msgstr ""
+msgstr "No se puede reanudar Tx A : el plan no está en .state."
 
 #: urpm/cli/commands/distupgrade.py:208
 #, fuzzy, python-brace-format
@@ -3368,6 +3370,8 @@ msgstr ""
 #: urpm/cli/commands/distupgrade.py:217
 msgid "Tx A committed + smoke test passed on retry.  Handing off (execvp)…"
 msgstr ""
+"Tx A aplicada y prueba de humo superada al reintentar.  Pasando el relevo "
+"(execvp)…"
 
 #: urpm/cli/commands/distupgrade.py:227
 #, fuzzy, python-brace-format
@@ -3385,10 +3389,13 @@ msgid ""
 "Stage 4 complete : {n_rpmnew} .rpmnew file(s), {n_failed} failed "
 "scriptlet(s)."
 msgstr ""
+"Fase 4 completada : {n_rpmnew} archivo(s) .rpmnew, {n_failed} scriptlet(s) "
+"fallido(s)."
 
 #: urpm/cli/commands/distupgrade.py:247
 msgid "Reboot recommended so Stage 5 post-boot fixups run."
 msgstr ""
+"Se recomienda reiniciar para que se ejecuten los ajustes de la fase 5."
 
 #: urpm/cli/commands/distupgrade.py:368
 #, python-brace-format
@@ -3428,23 +3435,29 @@ msgid ""
 "distupgrade state cleared : {n_del_m} target media + {n_del_s} server(s) "
 "removed, {n_up} row(s) restored."
 msgstr ""
+"Estado de la actualización borrado : {n_del_m} medios destino + {n_del_s} "
+"servidor(es) eliminados, {n_up} fila(s) restauradas."
 
 #: urpm/cli/commands/distupgrade.py:413
 msgid ""
 "distupgrade solve returned ZERO actions — every candidate was held by "
 "libsolv.  The system was NOT upgraded."
 msgstr ""
+"La resolución devolvió CERO acciones — libsolv retuvo todos los candidatos."
+"  El sistema NO se ha actualizado."
 
 #: urpm/cli/commands/distupgrade.py:418
 msgid ""
 "  No skipped-jobs record either — this is a resolver anomaly.  Please report"
 " with the output of :"
 msgstr ""
+"  Tampoco hay registro de trabajos omitidos — es una anomalía del resolutor."
+"  Informe adjuntando la salida de :"
 
 #: urpm/cli/commands/distupgrade.py:424
 #, python-brace-format
 msgid "  {n} candidate(s) held :"
-msgstr ""
+msgstr "  {n} candidato(s) retenido(s) :"
 
 #: urpm/cli/commands/distupgrade.py:435 urpm/cli/commands/distupgrade.py:944
 #: urpm/cli/commands/distupgrade.py:1496 urpm/cli/commands/distupgrade.py:1512
@@ -3481,10 +3494,10 @@ msgstr ""
 msgid "Backing up packages.db to {path}..."
 msgstr "Copiando de seguridad packages.db en {path}..."
 
-#: urpm/cli/commands/distupgrade.py:575
+#: urpm/cli/commands/distupgrade.py:633
 #, python-brace-format
 msgid "Stage 0 complete : current={cur}, target={tgt}."
-msgstr ""
+msgstr "Fase 0 completada : actual={cur}, destino={tgt}."
 
 #: urpm/cli/commands/distupgrade.py:589
 #, python-brace-format
@@ -3648,11 +3661,13 @@ msgstr "Reinicie, y luego continúe con :  urpm distupgrade --resume"
 msgid "Preliminary checks OK — current version : {cur}, target : {tgt}."
 msgstr "Comprobaciones previas OK — versión actual : {cur}, destino : {tgt}."
 
-#: urpm/cli/commands/distupgrade.py:889
+#: urpm/cli/commands/distupgrade.py:948
 msgid ""
 "--dry-run : stopping after Stage 0.  Release the lock and clear the state "
 "with `urpm distupgrade --abort`."
 msgstr ""
+"--dry-run : parada tras la fase 0.  Libere el bloqueo y borre el estado con "
+"`urpm distupgrade --abort`."
 
 #: urpm/cli/commands/distupgrade.py:895
 #, python-brace-format
@@ -3718,25 +3733,31 @@ msgstr ""
 "distupgrade cancelado en la confirmación de Stage 2 — nada descargado, "
 "estado no persistido.  Vuelva a ejecutar para volver a resolver."
 
-#: urpm/cli/commands/distupgrade.py:1031
+#: urpm/cli/commands/distupgrade.py:462
 msgid ""
 "Rolling back Stage 1 media changes so the DB matches the pre-distupgrade "
 "state..."
 msgstr ""
+"Deshaciendo los cambios de medios de la fase 1 para que la BD coincida con "
+"el estado previo a la actualización..."
 
-#: urpm/cli/commands/distupgrade.py:1041
+#: urpm/cli/commands/distupgrade.py:469
 #, python-brace-format
 msgid ""
 "Rolled back : {n_del_m} target media + {n_del_s} server(s) removed, {n_up} "
 "row(s) restored."
 msgstr ""
+"Deshecho : {n_del_m} medios destino + {n_del_s} servidor(es) eliminados, "
+"{n_up} fila(s) restauradas."
 
-#: urpm/cli/commands/distupgrade.py:1046
+#: urpm/cli/commands/distupgrade.py:474
 #, python-brace-format
 msgid ""
 "Rollback failed: {err}.  Run `urpm distupgrade --abort` manually to restore "
 "the pre-distupgrade state."
 msgstr ""
+"Fallo al deshacer: {err}.  Ejecute `urpm distupgrade --abort` manualmente "
+"para restaurar el estado previo."
 
 # distupgrade i18n restore (idempotent)
 #: urpm/cli/commands/distupgrade.py:1064
@@ -3814,15 +3835,17 @@ msgstr ""
 "sistema están instalados ; ejecute `urpm distupgrade --continue` "
 "manualmente."
 
-#: urpm/cli/commands/distupgrade.py:1334
+#: urpm/cli/commands/distupgrade.py:1335
 msgid "no distupgrade state on disk : nothing to continue."
-msgstr ""
+msgstr "No hay estado de actualización en disco : nada que continuar."
 
-#: urpm/cli/commands/distupgrade.py:1358
+#: urpm/cli/commands/distupgrade.py:1359
 msgid ""
 "no Tx B plan persisted : nothing to install in phase B.  Continuing to Stage"
 " 4."
 msgstr ""
+"No hay plan Tx B guardado : nada que instalar en la fase B.  Se continúa a "
+"la fase 4."
 
 #: urpm/cli/commands/distupgrade.py:1364
 #, python-brace-format
@@ -3929,11 +3952,14 @@ msgstr ""
 msgid "{n} orphan packages detected after the distupgrade."
 msgstr "{n} paquete huérfano detectado"
 
-#: urpm/cli/commands/distupgrade.py:1574
+#: urpm/cli/commands/distupgrade.py:1575
 msgid ""
 "  A mix of previous-release relics (safe to remove), SONAME sublibs (usually"
 " safe), and user-facing packages worth reviewing one by one."
 msgstr ""
+"  Una mezcla de restos de la versión anterior (seguros de eliminar), "
+"sublibrerías SONAME (normalmente seguras) y paquetes de usuario que conviene"
+" revisar uno a uno."
 
 #: urpm/cli/commands/distupgrade.py:1579
 #, fuzzy
@@ -3946,12 +3972,14 @@ msgid "    Skipped ; run later with :  urpm autoremove --interactive"
 msgstr ""
 "    Conservados ; eliminar más tarde con :  urpm media remove --distupgraded"
 
-#: urpm/cli/commands/distupgrade.py:1610
+#: urpm/cli/commands/distupgrade.py:1611
 #, python-brace-format
 msgid ""
 "Interactive triage failed : {err}. Run manually with :  urpm autoremove "
 "--interactive"
 msgstr ""
+"Fallo en la revisión interactiva : {err}. Ejecute manualmente :  urpm "
+"autoremove --interactive"
 
 #: urpm/cli/commands/distupgrade.py:1631
 #, python-brace-format
@@ -10083,6 +10111,23 @@ msgstr ""
 "{mountpoint} : {required} estimados, {available} disponibles, así que "
 "quedarían unos {remaining}. Es un margen escaso — {headroom} sería más "
 "seguro. Vale la pena liberar algo de espacio antes."
+
+#: urpm/cli/commands/distupgrade.py:1099
+msgid ""
+"{n} critical package(s) would be missing once the core transaction commits :"
+" {names}"
+msgstr ""
+"{n} paquete(s) crítico(s) faltarían una vez aplicada la transacción central "
+": {names}"
+
+#: urpm/cli/commands/distupgrade.py:1103
+msgid ""
+"urpm restarts under the newly installed rpm and python at that point, and "
+"cannot without them.  The {target} repositories have to provide each one."
+msgstr ""
+"urpm se reinicia en ese punto bajo el rpm y el python recién instalados, y "
+"no puede hacerlo sin ellos.  Los repositorios de {target} deben proporcionar"
+" cada uno."
 
 #, python-brace-format
 #~ msgid "Total download size: {size}"
