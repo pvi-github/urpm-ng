@@ -399,6 +399,43 @@ def cmd_mkimage(args, db: 'PackageDatabase') -> int:
     )
 
 
+def _local_media_mounts(addmedia) -> "list[tuple[str, str]]":
+    """Host paths the ``--addmedia`` URLs point at, for bind-mounting.
+
+    A ``file://`` medium names a directory on the *host*.  The container
+    sees nothing of it unless it is mounted in, so without this the
+    medium is added and every package under it is missing — the failure
+    lands at sync time, on a path that exists, blaming the wrong thing.
+
+    Mounted at the same path on both sides, deliberately.  The URL then
+    needs no rewriting, and a mounted ISO or DVD works with no code of
+    its own: ``file:///run/media/<user>/Mageia-10-x86_64/…`` is a
+    directory like any other once the medium is mounted.  Rewriting to
+    some internal mount point would work here and would have to be
+    undone the day that case arrives.
+
+    Read-only: an image build has no business writing to the operator's
+    mirror, and an ISO mount refuses it anyway.
+
+    Raises :class:`FileNotFoundError` naming the URL when the path is
+    not there — a missing mirror directory is worth saying plainly
+    before booting a container that cannot succeed.
+    """
+    from urllib.parse import unquote, urlparse
+
+    mounts = []
+    for name, url in addmedia or []:
+        if not url.startswith("file://"):
+            continue
+        path = unquote(urlparse(url).path)
+        if not Path(path).is_dir():
+            raise FileNotFoundError(
+                _("media {name}: {path} does not exist on this machine "
+                  "(from {url})").format(name=name, path=path, url=url))
+        mounts.append((path, path, "ro"))
+    return mounts
+
+
 def _phase2_container_promote(
     container: 'Container',
     minimal_tag: str,
@@ -434,9 +471,14 @@ def _phase2_container_promote(
     cid = None
     try:
         print(_("  Booting minimal image {tag}...").format(tag=minimal_tag))
+        volumes = _local_media_mounts(addmedia)
+        for host_path, _guest, _mode in volumes:
+            print(_("  Exposing {path} to the container (read-only)").format(
+                path=host_path))
         cid = container.run(
             minimal_tag, ['sleep', 'infinity'],
             detach=True, rm=False, network='host',
+            volumes=volumes or None,
         )
         print(_("  Container: {cid}").format(cid=cid[:12]))
         # Detect the container's user-space arch so subsequent
@@ -449,7 +491,13 @@ def _phase2_container_promote(
 
         for name, url in addmedia:
             print(_("  Adding media {name}...").format(name=name))
-            add_cmd = ['urpm', 'media', 'add', '--custom', name, name, url]
+            # `media add` takes the URL as its only positional; the
+            # display name and the short name are options.  Passing
+            # them positionally — as this did — leaves argparse with
+            # three positionals for one and the whole build stops at
+            # « unrecognized arguments ».
+            add_cmd = ['urpm', 'media', 'add', '--custom', url,
+                       '--name', name, '--shortname', name]
             if import_key:
                 add_cmd.append('--import-key')
             ret = container.exec_stream(cid, add_cmd)

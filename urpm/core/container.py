@@ -124,7 +124,9 @@ class Container:
             command: Command to execute in container
             detach: Run in background
             rm: Remove container when it exits
-            volumes: List of (host_path, container_path) tuples
+            volumes: List of ``(host_path, container_path)`` or
+                ``(host_path, container_path, mode)`` tuples ; the
+                mode reaches the engine as-is, e.g. ``"ro"``
             name: Container name
             network: Network mode ('host', 'bridge', etc.)
             workdir: Working directory in container
@@ -164,8 +166,14 @@ class Container:
         if workdir:
             args.extend(['-w', workdir])
         if volumes:
-            for host_path, container_path in volumes:
-                args.extend(['-v', f'{host_path}:{container_path}'])
+            for spec in volumes:
+                # ``(host, guest)`` or ``(host, guest, mode)`` — the mode
+                # is passed through to the engine, so ``"ro"`` gives a
+                # read-only bind mount.
+                host_path, container_path, *mode = spec
+                suffix = f':{mode[0]}' if mode else ''
+                args.extend(
+                    ['-v', f'{host_path}:{container_path}{suffix}'])
         if env:
             for key, value in env.items():
                 args.extend(['-e', f'{key}={value}'])
