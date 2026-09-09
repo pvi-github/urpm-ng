@@ -206,6 +206,52 @@ class TestWrapperActuallyWorks:
             f"stdout: {res.stdout}"
         )
 
+    def test_loopback_is_usable(self):
+        """The wrapper cuts the network, not the machine's ability to
+        talk to itself.
+
+        A fresh network namespace contains ``lo``, but it is created
+        DOWN, so ``127.0.0.1`` is unreachable.  Every ``%check`` that
+        binds a local socket fails on it (Test::TCP, Plack, anything
+        starting a server or a daemon), with an error that never
+        mentions networking : ``perl-Web-ID`` reported « Can't call
+        method "uri_object" on an undefined value », and two Perl
+        packages were nearly patched to work around it.
+
+        Paired with :meth:`test_network_is_really_cut`, this is what
+        makes the guarantee precise: cut outward, intact inward.
+        """
+        res = self._in_container(
+            f"{NET_ISOLATION_WRAP}"
+            "sh -c 'ip -br link show lo; "
+            "timeout 2 ping -c1 -W1 127.0.0.1 >/dev/null 2>&1 "
+            "&& echo LOOPBACK_OK || echo LOOPBACK_KO'"
+        )
+        assert "LOOPBACK_OK" in res.stdout, (
+            f"127.0.0.1 unreachable inside the wrapper — every test "
+            f"suite binding a local socket will fail.\n"
+            f"stdout: {res.stdout}\nstderr: {res.stderr}"
+        )
+        assert "UP" in res.stdout, (
+            f"lo is present but not up.\nstdout: {res.stdout}"
+        )
+
+    def test_exit_status_survives_the_wrapper(self):
+        """``exec "$@"`` has to keep rpmbuild's exit code intact.
+
+        The call sites read it to tell « needs more BuildRequires »
+        (11) from a real failure, through a ``set -o pipefail`` and a
+        ``tee``.  A wrapper that swallowed or replaced the status would
+        turn a dynamic-BuildRequires pass into a build error.
+        """
+        res = self._in_container(
+            f"set -o pipefail; {NET_ISOLATION_WRAP}"
+            "sh -c 'exit 11' 2>&1 | tee /dev/null"
+        )
+        assert res.returncode == 11, (
+            f"exit status lost: expected 11, got {res.returncode}"
+        )
+
     def test_identity_is_preserved(self):
         """rpmbuild must see uid 0 inside the wrapper exactly as it
         does outside, otherwise the buildroot ends up owned by nobody

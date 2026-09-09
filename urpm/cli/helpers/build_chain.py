@@ -85,7 +85,29 @@ _VER_RE = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
 # Verified inside ``mageia:10-build`` : interface count drops from 2
 # to 1 (loopback only) and name resolution fails, while ``id -u``
 # still reports 0 and writes keep root ownership.
-NET_ISOLATION_WRAP = 'unshare --user --map-root-user --net '
+#
+# The loopback has to be brought up by hand.  A fresh network namespace
+# does contain ``lo``, but it is created DOWN, so ``127.0.0.1`` is
+# unreachable.  Checking that the interface *exists* is not checking
+# that it *works*, and every ``%check`` that binds a local socket
+# failed on it : Test::TCP, Plack, anything starting a server or a
+# daemon and talking to it.  The errors never mention the network, so
+# two Perl packages were nearly patched to work around this instead.
+# Isolating a build from the network must not isolate it from itself.
+#
+# ``sh -c '…' _`` puts ``_`` in ``$0`` so the appended command lands in
+# ``"$@"``, and ``exec`` keeps the process tree and the exit status
+# identical to the unwrapped form.  ``2>/dev/null`` with no ``&&``
+# means an image without iproute2 degrades to the previous behaviour
+# rather than failing the build.
+#
+# What stays cut : every route off the container, DNS, and any external
+# address.  Nothing can enter the build through ``127.0.0.1`` that is
+# not already inside the container.
+NET_ISOLATION_WRAP = (
+    'unshare --user --map-root-user --net '
+    'sh -c \'ip link set lo up 2>/dev/null; exec "$@"\' _ '
+)
 
 
 def apply_media_scope(container, cid, enablemedia, disablemedia) -> None:
