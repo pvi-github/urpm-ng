@@ -12,7 +12,9 @@ import time
 import weakref
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple
+from typing import (
+    Callable, Dict, List, NamedTuple, Optional, Any, Iterator, Set, Tuple,
+)
 
 # Weak registry of every ``PackageDatabase`` instance in the current
 # process.  Populated by ``PackageDatabase.__init__``.  Consumed by
@@ -25,6 +27,9 @@ from .db import (
     MediaMixin, ServerMixin, ConstraintsMixin,
     HistoryMixin, PeerMixin, CacheMixin, AppStreamMixin,
 )
+# Safe at import time: rpmdb.py pulls in librpm lazily, so database.py
+# stays importable on a machine without python3-rpm.
+from .rpmdb import rpmdb_signature
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +99,30 @@ def _register_rpm_collation(conn: sqlite3.Connection) -> None:
     fallback) gets the collation registered uniformly.
     """
     conn.create_collation('rpm_version_compare', _rpm_version_collation)
+
+
+# ---------------------------------------------------------------------------
+# Installed-package index
+# ---------------------------------------------------------------------------
+
+class InstalledRpm(NamedTuple):
+    """One installed instance of a package, as recorded by the rpmdb.
+
+    A package *name* is not a unique key in the rpmdb: the same name can
+    be installed for several architectures at once. Hence
+    :meth:`PackageDatabase._get_installed_index` maps a name to a *list*
+    of these.
+
+    Epoch is deliberately absent: every ``package_id`` the PackageKit
+    backend builds uses a bare ``version-release`` string, so carrying an
+    epoch here would only invite an inconsistency.
+    """
+
+    version: str
+    release: str
+    arch: str
+    summary: str = ''
+
 
 # Schema version - increment when schema changes
 SCHEMA_VERSION = 37
@@ -2392,9 +2421,17 @@ class PackageDatabase(
                 unique.append(pkg)
         results = unique
 
-        # Add installed status by checking RPM database
+        # Install status, matched on the exact build.  A medium routinely
+        # carries several versions of a name; keying on the name alone
+        # flagged all of them installed at once, so the PackageKit backend
+        # emitted five "installed" firefoxes at five different versions.
+        #
+        installed_builds = self._installed_build_keys()
         for pkg in results:
-            pkg['installed'] = self._is_installed(pkg['name'])
+            pkg['installed'] = (
+                pkg['name'], pkg.get('version', ''),
+                pkg.get('release', ''), pkg.get('arch'),
+            ) in installed_builds
 
         # Enrich with media_name — the PackageKit backend needs this
         # to build a proper ``package_id`` data field (repo name for
@@ -2703,28 +2740,112 @@ class PackageDatabase(
 
         return pkg
 
-    _installed_cache: Optional[set] = None
+    _installed_cache: Optional[Dict[str, List[InstalledRpm]]] = None
+    _installed_cache_signature: Optional[Tuple[int, ...]] = None
 
-    def _get_installed_names(self) -> set:
-        """Get the set of all installed package names (cached)."""
-        if self._installed_cache is None:
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ['rpm', '-qa', '--qf', '%{NAME}\n'],
-                    capture_output=True, text=True, timeout=30
-                )
-                if result.returncode == 0:
-                    self._installed_cache = set(result.stdout.splitlines())
-                else:
-                    self._installed_cache = set()
-            except Exception:
-                self._installed_cache = set()
-        return self._installed_cache
+    def _get_installed_index(self) -> Dict[str, List[InstalledRpm]]:
+        """Map every installed package name to its installed instances.
+
+        A single ``rpm -qa`` for the whole system, cached until the rpmdb
+        moves under us. Callers that only need presence go through
+        :meth:`_is_installed`; callers that report *which* version is
+        installed need the full triple, otherwise they end up labelling a
+        media row as installed (see :meth:`_installed_build_keys`).
+
+        The cache is keyed on :func:`~urpm.core.rpmdb.rpmdb_signature`,
+        four ``stat`` calls on the rpmdb backing files. That matters for
+        long-lived processes: ``urpm-dbus.service`` and ``urpmd`` keep one
+        :class:`PackageDatabase` alive for hours, and an ``urpm install``
+        typed in a terminal changes the rpmdb without telling them. Until
+        this check existed, Discover kept showing the pre-transaction
+        state until the service was restarted.
+
+        ``gpg-pubkey`` entries are skipped. The rpmdb stores imported GPG
+        keys as pseudo-packages whose ``arch`` is the literal ``(none)``,
+        which is not a valid segment in a PackageKit ``package_id``;
+        :meth:`~urpm.core.operations.PackageOperations.get_installed_packages`
+        filters them out for that same reason.
+
+        A failure degrades to an empty index rather than raising: a
+        package manager that reports "nothing looks installed" is
+        recoverable, one that crashes the D-Bus service is not.
+        """
+        # Read the signature *before* the query, never after.  Sampled
+        # first, a transaction landing mid-read merely costs one stale
+        # generation that the next call corrects; sampled after, the
+        # fresh signature would be stamped on a pre-transaction read and
+        # the staleness would never expire.
+        signature = rpmdb_signature()
+        if (self._installed_cache is not None
+                and self._installed_cache_signature == signature):
+            return self._installed_cache
+
+        index: Dict[str, List[InstalledRpm]] = {}
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['rpm', '-qa', '--qf',
+                 '%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\t%{SUMMARY}\n'],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    # Summary last, unsplit: it is free text and RPM does
+                    # not escape tabs in it.
+                    parts = line.split('\t', 4)
+                    if len(parts) < 4 or parts[0] == 'gpg-pubkey':
+                        continue
+                    index.setdefault(parts[0], []).append(InstalledRpm(
+                        version=parts[1],
+                        release=parts[2],
+                        arch=parts[3],
+                        summary=parts[4] if len(parts) > 4 else '',
+                    ))
+        except Exception:
+            index = {}
+
+        self._installed_cache = index
+        self._installed_cache_signature = signature
+        return index
+
+    def invalidate_installed_cache(self) -> None:
+        """Force the next query to re-read the rpmdb.
+
+        The signature check in :meth:`_get_installed_index` already
+        catches every mutation that moves one of the rpmdb backing files
+        it knows about. This is the explicit path, for a caller that has
+        just run a transaction itself and does not want to depend on that
+        list of filenames being right: a distribution that moves its
+        rpmdb (as others did when adopting ``/usr/lib/sysimage/rpm``)
+        would freeze the signature without any error to show for it.
+        """
+        self._installed_cache = None
+        self._installed_cache_signature = None
 
     def _is_installed(self, name: str) -> bool:
-        """Check if a package is installed in the RPM database."""
-        return name in self._get_installed_names()
+        """Is a package of that name installed, in any version?
+
+        The right question for :meth:`get_package`, which answers "do you
+        have this software" and reads the file list and changelog from
+        the rpmdb accordingly. It is the *wrong* question for anything
+        that shows a version alongside the flag: see
+        :meth:`_installed_build_keys`.
+        """
+        return name in self._get_installed_index()
+
+    def _installed_build_keys(self) -> Set[Tuple[str, str, str, str]]:
+        """Snapshot every installed build as ``(name, version, release, arch)``.
+
+        One frozen view, meant to be taken once and reused across a whole
+        result set. Querying the index row by row instead would let a
+        transaction committing mid-loop split the answer, the first rows
+        judged against the old rpmdb and the rest against the new one.
+        """
+        return {
+            (name, inst.version, inst.release, inst.arch)
+            for name, instances in self._get_installed_index().items()
+            for inst in instances
+        }
 
     def find_package_by_nevra(self, name: str, evr: str, arch: str) -> Optional[Dict]:
         """Find a package by name, evr (epoch:version-release), and arch.
@@ -2805,54 +2926,71 @@ class PackageDatabase(
             return self.get_package(identifier)
 
     def get_packages_by_names(self, names: List[str]) -> List[Dict]:
-        """Batch get packages by names (for resolve operations).
+        """Batch resolve names to their installed and available faces.
 
-        Returns basic info only (no dependencies) for efficiency.
-        Much faster than calling get_package() N times.
+        Serves the PackageKit ``Resolve`` verb, via ``ResolvePackages`` on
+        the D-Bus service. For each requested name this returns up to two
+        entries:
+
+        * the **installed** one, whose version and release come from the
+          rpmdb, flagged ``installed: True``;
+        * the best candidate the enabled media offer, flagged
+          ``installed: False``.
+
+        Both are needed. A PackageKit client builds its "from version to
+        version" line by pairing the entry whose ``package_id`` data field
+        is ``installed`` with the one carrying a repository name; a single
+        entry per name leaves it no way to tell them apart, which is how
+        Discover came to display a media row as the installed version.
+
+        When the media candidate *is* the installed build there is nothing
+        to offer and a single installed entry comes back. A package
+        installed but carried by no medium (built locally, or dropped from
+        the media since) still yields its installed entry, where the
+        previous name-keyed lookup returned nothing at all.
 
         Args:
-            names: List of package names
+            names: Package names to resolve.
 
         Returns:
-            List of dicts with name, version, release, arch, summary, installed
+            List of dicts with ``name``, ``version``, ``release``,
+            ``arch``, ``summary``, ``installed`` and ``media_name``,
+            following the order the names were given. Names that are
+            neither installed nor available are absent.
         """
         if not names:
             return []
 
-        # Build version filter
         version_join, version_filter, version_params = self._build_version_filter()
 
-        # Query all packages at once
         placeholders = ','.join(['?' for _ in names])
         names_lower = [n.lower() for n in names]
 
-        if version_join:
-            query = f"""
-                SELECT p.id, p.name, p.version, p.release, p.arch, p.summary
-                FROM packages p
-                {version_join}
-                WHERE p.name_lower IN ({placeholders}) {version_filter}
-            """
-            params = tuple(names_lower) + version_params
-        else:
-            query = f"""
-                SELECT id, name, version, release, arch, summary
-                FROM packages
-                WHERE name_lower IN ({placeholders})
-            """
-            params = tuple(names_lower)
+        # Same ordering as get_package(): RPM-semantic, highest first, so
+        # the first row of a name is the candidate rather than whichever
+        # one happened to be inserted first. Without it the media rows
+        # come back in rowid order and the oldest wins.
+        query = f"""
+            SELECT p.id, p.name, p.version, p.release, p.arch, p.summary
+            FROM packages p
+            {version_join}
+            WHERE p.name_lower IN ({placeholders}) {version_filter}
+            ORDER BY p.name_lower,
+                     p.epoch COLLATE rpm_version_compare DESC,
+                     p.version COLLATE rpm_version_compare DESC,
+                     p.release COLLATE rpm_version_compare DESC
+        """
+        params = tuple(names_lower) + version_params
 
         with self._conn_read() as conn:
-            cursor = conn.execute(query, params)
-            rows = cursor.fetchall()
+            rows = conn.execute(query, params).fetchall()
 
-        # Build result dict by name (handle duplicates - keep first/latest).
         # Row layout: (id, name, version, release, arch, summary).
-        seen = {}
+        candidates: Dict[str, Dict] = {}
         for row in rows:
             name = row[1]
-            if name not in seen:
-                seen[name] = {
+            if name not in candidates:
+                candidates[name] = {
                     'id': row[0],
                     'name': name,
                     'version': row[2],
@@ -2861,31 +2999,36 @@ class PackageDatabase(
                     'summary': row[5] or '',
                 }
 
-        # Check installed status in batch using single rpm call
-        import subprocess
-        installed_set = set()
-        try:
-            # Query all at once: rpm -q returns 0 for each installed package
-            result = subprocess.run(
-                ['rpm', '-q', '--qf', '%{NAME}\\n'] + list(seen.keys()),
-                capture_output=True,
-                timeout=30
-            )
-            # Parse output - rpm prints package name for installed, error for not
-            for line in result.stdout.decode().splitlines():
-                line = line.strip()
-                if line and not line.startswith('package '):  # skip "package X is not installed"
-                    installed_set.add(line)
-        except Exception:
-            pass
+        installed_index = self._get_installed_index()
 
-        # Build results preserving input order
-        results = []
+        results: List[Dict] = []
         for name in names:
-            if name in seen:
-                pkg = seen[name].copy()
-                pkg['installed'] = name in installed_set
-                results.append(pkg)
+            candidate = candidates.get(name)
+            emitted = set()
+
+            for inst in installed_index.get(name, ()):
+                results.append({
+                    # No media row backs an installed build, so no id and
+                    # no repository: the PK backend stamps the data field
+                    # of an installed package_id with "installed" anyway.
+                    'id': None,
+                    'name': name,
+                    'version': inst.version,
+                    'release': inst.release,
+                    'arch': inst.arch,
+                    'summary': inst.summary,
+                    'installed': True,
+                    'media_name': '',
+                })
+                emitted.add((inst.version, inst.release, inst.arch))
+
+            if candidate is None:
+                continue
+            key = (candidate['version'], candidate['release'], candidate['arch'])
+            if key not in emitted:
+                available = candidate.copy()
+                available['installed'] = False
+                results.append(available)
 
         # Same rationale as search(): the PK backend needs media_name
         # to distinguish repositories in the package_id data field.

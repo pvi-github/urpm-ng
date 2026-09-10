@@ -113,6 +113,24 @@ class UrpmDBusService:
         self._ops = PackageOperations(self._db, audit_logger=self._audit)
         self._polkit = PolicyKitBackend()
 
+    def _forget_installed_state(self):
+        """Drop the cached rpmdb view after a transaction touched it.
+
+        ``_init_core`` builds a single :class:`PackageDatabase` that lives
+        as long as ``urpm-dbus.service`` does, and that object caches the
+        rpmdb index. The cache expires on its own when the rpmdb backing
+        files move, which is what catches an ``urpm install`` typed in a
+        terminal; this call is the explicit path for the transactions we
+        run ourselves, so that correctness here does not rest on that
+        file list staying accurate.
+
+        Called from the ``finally`` of each runner rather than from its
+        success path: a transaction that fails part way through has still
+        changed the rpmdb, and a stale index is worse than a re-read.
+        """
+        if self._db is not None:
+            self._db.invalidate_installed_cache()
+
     def _get_caller_credentials(self, bus, sender):
         """Get caller PID and UID from D-Bus sender."""
         try:
@@ -337,7 +355,10 @@ class UrpmDBusService:
                 'error': 'Authorization denied'
             })
 
-        success, error = self._ops.install_local_files(list(rpm_paths))
+        try:
+            success, error = self._ops.install_local_files(list(rpm_paths))
+        finally:
+            self._forget_installed_state()
         return json.dumps({
             'success': success,
             'error': error
@@ -562,6 +583,7 @@ class UrpmDBusService:
             self._emit_complete(op_id, False, str(e))
             self._return_invocation(invocation, False, str(e))
         finally:
+            self._forget_installed_state()
             with self._lock:
                 self._active_operations.pop(op_id, None)
 
@@ -644,6 +666,7 @@ class UrpmDBusService:
             self._emit_complete(op_id, False, str(e))
             self._return_invocation(invocation, False, str(e))
         finally:
+            self._forget_installed_state()
             with self._lock:
                 self._active_operations.pop(op_id, None)
 
@@ -755,6 +778,7 @@ class UrpmDBusService:
             self._emit_complete(op_id, False, str(e))
             self._return_invocation(invocation, False, str(e))
         finally:
+            self._forget_installed_state()
             with self._lock:
                 self._active_operations.pop(op_id, None)
 

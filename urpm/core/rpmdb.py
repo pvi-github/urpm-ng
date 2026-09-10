@@ -91,7 +91,7 @@ _RPMDB_FILES = (
 )
 
 
-def _rpmdb_signature(root: str) -> Tuple[int, ...]:
+def rpmdb_signature(root: str = "/") -> Tuple[int, ...]:
     """Return an integer tuple that changes whenever rpmdb mutates.
 
     ``mtime_ns`` (nanoseconds since epoch) is fine-grained enough to
@@ -100,6 +100,11 @@ def _rpmdb_signature(root: str) -> Tuple[int, ...]:
     filesystems is well under a millisecond.  The WAL file is also
     tracked because SQLite writes appear there before checkpointing
     to the main database.
+
+    Public because :class:`~urpm.core.database.PackageDatabase` keeps
+    its own rpmdb-derived cache and needs the same staleness test: a
+    long-lived process (``urpm-dbus.service``, ``urpmd``) must notice a
+    transaction run from a terminal behind its back.
     """
     root_path = Path(root)
     sig: List[int] = []
@@ -126,7 +131,7 @@ def _cached(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         root = kwargs.get("root", "/")
-        sig = _rpmdb_signature(root)
+        sig = rpmdb_signature(root)
         cache_key = (
             func.__name__,
             args,
