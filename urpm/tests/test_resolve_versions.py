@@ -320,6 +320,65 @@ class TestSearchInstalledFlag:
         assert results and all(not p['installed'] for p in results)
 
 
+class TestSearchJoinOrder:
+    """The FTS search must let the full-text index drive the join.
+
+    SQLite has no cost estimate for a virtual table. Left to itself it
+    orders the search as ``media`` → ``packages`` → ``packages_fts``,
+    which re-runs the whole full-text query once per package of the
+    enabled media instead of reading the match set once. On a full
+    Mageia 10 media set that took ``search('lib')`` from 31 ms to over
+    45 seconds, long enough to freeze the D-Bus service serving
+    Discover. ``CROSS JOIN`` pins the order; this test makes sure nobody
+    relaxes it back to a plain ``JOIN``.
+    """
+
+    @staticmethod
+    def _capture_fts_statement(db, pattern):
+        """Run a real search and return the SQL it issued against FTS."""
+        statements = []
+        with db._conn_read() as conn:
+            conn.set_trace_callback(statements.append)
+        try:
+            db.search(pattern, limit=10)
+        finally:
+            with db._conn_read() as conn:
+                conn.set_trace_callback(None)
+
+        matching = [s for s in statements if 'packages_fts MATCH' in s]
+        assert matching, "no full-text query was issued"
+        return matching[0]
+
+    def test_the_full_text_index_is_the_outer_loop(self, db):
+        media_id = _media(db, "Core Release", "core/release")
+        db.import_packages(iter([
+            _package(f'libtest{i}', '1.0', '1.mga9') for i in range(50)
+        ]), media_id=media_id)
+        assert db._has_packages_fts(), "fixture must exercise the FTS path"
+
+        statement = self._capture_fts_statement(db, 'libtest')
+
+        with db._conn_read() as conn:
+            plan = [row[3] for row in
+                    conn.execute('EXPLAIN QUERY PLAN ' + statement)]
+
+        assert 'VIRTUAL TABLE' in plan[0], (
+            "the full-text index must drive the join, got:\n  "
+            + "\n  ".join(plan))
+
+    def test_the_search_still_returns_its_matches(self, db):
+        """Pinning the join order must not change the answer."""
+        media_id = _media(db, "Core Release", "core/release")
+        db.import_packages(iter([
+            _package('libtest', '1.0', '1.mga9'),
+            _package('inkscape', '1.3', '1.mga9'),
+        ]), media_id=media_id)
+
+        names = {p['name'] for p in db.search('libtest')}
+
+        assert names == {'libtest'}
+
+
 class TestInstalledIndex:
     """Parsing of ``rpm -qa`` into the cached index."""
 

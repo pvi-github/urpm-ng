@@ -2450,6 +2450,17 @@ class PackageDatabase(
         (via ``rank`` column), then summary/description matches are
         flagged with ``matched_summary``.
 
+        The ``CROSS JOIN`` is load-bearing and must not be relaxed to a
+        plain ``JOIN``.  SQLite has no cost estimate for a virtual table,
+        so as soon as the ``media`` join appears it picks the ruinous
+        order ``media`` → ``packages`` → ``packages_fts``: instead of
+        reading the match set once, it re-runs the full-text query for
+        every package of the enabled media.  ``CROSS JOIN`` is SQLite's
+        documented way to pin the loop nesting, and it forces the only
+        sane order, ``packages_fts`` first, then each hit by rowid.
+        Measured on a full Mageia 10 media set, searching ``lib`` went
+        from over 45 seconds (killed, never completed) to 31 ms.
+
         Returns:
             (results, seen_ids) tuple
         """
@@ -2467,7 +2478,7 @@ class PackageDatabase(
                        p.nevra, p.summary, p.size,
                        (p.name_lower LIKE ?) AS is_name_match
                 FROM packages_fts fts
-                JOIN packages p ON p.id = fts.rowid
+                CROSS JOIN packages p ON p.id = fts.rowid
                 {version_join}
                 WHERE packages_fts MATCH ? {version_filter}
                 ORDER BY is_name_match DESC, p.name_lower
