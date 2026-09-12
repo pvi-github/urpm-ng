@@ -504,16 +504,43 @@ pk_backend_refresh_cache(PkBackend *backend, PkBackendJob *job, gboolean force)
 /* Install Packages                                                          */
 /* ========================================================================= */
 
-/* Context for async install with progress */
+/* Context for an async D-Bus call reporting progress as it runs. */
 typedef struct {
     PkBackendJob *job;
     GMainLoop *loop;
     GVariant *result;
     GError *error;
-    gchar **package_ids;
     guint signal_id;
-    gboolean in_download;
-} InstallContext;
+    PkStatusEnum status;   /* last status pushed, to avoid re-pushing it */
+} ProgressContext;
+
+/* Map a service phase name onto the status a PackageKit client shows.
+ * The service emits one of: resolving, downloading, installing,
+ * upgrading, removing, script, refreshing.  Anything unknown keeps the
+ * current status rather than resetting it to something misleading. */
+static PkStatusEnum
+urpm_status_for_phase(const gchar *phase, PkStatusEnum current)
+{
+    if (g_str_equal(phase, "downloading"))
+        return PK_STATUS_ENUM_DOWNLOAD;
+    if (g_str_equal(phase, "installing"))
+        return PK_STATUS_ENUM_INSTALL;
+    if (g_str_equal(phase, "upgrading"))
+        return PK_STATUS_ENUM_UPDATE;
+    if (g_str_equal(phase, "removing"))
+        return PK_STATUS_ENUM_REMOVE;
+    if (g_str_equal(phase, "resolving"))
+        return PK_STATUS_ENUM_DEP_RESOLVE;
+    if (g_str_equal(phase, "refreshing"))
+        return PK_STATUS_ENUM_REFRESH_CACHE;
+    /* Scriptlets and file triggers.  They deserve their own status:
+     * the package counter is frozen while they run and they are often
+     * the longest part of a transaction, so a client showing "installing"
+     * with a still bar looks hung. */
+    if (g_str_equal(phase, "script"))
+        return PK_STATUS_ENUM_RUN_HOOK;
+    return current;
+}
 
 static void
 on_operation_progress(GDBusConnection *connection,
@@ -524,47 +551,112 @@ on_operation_progress(GDBusConnection *connection,
                       GVariant *parameters,
                       gpointer user_data)
 {
-    InstallContext *ctx = user_data;
-    const gchar *op_id, *phase, *package, *message;
-    guint32 current, total;
+    ProgressContext *ctx = user_data;
+    const gchar *op_id, *phase, *package, *evr, *arch, *message;
+    guint32 percentage, item_percentage;
+    guint64 speed, download_remaining;
 
-    /* Python signal format: (sssuus) = (op_id, phase, package, current, total, message) */
-    g_variant_get(parameters, "(&s&s&suu&s)",
-                  &op_id, &phase, &package, &current, &total, &message);
+    /* (sssssuutts) = op_id, phase, package, evr, arch,
+     *                percentage, item_percentage,
+     *                speed, download_remaining, message */
+    g_variant_get(parameters, "(&s&s&s&s&suutt&s)",
+                  &op_id, &phase, &package, &evr, &arch,
+                  &percentage, &item_percentage,
+                  &speed, &download_remaining, &message);
 
-    /* Calculate percentage based on phase */
-    guint percentage = 0;
-    if (total > 0) {
-        percentage = (current * 100) / total;
+    PkStatusEnum status = urpm_status_for_phase(phase, ctx->status);
+    if (status != ctx->status) {
+        ctx->status = status;
+        pk_backend_job_set_status(ctx->job, status);
     }
 
-    /* Update status based on phase */
-    if (g_str_equal(phase, "downloading")) {
-        if (!ctx->in_download) {
-            ctx->in_download = TRUE;
-            pk_backend_job_set_status(ctx->job, PK_STATUS_ENUM_DOWNLOAD);
-        }
-        /* Download is 0-50% of total progress */
-        pk_backend_job_set_percentage(ctx->job, percentage / 2);
-    } else if (g_str_equal(phase, "installing")) {
-        if (ctx->in_download) {
-            ctx->in_download = FALSE;
-            pk_backend_job_set_status(ctx->job, PK_STATUS_ENUM_INSTALL);
-        }
-        /* Install is 50-100% of total progress */
-        pk_backend_job_set_percentage(ctx->job, 50 + percentage / 2);
-    } else if (g_str_equal(phase, "resolving")) {
-        pk_backend_job_set_status(ctx->job, PK_STATUS_ENUM_DEP_RESOLVE);
-        pk_backend_job_set_percentage(ctx->job, 0);
+    /* The overall percentage arrives already weighted by the service,
+     * which is the only side that knows how much of the transaction is
+     * download and how much is rpm.  We only forward it. */
+    if (percentage != PK_BACKEND_PERCENTAGE_INVALID)
+        pk_backend_job_set_percentage(ctx->job, percentage);
+
+    if (speed > 0)
+        pk_backend_job_set_speed(ctx->job, (guint) speed);
+    if (g_str_equal(phase, "downloading"))
+        pk_backend_job_set_download_size_remaining(ctx->job, download_remaining);
+
+    /* Per-item progress needs a full package_id, which is why the
+     * service sends evr and arch alongside the name instead of making
+     * us parse a NEVRA back apart. */
+    if (item_percentage != PK_BACKEND_PERCENTAGE_INVALID &&
+        package[0] != '\0' && evr[0] != '\0' && arch[0] != '\0') {
+        g_autofree gchar *package_id = pk_package_id_build(
+            package, evr, arch, "installed");
+        pk_backend_job_set_item_progress(ctx->job, package_id, status,
+                                         item_percentage);
     }
 }
 
 static void
-install_packages_ready_cb(GObject *source, GAsyncResult *res, gpointer user_data)
+urpm_call_ready_cb(GObject *source, GAsyncResult *res, gpointer user_data)
 {
-    InstallContext *ctx = user_data;
+    ProgressContext *ctx = user_data;
     ctx->result = g_dbus_proxy_call_finish(G_DBUS_PROXY(source), res, &ctx->error);
     g_main_loop_quit(ctx->loop);
+}
+
+/**
+ * urpm_call_with_progress:
+ * @job: the backend job to report progress on
+ * @method: D-Bus method to invoke on the urpm service
+ * @args: (transfer floating): arguments for @method
+ * @timeout_ms: call timeout in milliseconds
+ * @error: (out): set on failure
+ *
+ * Invoke a long-running service method while relaying its
+ * ``OperationProgress`` signal to @job.
+ *
+ * The asynchronous call and the explicit main loop are both required:
+ * ``g_dbus_proxy_call_sync`` runs its own main context, so a signal
+ * subscribed here would never be dispatched while it blocks.  Install
+ * was the only operation that did this, which is why it was also the
+ * only one with a moving progress bar.
+ *
+ * Returns: (transfer full): the method's reply, or %NULL on error.
+ */
+static GVariant *
+urpm_call_with_progress(PkBackendJob *job, const gchar *method,
+                        GVariant *args, gint timeout_ms, GError **error)
+{
+    ProgressContext ctx = {
+        .job = job,
+        .loop = g_main_loop_new(NULL, FALSE),
+        .result = NULL,
+        .error = NULL,
+        .signal_id = 0,
+        .status = PK_STATUS_ENUM_UNKNOWN,
+    };
+
+    ctx.signal_id = g_dbus_connection_signal_subscribe(
+        priv->connection,
+        URPM_BUS_NAME,
+        URPM_INTERFACE,
+        "OperationProgress",
+        URPM_OBJECT_PATH,
+        NULL,
+        G_DBUS_SIGNAL_FLAGS_NONE,
+        on_operation_progress,
+        &ctx,
+        NULL
+    );
+
+    g_dbus_proxy_call(priv->proxy, method, args, G_DBUS_CALL_FLAGS_NONE,
+                      timeout_ms, NULL, urpm_call_ready_cb, &ctx);
+
+    g_main_loop_run(ctx.loop);
+
+    g_dbus_connection_signal_unsubscribe(priv->connection, ctx.signal_id);
+    g_main_loop_unref(ctx.loop);
+
+    if (ctx.result == NULL)
+        g_propagate_error(error, ctx.error);
+    return ctx.result;
 }
 
 static void
@@ -645,64 +737,27 @@ pk_backend_install_packages_thread(PkBackendJob *job, GVariant *params, gpointer
     /* REAL mode: do the actual install */
     g_message("pk_backend_install_packages_thread: calling InstallPackages with %d packages", names->len - 1);
 
-    /* Set up context for async operation */
-    InstallContext ctx = {
-        .job = job,
-        .loop = g_main_loop_new(NULL, FALSE),
-        .result = NULL,
-        .error = NULL,
-        .package_ids = package_ids,
-        .signal_id = 0,
-        .in_download = FALSE
-    };
-
-    /* Subscribe to progress signals */
-    ctx.signal_id = g_dbus_connection_signal_subscribe(
-        priv->connection,
-        URPM_BUS_NAME,
-        URPM_INTERFACE,
-        "OperationProgress",
-        URPM_OBJECT_PATH,
-        NULL,
-        G_DBUS_SIGNAL_FLAGS_NONE,
-        on_operation_progress,
-        &ctx,
-        NULL
-    );
-
-    /* Make async call */
-    g_dbus_proxy_call(
-        priv->proxy,
-        "InstallPackages",
+    GVariant *result = urpm_call_with_progress(
+        job, "InstallPackages",
         g_variant_new("(@as@a{sv})",
                       pkg_array,
                       g_variant_new_array(G_VARIANT_TYPE("{sv}"), NULL, 0)),
-        G_DBUS_CALL_FLAGS_NONE,
         600000,  /* 10 min timeout */
-        NULL,
-        install_packages_ready_cb,
-        &ctx
-    );
+        &error);
 
-    /* Run main loop until call completes */
-    g_main_loop_run(ctx.loop);
-
-    /* Unsubscribe from signals */
-    g_dbus_connection_signal_unsubscribe(priv->connection, ctx.signal_id);
-    g_main_loop_unref(ctx.loop);
     g_ptr_array_free(names, TRUE);
 
-    if (ctx.result == NULL) {
-        g_warning("pk_backend_install_packages_thread: D-Bus call failed: %s", ctx.error->message);
-        pk_backend_job_error_code(job, urpm_pk_error_from_dbus(ctx.error),
-                                  "Install failed: %s", ctx.error->message);
-        g_error_free(ctx.error);
+    if (result == NULL) {
+        g_warning("pk_backend_install_packages_thread: D-Bus call failed: %s", error->message);
+        pk_backend_job_error_code(job, urpm_pk_error_from_dbus(error),
+                                  "Install failed: %s", error->message);
+        g_error_free(error);
         return;
     }
 
     gboolean success;
     const gchar *message;
-    g_variant_get(ctx.result, "(b&s)", &success, &message);
+    g_variant_get(result, "(b&s)", &success, &message);
 
     g_message("pk_backend_install_packages_thread: result success=%d message=%s", success, message);
 
@@ -760,7 +815,7 @@ pk_backend_install_packages_thread(PkBackendJob *job, GVariant *params, gpointer
         }
     }
 
-    g_variant_unref(ctx.result);
+    g_variant_unref(result);
     pk_backend_job_finished(job);
 }
 
@@ -828,17 +883,13 @@ pk_backend_remove_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
     }
     GVariant *pkg_array = g_variant_builder_end(&builder);
 
-    GVariant *result = g_dbus_proxy_call_sync(
-        priv->proxy,
-        "RemovePackages",
+    GVariant *result = urpm_call_with_progress(
+        job, "RemovePackages",
         g_variant_new("(@as@a{sv})",
                       pkg_array,
                       g_variant_new_array(G_VARIANT_TYPE("{sv}"), NULL, 0)),
-        G_DBUS_CALL_FLAGS_NONE,
         300000,  /* 5 min timeout */
-        NULL,
-        &error
-    );
+        &error);
 
     g_ptr_array_free(names, TRUE);
 
@@ -927,16 +978,15 @@ pk_backend_update_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
     pk_backend_job_set_status(job, PK_STATUS_ENUM_UPDATE);
     pk_backend_job_set_percentage(job, PK_BACKEND_PERCENTAGE_INVALID);
 
-    GVariant *result = g_dbus_proxy_call_sync(
-        priv->proxy,
-        "UpgradePackages",
+    /* Through urpm_call_with_progress, not a plain sync call: this is
+     * what was missing, and it is why an update showed no progress bar
+     * at all while an install showed one. */
+    GVariant *result = urpm_call_with_progress(
+        job, "UpgradePackages",
         g_variant_new("(@a{sv})",
                       g_variant_new_array(G_VARIANT_TYPE("{sv}"), NULL, 0)),
-        G_DBUS_CALL_FLAGS_NONE,
         1800000,  /* 30 min timeout */
-        NULL,
-        &error
-    );
+        &error);
 
     if (result == NULL) {
         pk_backend_job_error_code(job, urpm_pk_error_from_dbus(error),

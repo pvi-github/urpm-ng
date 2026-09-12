@@ -147,12 +147,23 @@
 
     <signal name="OperationProgress">
       <annotation name="org.freedesktop.DBus.Description"
-        value="Emitted during async operations"/>
+        value="Emitted during async operations. The service computes the
+               overall percentage itself: it is the only side that knows the
+               resolved plan, so it is the only side that can weight the
+               download against the rpm transaction. A percentage of 101
+               means unknown, matching PackageKit's
+               PK_BACKEND_PERCENTAGE_INVALID. Phases: resolving,
+               downloading, installing, upgrading, removing, script,
+               refreshing."/>
       <arg name="operation_id" type="s"/>
       <arg name="phase" type="s"/>
       <arg name="package" type="s"/>
-      <arg name="current" type="u"/>
-      <arg name="total" type="u"/>
+      <arg name="evr" type="s"/>
+      <arg name="arch" type="s"/>
+      <arg name="percentage" type="u"/>
+      <arg name="item_percentage" type="u"/>
+      <arg name="speed" type="t"/>
+      <arg name="download_remaining" type="t"/>
       <arg name="message" type="s"/>
     </signal>
 

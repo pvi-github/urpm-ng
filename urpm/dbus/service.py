@@ -26,6 +26,10 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from ..core.progress_scale import (
+    PERCENTAGE_UNKNOWN, ProgressScale, item_percentage,
+)
+
 logger = logging.getLogger(__name__)
 
 # D-Bus names
@@ -189,8 +193,38 @@ class UrpmDBusService:
     # D-Bus signal emission
     # =====================================================================
 
-    def _emit_progress(self, op_id, phase, package, current, total, message=""):
-        """Emit OperationProgress signal on the main loop thread."""
+    def _emit_progress(self, op_id, phase, package="", *,
+                       percentage=PERCENTAGE_UNKNOWN,
+                       item_percentage=PERCENTAGE_UNKNOWN,
+                       evr="", arch="", speed=0, download_remaining=0,
+                       message=""):
+        """Emit OperationProgress on the main loop thread.
+
+        The overall ``percentage`` is computed here rather than in the
+        PackageKit backend. It is the service that knows the resolved
+        plan, so it is the service that can weight the download against
+        the rpm transaction (see :class:`~urpm.core.progress_scale.
+        ProgressScale`); leaving that arithmetic in C put it out of reach
+        of the test suite and hard-coded a half-and-half split that suits
+        no real transaction.
+
+        ``evr`` and ``arch`` travel alongside the package name so the
+        backend can rebuild a full ``package_id`` for PackageKit's
+        per-item progress without parsing a NEVRA back apart.
+
+        Args:
+            op_id: Operation this belongs to.
+            phase: One of resolving, downloading, installing, upgrading,
+                removing, script, refreshing.
+            package: Package being worked on, empty when none applies.
+            percentage: Overall 0-100, or ``PERCENTAGE_UNKNOWN``.
+            item_percentage: Progress within ``package``, same convention.
+            evr: ``version-release`` of ``package``, when known.
+            arch: Architecture of ``package``, when known.
+            speed: Download rate in bytes per second, 0 when unknown.
+            download_remaining: Bytes left to fetch, 0 when none or unknown.
+            message: Free text, used by phases that have no counter.
+        """
         from gi.repository import GLib
 
         def _emit():
@@ -198,14 +232,85 @@ class UrpmDBusService:
                 self._connection.emit_signal(
                     None, OBJECT_PATH, INTERFACE_NAME,
                     "OperationProgress",
-                    GLib.Variant('(sssuus)', (
-                        op_id, phase, package,
-                        current, total, message
+                    GLib.Variant('(sssssuutts)', (
+                        op_id, phase, package, evr, arch,
+                        percentage, item_percentage,
+                        speed, download_remaining, message
                     ))
                 )
             return False  # Don't repeat
 
         GLib.idle_add(_emit)
+
+    @staticmethod
+    def _progress_scale(actions, download_items):
+        """Weight the bar from the plan: bytes fetched against bytes unpacked.
+
+        ``download_items`` holds only what is actually missing from the
+        cache, so an operation served entirely from cache produces a
+        download share of zero, and a removal, called with no items at
+        all, gives the whole bar to the rpm transaction.
+        """
+        from ..core.transaction_sizes import compute_sizes
+
+        return ProgressScale(
+            download_bytes=sum(item.size or 0 for item in download_items),
+            install_bytes=compute_sizes(actions).installed,
+        )
+
+    def _download_reporter(self, op_id, scale):
+        """Build the progress callback handed to the downloader."""
+        def report(name, pkg_num, pkg_total, dl_bytes, dl_total,
+                   item_bytes=None, item_total=None,
+                   active_downloads=None, coordinator_speed=0.0):
+            # Prefer the byte-level counter over the package counter so
+            # the bar advances continuously instead of jumping in N steps
+            # for an N-package transaction.  Fall back to the package
+            # counter when the total is unknown, which happens when a
+            # mirror does not report Content-Length.
+            if dl_total and dl_total > 0:
+                done, total = dl_bytes, dl_total
+            else:
+                done, total = pkg_num, pkg_total
+            self._emit_progress(
+                op_id, "downloading", name or "",
+                percentage=scale.downloading(done, total),
+                item_percentage=item_percentage(item_bytes or 0,
+                                                item_total or 0),
+                speed=int(coordinator_speed or 0),
+                download_remaining=max(0, (dl_total or 0) - (dl_bytes or 0)),
+            )
+
+        return report
+
+    def _transaction_reporter(self, op_id, scale, phase, actions=()):
+        """Build the progress callback handed to rpm.
+
+        ``phase`` is what a client should display while packages are
+        written: installing, upgrading or removing. Scriptlets get a
+        phase of their own instead. They run with the package counter
+        frozen, and ``TransactionProgress`` documents them as often the
+        slowest part of a transaction, so without a distinct phase the
+        bar looks hung precisely when it takes longest.
+        """
+        from ..core.transaction_queue import TransactionPhase
+
+        builds = {a.name: (a.evr, a.arch) for a in actions}
+
+        def report(tp):
+            if tp.phase == TransactionPhase.SCRIPT:
+                name, step = tp.script_name or tp.package_name, "script"
+            else:
+                name, step = tp.package_name, phase
+            evr, arch = builds.get(name, ("", ""))
+            self._emit_progress(
+                op_id, step, name or "", evr=evr, arch=arch,
+                percentage=scale.transacting(tp.packages_done,
+                                             tp.packages_total),
+                item_percentage=item_percentage(tp.bytes_done, tp.bytes_total),
+            )
+
+        return report
 
     def _emit_complete(self, op_id, success, message=""):
         """Emit OperationComplete signal on the main loop thread."""
@@ -442,7 +547,7 @@ class UrpmDBusService:
 
         try:
             logger.info(f"_run_install: packages={package_names}")
-            self._emit_progress(op_id, "resolving", "", 0, 0)
+            self._emit_progress(op_id, "resolving", percentage=0)
 
             resolver = Resolver(self._db, arch=platform.machine())
             result = resolver.resolve_install(package_names)
@@ -474,34 +579,21 @@ class UrpmDBusService:
                 self._return_invocation(invocation, True, "Nothing to do")
                 return
 
-            # Build download items
-            self._emit_progress(op_id, "downloading", "", 0, len(actions))
+            # Build download items first: the progress scale needs to know
+            # what is really missing from the cache before the bar moves.
             download_items, local_paths = self._ops.build_download_items(
                 actions, resolver
             )
+            scale = self._progress_scale(actions, download_items)
+            self._emit_progress(op_id, "downloading",
+                                percentage=scale.downloading(0, 1))
 
             # Download
             rpm_paths = list(local_paths)
             if download_items:
-                def dl_progress(name, pkg_num, pkg_total, dl_bytes, dl_total,
-                               item_bytes=None, item_total=None,
-                               active_downloads=None, coordinator_speed=0.0):
-                    # Prefer the byte-level counter over the package
-                    # counter so Discover's progress bar advances
-                    # continuously instead of jumping in N steps for
-                    # an N-package transaction.  Fall back to the
-                    # package counter when the total is unknown
-                    # (mirror does not report Content-Length).
-                    if dl_total and dl_total > 0:
-                        current, total = dl_bytes, dl_total
-                    else:
-                        current, total = pkg_num, pkg_total
-                    self._emit_progress(
-                        op_id, "downloading", name or "", current, total
-                    )
-
                 dl_results, downloaded, cached, _ = self._ops.download_packages(
-                    download_items, progress_callback=dl_progress
+                    download_items,
+                    progress_callback=self._download_reporter(op_id, scale),
                 )
                 for r in dl_results:
                     if r.path:
@@ -519,11 +611,10 @@ class UrpmDBusService:
             )
 
             # Install
-            self._emit_progress(op_id, "installing", "", 0, len(rpm_paths))
-
-            def install_progress(tp):
-                self._emit_progress(op_id, "installing", tp.package_name,
-                                    tp.packages_done, tp.packages_total)
+            self._emit_progress(op_id, "installing",
+                                percentage=scale.transacting(0, 1))
+            install_progress = self._transaction_reporter(
+                op_id, scale, "installing", actions)
 
             options = InstallOptions()
             # ``full_sync=False`` matches the CLI default: rpm's own
@@ -593,7 +684,7 @@ class UrpmDBusService:
         from ..core.operations import InstallOptions
 
         try:
-            self._emit_progress(op_id, "resolving", "", 0, 0)
+            self._emit_progress(op_id, "resolving", percentage=0)
 
             resolver = Resolver(self._db, arch=platform.machine())
             result = resolver.resolve_remove(package_names)
@@ -626,12 +717,14 @@ class UrpmDBusService:
                 actions
             )
 
-            # Execute removal
-            self._emit_progress(op_id, "removing", "", 0, len(remove_names))
-
-            def erase_progress(tp):
-                self._emit_progress(op_id, "removing", tp.package_name,
-                                    tp.packages_done, tp.packages_total)
+            # Execute removal.  A removal fetches nothing, so the scale is
+            # built with no download items and hands the whole bar to rpm
+            # instead of starting it half full.
+            scale = self._progress_scale(actions, ())
+            self._emit_progress(op_id, "removing",
+                                percentage=scale.transacting(0, 1))
+            erase_progress = self._transaction_reporter(
+                op_id, scale, "removing", actions)
 
             options = InstallOptions()
             # ``full_sync=False``: same rationale as install — hand
@@ -676,7 +769,7 @@ class UrpmDBusService:
         from ..core.operations import InstallOptions
 
         try:
-            self._emit_progress(op_id, "resolving", "", 0, 0)
+            self._emit_progress(op_id, "resolving", percentage=0)
 
             resolver = Resolver(self._db, arch=platform.machine())
             result = resolver.resolve_upgrade()
@@ -694,38 +787,25 @@ class UrpmDBusService:
                 self._return_invocation(invocation, True, msg)
                 return
 
-            # Separate upgrades and removals
-            upgrade_actions = [a for a in actions if a.action != TransactionType.REMOVE]
+            # An upgrade plan can carry removals: obsoleted packages go
+            # in the same transaction as the ones replacing them.
             remove_names = [a.name for a in actions if a.action == TransactionType.REMOVE]
 
-            # Build download items for upgrades
-            self._emit_progress(op_id, "downloading", "", 0, len(upgrade_actions))
+            # Build download items first: the progress scale needs to know
+            # what is really missing from the cache before the bar moves.
             download_items, local_paths = self._ops.build_download_items(
                 actions, resolver
             )
+            scale = self._progress_scale(actions, download_items)
+            self._emit_progress(op_id, "downloading",
+                                percentage=scale.downloading(0, 1))
 
             # Download
             rpm_paths = list(local_paths)
             if download_items:
-                def dl_progress(name, pkg_num, pkg_total, dl_bytes, dl_total,
-                               item_bytes=None, item_total=None,
-                               active_downloads=None, coordinator_speed=0.0):
-                    # Prefer the byte-level counter over the package
-                    # counter so Discover's progress bar advances
-                    # continuously instead of jumping in N steps for
-                    # an N-package transaction.  Fall back to the
-                    # package counter when the total is unknown
-                    # (mirror does not report Content-Length).
-                    if dl_total and dl_total > 0:
-                        current, total = dl_bytes, dl_total
-                    else:
-                        current, total = pkg_num, pkg_total
-                    self._emit_progress(
-                        op_id, "downloading", name or "", current, total
-                    )
-
                 dl_results, downloaded, cached, _ = self._ops.download_packages(
-                    download_items, progress_callback=dl_progress
+                    download_items,
+                    progress_callback=self._download_reporter(op_id, scale),
                 )
                 for r in dl_results:
                     if r.path:
@@ -743,12 +823,10 @@ class UrpmDBusService:
             )
 
             # Execute upgrade
-            total = len(rpm_paths) + len(remove_names)
-            self._emit_progress(op_id, "upgrading", "", 0, total)
-
-            def upgrade_progress(tp):
-                self._emit_progress(op_id, "upgrading", tp.package_name,
-                                    tp.packages_done, tp.packages_total)
+            self._emit_progress(op_id, "upgrading",
+                                percentage=scale.transacting(0, 1))
+            upgrade_progress = self._transaction_reporter(
+                op_id, scale, "upgrading", actions)
 
             options = InstallOptions()
             # ``full_sync=False``: return as soon as rpm's extraction
@@ -787,11 +865,16 @@ class UrpmDBusService:
         try:
             from ..core.sync import sync_all_media
 
-            self._emit_progress(op_id, "refreshing", "", 0, 0)
+            self._emit_progress(op_id, "refreshing", percentage=0)
 
             def refresh_progress(media_name, stage, current, total):
+                # No download / transaction split to weigh here: a refresh
+                # is one kind of work from start to finish, so the plain
+                # scale gives it the whole bar.
                 self._emit_progress(
-                    op_id, "refreshing", media_name, current, total, stage
+                    op_id, "refreshing", media_name,
+                    percentage=ProgressScale().transacting(current, total),
+                    message=stage,
                 )
 
             # ``force=False`` mirrors the CLI default: each medium sends
@@ -1005,8 +1088,12 @@ class UrpmDBusService:
       <arg name="operation_id" type="s"/>
       <arg name="phase" type="s"/>
       <arg name="package" type="s"/>
-      <arg name="current" type="u"/>
-      <arg name="total" type="u"/>
+      <arg name="evr" type="s"/>
+      <arg name="arch" type="s"/>
+      <arg name="percentage" type="u"/>
+      <arg name="item_percentage" type="u"/>
+      <arg name="speed" type="t"/>
+      <arg name="download_remaining" type="t"/>
       <arg name="message" type="s"/>
     </signal>
     <signal name="OperationComplete">
