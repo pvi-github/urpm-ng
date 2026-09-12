@@ -530,15 +530,22 @@ fi
 # ============================================================================
 %post packagekit-backend
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
-# Same rationale as urpm-ng-daemon: after an upgrade, restart the
-# D-Bus service that carries the Python business logic AND the
-# PackageKit daemon that dlopens libpk_backend_urpm.so, so
-# Discover / GNOME Software immediately see the new backend.
-# Guard by ``$1 -ge 2`` (upgrade) — fresh installs do not need it.
-if [ "$1" -ge 2 ]; then
-    /usr/bin/systemctl try-restart urpm-dbus.service >/dev/null 2>&1 || :
-    /usr/bin/systemctl try-restart packagekit.service >/dev/null 2>&1 || :
-fi
+# This scriptlet deliberately restarts nothing.
+#
+# It used to run `systemctl try-restart urpm-dbus.service` on upgrade,
+# which killed the process executing the very transaction that was
+# installing this package: rpm was cut off halfway, the packages
+# ordered after this one were never installed, and the history row was
+# left at `running`.  It also restarted packagekit.service, killing the
+# client that was watching the job, so Discover lost its progress bar
+# on every self-upgrade.  Both are now handled where they are safe:
+#
+#   * urpm-dbus.service notices that its own code changed on disk and
+#     exits once its transaction is finished and answered, after which
+#     the next method call re-activates it (see
+#     UrpmDBusService._stop_if_code_replaced);
+#   * packagekitd exits on its own idle timeout and dlopens the new
+#     libpk_backend_urpm.so when it is next activated.
 
 CONFIG_FILE=/etc/PackageKit/PackageKit.conf
 
@@ -560,9 +567,6 @@ if [ "$1" -eq 1 ]; then
     # Enable D-Bus service
     /usr/bin/systemctl enable urpm-dbus.service >/dev/null 2>&1 || :
 fi
-
-# Restart PackageKit to pick up the new backend
-/usr/bin/systemctl try-restart packagekit.service >/dev/null 2>&1 || :
 
 %preun packagekit-backend
 if [ $1 -eq 0 ]; then

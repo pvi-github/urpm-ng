@@ -556,6 +556,22 @@ on_operation_progress(GDBusConnection *connection,
     guint32 percentage, item_percentage;
     guint64 speed, download_remaining;
 
+    /* Check the shape before reading it.  g_variant_get aborts the
+     * process on a format mismatch, and a mismatch is reachable: this
+     * plugin and urpm-dbus-service ship together, but packagekitd
+     * reloads the new plugin on its next activation while a long-lived
+     * service may still be running the code it was started with, and
+     * therefore emitting the previous signal shape.  Ignoring a signal
+     * we do not recognise costs a progress bar until the service steps
+     * aside; parsing it blindly would take packagekitd down. */
+    static const gchar *EXPECTED = "(sssssuutts)";
+    if (!g_variant_is_of_type(parameters, G_VARIANT_TYPE(EXPECTED))) {
+        g_warning("ignoring OperationProgress with signature %s, expected %s"
+                  " (urpm-dbus-service still running older code?)",
+                  g_variant_get_type_string(parameters), EXPECTED);
+        return;
+    }
+
     /* (sssssuutts) = op_id, phase, package, evr, arch,
      *                percentage, item_percentage,
      *                speed, download_remaining, message */

@@ -43,6 +43,30 @@ INTERFACE_NAME = "org.mageia.Urpm.v1"
 ERROR_DISTUPGRADE_IN_PROGRESS = "org.mageia.Urpm.v1.Error.DistupgradeInProgress"
 ERROR_GENERIC = "org.mageia.Urpm.v1.Error"
 
+#: Root of the Python code this process runs, used to notice that a
+#: transaction has replaced it.
+_CODE_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _code_fingerprint(root: Path = _CODE_ROOT) -> frozenset:
+    """Fingerprint the service's own code as it currently sits on disk.
+
+    Answers exactly one question: has the code this process is running
+    been replaced underneath it? Size and mtime rather than a hash,
+    because the answer is wanted after every transaction and has to stay
+    cheap. A file that cannot be stat'ed is simply left out; it will
+    read as a change next time, which is the safe direction.
+    """
+    prints = set()
+    for path in root.rglob('*.py'):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        prints.add((str(path), stat.st_mtime_ns, stat.st_size))
+    return frozenset(prints)
+
+
 class DistupgradeInProgressError(Exception):
     """Raised when a D-Bus write method is invoked while a distupgrade
     is in progress or interrupted (SPEC_DISTUPGRADE §2).
@@ -101,6 +125,9 @@ class UrpmDBusService:
         self._active_operations = {}
         self._cancel_requested = False
         self._lock = threading.Lock()
+        # Snapshot taken before serving anything, so a later comparison
+        # says whether a transaction has replaced us mid-flight.
+        self._code_at_startup = _code_fingerprint()
 
     def _init_core(self):
         """Lazy-init core components."""
@@ -134,6 +161,53 @@ class UrpmDBusService:
         """
         if self._db is not None:
             self._db.invalidate_installed_cache()
+
+    def _stop_if_code_replaced(self):
+        """Step aside when the transaction just replaced this service's code.
+
+        Packaging must not restart us, and used to. The ``%post`` of
+        ``urpm-ng-packagekit-backend`` ran ``systemctl try-restart
+        urpm-dbus.service`` from inside the very transaction this process
+        was executing: rpm was killed halfway through, the remaining
+        packages were never installed, the history row stayed at
+        ``running``, and the client watching the job died with it. Only
+        the service knows when it is safe to go, so the service decides.
+
+        Going means exiting cleanly rather than re-executing in place.
+        The unit is ``Type=dbus``, so dropping and re-taking the bus name
+        under systemd's nose is asking for trouble; a clean exit leaves
+        the unit inactive and the next method call re-activates it
+        through ``org.mageia.Urpm.v1.service``, running the new code.
+
+        Nothing is done about ``libpk_backend_urpm.so``: packagekitd
+        already exits on its own after its idle timeout and picks the new
+        one up when it is next activated.
+        """
+        with self._lock:
+            if self._active_operations:
+                return  # another transaction is running; it will re-check
+        if _code_fingerprint() == self._code_at_startup:
+            return
+
+        from gi.repository import GLib
+
+        logger.info("own code replaced on disk, stopping to pick it up")
+        # PRIORITY_LOW, so the completion signal and the method reply,
+        # both queued at PRIORITY_DEFAULT_IDLE by _emit_complete and
+        # _return_invocation, are dispatched first.  Ordering by
+        # priority rather than by a timer keeps this deterministic.
+        GLib.idle_add(self._stop_for_new_code, priority=GLib.PRIORITY_LOW)
+
+    def _stop_for_new_code(self):
+        """Flush what the client is still owed, then end the main loop."""
+        try:
+            if self._connection is not None:
+                self._connection.flush_sync(None)
+        except Exception:
+            logger.exception("could not flush the bus before stopping")
+        if self._loop is not None:
+            self._loop.quit()
+        return False  # one-shot
 
     def _get_caller_credentials(self, bus, sender):
         """Get caller PID and UID from D-Bus sender."""
@@ -464,6 +538,7 @@ class UrpmDBusService:
             success, error = self._ops.install_local_files(list(rpm_paths))
         finally:
             self._forget_installed_state()
+            self._stop_if_code_replaced()
         return json.dumps({
             'success': success,
             'error': error
@@ -677,6 +752,7 @@ class UrpmDBusService:
             self._forget_installed_state()
             with self._lock:
                 self._active_operations.pop(op_id, None)
+            self._stop_if_code_replaced()
 
     def _run_remove(self, op_id, context, package_names, invocation):
         """Remove packages in a background thread."""
@@ -762,6 +838,7 @@ class UrpmDBusService:
             self._forget_installed_state()
             with self._lock:
                 self._active_operations.pop(op_id, None)
+            self._stop_if_code_replaced()
 
     def _run_upgrade(self, op_id, context, invocation):
         """Upgrade system packages in a background thread."""
@@ -859,6 +936,7 @@ class UrpmDBusService:
             self._forget_installed_state()
             with self._lock:
                 self._active_operations.pop(op_id, None)
+            self._stop_if_code_replaced()
 
     def _run_refresh(self, op_id, context, invocation):
         """Refresh metadata in a background thread."""
