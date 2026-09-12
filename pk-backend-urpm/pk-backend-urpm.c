@@ -599,11 +599,24 @@ on_operation_progress(GDBusConnection *connection,
 
     /* Per-item progress needs a full package_id, which is why the
      * service sends evr and arch alongside the name instead of making
-     * us parse a NEVRA back apart. */
+     * us parse a NEVRA back apart.
+     *
+     * This is not a nicety.  Discover's update page hides its single
+     * overall bar while a transaction runs and draws one bar per
+     * package instead, fed only by ItemProgress
+     * (PackageKitUpdater::itemProgress -> resourceProgressed ->
+     * UpdateModel's resourceProgress).  No ItemProgress means no bar at
+     * all there, which is why an update showed nothing until rpm
+     * started writing. */
     if (item_percentage != PK_BACKEND_PERCENTAGE_INVALID &&
         package[0] != '\0' && evr[0] != '\0' && arch[0] != '\0') {
+        /* A payload still being fetched is not installed yet; "urpm" is
+         * the repository-agnostic placeholder this backend already uses
+         * when the medium is unknown. */
+        const gchar *data = g_str_equal(phase, "downloading") ? "urpm"
+                                                              : "installed";
         g_autofree gchar *package_id = pk_package_id_build(
-            package, evr, arch, "installed");
+            package, evr, arch, data);
         pk_backend_job_set_item_progress(ctx->job, package_id, status,
                                          item_percentage);
     }

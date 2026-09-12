@@ -223,6 +223,54 @@ class TestReporters:
         assert sent[0]['speed'] == 2_500_000
         assert sent[0]['download_remaining'] == 2 * GB
 
+    def test_the_download_names_the_build_it_is_fetching(self):
+        """Without this there is no progress bar at all on Discover's updates.
+
+        That page hides its single overall bar while a transaction runs
+        and draws one bar per package instead, fed only by PackageKit's
+        ``ItemProgress`` (``PackageKitUpdater::itemProgress`` ->
+        ``resourceProgressed`` -> ``UpdateModel``'s ``resourceProgress``).
+        ``ItemProgress`` needs a full ``package_id``, so the version and
+        the architecture have to travel with the name. The download used
+        to send a bare name, and nothing was drawn until rpm began
+        writing.
+        """
+        service, sent = self._service()
+        items = [SimpleNamespace(name='iwlwifi-firmware',
+                                 version='20260622',
+                                 release='1.mga10.nonfree',
+                                 arch='noarch', size=37325049)]
+
+        report = service._download_reporter(
+            'op', ProgressScale(download_bytes=37325049), items)
+        report('iwlwifi-firmware', 0, 1, 1988637, 37325049,
+               item_bytes=1988637, item_total=37325049)
+
+        assert sent[0]['evr'] == '20260622-1.mga10.nonfree'
+        assert sent[0]['arch'] == 'noarch'
+        assert sent[0]['item_percentage'] == 5
+
+    def test_a_payload_taken_from_cache_names_no_build(self):
+        """The downloader reports a literal "(cache)" for those."""
+        service, sent = self._service()
+        items = [SimpleNamespace(name='firefox', version='153.2.0',
+                                 release='1.mga10', arch='x86_64', size=1)]
+
+        report = service._download_reporter('op', ProgressScale(), items)
+        report('(cache)', 1, 1, 0, 0)
+
+        assert sent[0]['evr'] == ''
+        assert sent[0]['arch'] == ''
+
+    def test_an_unexpected_name_names_no_build(self):
+        service, sent = self._service()
+
+        report = service._download_reporter('op', ProgressScale(), ())
+        report('mystery', 0, 1, 0, 1)
+
+        assert sent[0]['evr'] == ''
+        assert sent[0]['arch'] == ''
+
     def test_a_mirror_without_content_length_falls_back_to_counting(self):
         service, sent = self._service()
         scale = ProgressScale(download_bytes=4 * GB, install_bytes=0)

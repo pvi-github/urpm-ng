@@ -332,8 +332,20 @@ class UrpmDBusService:
             install_bytes=compute_sizes(actions).installed,
         )
 
-    def _download_reporter(self, op_id, scale):
-        """Build the progress callback handed to the downloader."""
+    def _download_reporter(self, op_id, scale, items=()):
+        """Build the progress callback handed to the downloader.
+
+        ``items`` supplies the version and architecture of each payload.
+        Without them no per-package progress can be reported, and on
+        Discover's update page that means no progress bar at all: the
+        bars it draws there come from PackageKit's ``ItemProgress``, not
+        from the overall percentage, which that page hides while a
+        transaction runs. The download used to send a bare name, so
+        nothing was drawn until rpm started writing.
+        """
+        builds = {item.name: (f"{item.version}-{item.release}", item.arch)
+                  for item in items}
+
         def report(name, pkg_num, pkg_total, dl_bytes, dl_total,
                    item_bytes=None, item_total=None,
                    active_downloads=None, coordinator_speed=0.0):
@@ -346,8 +358,12 @@ class UrpmDBusService:
                 done, total = dl_bytes, dl_total
             else:
                 done, total = pkg_num, pkg_total
+            # The downloader reports a literal "(cache)" for payloads it
+            # did not have to fetch; those match no build and simply get
+            # no per-item progress.
+            evr, arch = builds.get(name, ("", ""))
             self._emit_progress(
-                op_id, "downloading", name or "",
+                op_id, "downloading", name or "", evr=evr, arch=arch,
                 percentage=scale.downloading(done, total),
                 item_percentage=item_percentage(item_bytes or 0,
                                                 item_total or 0),
@@ -668,7 +684,7 @@ class UrpmDBusService:
             if download_items:
                 dl_results, downloaded, cached, _ = self._ops.download_packages(
                     download_items,
-                    progress_callback=self._download_reporter(op_id, scale),
+                    progress_callback=self._download_reporter(op_id, scale, download_items),
                 )
                 for r in dl_results:
                     if r.path:
@@ -882,7 +898,7 @@ class UrpmDBusService:
             if download_items:
                 dl_results, downloaded, cached, _ = self._ops.download_packages(
                     download_items,
-                    progress_callback=self._download_reporter(op_id, scale),
+                    progress_callback=self._download_reporter(op_id, scale, download_items),
                 )
                 for r in dl_results:
                     if r.path:
