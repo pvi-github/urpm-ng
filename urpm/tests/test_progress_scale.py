@@ -539,3 +539,68 @@ class TestMonotonicTransaction:
         ])
 
         assert bar == [25, 50, 75, 100]
+
+
+class TestProgressThrottle:
+    """rpm calls back per cpio block; the bus must not carry every one."""
+
+    @staticmethod
+    def _service():
+        from urpm.dbus.service import UrpmDBusService
+        return UrpmDBusService()
+
+    def test_a_repeat_within_the_window_is_dropped(self):
+        service = self._service()
+
+        first = service._progress_is_worth_sending('op', 'upgrading', 'pkg', 40)
+        again = service._progress_is_worth_sending('op', 'upgrading', 'pkg', 40)
+
+        assert first is True
+        assert again is False
+
+    def test_a_new_percentage_goes_out_at_once(self):
+        service = self._service()
+        service._progress_is_worth_sending('op', 'upgrading', 'pkg', 40)
+
+        assert service._progress_is_worth_sending('op', 'upgrading', 'pkg', 41)
+
+    def test_a_new_package_goes_out_at_once(self):
+        service = self._service()
+        service._progress_is_worth_sending('op', 'upgrading', 'pkg', 40)
+
+        assert service._progress_is_worth_sending('op', 'upgrading', 'other', 40)
+
+    def test_a_new_phase_goes_out_at_once(self):
+        service = self._service()
+        service._progress_is_worth_sending('op', 'upgrading', 'pkg', 40)
+
+        assert service._progress_is_worth_sending('op', 'script', 'pkg', 40)
+
+    def test_a_repeat_passes_once_the_window_elapses(self, monkeypatch):
+        from urpm.dbus import service as service_module
+
+        clock = [1000.0]
+        monkeypatch.setattr(service_module.time, 'monotonic', lambda: clock[0])
+        service = self._service()
+
+        assert service._progress_is_worth_sending('op', 'upgrading', 'p', 40)
+        assert not service._progress_is_worth_sending('op', 'upgrading', 'p', 40)
+
+        clock[0] += service_module._PROGRESS_MIN_INTERVAL
+        assert service._progress_is_worth_sending('op', 'upgrading', 'p', 40)
+
+    def test_the_flood_is_cut_down_by_orders_of_magnitude(self, monkeypatch):
+        """3 308 identical callbacks in one second became 3 308 signals."""
+        from urpm.dbus import service as service_module
+
+        clock = [0.0]
+        monkeypatch.setattr(service_module.time, 'monotonic', lambda: clock[0])
+        service = self._service()
+
+        passed = 0
+        for _ in range(3308):
+            if service._progress_is_worth_sending('op', 'upgrading', 'pkg', 11):
+                passed += 1
+            clock[0] += 1 / 3308  # one second's worth
+
+        assert passed <= 11, passed

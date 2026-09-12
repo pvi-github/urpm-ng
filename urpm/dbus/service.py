@@ -22,6 +22,7 @@ import platform
 import signal
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -46,6 +47,11 @@ ERROR_GENERIC = "org.mageia.Urpm.v1.Error"
 #: Root of the Python code this process runs, used to notice that a
 #: transaction has replaced it.
 _CODE_ROOT = Path(__file__).resolve().parent.parent
+
+#: Floor between two progress signals that say the same thing. Ten a
+#: second is what a download naturally produces and it reads as smooth;
+#: rpm's per-cpio-block callbacks reached three thousand a second.
+_PROGRESS_MIN_INTERVAL = 0.1
 
 
 def _code_fingerprint(root: Path = _CODE_ROOT) -> frozenset:
@@ -128,6 +134,8 @@ class UrpmDBusService:
         # Snapshot taken before serving anything, so a later comparison
         # says whether a transaction has replaced us mid-flight.
         self._code_at_startup = _code_fingerprint()
+        self._last_progress = None
+        self._last_progress_at = 0.0
 
     def _init_core(self):
         """Lazy-init core components."""
@@ -267,6 +275,26 @@ class UrpmDBusService:
     # D-Bus signal emission
     # =====================================================================
 
+    def _progress_is_worth_sending(self, op_id, phase, package, percentage):
+        """Decide whether this progress update tells a client anything new.
+
+        Yes when the operation, the phase, the package or the overall
+        percentage differ from the last one sent. Otherwise only once per
+        :data:`_PROGRESS_MIN_INTERVAL`, which keeps the byte-level
+        filling-in visible without repeating it thousands of times a
+        second.
+        """
+        state = (op_id, phase, package, percentage)
+        now = time.monotonic()
+        if state != self._last_progress:
+            self._last_progress = state
+            self._last_progress_at = now
+            return True
+        if now - self._last_progress_at >= _PROGRESS_MIN_INTERVAL:
+            self._last_progress_at = now
+            return True
+        return False
+
     def _emit_progress(self, op_id, phase, package="", *,
                        percentage=PERCENTAGE_UNKNOWN,
                        item_percentage=PERCENTAGE_UNKNOWN,
@@ -286,6 +314,15 @@ class UrpmDBusService:
         backend can rebuild a full ``package_id`` for PackageKit's
         per-item progress without parsing a NEVRA back apart.
 
+        Emissions that repeat what a client already knows are dropped,
+        and the rest are capped at :data:`_PROGRESS_MIN_INTERVAL`. rpm
+        calls back once per cpio block, which produced 9 800 signals in
+        sixteen seconds for a single package, peaking at 3 308 in one
+        second, nearly all carrying the value before them. Anything that
+        changes the overall percentage or moves to another package still
+        goes out at once; only the repetitive filling-in between is
+        thinned.
+
         Args:
             op_id: Operation this belongs to.
             phase: One of resolving, downloading, installing, upgrading,
@@ -299,6 +336,10 @@ class UrpmDBusService:
             download_remaining: Bytes left to fetch, 0 when none or unknown.
             message: Free text, used by phases that have no counter.
         """
+        if not self._progress_is_worth_sending(
+                op_id, phase, package, percentage):
+            return
+
         from gi.repository import GLib
 
         def _emit():
