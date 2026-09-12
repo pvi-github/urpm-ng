@@ -382,21 +382,47 @@ class UrpmDBusService:
         frozen, and ``TransactionProgress`` documents them as often the
         slowest part of a transaction, so without a distinct phase the
         bar looks hung precisely when it takes longest.
+
+        Only the phases that write packages move the bar. The install and
+        erase phases share one combined counter, ``elements_done`` over
+        ``elements_total``, so they are safe to follow. Verification is
+        not: ``RPMCALLBACK_VERIFY_PROGRESS`` reports bytes within the
+        header being checked, on a scale of its own, and feeding that
+        into the same figure made the bar climb during verification and
+        fall back when installation began. PackageKit refuses a
+        percentage that decreases and discards every later one, so the
+        bar froze for the rest of the transaction. Measured on a
+        one-package upgrade: 11 %, then 55 %, then back to 11 % and stuck
+        there for four seconds until a final jump to 100 %.
         """
         from ..core.transaction_queue import TransactionPhase
 
         builds = {a.name: (a.evr, a.arch) for a in actions}
+        # VERIFY counts header bytes and PREPARE counts element ordering,
+        # neither on the transaction's own scale; SCRIPT has no countable
+        # total at all and holds whatever was last reached.
+        counting = (TransactionPhase.INSTALL, TransactionPhase.ERASE)
+        # An upgrade can queue a second operation behind the first, the
+        # background orphan cleanup, and that one starts its own
+        # ``elements_total`` from zero.  Never look back.
+        furthest = scale.transacting(0, 1)
 
         def report(tp):
+            nonlocal furthest
             if tp.phase == TransactionPhase.SCRIPT:
                 name, step = tp.script_name or tp.package_name, "script"
             else:
                 name, step = tp.package_name, phase
             evr, arch = builds.get(name, ("", ""))
+
+            if tp.phase in counting:
+                furthest = max(furthest,
+                               scale.transacting(tp.packages_done,
+                                                 tp.packages_total))
+
             self._emit_progress(
                 op_id, step, name or "", evr=evr, arch=arch,
-                percentage=scale.transacting(tp.packages_done,
-                                             tp.packages_total),
+                percentage=furthest,
                 item_percentage=item_percentage(tp.bytes_done, tp.bytes_total),
             )
 

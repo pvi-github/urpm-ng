@@ -462,3 +462,80 @@ class TestRefreshRun:
         sent, _ = self._run(monkeypatch, ['Core Release'])
 
         assert sent[-1]['message'] == 'synthesis'
+
+
+class TestMonotonicTransaction:
+    """The bar must never step backwards during the rpm transaction.
+
+    ``RPMCALLBACK_VERIFY_PROGRESS`` reports bytes within the header being
+    checked, on a scale unrelated to the transaction's element count.
+    Feeding it into the overall figure made the bar read 11 %, then 55 %,
+    then 11 % again; PackageKit refuses a decrease and discards every
+    later value, so the bar froze for the rest of the run.
+    """
+
+    @staticmethod
+    def _reported(steps, scale=None):
+        from urpm.dbus.service import UrpmDBusService
+        from urpm.core.transaction_queue import TransactionPhase
+
+        service = UrpmDBusService()
+        sent = []
+        service._emit_progress = lambda op_id, phase, package="", **fields: (
+            sent.append({'phase': phase, **fields}))
+
+        actions = [SimpleNamespace(name='pkg', evr='1.0-1', arch='noarch')]
+        report = service._transaction_reporter(
+            'op', scale or ProgressScale(), 'upgrading', actions)
+        for phase, done, total in steps:
+            report(SimpleNamespace(
+                phase=getattr(TransactionPhase, phase),
+                package_name='pkg', script_name='',
+                packages_done=done, packages_total=total,
+                bytes_done=0, bytes_total=0))
+        return [entry['percentage'] for entry in sent]
+
+    def test_verification_does_not_move_the_bar(self):
+        """The exact sequence that produced the freeze."""
+        bar = self._reported([
+            ('VERIFY', 1, 2),
+            ('VERIFY', 2, 2),
+            ('PREPARE', 0, 4),
+            ('INSTALL', 1, 4),
+            ('INSTALL', 4, 4),
+        ], ProgressScale(download_bytes=1, install_bytes=8))
+
+        assert bar == sorted(bar), bar
+        assert bar[0] == bar[1] == bar[2], "verification must stand still"
+        assert bar[-1] == 100
+
+    def test_scriptlets_hold_the_last_value(self):
+        bar = self._reported([
+            ('INSTALL', 2, 4),
+            ('SCRIPT', 2, 4),
+            ('SCRIPT', 2, 4),
+            ('INSTALL', 4, 4),
+        ])
+
+        assert bar == [50, 50, 50, 100]
+
+    def test_a_second_queued_operation_cannot_rewind_it(self):
+        """The background orphan cleanup restarts its own element total."""
+        bar = self._reported([
+            ('INSTALL', 4, 4),
+            ('ERASE', 0, 3),
+            ('ERASE', 1, 3),
+        ])
+
+        assert bar == [100, 100, 100]
+
+    def test_erase_and_install_share_one_counter(self):
+        """``elements_done`` spans both, so following them is safe."""
+        bar = self._reported([
+            ('ERASE', 1, 4),
+            ('INSTALL', 2, 4),
+            ('ERASE', 3, 4),
+            ('INSTALL', 4, 4),
+        ])
+
+        assert bar == [25, 50, 75, 100]
