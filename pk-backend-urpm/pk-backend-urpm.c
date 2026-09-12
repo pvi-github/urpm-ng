@@ -637,7 +637,6 @@ pk_backend_install_packages_thread(PkBackendJob *job, GVariant *params, gpointer
 
         /* Don't emit packages during simulation - let Discover query via resolve */
         g_variant_unref(result);
-        g_variant_unref(result);
         pk_backend_job_set_percentage(job, 100);
         pk_backend_job_finished(job);
         return;
