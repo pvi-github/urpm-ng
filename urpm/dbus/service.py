@@ -779,7 +779,8 @@ class UrpmDBusService:
             # extraction is awaited synchronously (so the progress bar
             # reaches 100 % when the payload is really on disk), but
             # post-install triggers (bytecompile, desktop-database,
-            # mkinitrd…) run in the background via urpmd.  With
+            # mkinitrd…) are left to the transaction's own forked child,
+            # which keeps running once the pipe is released.  With
             # ``full_sync=True`` Discover's progress bar sat at 100 %
             # for several seconds waiting for those triggers, giving
             # the impression of a hung install.

@@ -122,13 +122,6 @@ Obsoletes:      %{name}-daemon < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-daemon = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
 Requires:       %{name}-core = %{version}-%{release}
-# D-Bus service + PolicyKit backend live here now (was pulled into -core
-# through the pyproject_files sweep, which forced ``typelib(Polkit)`` on
-# every -core install -- including headless containers that never touch
-# the daemon).  The gi bindings and polkit itself are strict runtime
-# deps of ``urpm/dbus/service.py`` and ``urpm/auth/polkit.py``.
-Requires:       python3-gobject
-Requires:       polkit
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
@@ -170,7 +163,10 @@ Group:          System/Configuration/Packaging
 # explicitly.
 
 Requires:       %{name}-core = %{version}-%{release}
-Requires:       %{name}-daemon = %{version}-%{release}
+# urpmd only gets a best-effort cache-invalidation POST from here.
+Recommends:     %{name}-daemon = %{version}-%{release}
+# urpm/dbus and urpm/auth/polkit.py used to be in -daemon.
+Conflicts:      %{name}-daemon < %{version}-%{release}
 Requires:       python3-gobject
 Requires:       polkit
 Requires:       PackageKit
@@ -620,10 +616,8 @@ fi
 %exclude %{python3_sitelib}/urpm/genmedia
 %exclude %{python3_sitelib}/urpm/cli/commands/genmedia.py
 %exclude %{python3_sitelib}/urpm/cli/commands/__pycache__/genmedia.*.pyc
-# D-Bus service module and PolicyKit backend belong to urpm-ng-daemon.
-# Leaving them here would forward-declare ``typelib(Polkit) = 1.0`` as a
-# strict Requires on every -core install (headless containers pay ~10 MB
-# of polkit + libpolkit-gir + typelib deps for code they never load).
+# Shipped by -packagekit-backend.  Here they would put
+# ``typelib(Polkit)`` on every -core install, ~10 MB unused.
 %exclude %{python3_sitelib}/urpm/dbus
 %exclude %{python3_sitelib}/urpm/auth/polkit.py
 %exclude %{python3_sitelib}/urpm/auth/__pycache__/polkit.*.pyc
@@ -637,10 +631,6 @@ fi
 %config(noreplace) %{_sysconfdir}/shorewall/rules.urpm-ng
 %{_mandir}/man8/urpmd.8*
 %{_mandir}/*/man8/urpmd.8*
-# Moved out of urpm-ng-core (see the matching %exclude block above).
-%{python3_sitelib}/urpm/dbus
-%{python3_sitelib}/urpm/auth/polkit.py
-%{python3_sitelib}/urpm/auth/__pycache__/polkit.*.pyc
 %{_datadir}/metainfo/org.mageia.urpm-ng-daemon.metainfo.xml
 
 # ============================================================================
@@ -658,6 +648,11 @@ fi
 %{_bindir}/urpm-dbus-service
 %{_libexecdir}/urpm-dbus-service
 %{_unitdir}/urpm-dbus.service
+# Moved out of -core to keep its weight down and keep the domains
+# apart (see the matching %exclude block).
+%{python3_sitelib}/urpm/dbus
+%{python3_sitelib}/urpm/auth/polkit.py
+%{python3_sitelib}/urpm/auth/__pycache__/polkit.*.pyc
 %{_datadir}/dbus-1/system-services/org.mageia.Urpm.v1.service
 %config(noreplace) %{_sysconfdir}/dbus-1/system.d/org.mageia.Urpm.v1.conf
 %{_datadir}/polkit-1/actions/org.mageia.urpm.policy
