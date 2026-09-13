@@ -30,8 +30,12 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored: these come from the stock Python .gitignore and mean the
+# project root's build output.  Unanchored they swallowed any lib/ at
+# any depth, including data/usr/lib/, which silently kept a shipped
+# file out of the repository.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

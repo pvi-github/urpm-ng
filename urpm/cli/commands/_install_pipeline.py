@@ -283,6 +283,13 @@ def run_install_transaction(
             for msg in format_restart_messages(restart_info):
                 print(colors.warning(f"  ⚠ {msg}"))
 
+        # ── Post-operation rules (``/usr/lib/urpm/hooks.d``) ──
+        # After the commit on purpose : a rule may target the very
+        # process running the operation, which is exactly what rpm's own
+        # scriptlets cannot do.  See ``urpm.core.hooks``.
+        from ..helpers.hook_report import run_post_operation_hooks
+        run_post_operation_hooks(ops, transaction_id)
+
         # ── Update installed-through-deps.list for urpmi compat ──
         ops.mark_dependencies(resolver, result.actions)
 

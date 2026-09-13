@@ -71,7 +71,7 @@ import functools
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Set, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +429,84 @@ def query_by_name(name: str, root: str = "/") -> List[InstalledPkg]:
     """
     with open_ts(root) as ts:
         return [_pkg_from_hdr(h) for h in ts.dbMatch("name", name)]
+
+
+def provides_of(names: Iterable[str],
+                root: str = "/") -> Dict[str, Set[str]]:
+    """Every capability the named installed packages provide, with values.
+
+    See the module contract : rpmdb access via ``open_ts`` context
+    manager, closes explicitly.
+
+    Answers "what did this operation bring onto the machine", for the
+    post-operation hooks to match their rules against. The rpmdb is asked
+    rather than the media metadata because the question is about what was
+    *really* installed: a package built locally, or one whose medium has
+    moved on since, would give a different answer through the catalogue.
+
+    The **values** matter as much as the names here, because a capability
+    can carry its own subject: ``restart-on-completion = urpm-dbus`` says
+    both "something wants a restart" and "of that service". Mageia's own
+    ``should-restart = system`` works the same way, which is why
+    :mod:`urpm.core.needs_restart` reads ``PROVIDEVERSION`` too.
+
+    Returns:
+        Capability name to the set of values seen for it. A capability
+        declared without a value maps to an empty set, so a caller can
+        tell "declared, no subject" from "not declared".
+
+    Not cached: it is called once, right after a transaction, when the
+    cache would be cold anyway. Names that are not installed contribute
+    nothing rather than raising, since a hook must never take down an
+    operation that is already recorded.
+
+    rpm adds ``Provides: name = evr`` to every package, so a package's
+    own name is in the result. A rule may therefore watch a package
+    directly and still be expressed as a capability.
+    """
+    import rpm
+
+    found: Dict[str, Set[str]] = {}
+    with open_ts(root) as ts:
+        for name in names:
+            for hdr in ts.dbMatch(rpm.RPMTAG_NAME, name):
+                for dep in _read_dep_family(hdr, "PROVIDE"):
+                    values = found.setdefault(dep.name, set())
+                    if dep.version:
+                        values.add(dep.version)
+    return found
+
+
+def packages_providing(capability: str, names: Iterable[str],
+                       root: str = "/") -> Set[str]:
+    """Which of the named installed packages declare that capability.
+
+    See the module contract : rpmdb access via ``open_ts`` context
+    manager, closes explicitly.
+
+    The other way round from :func:`provides_of`, and for a different
+    consumer. A post-operation rule watches a capability and acts on the
+    services it names, but PackageKit's ``RequireRestart`` carries a
+    *package* id, whose name is what Discover shows the user. So the
+    answer to "who asked for this" has to be a package.
+
+    Returns:
+        The subset of ``names`` that provide ``capability``, with or
+        without a value. Names that are not installed contribute nothing
+        rather than raising, since a hook must never take down an
+        operation that is already recorded.
+    """
+    import rpm
+
+    providers: Set[str] = set()
+    with open_ts(root) as ts:
+        for name in names:
+            for hdr in ts.dbMatch(rpm.RPMTAG_NAME, name):
+                if any(dep.name == capability
+                       for dep in _read_dep_family(hdr, "PROVIDE")):
+                    providers.add(name)
+                    break
+    return providers
 
 
 @_cached

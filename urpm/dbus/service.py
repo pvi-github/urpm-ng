@@ -170,6 +170,72 @@ class UrpmDBusService:
         if self._db is not None:
             self._db.invalidate_installed_cache()
 
+    @staticmethod
+    def _package_entries(actions, only=None):
+        """Describe planned packages the way the PackageKit backend reads them.
+
+        The backend turns each entry into a package id, so the four
+        fields it needs are split here rather than there.
+
+        Args:
+            actions: The resolver actions the transaction ran.
+            only: Restrict to these names, or ``None`` for all of them.
+        """
+        entries = []
+        for action in actions:
+            if only is not None and action.name not in only:
+                continue
+            evr = action.evr
+            version, release = evr.rsplit('-', 1) if '-' in evr else (evr, '1')
+            entries.append({
+                'name': action.name,
+                'version': version,
+                'release': release,
+                'arch': action.arch,
+            })
+        return entries
+
+    def _hook_advice(self, transaction_id):
+        """Which post-operation rules fired, and which packages asked.
+
+        Split from the acting half because the two belong on either side
+        of the method reply: the caller is *told* before it is answered,
+        so PackageKit can raise ``RequireRestart`` while the job is still
+        alive, and the machine is only *touched* afterwards, which is
+        what lets a rule target this very process.
+
+        Returns:
+            The triggered rules, and the names of the packages that
+            declared what they watch.  ``([], [])`` when nothing fired,
+            which is the common case, and also when reading the rules
+            went wrong: an operation that is already committed and
+            recorded must not be reported as failed over a hook.
+        """
+        try:
+            triggered = self._ops.hooks_triggered_by(transaction_id)
+            if not triggered:
+                return [], []
+            return triggered, self._ops.packages_behind_hooks(
+                transaction_id, triggered)
+        except Exception:  # noqa: BLE001 — never fail a done operation
+            logger.exception("could not read the post-operation rules")
+            return [], []
+
+    def _run_hooks_after_reply(self, triggered):
+        """Carry out the rules, now that the caller has its answer.
+
+        A rule set to ``restart-service`` on ``urpm-dbus`` itself will
+        take this process down here.  That is the point of the ordering,
+        and it costs nothing: the unit is ``Type=dbus`` and the next
+        method call re-activates it.
+        """
+        if not triggered:
+            return
+        try:
+            self._ops.run_hooks(triggered)
+        except Exception:  # noqa: BLE001 — never fail a done operation
+            logger.exception("a post-operation rule went wrong")
+
     def _stop_if_code_replaced(self):
         """Step aside when the transaction just replaced this service's code.
 
@@ -808,24 +874,21 @@ class UrpmDBusService:
             self._ops.notify_urpmd_cache_invalidate()
 
             # Build list of installed packages for PackageKit
-            installed_pkgs = []
-            for action in actions:
-                evr = action.evr
-                if '-' in evr:
-                    version, release = evr.rsplit('-', 1)
-                else:
-                    version, release = evr, '1'
-                installed_pkgs.append({
-                    'name': action.name,
-                    'version': version,
-                    'release': release,
-                    'arch': action.arch,
-                })
+            installed_pkgs = self._package_entries(actions)
 
-            msg = json.dumps({'message': f"Installed {len(rpm_paths)} package(s)", 'packages': installed_pkgs})
+            # Post-operation rules: said before the reply, acted on after
+            # it.  See ``_hook_advice`` and ``urpm.core.hooks``.
+            triggered, requesters = self._hook_advice(transaction_id)
+
+            msg = json.dumps({
+                'message': f"Installed {len(rpm_paths)} package(s)",
+                'packages': installed_pkgs,
+                'restart_packages': self._package_entries(actions, requesters),
+            })
             logger.info(f"_run_install: emitting complete, success=True")
             self._emit_complete(op_id, True, msg)
             self._return_invocation(invocation, True, msg)
+            self._run_hooks_after_reply(triggered)
             logger.info(f"_run_install: done")
 
         except Exception as e:
@@ -1006,11 +1069,22 @@ class UrpmDBusService:
             self._ops.complete_transaction(transaction_id)
             self._ops.notify_urpmd_cache_invalidate()
 
-            msg = f"Upgraded {len(rpm_paths)} package(s)"
+            # Post-operation rules: said before the reply, acted on after
+            # it.  See ``_hook_advice`` and ``urpm.core.hooks``.
+            triggered, requesters = self._hook_advice(transaction_id)
+
+            summary = f"Upgraded {len(rpm_paths)} package(s)"
             if remove_names:
-                msg += f", removed {len(remove_names)}"
+                summary += f", removed {len(remove_names)}"
+            # JSON like the install path, so the backend reads one shape
+            # whichever verb it called.  The sentence stays inside it.
+            msg = json.dumps({
+                'message': summary,
+                'restart_packages': self._package_entries(actions, requesters),
+            })
             self._emit_complete(op_id, True, msg)
             self._return_invocation(invocation, True, msg)
+            self._run_hooks_after_reply(triggered)
 
         except Exception as e:
             logger.exception(f"Upgrade failed: {e}")

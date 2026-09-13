@@ -94,6 +94,59 @@ ensure_connection(PkBackendJob *job, GError **error)
 }
 
 /* ========================================================================= */
+/* Helper: Post-operation restart advice                                     */
+/*                                                                           */
+/* The service answers with a "restart_packages" list holding the packages   */
+/* that declared "restart-on-completion" and really landed.  Raising it here */
+/* rather than in the service is what puts the notice in front of the user:  */
+/* Discover turns RequireRestart into a passive message naming the package.  */
+/*                                                                           */
+/* Called before pk_backend_job_finished, because a client stops listening   */
+/* to a job once it is done.  The service, for its part, only *acts* on the  */
+/* rules after it has answered us — see urpm/core/hooks.py.                  */
+/* ========================================================================= */
+
+static void
+emit_restart_advice_from_json(PkBackendJob *job, const gchar *json_str)
+{
+    JsonParser *parser = json_parser_new();
+
+    if (json_parser_load_from_data(parser, json_str, -1, NULL)) {
+        JsonNode *root = json_parser_get_root(parser);
+        if (JSON_NODE_HOLDS_OBJECT(root)) {
+            JsonObject *obj = json_node_get_object(root);
+            JsonArray *wanted = json_object_has_member(obj, "restart_packages")
+                ? json_object_get_array_member(obj, "restart_packages")
+                : NULL;
+
+            if (wanted != NULL) {
+                guint len = json_array_get_length(wanted);
+                for (guint j = 0; j < len; j++) {
+                    JsonObject *pkg = json_array_get_object_element(wanted, j);
+                    if (pkg == NULL)
+                        continue;
+
+                    const gchar *name = json_object_get_string_member_with_default(pkg, "name", "");
+                    const gchar *version = json_object_get_string_member_with_default(pkg, "version", "");
+                    const gchar *release = json_object_get_string_member_with_default(pkg, "release", "");
+                    const gchar *arch = json_object_get_string_member_with_default(pkg, "arch", "");
+
+                    g_autofree gchar *evr = g_strdup_printf("%s-%s", version, release);
+                    g_autofree gchar *pkg_id = pk_package_id_build(name, evr, arch, "installed");
+                    /* APPLICATION, never SESSION or SYSTEM: what the
+                     * capability declares is one service of its own,
+                     * and overstating it would train users to ignore
+                     * the notice. */
+                    pk_backend_job_require_restart(job, PK_RESTART_ENUM_APPLICATION, pkg_id);
+                }
+            }
+        }
+    }
+
+    g_object_unref(parser);
+}
+
+/* ========================================================================= */
 /* Helper: Parse JSON package list                                           */
 /* ========================================================================= */
 
@@ -828,6 +881,8 @@ pk_backend_install_packages_thread(PkBackendJob *job, GVariant *params, gpointer
             if (json_error) g_error_free(json_error);
         }
         g_object_unref(parser);
+
+        emit_restart_advice_from_json(job, message);
     }
 
     pk_backend_job_set_percentage(job, 100);
@@ -1031,6 +1086,8 @@ pk_backend_update_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
     if (!success) {
         pk_backend_job_error_code(job, PK_ERROR_ENUM_PACKAGE_FAILED_TO_INSTALL,
                                   "Upgrade failed: %s", message);
+    } else {
+        emit_restart_advice_from_json(job, message);
     }
 
     pk_backend_job_set_percentage(job, 100);

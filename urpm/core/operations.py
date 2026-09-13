@@ -17,7 +17,9 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Callable, Tuple
+from typing import (
+    TYPE_CHECKING, List, Dict, Any, Iterable, Optional, Callable, Tuple,
+)
 
 from .database import PackageDatabase
 from .download import Downloader, DownloadItem
@@ -27,6 +29,9 @@ from .resilient_install import (
     find_dependents, retry_failed_downloads, _extract_name_from_path,
 )
 from .transaction_queue import TransactionQueue, TransactionProgress, TransactionPhase
+
+if TYPE_CHECKING:  # hooks are imported lazily: they cost nothing per operation
+    from .hooks import Hook, OperationOutcome, TriggeredHook
 
 logger = logging.getLogger(__name__)
 
@@ -798,6 +803,161 @@ class PackageOperations:
     def abort_transaction(self, transaction_id: int):
         """Mark a transaction as interrupted/failed."""
         self.db.abort_transaction(transaction_id)
+
+    # =========================================================================
+    # Post-operation hooks
+    #
+    # Split in two on purpose.  ``hooks_triggered_by`` only decides and
+    # is free of side effects, so a caller can report before answering
+    # its own caller; ``run_hooks`` acts, and belongs strictly after that
+    # answer.  Only the acting half needs to come last: that is what lets
+    # a rule target the very process carrying it out, which is the case
+    # this whole mechanism exists for (see
+    # ``doc/SPEC_POST_TRANSACTION_HOOKS.md``).
+    # =========================================================================
+
+    def hooks_triggered_by(self,
+                           transaction_id: int) -> List["TriggeredHook"]:
+        """Which rules a finished transaction satisfies. Decides, does nothing.
+
+        The condition is matched against what the transaction **really**
+        installed, read back from the history where each package carries
+        its own ``done`` / ``failed`` / ``skipped`` verdict. A partly
+        applied transaction therefore needs no special handling: a
+        package that never reached the disk provides nothing.
+
+        Args:
+            transaction_id: The transaction as recorded by
+                :meth:`begin_transaction`.
+
+        Returns:
+            The matching rules, in load order, each paired with the
+            services it applies to. Empty when no rule fires, which is
+            the common case.
+        """
+        from .hooks import hooks_for, load_hooks
+
+        report = load_hooks()
+        if not report.hooks:
+            return []
+
+        outcome = self._operation_outcome(transaction_id)
+        return hooks_for(outcome, report.hooks)
+
+    def run_hooks(self, triggered: Iterable["TriggeredHook"]
+                  ) -> List[Tuple["TriggeredHook", List[Any]]]:
+        """Carry out the rules' actions. Call after answering the caller.
+
+        A hook that fails never fails the operation, which is already
+        committed and recorded: the failure is reported and the remaining
+        hooks still run.
+
+        Args:
+            triggered: What :meth:`hooks_triggered_by` returned.
+
+        Returns:
+            One ``(triggered, outcomes)`` pair per rule, in the same
+            order.  ``outcomes`` holds one
+            :class:`~urpm.core.init_system.ServiceOutcome` per service
+            the rule applied to, and is empty for a rule that only
+            reports, or for one that asked for a restart without naming
+            anything to restart.
+        """
+        from . import init_system
+        from .hooks import Action
+
+        results: List[Tuple["TriggeredHook", List[Any]]] = []
+        for entry in triggered:
+            outcomes: List[Any] = []
+            if entry.hook.action == Action.RESTART_SERVICE:
+                # Sorted so a rule covering several services behaves the
+                # same way twice in a row, in the logs as on screen.
+                for service in sorted(entry.subjects):
+                    outcomes.append(self._restart_for_hook(entry.hook,
+                                                           service))
+            results.append((entry, outcomes))
+        return results
+
+    @staticmethod
+    def _restart_for_hook(hook: "Hook", service: str) -> Any:
+        """Restart one service on a rule's behalf, turning a raise into news.
+
+        Nothing here may take the operation down: it is committed and
+        recorded, and the caller has already been answered.
+        """
+        from . import init_system
+
+        try:
+            return init_system.try_restart(service)
+        except Exception:  # noqa: BLE001 — never undo a done operation
+            logger.exception("hook %s failed on %s",
+                             hook.identifier, service)
+            return init_system.ServiceOutcome(
+                service, init_system.Result.FAILED,
+                "the action raised; see the log")
+
+    def packages_behind_hooks(self, transaction_id: int,
+                              triggered: Iterable["TriggeredHook"]
+                              ) -> List[str]:
+        """The installed packages that declared what those rules watch.
+
+        Asked by the D-Bus path and not by the CLI, because PackageKit's
+        ``RequireRestart`` names a *package*: Discover turns the package
+        id into the name it shows the user ("… was changed and suggests
+        to be restarted").  The rules themselves never work on names, so
+        the question has to be asked here rather than answered by them.
+
+        Args:
+            transaction_id: The transaction, as recorded when it began.
+            triggered: What :meth:`hooks_triggered_by` returned.
+
+        Returns:
+            Package names, sorted so two identical operations report
+            identically.  Empty when nothing fired.
+        """
+        from .rpmdb import packages_providing
+
+        watched = {entry.hook.watch for entry in triggered}
+        if not watched:
+            return []
+
+        landed, _every_row_done = self._landed_packages(transaction_id)
+        requesters: set = set()
+        for capability in sorted(watched):
+            requesters |= packages_providing(capability, landed)
+        return sorted(requesters)
+
+    def _landed_packages(self, transaction_id: int) -> Tuple[set, bool]:
+        """What a finished transaction really put on the machine.
+
+        Only packages recorded as ``done`` count, and only those that
+        came *in*: a removal takes capabilities away rather than bringing
+        them, and no rule vocabulary exists for that yet.
+
+        Returns:
+            The package names, and whether every recorded row succeeded.
+        """
+        transaction = self.db.get_transaction(transaction_id) or {}
+        rows = transaction.get('packages', [])
+        landed = {row['pkg_name'] for row in rows
+                  if row.get('status') == 'done'
+                  and row.get('action') != 'remove'}
+        every_row_done = bool(rows) and all(
+            row.get('status') == 'done' for row in rows)
+        return landed, every_row_done
+
+    def _operation_outcome(self, transaction_id: int) -> "OperationOutcome":
+        """Describe what a finished transaction actually did."""
+        from .hooks import OperationOutcome
+        from .rpmdb import provides_of
+
+        landed, every_row_done = self._landed_packages(transaction_id)
+        brought = provides_of(landed) if landed else {}
+        return OperationOutcome(
+            provides={name: frozenset(values)
+                      for name, values in brought.items()},
+            fully_successful=every_row_done,
+        )
 
     def mark_dependencies(self, resolver, actions: list):
         """Mark packages as dependencies or explicit in the deps list.

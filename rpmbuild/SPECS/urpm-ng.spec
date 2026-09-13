@@ -172,6 +172,10 @@ Requires:       polkit
 Requires:       PackageKit
 Obsoletes:      pk-backend-urpm < 0.3
 Provides:       pk-backend-urpm = %{version}-%{release}
+# Read by the post-operation rules: replacing this package leaves
+# urpm-dbus running the code it started with.  A declaration, not an
+# instruction -- the shipped rule only reports it.
+Provides:       restart-on-completion = urpm-dbus
 
 %description packagekit-backend
 PackageKit backend that uses urpm-ng for package management on Mageia Linux.
@@ -346,6 +350,15 @@ install -Dm644 data/etc/urpm/urpm.cfg %{buildroot}%{_sysconfdir}/urpm/urpm.cfg
 if [ -d data/etc/urpm/conf.d ]; then
     install -m644 data/etc/urpm/conf.d/*.cfg %{buildroot}%{_sysconfdir}/urpm/conf.d/ 2>/dev/null || :
 fi
+
+# Install post-operation hook rules.  Vendor rules live under
+# %{_prefix}/lib so rpm replaces them cleanly on upgrade; the
+# administrator's copy in %{_sysconfdir}/urpm/hooks.d masks the vendor
+# file of the same name, the way tmpfiles and sysusers already work on
+# Mageia.  The /etc directory is shipped empty on purpose.
+install -dm755 %{buildroot}%{_sysconfdir}/urpm/hooks.d
+install -Dm644 data/usr/lib/urpm/hooks.d/50-declared-restarts.cfg \
+    %{buildroot}%{_prefix}/lib/urpm/hooks.d/50-declared-restarts.cfg
 
 # Install PolicyKit policy
 install -Dm644 data/org.mageia.urpm.policy %{buildroot}%{_datadir}/polkit-1/actions/org.mageia.urpm.policy
@@ -595,6 +608,12 @@ fi
 %dir %{_sysconfdir}/urpm/conf.d
 %config(noreplace) %{_sysconfdir}/urpm/urpm.cfg
 %{_sysconfdir}/urpm/conf.d/*.cfg
+# Post-operation hook rules: shipped read-only under /usr/lib, and an
+# empty /etc drop-in for the administrator to mask them by file name.
+%dir %{_sysconfdir}/urpm/hooks.d
+%dir %{_prefix}/lib/urpm
+%dir %{_prefix}/lib/urpm/hooks.d
+%{_prefix}/lib/urpm/hooks.d/*.cfg
 %{_mandir}/man1/urpm.1*
 %{_mandir}/*/man1/urpm.1*
 %dir %{_datadir}/urpm

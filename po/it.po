@@ -10635,3 +10635,35 @@ msgstr ""
 
 #~ msgid "    Drop them later with :  urpm media remove --distupgraded"
 #~ msgstr "    Rimuoverli più tardi con :  urpm media remove --distupgraded"
+
+#, python-brace-format
+msgid "This service is running replaced code: {services}"
+msgid_plural "These services are running replaced code: {services}"
+msgstr[0] "Questo servizio sta eseguendo codice sostituito: {services}"
+msgstr[1] "Questi servizi stanno eseguendo codice sostituito: {services}"
+
+#, python-brace-format
+msgid "Restart it when convenient:"
+msgid_plural "Restart them when convenient:"
+msgstr[0] "Riavviarlo quando è opportuno:"
+msgstr[1] "Riavviarli quando è opportuno:"
+
+#, python-brace-format
+msgid "Rule {rule} asked for a restart without naming a service"
+msgstr "La regola {rule} chiede un riavvio senza indicare un servizio"
+
+#, python-brace-format
+msgid "{service} restarted"
+msgstr "{service} riavviato"
+
+#, python-brace-format
+msgid "{service} was not running, left alone"
+msgstr "{service} non era in esecuzione, lasciato invariato"
+
+#, python-brace-format
+msgid "Cannot restart {service}: no service command on this system"
+msgstr "Impossibile riavviare {service}: nessun comando service su questo sistema"
+
+#, python-brace-format
+msgid "Could not restart {service}, try: service {service} restart"
+msgstr "Impossibile riavviare {service}, provare: service {service} restart"

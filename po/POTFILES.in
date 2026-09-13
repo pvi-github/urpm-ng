@@ -43,6 +43,7 @@ urpm/cli/helpers/orphans_triage.py
 urpm/cli/helpers/build_limits.py
 urpm/cli/helpers/distupgrade_mesh.py
 urpm/cli/helpers/failure_report.py
+urpm/cli/helpers/hook_report.py
 urpm/cli/helpers/security.py
 urpm/cli/helpers/short_names.py
 urpm/cli/helpers/suggests.py
