@@ -128,6 +128,9 @@ class UrpmDBusService:
         self._audit = None
         self._loop = None
         self._connection = None
+        # Kept so the name can be handed back before we go, rather than
+        # dropped by the process dying.  See ``_stop_for_new_code``.
+        self._bus_name_owner_id = None
         self._active_operations = {}
         self._cancel_requested = False
         self._lock = threading.Lock()
@@ -273,7 +276,30 @@ class UrpmDBusService:
         GLib.idle_add(self._stop_for_new_code, priority=GLib.PRIORITY_LOW)
 
     def _stop_for_new_code(self):
-        """Flush what the client is still owed, then end the main loop."""
+        """Hand the name back, flush what is still owed, then end the loop.
+
+        Giving up the bus name is what makes the exit safe, and leaving
+        it out cost a real failure: Discover sends ``GetUpdates`` right
+        after an upgrade to redraw its list, and the bus still believed
+        we owned ``org.mageia.Urpm.v1``, so it routed the call to a
+        process on its way out.  The client got
+        ``org.freedesktop.DBus.Error.NoReply: Message recipient
+        disconnected from message bus without replying``.
+
+        Released first, flushed second, quit last.  Once the release is
+        on the wire, the bus hands the next call to a fresh activation
+        instead of to us, and that new instance runs the code that just
+        landed, which is the whole point of stepping aside.
+        """
+        from gi.repository import Gio
+
+        owner_id, self._bus_name_owner_id = self._bus_name_owner_id, None
+        if owner_id is not None:
+            try:
+                Gio.bus_unown_name(owner_id)
+            except Exception:
+                logger.exception("could not release %s before stopping",
+                                 BUS_NAME)
         try:
             if self._connection is not None:
                 self._connection.flush_sync(None)
@@ -1035,6 +1061,18 @@ class UrpmDBusService:
                     if r.path:
                         rpm_paths.append(str(r.path))
 
+            # A plan that had packages to put on the machine and ended up
+            # with no file is a failure, never "nothing to do": the empty
+            # plan was already answered above.  Checked before the
+            # removals so an upgrade whose downloads all failed cannot go
+            # on to erase the obsoleted packages on its own, leaving the
+            # system without what was meant to replace them.
+            if (local_paths or download_items) and not rpm_paths:
+                msg = "No packages downloaded"
+                self._emit_complete(op_id, False, msg)
+                self._return_invocation(invocation, False, msg)
+                return
+
             if not rpm_paths and not remove_names:
                 msg = "Nothing to upgrade"
                 self._emit_complete(op_id, True, msg)
@@ -1057,13 +1095,25 @@ class UrpmDBusService:
             # is over, let post-install triggers finish in the
             # background via urpmd — matches the CLI default and
             # keeps Discover's progress bar honest.
-            self._ops.execute_upgrade(
+            result = self._ops.execute_upgrade(
                 rpm_paths, erase_names=remove_names,
                 options=options,
                 full_sync=False,
                 progress_callback=upgrade_progress,
                 auth_context=context
             )
+
+            # ``execute_upgrade`` answers ``None`` for an empty queue,
+            # which is not a failure; same reading as the CLI pipeline.
+            if result is not None and not result.success:
+                errors = result.overall_error or "; ".join(
+                    e for op in result.operations for e in op.errors
+                )
+                self._ops.abort_transaction(transaction_id)
+                self._emit_complete(op_id, False, errors or "Upgrade failed")
+                self._return_invocation(invocation, False,
+                                        errors or "Upgrade failed")
+                return
 
             self._ops.mark_dependencies(resolver, actions)
             self._ops.complete_transaction(transaction_id)
@@ -1559,7 +1609,7 @@ class UrpmDBusService:
             logger.error(f"Name lost: {name}")
             self._loop.quit()
 
-        Gio.bus_own_name(
+        self._bus_name_owner_id = Gio.bus_own_name(
             Gio.BusType.SYSTEM,
             BUS_NAME,
             Gio.BusNameOwnerFlags.NONE,

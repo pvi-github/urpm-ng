@@ -326,42 +326,24 @@ def set_packagekit_auto_upgrades(enabled: bool) -> bool:
         return False
 
 
-# ── Stop PackageKit daemon (cancel in-progress transactions) ──────────
-
-
-def stop_packagekit_daemon() -> None:
-    """Stop the PackageKit daemon to cancel any in-progress transaction.
-
-    The daemon is socket-activated and will restart on the next request
-    from a GUI front-end (Discover, GNOME Software), so this is safe.
-    """
-    try:
-        if _is_unit_active("packagekit.service"):
-            _systemctl("stop", "packagekit.service")
-            logger.info("Stopped packagekit.service (cancel in-progress transaction)")
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-
-
 # ── Master entry point (for %post and urpmd) ──────────────────────────
 
 
-def _kill_gui_updaters() -> None:
-    """Kill running GUI update managers so they pick up new settings.
-
-    gnome-software and Discover cache GSettings/KConfig in memory.
-    After writing overrides they must be restarted to apply them.
-    Both are D-Bus activated and will restart on next user interaction.
-    """
-    for process_name in ("gnome-software", "plasma-discover"):
-        try:
-            subprocess.run(
-                ["pkill", "-f", process_name],
-                capture_output=True, timeout=5,
-            )
-            logger.info("Killed %s (will restart with new settings)", process_name)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
+# Nothing below ends a running process, and that is deliberate.  This
+# used to ``pkill`` gnome-software and plasma-discover so they would
+# re-read the overrides written above, then stop packagekit.service to
+# cancel any auto-upgrade running behind our back.  Both were defensible
+# back when urpm-ng was only ever installed from a terminal.  Neither
+# survives the day Discover drives the transaction itself: the scriptlet
+# killed the very window the user was watching, and the daemon it shut
+# down was the one hosting our own backend.
+#
+# Cancelling a rival transaction could not work here anyway.  A ``%post``
+# runs inside an rpm transaction, and rpm allows only one at a time, so
+# the only transaction reachable from here was always our own.
+#
+# The overrides stay on disk and are read at the front-end's next start,
+# which is later but costs nobody their session.
 
 
 def enforce_all() -> None:
@@ -372,8 +354,9 @@ def enforce_all() -> None:
     2. Disable gnome-software auto-downloads (if present).
     3. Disable Discover auto-updates (if present).
     4. Disable packagekit-offline-update (if present).
-    5. Kill GUI updaters so they reload settings.
-    6. Stop PackageKit daemon (cancel any in-progress auto-upgrade).
+
+    Writes settings, ends no session.  Every front-end reads the
+    overrides the next time it starts.
     """
     kill_dnf_automatic()
 
@@ -383,6 +366,3 @@ def enforce_all() -> None:
         set_discover_auto_upgrades(False)
     if _is_unit_present(_PK_OFFLINE_SERVICE):
         set_packagekit_auto_upgrades(False)
-
-    _kill_gui_updaters()
-    stop_packagekit_daemon()

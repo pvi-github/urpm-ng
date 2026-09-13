@@ -8,9 +8,10 @@ Type=dbus
 BusName=org.mageia.Urpm.v1
 ExecStart=/usr/libexec/urpm-dbus-service
 
-# Hardening (limited - package manager needs write access to /usr, /etc, /var)
+# No sandboxing: a package manager runs rpm scriptlets as root, so any
+# of it would be decorative.  ProtectHome=yes was the last one left and
+# it broke a real case, a file:// medium under a user's home.
 PrivateTmp=no
-ProtectHome=yes
 NoNewPrivileges=no
 
 [Install]

@@ -176,6 +176,96 @@ class TestStopForNewCode:
         assert instance._stop_for_new_code() is False
 
 
+class TestTheNameIsHandedBack:
+    """Leaving without giving up the bus name strands the next caller.
+
+    Seen for real once an upgrade through Discover finally reached the
+    point of replacing our own code: Discover sends ``GetUpdates`` right
+    away to redraw its list, the bus still believed we owned the name and
+    routed the call to a process on its way out, and the client got
+    ``org.freedesktop.DBus.Error.NoReply: Message recipient disconnected
+    from message bus without replying``.
+
+    Releasing the name first is what turns that into a fresh activation,
+    which then runs the code that just landed.
+    """
+
+    @staticmethod
+    def _instance(monkeypatch, owner_id=7):
+        from gi.repository import Gio
+
+        order = []
+
+        class _Loop:
+            def quit(self):
+                order.append('quit')
+
+        class _Connection:
+            def flush_sync(self, cancellable):
+                order.append('flush')
+
+        monkeypatch.setattr(
+            Gio, 'bus_unown_name',
+            lambda oid: order.append(('unown', oid)))
+
+        instance = UrpmDBusService()
+        instance._loop = _Loop()
+        instance._connection = _Connection()
+        instance._bus_name_owner_id = owner_id
+        return instance, order
+
+    def test_the_name_goes_back_before_the_loop_ends(self, monkeypatch):
+        instance, order = self._instance(monkeypatch)
+
+        instance._stop_for_new_code()
+
+        assert order == [('unown', 7), 'flush', 'quit']
+
+    def test_the_release_is_flushed_before_the_process_goes(self, monkeypatch):
+        """Queued and never sent would leave the bus none the wiser."""
+        instance, order = self._instance(monkeypatch)
+
+        instance._stop_for_new_code()
+
+        assert order.index(('unown', 7)) < order.index('flush')
+
+    def test_the_name_is_given_back_once(self, monkeypatch):
+        """A second pass must not hand back an id the bus already took."""
+        instance, order = self._instance(monkeypatch)
+
+        instance._stop_for_new_code()
+        instance._stop_for_new_code()
+
+        assert [e for e in order if e != 'flush' and e != 'quit'] == [
+            ('unown', 7)]
+
+    def test_owning_nothing_yet_still_quits(self, monkeypatch):
+        """The stop must never hang on a service that never took the name."""
+        instance, order = self._instance(monkeypatch, owner_id=None)
+
+        instance._stop_for_new_code()
+
+        assert order == ['flush', 'quit']
+
+    def test_a_refused_release_still_quits(self, monkeypatch):
+        """Staying alive on old code is worse than an untidy exit."""
+        from gi.repository import Gio
+
+        def explode(owner_id):
+            raise RuntimeError("the bus went away")
+
+        monkeypatch.setattr(Gio, 'bus_unown_name', explode)
+
+        instance = UrpmDBusService()
+        instance._loop = TestStopForNewCode._Loop()
+        instance._connection = TestStopForNewCode._Connection()
+        instance._bus_name_owner_id = 7
+
+        instance._stop_for_new_code()
+
+        assert instance._loop.quit_called
+
+
 class TestPackagingDoesNotRestartUs:
     """The scriptlet must stay out of it.
 
