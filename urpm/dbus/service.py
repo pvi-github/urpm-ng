@@ -653,6 +653,44 @@ class UrpmDBusService:
         packages = self._ops.get_installed_packages()
         return json.dumps(packages)
 
+    def handle_get_repo_list(self, bus, sender):
+        """GetRepoList() -> s (JSON)
+
+        The media urpm knows about, in PackageKit's vocabulary: an id, a
+        description, and whether it is enabled.  Discover asks for this
+        on every start and the backend used to answer
+        ``GetRepoList not supported by backend``, so its Sources page
+        stayed empty while the media were right there in the database.
+
+        The id is the display name, not the shorter ``short_name``,
+        because a repo id has to be unique and only ``name`` is: the
+        table is unique on ``(mageia_version, architecture,
+        short_name)``, so two media of different releases may well share
+        a short name.  :meth:`resolve_media` accepts either, so the id we
+        publish stays something the operator can type back at urpm.
+
+        The description carries the release and the architecture, which
+        is what tells apart the several media sharing a name across the
+        versions installed side by side.
+        """
+        self._init_core()
+        import json
+
+        repos = [
+            {
+                'id': medium.get('name', ''),
+                'description': "{name} (Mageia {version}, {arch})".format(
+                    name=medium.get('name', ''),
+                    version=medium.get('mageia_version', ''),
+                    arch=medium.get('architecture', ''),
+                ),
+                'enabled': bool(medium.get('enabled', 1)),
+            }
+            for medium in self._db.list_media()
+            if medium.get('name')
+        ]
+        return json.dumps(repos)
+
     def handle_download_packages(self, bus, sender, package_names, directory):
         """DownloadPackages(packages: as, directory: s) -> s (JSON)
 
@@ -1326,6 +1364,9 @@ class UrpmDBusService:
     <method name="GetInstalledPackages">
       <arg name="packages" type="s" direction="out"/>
     </method>
+    <method name="GetRepoList">
+      <arg name="repos" type="s" direction="out"/>
+    </method>
     <method name="DownloadPackages">
       <arg name="packages" type="as" direction="in"/>
       <arg name="directory" type="s" direction="in"/>
@@ -1448,6 +1489,12 @@ class UrpmDBusService:
                 )
                 invocation.return_value(
                     GLib.Variant('(s)', (packages,))
+                )
+
+            elif method_name == "GetRepoList":
+                repos = self.handle_get_repo_list(connection, sender)
+                invocation.return_value(
+                    GLib.Variant('(s)', (repos,))
                 )
 
             elif method_name == "DownloadPackages":

@@ -94,6 +94,69 @@ ensure_connection(PkBackendJob *job, GError **error)
 }
 
 /* ========================================================================= */
+/* Helper: Tell clients their cached view is stale                           */
+/*                                                                           */
+/* pk_backend_updates_changed and its siblings assert pk_is_thread_default,  */
+/* and every one of our call sites runs in a worker thread created by        */
+/* pk_backend_job_thread_create.  The assertion is a g_return_if_fail, so it */
+/* never crashed anything: it simply returned, and the signals were never    */
+/* emitted.  Discover kept redrawing a stale list and the journal said       */
+/* "assertion 'pk_is_thread_default ()' failed" on every transaction.        */
+/*                                                                           */
+/* Bouncing through an idle on the default main context puts the emission    */
+/* back on the thread the API requires.                                      */
+/* ========================================================================= */
+
+typedef struct {
+    PkBackend *backend;
+    gboolean repo_list;   /* a refresh may have changed the media too */
+    gboolean installed;   /* a transaction changed what is installed */
+} UrpmCacheNotice;
+
+static void
+urpm_cache_notice_free(gpointer data)
+{
+    UrpmCacheNotice *notice = data;
+    g_object_unref(notice->backend);
+    g_free(notice);
+}
+
+static gboolean
+urpm_emit_cache_notice(gpointer data)
+{
+    UrpmCacheNotice *notice = data;
+
+    if (notice->repo_list)
+        pk_backend_repo_list_changed(notice->backend);
+    if (notice->installed)
+        pk_backend_installed_db_changed(notice->backend);
+    /* Always: both a refresh and a transaction can change what is
+     * pending, which is the one thing every client redraws. */
+    pk_backend_updates_changed(notice->backend);
+
+    return G_SOURCE_REMOVE;
+}
+
+static void
+urpm_notify_caches_changed(PkBackendJob *job, gboolean repo_list,
+                           gboolean installed)
+{
+    PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
+    if (backend == NULL)
+        return;
+
+    UrpmCacheNotice *notice = g_new0(UrpmCacheNotice, 1);
+    /* Referenced because the emission outlives this call, and the job
+     * that led us here may well be finished by then. */
+    notice->backend = g_object_ref(backend);
+    notice->repo_list = repo_list;
+    notice->installed = installed;
+
+    g_idle_add_full(G_PRIORITY_DEFAULT, urpm_emit_cache_notice, notice,
+                    urpm_cache_notice_free);
+}
+
+/* ========================================================================= */
 /* Helper: Post-operation restart advice                                     */
 /*                                                                           */
 /* The service answers with a "restart_packages" list holding the packages   */
@@ -535,13 +598,8 @@ pk_backend_refresh_cache_thread(PkBackendJob *job, GVariant *params, gpointer us
      * updates can both have changed — let PackageKit clients know
      * so Discover pulls a fresh view instead of hanging on to its
      * pre-refresh cache. */
-    if (success) {
-        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
-        if (backend) {
-            pk_backend_repo_list_changed(backend);
-            pk_backend_updates_changed(backend);
-        }
-    }
+    if (success)
+        urpm_notify_caches_changed(job, TRUE, FALSE);
 
     g_variant_unref(result);
     pk_backend_job_finished(job);
@@ -891,13 +949,8 @@ pk_backend_install_packages_thread(PkBackendJob *job, GVariant *params, gpointer
      * installed set and the pending updates changed.  Without these
      * calls, Discover keeps its cached "not installed" state until
      * the window is closed and reopened. */
-    if (success && !simulate) {
-        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
-        if (backend) {
-            pk_backend_installed_db_changed(backend);
-            pk_backend_updates_changed(backend);
-        }
-    }
+    if (success && !simulate)
+        urpm_notify_caches_changed(job, FALSE, TRUE);
 
     g_variant_unref(result);
     pk_backend_job_finished(job);
@@ -1002,13 +1055,8 @@ pk_backend_remove_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
 
     /* Signal PackageKit clients that the installed set changed —
      * same rationale as install_packages_thread. */
-    if (success && !simulate) {
-        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
-        if (backend) {
-            pk_backend_installed_db_changed(backend);
-            pk_backend_updates_changed(backend);
-        }
-    }
+    if (success && !simulate)
+        urpm_notify_caches_changed(job, FALSE, TRUE);
 
     g_variant_unref(result);
     pk_backend_job_finished(job);
@@ -1095,13 +1143,8 @@ pk_backend_update_packages_thread(PkBackendJob *job, GVariant *params, gpointer 
     /* Same rationale as install/remove: tell Discover to invalidate
      * both its installed and its updates cache after a successful
      * upgrade transaction. */
-    if (success && !simulate) {
-        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
-        if (backend) {
-            pk_backend_installed_db_changed(backend);
-            pk_backend_updates_changed(backend);
-        }
-    }
+    if (success && !simulate)
+        urpm_notify_caches_changed(job, FALSE, TRUE);
 
     g_variant_unref(result);
     pk_backend_job_finished(job);
@@ -1322,6 +1365,87 @@ void
 pk_backend_get_details(PkBackend *backend, PkBackendJob *job, gchar **package_ids)
 {
     pk_backend_job_thread_create(job, pk_backend_get_details_thread, NULL, NULL);
+}
+
+/* ========================================================================= */
+/* Repository list                                                           */
+/*                                                                           */
+/* Without this the daemon answered "GetRepoList not supported by backend"    */
+/* and Discover's Sources page stayed empty, while urpm had the media all     */
+/* along.  The id we hand out is the medium's short name, the same handle     */
+/* the CLI accepts, because a client is expected to quote a repo id back.     */
+/* ========================================================================= */
+
+static void
+pk_backend_get_repo_list_thread(PkBackendJob *job, GVariant *params,
+                                gpointer user_data)
+{
+    GError *error = NULL;
+
+    if (!ensure_connection(job, &error)) {
+        pk_backend_job_error_code(job, PK_ERROR_ENUM_CANNOT_GET_LOCK,
+                                  "Cannot connect to urpm D-Bus service: %s",
+                                  error->message);
+        g_error_free(error);
+        return;
+    }
+
+    pk_backend_job_set_status(job, PK_STATUS_ENUM_QUERY);
+
+    GVariant *result = g_dbus_proxy_call_sync(
+        priv->proxy,
+        "GetRepoList",
+        NULL,
+        G_DBUS_CALL_FLAGS_NONE,
+        -1,
+        NULL,
+        &error
+    );
+
+    if (result == NULL) {
+        pk_backend_job_error_code(job, urpm_pk_error_from_dbus(error),
+                                  "GetRepoList failed: %s", error->message);
+        g_error_free(error);
+        pk_backend_job_finished(job);
+        return;
+    }
+
+    const gchar *json_str;
+    g_variant_get(result, "(&s)", &json_str);
+
+    JsonParser *parser = json_parser_new();
+    if (json_parser_load_from_data(parser, json_str, -1, NULL)) {
+        JsonNode *root = json_parser_get_root(parser);
+        if (JSON_NODE_HOLDS_ARRAY(root)) {
+            JsonArray *repos = json_node_get_array(root);
+            guint len = json_array_get_length(repos);
+            for (guint i = 0; i < len; i++) {
+                JsonObject *repo = json_array_get_object_element(repos, i);
+                if (repo == NULL)
+                    continue;
+
+                const gchar *id = json_object_get_string_member_with_default(repo, "id", "");
+                const gchar *description = json_object_get_string_member_with_default(repo, "description", "");
+                gboolean enabled = json_object_get_boolean_member_with_default(repo, "enabled", TRUE);
+
+                if (id[0] == '\0')
+                    continue;  /* nameless medium: nothing a client could quote back */
+
+                pk_backend_job_repo_detail(job, id, description, enabled);
+            }
+        }
+    }
+
+    g_object_unref(parser);
+    g_variant_unref(result);
+    pk_backend_job_finished(job);
+}
+
+void
+pk_backend_get_repo_list(PkBackend *backend, PkBackendJob *job,
+                         PkBitfield filters)
+{
+    pk_backend_job_thread_create(job, pk_backend_get_repo_list_thread, NULL, NULL);
 }
 
 /* ========================================================================= */
@@ -2053,13 +2177,8 @@ pk_backend_install_files_thread(PkBackendJob *job, GVariant *params, gpointer us
     g_variant_unref(result);
 
     /* Same signal-emission pattern as install_packages_thread. */
-    if (install_ok) {
-        PkBackend *backend = (PkBackend *) pk_backend_job_get_backend(job);
-        if (backend) {
-            pk_backend_installed_db_changed(backend);
-            pk_backend_updates_changed(backend);
-        }
-    }
+    if (install_ok)
+        urpm_notify_caches_changed(job, FALSE, TRUE);
 
     pk_backend_job_finished(job);
 }
