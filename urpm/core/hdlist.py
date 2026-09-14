@@ -409,7 +409,7 @@ class HdlistWriter():
         self._build_toc()
         self.handle.close()
         self.destroyed = True
-        logger.debug("File wrotten: ", self.output_path)
+        logger.debug("File written: %s", self.output_path)
         return wrotten
 
     def _append_header(self, rpm_name: str, header_bytes: bytes) -> None:
