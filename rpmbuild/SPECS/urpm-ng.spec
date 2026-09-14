@@ -12,7 +12,7 @@ Version:        %{version}
 Release:        %mkrel %{release}
 Summary:        Modern package manager for Mageia Linux
 License:        GPLv3+
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 URL:            https://github.com/pvi-github/urpm-ng
 Source0:        %{name}-%{version}.tar.gz
 Source1:        pk-backend-urpm-%{version}.tar.gz
@@ -72,7 +72,7 @@ For desktop integration (Discover, GNOME Software), install urpm-ng-desktop.
 # ============================================================================
 %package core
 Summary:        Core CLI and resolver for urpm-ng
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 BuildArch:      noarch
 Obsoletes:      %{name}-core < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-core = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
@@ -116,7 +116,7 @@ desktop integration. Useful for container images and minimal installs.
 # ============================================================================
 %package daemon
 Summary:        Background daemon and P2P sharing for urpm-ng
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 BuildArch:      noarch
 Obsoletes:      %{name}-daemon < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-daemon = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
@@ -137,7 +137,7 @@ Background daemon for urpm-ng providing:
 # ============================================================================
 %package appstream
 Summary:        AppStream integration for urpm-ng
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 BuildArch:      noarch
 Obsoletes:      %{name}-appstream < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-appstream = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
@@ -153,7 +153,7 @@ Enables application metadata for software centers.
 # ============================================================================
 %package packagekit-backend
 Summary:        PackageKit backend for urpm-ng
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 # No BuildArch override: this is the only subpackage shipping a
 # native artefact (``libpk_backend_urpm.so``) so it inherits the
 # host arch from the spec preamble.  RPM does not let us mix
@@ -188,7 +188,7 @@ Includes D-Bus service and PolicyKit integration.
 # ============================================================================
 %package desktop
 Summary:        Desktop integration for urpm-ng
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 BuildArch:      noarch
 Obsoletes:      %{name}-desktop < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-desktop = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
@@ -208,7 +208,7 @@ Includes: core CLI, daemon, PackageKit backend, and AppStream support.
 # ============================================================================
 %package build
 Summary:        Container image building tools for urpm-ng
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 BuildArch:      noarch
 Obsoletes:      %{name}-build < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-build = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
@@ -227,7 +227,7 @@ Requires Docker or Podman to function.
 # ============================================================================
 %package genmedia
 Summary:        Server-side media metadata generation for urpm-ng
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 BuildArch:      noarch
 Obsoletes:      %{name}-genmedia < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-genmedia = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
@@ -251,7 +251,7 @@ installed, ``urpm genmedia`` exits with an installation hint.
 # ============================================================================
 %package all
 Summary:        Complete urpm-ng installation
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 BuildArch:      noarch
 Obsoletes:      %{name}-all < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-all = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
@@ -352,13 +352,18 @@ if [ -d data/etc/urpm/conf.d ]; then
 fi
 
 # Install post-operation hook rules.  Vendor rules live under
-# %{_prefix}/lib so rpm replaces them cleanly on upgrade; the
-# administrator's copy in %{_sysconfdir}/urpm/hooks.d masks the vendor
-# file of the same name, the way tmpfiles and sysusers already work on
-# Mageia.  The /etc directory is shipped empty on purpose.
+# /usr/lib so rpm replaces them cleanly on upgrade; the administrator's
+# copy in %%{_sysconfdir}/urpm/hooks.d masks the vendor file of the same
+# name, the way tmpfiles and sysusers already work on Mageia.  The /etc
+# directory is shipped empty on purpose.
+#
+# %%{_exec_prefix} rather than %%{_prefix}: both expand to /usr, but
+# rpmlint matches on the literal text and flags the second as a
+# hardcoded library path.  Never %%{_libdir}, which is /usr/lib64 here:
+# these rules are arch-independent and the code reads /usr/lib.
 install -dm755 %{buildroot}%{_sysconfdir}/urpm/hooks.d
 install -Dm644 data/usr/lib/urpm/hooks.d/50-declared-restarts.cfg \
-    %{buildroot}%{_prefix}/lib/urpm/hooks.d/50-declared-restarts.cfg
+    %{buildroot}%{_exec_prefix}/lib/urpm/hooks.d/50-declared-restarts.cfg
 
 # Install PolicyKit policy
 install -Dm644 data/org.mageia.urpm.policy %{buildroot}%{_datadir}/polkit-1/actions/org.mageia.urpm.policy
@@ -440,7 +445,7 @@ fi
 
 # --- Shorewall firewall configuration ---
 # We ship /etc/shorewall/rules.urpm-ng as an include file.
-# The %post adds "INCLUDE rules.urpm-ng" to the main rules file,
+# The %%post adds "INCLUDE rules.urpm-ng" to the main rules file,
 # and migrates old inline rules from previous versions.
 if [ -f /etc/shorewall/rules ]; then
     _changed=0
@@ -611,9 +616,9 @@ fi
 # Post-operation hook rules: shipped read-only under /usr/lib, and an
 # empty /etc drop-in for the administrator to mask them by file name.
 %dir %{_sysconfdir}/urpm/hooks.d
-%dir %{_prefix}/lib/urpm
-%dir %{_prefix}/lib/urpm/hooks.d
-%{_prefix}/lib/urpm/hooks.d/*.cfg
+%dir %{_exec_prefix}/lib/urpm
+%dir %{_exec_prefix}/lib/urpm/hooks.d
+%{_exec_prefix}/lib/urpm/hooks.d/*.cfg
 %{_mandir}/man1/urpm.1*
 %{_mandir}/*/man1/urpm.1*
 %dir %{_datadir}/urpm
@@ -668,7 +673,7 @@ fi
 %{_libexecdir}/urpm-dbus-service
 %{_unitdir}/urpm-dbus.service
 # Moved out of -core to keep its weight down and keep the domains
-# apart (see the matching %exclude block).
+# apart (see the matching %%exclude block).
 %{python3_sitelib}/urpm/dbus
 %{python3_sitelib}/urpm/auth/polkit.py
 %{python3_sitelib}/urpm/auth/__pycache__/polkit.*.pyc
