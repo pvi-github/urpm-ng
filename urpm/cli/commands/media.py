@@ -256,16 +256,17 @@ def cmd_init(args, db: 'PackageDatabase') -> int:
             if not arch:
                 arch = match.group(2)
 
-    # Fallback to system version if still not determined
+    # Fallback to the system's own identity when nothing was asked for.
+    #
+    # Not ``VERSION_ID`` alone: a cauldron announces the version it is
+    # *becoming*, so reading it built media under ``11/x86_64/…`` while
+    # every mirror still served ``cauldron/x86_64/…``.  The path existed
+    # nowhere, no server could be attached, and the media were listed
+    # with none.  ``get_system_identity`` asks /etc/version for the
+    # branch first and only falls back to the number.
     if not identity:
-        try:
-            with open('/etc/os-release') as f:
-                for line in f:
-                    if line.startswith('VERSION_ID='):
-                        identity = line.strip().split('=')[1].strip('"').lower()
-                        break
-        except (IOError, OSError):
-            pass
+        from ...core.config import get_system_identity
+        identity = (get_system_identity() or '').lower()
 
     if not identity:
         print(colors.error(_("Cannot determine Mageia version")))
@@ -1663,22 +1664,22 @@ def cmd_media_import(args, db: 'PackageDatabase') -> int:
     # Get existing media names
     existing = {m['name'].lower(): m['name'] for m in db.list_media()}
 
-    # Resolve target version + arch for mirrorlist entries.  urpmi.cfg
-    # doesn't carry these values on mirrorlist-based media, so we
-    # cascade: --release CLI flag > /etc/mageia-release > give up.
-    #  and: --arch CLI flag > platform.machine().
+    # Resolve target identity + arch for mirrorlist entries.  urpmi.cfg
+    # carries neither on mirrorlist-based media, so: --release flag,
+    # else the system's own identity; --arch flag, else the machine's.
+    #
+    # The identity, never the number.  This line used to read
+    # /etc/mageia-release itself and keep « 11 » out of « Mageia release
+    # 11 (Cauldron) », which stamped every imported medium with
+    # 11/x86_64/… — a tree no mirror serves.  The server probe then
+    # answered 404 for all forty-five and not one link was created, so a
+    # fresh cauldron install ended up with every medium listed as having
+    # no server.
     release_hint = getattr(args, "release", None)
     arch_hint = getattr(args, "arch", None) or system_arch()
     if not release_hint:
-        try:
-            with open("/etc/mageia-release", encoding="utf-8") as fh:
-                import re as _re
-                m = _re.search(r"\b(\d+|cauldron)\b", fh.readline(),
-                               _re.IGNORECASE)
-                if m:
-                    release_hint = m.group(1).lower()
-        except OSError:
-            pass
+        from ...core.config import get_system_identity
+        release_hint = get_system_identity()
 
     # Categorize direct URL media
     to_add = []

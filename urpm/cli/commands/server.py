@@ -773,14 +773,12 @@ def cmd_server_autoconfig(args, db: 'PackageDatabase') -> int:
     # ── Resolve version and arch ──────────────────────────────────────
     version = getattr(args, 'release', None)
     if not version:
-        try:
-            with open('/etc/os-release') as f:
-                for line in f:
-                    if line.startswith('VERSION_ID='):
-                        version = line.strip().split('=')[1].strip('"')
-                        break
-        except (IOError, OSError):
-            pass
+        # The identity, not the number.  The mirror API serves the
+        # development branch as ``mageia.cauldron.<arch>.list``; asking
+        # for ``mageia.11.<arch>.list`` on a cauldron returns nothing,
+        # and every medium ends up with no server at all.
+        from ...core.config import get_system_identity
+        version = get_system_identity()
 
     if not version:
         print(colors.error(_("Cannot detect Mageia version from /etc/os-release")))

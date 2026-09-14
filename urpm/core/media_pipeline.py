@@ -279,19 +279,25 @@ def _extract_arch_from_url(url: str) -> str:
 
 
 def _system_version_fallback() -> str:
-    """Read ``/etc/mageia-release`` and return the version number.
+    """Return the release identity this system addresses mirrors with.
 
-    Returns an empty string when the file is absent or unparseable.
-    Used as the last step of the version cascade for catalogues
-    that lack a ``[media_info].version=`` entry.
+    Last step of the version cascade, for catalogues that lack a
+    ``[media_info].version=`` entry — most notably the mirrorlist-based
+    media imported from ``/etc/urpmi/urpmi.cfg``, which carry no URL to
+    read an identity from.
+
+    Defers to :func:`urpm.core.config.get_system_identity`, the single
+    authority on that question.  This function used to read
+    ``/etc/mageia-release`` itself, which is what produced
+    ``11/x86_64/media/core/release`` on a fresh cauldron and left every
+    medium unreachable.
+
+    Returns an empty string when nothing can be determined, which is
+    what this cascade's callers expect for "unknown".
     """
-    try:
-        with open("/etc/mageia-release", encoding="utf-8") as fh:
-            line = fh.readline().strip()
-    except OSError:
-        return ""
-    m = re.search(r"\b(\d+|cauldron)\b", line, re.IGNORECASE)
-    return m.group(1).lower() if m else ""
+    from .config import get_system_identity
+
+    return get_system_identity() or ""
 
 
 def _resolve_version(
@@ -980,7 +986,7 @@ def _process_one_media(
     # (c) hard refusal if any strictly-required field is still empty.
     for field, value, sources in [
         ("mageia_version", version, ["manifest", "catalogue", "hint",
-                                     "URL regex", "/etc/mageia-release"]),
+                                     "URL regex", "system identity"]),
         ("architecture", arch, ["manifest", "catalogue", "hint", "URL regex"]),
         ("short_name", short_name, ["hint", "section name"]),
         ("relative_path", relative_path, ["catalogue", "computed from version/arch/section"]),

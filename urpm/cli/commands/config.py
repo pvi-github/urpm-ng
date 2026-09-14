@@ -44,7 +44,10 @@ def cmd_config(args) -> int:
     # Handle version-mode (uses database, not config file)
     if args.config_cmd in ('version-mode', 'vm'):
         from ...core.database import PackageDatabase
-        from ...core.config import get_db_path, get_system_version, get_accepted_versions
+        from ...core.config import (
+            get_db_path, get_system_version, get_accepted_versions,
+            set_system_branch,
+        )
         from .. import colors
 
         db = PackageDatabase(get_db_path())
@@ -114,6 +117,20 @@ def cmd_config(args) -> int:
 
             db.set_config('version-mode', args.mode)
             print(_("version-mode set to '{mode}'").format(mode=args.mode))
+
+            # Bring /etc/version's branch field in line with the choice.
+            #
+            # That file is what tells a development branch from a
+            # released one, and everything downstream reads it to decide
+            # whether a mirror serves ``cauldron/`` or ``<n>/``.  Leaving
+            # it alone would make the switch half-applied: the media
+            # would follow the new mode while a later ``urpm init`` or
+            # ``media autoconfig`` went back to the old branch.
+            changed = set_system_branch(
+                'cauldron' if target_identity == 'cauldron' else 'official')
+            if changed:
+                print(_("/etc/version branch set to '{branch}'").format(
+                    branch=changed))
             return 0
         else:
             # Show current state

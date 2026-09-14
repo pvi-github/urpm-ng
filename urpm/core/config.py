@@ -25,6 +25,7 @@ Directory structure:
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -448,6 +449,156 @@ def get_system_version(root: str = None) -> Optional[str]:
         _system_version_cache = version
 
     return version
+
+
+def get_system_branch(root: str = None) -> Optional[str]:
+    """Return the release branch this system runs: ``cauldron`` or not.
+
+    Reads the third field of ``/etc/version``, shipped by
+    ``mageia-release-common``::
+
+        10 4 official
+        11 0.0.5 cauldron
+
+    This is the one place that tells a development branch from a
+    released one.  ``os-release`` cannot: a cauldron announces the
+    version it is *becoming*, so ``VERSION_ID=11`` months before
+    anything is served under ``11/``.
+
+    Args:
+        root: Optional chroot path, so a cross-version init reads the
+            target's branch and not the host's.
+
+    Returns:
+        The branch in lower case, or ``None`` when the file is absent
+        or carries no branch field.  Callers treat ``None`` as "not
+        cauldron", which is the safe reading: a released layout is
+        served under its number, so getting it wrong on a real cauldron
+        yields a visible 404 rather than a silently wrong tree.
+    """
+    version_file = Path(root or '/') / 'etc' / 'version'
+
+    try:
+        with open(version_file, encoding='utf-8') as handle:
+            fields = handle.readline().split()
+    except (IOError, OSError):
+        return None
+
+    return fields[-1].lower() if len(fields) >= 2 else None
+
+
+def get_system_identity(root: str = None) -> Optional[str]:
+    """Return the release identity to address mirrors with.
+
+    The identity is what names the tree on a mirror, which is **not**
+    always the release number.  During the whole development cycle a
+    mirror serves ``cauldron/<arch>/…``, and only renames it to the
+    number on release day.
+
+    Mixing the two is what made ``urpm init`` on a fresh cauldron build
+    media under ``11/x86_64/media/core/release``: a path that exists
+    nowhere, so no mirror could be attached to it and every medium was
+    listed with no server at all.
+
+    This is the **single authority** on that question.  Nothing else
+    may read ``/etc/version``, ``/etc/os-release`` or
+    ``/etc/mageia-release`` to answer it: five sites used to do so
+    independently, three of them wrong on a cauldron, and fixing them
+    one at a time is what let the bug survive four rounds.
+
+    The cascade, in order:
+
+    1. ``/etc/version``'s branch field — the only one that names the
+       branch, so ``cauldron`` wins whatever the number says.
+    2. ``/etc/os-release``'s ``VERSION_ID`` — right on a release.
+    3. ``/etc/mageia-release`` — kept for a half-bootstrapped chroot
+       that carries ``mageia-release`` but no ``os-release`` yet.
+
+    Args:
+        root: Optional chroot path, honoured by every read.
+
+    Returns:
+        ``'cauldron'`` on the development branch, the release number
+        otherwise, or ``None`` when nothing can be determined.
+    """
+    if get_system_branch(root) == 'cauldron':
+        return 'cauldron'
+
+    version = get_system_version(root)
+    if version:
+        return version.lower()
+
+    return _identity_from_mageia_release(root)
+
+
+def set_system_branch(branch: str, root: str = None) -> str:
+    """Rewrite the branch field of ``/etc/version``, leaving the rest.
+
+    Lives beside :func:`get_system_branch` because both know the file's
+    layout, ``<version> <release> <branch>``, and that knowledge belongs
+    in one place.
+
+    Called when the operator switches version-mode: recording the
+    preference without touching this file leaves the system saying one
+    thing and behaving another way, since the next ``urpm init`` or
+    ``media autoconfig`` reads the branch back and returns to it.
+
+    Only the last field changes.  The version and release fields are the
+    distribution's and are written back untouched.
+
+    Args:
+        branch: ``cauldron`` or ``official``.
+        root: Optional chroot path.
+
+    Returns:
+        The branch now written, or ``""`` when nothing had to change or
+        the file could not be updated.  Best-effort by design: a
+        read-only ``/etc`` must not fail a preference already recorded
+        in the database.
+    """
+    path = Path(root or '/') / 'etc' / 'version'
+
+    try:
+        fields = path.read_text(encoding='utf-8').split()
+    except OSError:
+        return ""
+
+    if len(fields) < 2 or fields[-1].lower() == branch:
+        return ""
+
+    fields[-1] = branch
+    try:
+        path.write_text(" ".join(fields) + "\n", encoding='utf-8')
+    except OSError:
+        return ""
+
+    return branch
+
+
+def _identity_from_mageia_release(root: str = None) -> Optional[str]:
+    """Last resort: read ``/etc/mageia-release``.
+
+    Only reached on a system carrying ``mageia-release`` but no
+    ``os-release``, typically a chroot part-way through bootstrap.
+
+    The word is looked for on its own, before the number.  A single
+    alternation would not do: the line reads « Mageia release 11
+    (Cauldron) » and :func:`re.search` returns whichever token comes
+    first *in the string*, which is always the number.  That is exactly
+    how fresh cauldrons ended up addressing ``11/`` on mirrors that
+    serve ``cauldron/``.
+    """
+    try:
+        with open(Path(root or '/') / 'etc' / 'mageia-release',
+                  encoding='utf-8') as handle:
+            line = handle.readline()
+    except (IOError, OSError):
+        return None
+
+    if re.search(r'\bcauldron\b', line, re.IGNORECASE):
+        return 'cauldron'
+    match = re.search(r'\b(\d+)\b', line)
+    return match.group(1) if match else None
 
 
 def get_compatible_arches(arch: str) -> list:

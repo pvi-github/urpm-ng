@@ -233,15 +233,14 @@ def _average_bandwidth(servers: list) -> int:
 
 
 def _detect_version() -> str:
-    """Read VERSION_ID from /etc/os-release."""
-    try:
-        with open('/etc/os-release') as f:
-            for line in f:
-                if line.startswith('VERSION_ID='):
-                    return line.strip().split('=')[1].strip('"')
-    except OSError:
-        pass
-    return ''
+    """Return the release identity mirrors are addressed with.
+
+    Not ``VERSION_ID``: a cauldron announces the version it is becoming,
+    while mirrors serve the development branch under ``cauldron``.  See
+    :func:`urpm.core.config.get_system_identity`.
+    """
+    from .config import get_system_identity
+    return get_system_identity() or ''
 
 
 def dedup_mirror_urls(mirror_urls, suffix_pattern, existing_host_paths=None):

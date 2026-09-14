@@ -914,32 +914,27 @@ def sync_all_media(db: PackageDatabase,
 
 
 def get_mageia_version_arch() -> Tuple[Optional[str], Optional[str]]:
-    """Detect current Mageia version and architecture from /etc/mageia-release.
+    """Detect this system's release identity and architecture.
+
+    Defers to :func:`urpm.core.config.get_system_identity`, the single
+    authority on release identity.  This function used to parse
+    ``/etc/mageia-release`` on its own with ``Mageia release (\\d+)``,
+    which answers ``11`` on a cauldron — the version being prepared, not
+    the one mirrors serve.
+
+    No caller remains in this repository; the function is kept because
+    it is public API and consumers outside the tree have not been
+    looked for.
 
     Returns:
-        Tuple of (version, arch) or (None, None) if detection fails
-        version is like "9", "10", etc.
-        arch is like "x86_64", "i586", etc.
+        ``(identity, arch)``: identity is ``'cauldron'`` or a release
+        number, or ``None`` when it cannot be determined.  The
+        architecture is always reported.
     """
     import platform
-    import re
 
-    # Get architecture from platform
-    arch = platform.machine()
+    from .config import get_system_identity
 
-    # Get version from /etc/mageia-release
-    try:
-        release_path = Path("/etc/mageia-release")
-        if release_path.exists():
-            content = release_path.read_text().strip()
-            # Format: "Mageia release 10 (Cauldron) for x86_64"
-            match = re.search(r'Mageia release (\d+)', content)
-            if match:
-                version = match.group(1)
-                return version, arch
-    except Exception:
-        pass
-
-    return None, arch
+    return get_system_identity(), platform.machine()
 
 
