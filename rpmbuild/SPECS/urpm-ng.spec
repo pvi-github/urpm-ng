@@ -29,8 +29,6 @@ Source1:        pk-backend-urpm-%{version}.tar.gz
 # Python build requirements
 BuildRequires:  pyproject-rpm-macros
 BuildRequires:  python3-devel
-BuildRequires:  python3-wheel
-BuildRequires:  python3-setuptools
 BuildRequires:  python3-solv
 BuildRequires:  python3-rpm
 BuildRequires:  python3-zstandard
@@ -77,7 +75,6 @@ BuildArch:      noarch
 Obsoletes:      %{name}-core < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-core = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
-Requires:       python3
 Requires:       python3-solv
 Requires:       python3-rpm
 Requires:       python3-zstandard
@@ -272,8 +269,7 @@ Meta-package that installs all urpm-ng components:
 # Prep
 # ============================================================================
 %prep
-%setup -q
-%setup -q -T -D -a 1
+%autosetup -p1 -a 1
 
 # Check if setuptools < 77.0.0 (old way in mga9)
 if ! python3 -c "import setuptools; from packaging.version import parse; exit(0 if parse(setuptools.__version__) >= parse('77.0.0') else 1)" 2>/dev/null; then

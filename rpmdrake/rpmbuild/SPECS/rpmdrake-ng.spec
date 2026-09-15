@@ -8,7 +8,7 @@ Release:        %mkrel %{release}
 Summary:        Modern graphical package manager for Mageia Linux
 Summary(fr):    Gestionnaire de paquets graphique moderne pour Mageia Linux
 License:        GPLv3+
-Group:          System/Configuration/Packaging
+Group:          System/Packaging
 URL:            https://github.com/pvi-github/urpm-ng
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
@@ -16,12 +16,9 @@ BuildArch:      noarch
 # Python build requirements
 BuildRequires:  pyproject-rpm-macros
 BuildRequires:  python3-devel
-BuildRequires:  python3-wheel
-BuildRequires:  python3-setuptools
 
 # Runtime dependencies
 Requires:       urpm-ng-core >= 0.3.0
-Requires:       python3
 # Only the PySide6 modules actually used (not the full meta-package)
 Requires:       python3-pyside6-core
 Requires:       python3-pyside6-gui
@@ -54,7 +51,7 @@ Basé sur la bibliothèque urpm-ng pour une résolution fiable des dépendances.
 # Prep
 # ============================================================================
 %prep
-%setup -q
+%autosetup -p1
 
 # Check if setuptools < 77.0.0 (old way in mga9)
 if ! python3 -c "import setuptools; from packaging.version import parse; exit(0 if parse(setuptools.__version__) >= parse('77.0.0') else 1)" 2>/dev/null; then
@@ -104,20 +101,6 @@ install -Dm644 man/fr/man1/rpmdrake-ng.1 %{buildroot}%{_mandir}/fr/man1/rpmdrake
 
 # Install transaction helper to libexec (called via pkexec)
 install -Dm755 bin/rpmdrake-ng-helper %{buildroot}%{_libexecdir}/rpmdrake-ng-helper
-
-# ============================================================================
-# Post-install scripts
-# ============================================================================
-%post
-# Update icon cache
-/usr/bin/gtk-update-icon-cache -f %{_datadir}/icons/hicolor 2>/dev/null || :
-/usr/bin/update-desktop-database %{_datadir}/applications 2>/dev/null || :
-
-%postun
-if [ $1 -eq 0 ]; then
-    /usr/bin/gtk-update-icon-cache -f %{_datadir}/icons/hicolor 2>/dev/null || :
-    /usr/bin/update-desktop-database %{_datadir}/applications 2>/dev/null || :
-fi
 
 # ============================================================================
 # Files
