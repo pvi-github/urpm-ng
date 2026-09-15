@@ -15,6 +15,76 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.11] — 2026-09-15
+
+Three bug fixes, all from beta-tester reports on 0.9.10.  A fresh
+install on cauldron could reach no mirror at all, `urpm genmedia -v`
+printed a traceback instead of a log line, and the spec carried
+seventeen rpmlint warnings.
+
+### Bug Fixes
+
+- **A fresh cauldron install reached no mirror at all.**  Every enabled
+  medium was listed as having no server, and `urpm media update` failed
+  on all of them.  The servers were never at fault: the mirror list was
+  fetched correctly and six mirrors added.  The media pointed at
+  `11/x86_64/media/…`, a tree no mirror serves until release day, so the
+  server probe — a HEAD on `<server>/<path>/media_info/MD5SUM` — answered
+  404 for all forty-five and not one link was created.
+
+  The `%post` imports `urpmi.cfg`, whose mirrorlist-based entries carry
+  no URL, so an identity has to be derived for them.  It was read from
+  `/etc/mageia-release`, whose line reads « Mageia release 11 (Cauldron)
+  », with a pattern that returns whichever token comes first *in the
+  string* — always the number.  `os-release` cannot tell the two apart
+  either, since a cauldron announces the version it is *becoming*.
+  `/etc/version`'s third field is the only thing on the system that
+  names the branch:
+
+      10 4 official
+      11 0.0.5 cauldron
+
+  Five sites answered this question independently, three of them wrong
+  on a cauldron, which is why fixing them one at a time did not work.
+  There is now a single authority carrying the whole cascade — branch,
+  then `VERSION_ID`, then `mageia-release` for a chroot part-way through
+  bootstrap — and a guard test refuses any new site that reads those
+  files to reach a mirror.  Writing `/etc/version` moved next to reading
+  it, so a `version-mode` switch no longer leaves the system telling one
+  story while behaving another way.
+
+  Four other readers are deliberately left alone: the orphan classifier
+  wants the major for disttag comparison and returns nothing on cauldron
+  on purpose, Stage 0 reads only the file's mtime, distupgrade computes
+  the next release from a number, and build / image write into a chroot
+  against an explicit target.
+
+- **`urpm genmedia -v` printed a traceback after every hdlist write.**
+  The debug call passed the path as a formatting argument to a message
+  carrying no placeholder, so logging raised *not all arguments
+  converted during string formatting* and the message was replaced by a
+  stack trace.  Only the verbose output was affected; the metadata
+  produced was always correct.  A guard test now walks the tree and
+  refuses any logging call whose placeholder count does not match its
+  arguments — a format string is just a string, so nothing else would
+  have caught it.
+
+### Packaging & Distribution
+
+- **The spec is rpmlint-clean: 0 errors, 0 warnings, down from 17.**
+  `Group` was `System/Configuration/Packaging`, which rpmlint does not
+  know; `urpmi`, `rpm`, `rpmdrake` and `rpm-helper` all declare
+  `System/Packaging`, and that is what urpm-ng is.  Four comments
+  spelled a macro with a single `%`, which rpm expands.  The hooks
+  drop-in directory is written `%{_exec_prefix}/lib` rather than
+  `%{_prefix}/lib`: both expand to `/usr` and the installed path is
+  unchanged, but rpmlint matches on the literal text.  `%{_libdir}`
+  would be wrong — it is `/usr/lib64` here, while these rules are
+  arch-independent and the code reads `/usr/lib`, as `tmpfiles.d` and
+  `sysusers.d` do.
+
+---
+
 ## [0.9.10] — 2026-09-13
 
 Mostly a Discover release.  Updates through the graphical centre now
