@@ -1144,6 +1144,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     net_isolation = getattr(args, 'net_isolation', 'auto')
     if getattr(args, 'with_network', False):
         net_isolation = 'off'
+    nocheck = getattr(args, 'nocheck', False)
     # Media scoping for this build only.  Identifiers are passed to
     # the container verbatim : it has its own database and its own
     # media, so host-side resolution would be meaningless here.
@@ -1250,6 +1251,10 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
         cpus=(limits.cpus if limits.cpus is not None else _("unlimited")),
         memory=mem_txt,
     ))
+    # An untested package must never come out quietly.
+    if nocheck:
+        print("  " + colors.warning(
+            _("Skipping %check: the packages produced are untested")))
 
     results = []
 
@@ -1260,6 +1265,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             with_rpms, no_update=no_update, subrel=subrel,
             rpmmacros_path=rpmmacros_path, limits=limits,
             bcond_args=bcond_args, net_isolation=net_isolation,
+            nocheck=nocheck,
             enablemedia=enablemedia, disablemedia=disablemedia,
         )
 
@@ -1299,6 +1305,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             limits=limits,
             bcond_args=bcond_args,
             net_isolation=net_isolation,
+            nocheck=nocheck,
             enablemedia=enablemedia,
             disablemedia=disablemedia,
             _find_workspace_fn=_find_workspace,
@@ -1377,6 +1384,7 @@ def _build_single_package(
     limits: 'BuildLimits | None' = None,
     bcond_args: str = '',
     net_isolation: str = 'auto',
+    nocheck: bool = False,
     enablemedia=None,
     disablemedia=None,
 ) -> tuple:
@@ -1407,6 +1415,8 @@ def _build_single_package(
             spec's ``%prep`` / ``%build`` / ``%install`` / ``%check``
             runs with the network cut.  See
             :func:`urpm.cli.helpers.build_chain.resolve_net_wrap`.
+        nocheck: Skip the spec's ``%check`` section entirely, by
+            passing ``--nocheck`` to the final ``rpmbuild``.
 
     Returns:
         Tuple of (source_path, success, message)
@@ -1422,6 +1432,9 @@ def _build_single_package(
         f'--define "_smp_mflags {limits.smp_mflags}" '
         if limits and limits.smp_mflags else ''
     )
+    # Only the ``-ba`` pass takes it: ``-br`` stops before ``%build``
+    # and never reaches ``%check``.
+    nocheck_arg = '--nocheck ' if nocheck else ''
 
     try:
         # 1. Start fresh container with host network (for urpmd P2P access)
@@ -1705,7 +1718,7 @@ def _build_single_package(
         # 6. Build the package
         print(_("  Building..."))
         result = container.exec_stream(cid, [
-            'bash', '-c', f'set -o pipefail; {net_wrap}rpmbuild {smp_define}{bcond_args}-ba {spec_path} 2>&1 | tee -a {container_log}'
+            'bash', '-c', f'set -o pipefail; {net_wrap}rpmbuild {smp_define}{bcond_args}{nocheck_arg}-ba {spec_path} 2>&1 | tee -a {container_log}'
         ])
         build_failed = result != 0
 

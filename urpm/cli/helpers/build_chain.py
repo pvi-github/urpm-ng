@@ -531,6 +531,7 @@ def _build_one_spec_in_container(
     limits: "BuildLimits | None" = None,
     bcond_args: str = '',
     net_wrap: str = '',
+    nocheck: bool = False,
 ) -> Tuple[Path, bool, str, List[str]]:
     """Build one spec inside a container that has already been set up.
 
@@ -548,6 +549,10 @@ def _build_one_spec_in_container(
     whole run by :func:`resolve_net_wrap` — empty string to build with
     the network open.  It is passed in rather than recomputed here so
     the probe runs once per container, not once per spec.
+
+    ``nocheck`` adds ``--nocheck`` to the final ``rpmbuild``, skipping
+    the spec's ``%check`` section.  Only the ``-ba`` pass takes it:
+    ``-br`` stops before ``%build`` and never reaches ``%check``.
 
     Returns ``(source, success, message, produced_rpm_paths)`` where
     ``produced_rpm_paths`` is the container-side list of the RPMs
@@ -721,11 +726,12 @@ def _build_one_spec_in_container(
 
     # Actual build.
     print(_("  Building..."))
+    nocheck_arg = '--nocheck ' if nocheck else ''
     result = container.exec_stream(cid, [
         'bash', '-c',
         f'set -o pipefail; '
         f'{net_wrap}rpmbuild --define "_topdir {pkg_topdir}" '
-        f'{smp_define}{bcond_args}-ba {spec_path} '
+        f'{smp_define}{bcond_args}{nocheck_arg}-ba {spec_path} '
         f'2>&1 | tee -a {container_log}',
     ])
     build_failed = result != 0
@@ -788,6 +794,7 @@ def run_shared_container_chain(
     limits: "BuildLimits | None" = None,
     bcond_args: str = '',
     net_isolation: str = 'auto',
+    nocheck: bool = False,
     enablemedia=None,
     disablemedia=None,
 ) -> List[Tuple[Path, bool, str]]:
@@ -845,6 +852,7 @@ def run_shared_container_chain(
                 limits=limits,
                 bcond_args=bcond_args,
                 net_wrap=net_wrap,
+                nocheck=nocheck,
             )
             results.append((src, ok, msg))
             if ok:

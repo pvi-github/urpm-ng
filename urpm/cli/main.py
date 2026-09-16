@@ -1119,6 +1119,17 @@ Examples:
         help=_('Alias for --net-isolation=off, kept for compatibility.')
     )
     build_parser.add_argument(
+        '--nocheck',
+        action='store_true',
+        help=_('Skip the spec\'s %%check section entirely (passed to '
+               'rpmbuild as --nocheck). All or nothing: rpmbuild has no '
+               'notion of individual tests. Use when a test suite cannot '
+               'pass in a rootless container — python\'s test_posix chowns '
+               'to uid 2**31, which no rootless user namespace maps — or '
+               'to shorten a development iteration. The package produced '
+               'is untested: say so if you ship it.')
+    )
+    build_parser.add_argument(
         '--strict-memory',
         action='store_true',
         help=_('Tie --memory-swap to --build-memory so the container '
