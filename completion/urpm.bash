@@ -462,10 +462,15 @@ _urpm_build() {
         --with-rpms|-w)
             return  # Free text glob pattern.
             ;;
+        --net-isolation)
+            COMPREPLY=($(compgen -W "auto strict off" -- "$cur"))
+            return
+            ;;
     esac
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--image -i --output -o --with-rpms -w \
-            --runtime --parallel -j --keep-container --no-update" -- "$cur"))
+            --runtime --parallel -j --keep-container --no-update \
+            --net-isolation --nocheck" -- "$cur"))
     else
         _filedir '@(spec|src.rpm)'
     fi

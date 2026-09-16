@@ -1186,6 +1186,13 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
                               # bij het bereiken van het RAM-plafond). Standaard: swap onbeperkt,
                               # afgestemd op mock/systemd-nspawn. Gebruik dit in CI waar stil
                               # swappen onmogelijk van een hang te onderscheiden zou zijn.
+--net-isolation MODE          # auto (standaard) | strict | off — of %prep/%build/%install/
+                              # %check zonder netwerk draaien.  auto bouwt met open netwerk
+                              # en waarschuwt als de runtime niet kan isoleren; strict weigert.
+                              # --with-network is een alias voor off.
+--nocheck                     # Slaat de %check-sectie van de spec volledig over (rpmbuild --nocheck).
+                              # Alles of niets: rpm kent geen individuele tests.
+                              # De geproduceerde pakketten zijn ongetest.
 --with FEATURE                # Geeft `--with FEATURE` door aan rpmbuild (%bcond in de spec). Herhaalbaar.
 --without FEATURE             # Geeft `--without FEATURE` door aan rpmbuild (%bcond in de spec). Herhaalbaar.
 ```
@@ -1202,6 +1209,48 @@ doet. Zonder dat loopt firefox' rustc tegen `SIGKILL` aan ruim voor de
 werkelijke RAM-grens op < 16 GB-hosts. `--strict-memory` bindt
 `--memory-swap` weer aan voor CI, waar stil swappen niet van een hang te
 onderscheiden zou zijn.
+
+#### Netwerkisolatie tijdens rpmbuild
+
+Standaard draaien `%prep`, `%build`, `%install` en `%check` van de spec
+onder `unshare --net`, zodat een verdwaalde `curl` of `pip install` geen
+ongecontroleerde inhoud in de RPM kan binnensmokkelen.  De loopback blijft
+actief en bruikbaar, waardoor testsuites die een lokale socket openen blijven
+werken (Test::TCP, Plack, alles wat een daemon start en ermee praat).
+Media-update en de installatie van BuildRequires hebben in elke modus
+netwerk: alleen rpmbuild wordt afgesneden.
+
+Het aanmaken van de naamruimte vereist `SYS_ADMIN` en het activeren van de
+loopback vereist `NET_ADMIN`; `urpm build` kent beide toe aan de
+bouwcontainer.  Zonder root-rechten blijven ze binnen uw eigen
+gebruikersnaamruimte en betekenen ze niets op de host.  Weigert de runtime
+ze, dan bouwt `auto` verder met open netwerk en meldt dat, terwijl `strict`
+weigert te bouwen.  Gebruik `off` voor specs die het netwerk legitiem nodig
+hebben (upstream-momentopnamen, tarballs spiegelen).
+
+TCP, UDP en ICMP werken allemaal op `127.0.0.1`: `NET_RAW` wordt in elke
+modus toegekend, want `ping` heeft een raw socket nodig (een verse
+naamruimte zet `net.ipv4.ping_group_range` terug en `/proc/sys` is
+alleen-lezen in de container) en een `%check` die localhost pingt zou anders
+mislukken.  Het is evenmin een uitweg: zonder route uit de naamruimte
+bereikt een raw socket de loopback en verder niets.
+
+#### De testsuite overslaan
+
+`--nocheck` geeft `rpmbuild --nocheck` door aan de bouw, wat de
+`%check`-sectie van de spec overslaat.  Het is alles of niets: rpm kent geen
+individuele tests, dus valt de hele suite weg.
+
+Twee situaties rechtvaardigen dat.  Een testsuite die niet kan slagen in een
+container zonder root-rechten, omdat men daar alleen root is binnen de eigen
+gebruikersnaamruimte: de `test_posix` van python doet een `chown` naar uid
+2**31 om grote waarden te beproeven, en geen enkele naamruimte zonder
+root-rechten reikt zo ver, zodat drie van zijn tests op de bouwmachine
+falen terwijl ze op de officiële slagen.  En gewone ontwikkelrondes, waarin
+vijf minuten testsuite tussen twee pogingen niets opleveren.
+
+De geproduceerde pakketten zijn ongetest, en urpm meldt dat op de bouwregel.
+Meld het ook wanneer u ze verspreidt.
 
 #### rpmbuild-bcond doorgeven
 

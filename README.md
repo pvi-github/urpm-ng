@@ -1204,6 +1204,13 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
                               # reaching the RAM ceiling).  Default: swap unlimited, matches
                               # mock/systemd-nspawn.  Use in CI where quiet swapping would
                               # masquerade as a timeout.
+--net-isolation MODE          # auto (default) | strict | off — whether %prep/%build/%install/
+                              # %check run with the network cut.  auto builds with the network
+                              # open and warns when the runtime cannot isolate; strict refuses.
+                              # --with-network is an alias for off.
+--nocheck                     # Skip the spec's %check section entirely (rpmbuild --nocheck).
+                              # All or nothing: rpm has no notion of an individual test.
+                              # The packages produced are untested.
 --with FEATURE                # Pass `--with FEATURE` to rpmbuild (spec %bcond).  Repeatable.
 --without FEATURE             # Pass `--without FEATURE` to rpmbuild (spec %bcond).  Repeatable.
 ```
@@ -1219,6 +1226,46 @@ the way mock's systemd-nspawn wrapper does.  Without that, firefox's rustc
 runs into `SIGKILL` well before the actual RAM ceiling on <16 GB hosts.
 `--strict-memory` re-ties `--memory-swap` for CI where quiet swapping would
 be indistinguishable from a hang.
+
+#### Network isolation during rpmbuild
+
+By default the spec's `%prep`, `%build`, `%install` and `%check` run under
+`unshare --net`, so a stray `curl` or `pip install` cannot slip unaudited
+content into the RPM.  The loopback stays up and usable, which keeps test
+suites that bind a local socket working (Test::TCP, Plack, anything that
+starts a daemon and talks to it).  Media update and BuildRequires install
+are networked in every mode: only rpmbuild is cut off.
+
+Creating the namespace needs `SYS_ADMIN` and bringing the loopback up needs
+`NET_ADMIN`, so `urpm build` grants both to the build container.  Rootless,
+they stay confined to your own user namespace and convey nothing on the
+host.  On a runtime that refuses them, `auto` builds with the network open
+and says so, while `strict` refuses to build.  Use `off` for specs that
+legitimately need the network (upstream snapshots, tarball mirroring).
+
+TCP, UDP and ICMP all work on `127.0.0.1`: `NET_RAW` is granted in every
+mode, because `ping` needs a raw socket (a fresh namespace resets
+`net.ipv4.ping_group_range` and `/proc/sys` is read-only in the container)
+and a `%check` that pings localhost would otherwise fail.  It is not a way
+out either: with no route off the namespace, a raw socket reaches the
+loopback and nothing else.
+
+#### Skipping the test suite
+
+`--nocheck` hands `rpmbuild --nocheck` to the build, which skips the spec's
+`%check` section.  It is all or nothing: rpm has no notion of an individual
+test, so this drops the whole suite.
+
+Two situations call for it.  A test suite that cannot pass in a rootless
+container, because the container is root only inside its own user namespace:
+python's `test_posix` chowns to uid 2**31 to exercise large values, and no
+rootless namespace maps that far, so three of its tests fail on the build
+machine while passing on the official one.  And plain development
+iterations, where five minutes of test suite between two attempts buys
+nothing.
+
+The packages produced are untested, and urpm says so on the build line.  Say
+it too if you ship them.
 
 #### rpmbuild bcond passthrough
 

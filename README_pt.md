@@ -1158,6 +1158,13 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
                               # ao atingir o tecto de RAM). Por omissão: swap ilimitado,
                               # alinhado com mock/systemd-nspawn. Usar em CI onde swap silencioso
                               # não seria distinguível de um hang.
+--net-isolation MODE          # auto (por omissão) | strict | off — se %prep/%build/%install/
+                              # %check correm sem rede.  auto compila com a rede aberta e
+                              # avisa se o motor não souber isolar; strict recusa.
+                              # --with-network é um alias de off.
+--nocheck                     # Salta por completo a secção %check do spec (rpmbuild --nocheck).
+                              # Tudo ou nada: o rpm não conhece testes individuais.
+                              # Os pacotes produzidos não são testados.
 --with FEATURE                # Encaminha `--with FEATURE` ao rpmbuild (%bcond do spec). Repetível.
 --without FEATURE             # Encaminha `--without FEATURE` ao rpmbuild (%bcond do spec). Repetível.
 ```
@@ -1174,6 +1181,48 @@ wrapper systemd-nspawn do mock. Sem isso, o rustc do firefox apanha
 `SIGKILL` bem antes do verdadeiro tecto de RAM em hosts < 16 GB.
 `--strict-memory` volta a amarrar `--memory-swap` para a CI, onde swap
 silencioso seria indistinguível de um hang.
+
+#### Isolamento de rede durante o rpmbuild
+
+Por omissão, `%prep`, `%build`, `%install` e `%check` do spec correm sob
+`unshare --net`, para que um `curl` ou um `pip install` perdido não consiga
+meter conteúdo não auditado no RPM.  O loopback fica activo e utilizável, o
+que mantém a funcionar as suites de testes que abrem um socket local
+(Test::TCP, Plack, tudo o que arranca um serviço e fala com ele).  A
+actualização de médias e a instalação dos BuildRequires têm rede em todos os
+modos: só o rpmbuild é cortado.
+
+Criar o espaço de nomes exige `SYS_ADMIN` e levantar o loopback exige
+`NET_ADMIN`, por isso o `urpm build` concede ambos ao contentor de
+compilação.  Sem privilégios ficam confinados ao seu próprio espaço de nomes
+de utilizador e não conferem nada na máquina.  Num motor que os recuse,
+`auto` compila com a rede aberta e avisa, enquanto `strict` recusa compilar.
+Usar `off` para os specs que precisam legitimamente da rede (instantâneos do
+upstream, réplica de tarballs).
+
+TCP, UDP e ICMP funcionam todos em `127.0.0.1`: `NET_RAW` é concedida em
+todos os modos, porque o `ping` precisa de um socket em bruto (um espaço de
+nomes novo repõe `net.ipv4.ping_group_range` e `/proc/sys` é só de leitura
+no contentor) e um `%check` que faz ping a localhost falharia de outro modo.
+Também não é uma saída: sem rota para fora do espaço de nomes, um socket em
+bruto alcança o loopback e mais nada.
+
+#### Saltar a suite de testes
+
+`--nocheck` passa `rpmbuild --nocheck` à compilação, o que salta a secção
+`%check` do spec.  É tudo ou nada: o rpm não conhece testes individuais, pelo
+que cai a suite inteira.
+
+Duas situações o justificam.  Uma suite que não consegue passar num contentor
+sem privilégios, porque aí só se é root dentro do próprio espaço de nomes: o
+`test_posix` do python faz um `chown` para o uid 2**31 para exercitar valores
+grandes, e nenhum espaço de nomes sem privilégios chega tão longe, de modo
+que três dos seus testes falham na máquina de compilação enquanto passam na
+oficial.  E as simples iterações de desenvolvimento, onde cinco minutos de
+testes entre duas tentativas não trazem nada.
+
+Os pacotes produzidos não são testados, e o urpm avisa na linha de
+compilação.  Avise também se os distribuir.
 
 #### Encaminhamento de bcond ao rpmbuild
 

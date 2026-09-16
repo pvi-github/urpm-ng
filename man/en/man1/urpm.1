@@ -1213,6 +1213,31 @@ has no swap headroom (podman kills the process on reaching the RAM
 ceiling). Default: swap unlimited, matches mock/systemd\-nspawn.
 Use in CI where quiet swapping would masquerade as a timeout.
 .TP
+.BR \-\-net\-isolation " " \fBauto\fR|\fBstrict\fR|\fBoff\fR
+How the network is handled during the \fBrpmbuild\fR phase.
+\fBauto\fR (default) cuts it: the spec's \fB%prep\fR, \fB%build\fR,
+\fB%install\fR and \fB%check\fR run under \fBunshare \-\-net\fR, so a
+stray \fBcurl\fR or \fBpip install\fR cannot slip unaudited content
+into the RPM. The loopback stays usable, for test suites that bind a
+local socket. The container is granted \fBSYS_ADMIN\fR and
+\fBNET_ADMIN\fR to make this possible; on a runtime that refuses them
+the build continues with the network open and says so.
+\fBstrict\fR refuses to build in that case. \fBoff\fR leaves the
+network open, for specs that legitimately need it (upstream snapshots,
+tarball mirroring). Media update and BuildRequires install are
+networked in every mode. \fB\-\-with\-network\fR is an alias for
+\fBoff\fR.
+\fBNET_RAW\fR is granted in every mode, so a \fB%check\fR can ping the loopback.
+.TP
+.B \-\-nocheck
+Skip the spec's \fB%check\fR section entirely, by handing
+\fB\-\-nocheck\fR to rpmbuild. All or nothing: rpm has no notion of an
+individual test. Use it when a test suite cannot pass in a rootless
+container (python's \fBtest_posix\fR chowns to uid 2**31 to exercise large
+values, and no rootless user namespace maps that far), or to shorten a
+development iteration. The packages produced are untested, and urpm says so
+on the build line.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Pass \fB\-\-with \fIFEATURE\fR\fR to rpmbuild so specs using
 \fB%bcond_with\fR can be flipped without shelling out. Repeatable.

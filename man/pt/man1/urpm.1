@@ -822,6 +822,32 @@ processo ao atingir o tecto de RAM). Por omissão: swap ilimitado,
 alinhado com mock/systemd\-nspawn. Usar em CI onde swap silencioso
 não seria distinguível de um hang.
 .TP
+.BR \-\-net\-isolation " " \fBauto\fR|\fBstrict\fR|\fBoff\fR
+Como a rede é tratada durante a fase \fBrpmbuild\fR.
+\fBauto\fR (por omissão) corta\-a: \fB%prep\fR, \fB%build\fR,
+\fB%install\fR e \fB%check\fR do spec correm sob
+\fBunshare \-\-net\fR, para que um \fBcurl\fR ou um
+\fBpip install\fR perdido não consiga meter conteúdo não auditado no
+RPM. O loopback continua utilizável, para as suites de testes que
+abrem um socket local. O contentor recebe para isso \fBSYS_ADMIN\fR e
+\fBNET_ADMIN\fR; num motor que os recuse, a compilação prossegue com a
+rede aberta e avisa. \fBstrict\fR recusa então compilar. \fBoff\fR
+deixa a rede aberta, para os specs que dela precisam legitimamente
+(instantâneos do upstream, réplica de tarballs). A actualização de
+médias e a instalação dos BuildRequires têm rede em todos os modos.
+\fB\-\-with\-network\fR é um alias de \fBoff\fR.
+\fBNET_RAW\fR é concedida em todos os modos, para que um \fB%check\fR possa fazer ping ao loopback.
+.TP
+.B \-\-nocheck
+Salta por completo a secção \fB%check\fR do spec, passando
+\fB\-\-nocheck\fR ao rpmbuild. É tudo ou nada: o rpm não conhece testes
+individuais. Usar quando uma suite de testes não consegue passar num
+contentor sem privilégios (o \fBtest_posix\fR do python faz um chown para o
+uid 2**31 para exercitar valores grandes, e nenhum espaço de nomes sem
+privilégios chega tão longe), ou para encurtar uma iteração de
+desenvolvimento. Os pacotes produzidos não são testados, e o urpm avisa na
+linha de compilação.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Encaminha \fB\-\-with \fIFEATURE\fR\fR ao rpmbuild para que specs que
 usam \fB%bcond_with\fR possam ser alternados sem invocar o rpmbuild à

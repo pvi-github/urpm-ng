@@ -820,6 +820,32 @@ het proces bij het bereiken van het RAM-plafond). Standaard: swap
 onbeperkt, afgestemd op mock/systemd\-nspawn. Gebruik dit in CI waar
 stil swappen niet van een hang te onderscheiden zou zijn.
 .TP
+.BR \-\-net\-isolation " " \fBauto\fR|\fBstrict\fR|\fBoff\fR
+Hoe het netwerk wordt behandeld tijdens de \fBrpmbuild\fR\-fase.
+\fBauto\fR (standaard) snijdt het af: \fB%prep\fR, \fB%build\fR,
+\fB%install\fR en \fB%check\fR van de spec draaien onder
+\fBunshare \-\-net\fR, zodat een verdwaalde \fBcurl\fR of
+\fBpip install\fR geen ongecontroleerde inhoud in de RPM kan
+binnensmokkelen. De loopback blijft bruikbaar, voor testsuites die een
+lokale socket openen. De container krijgt hiervoor \fBSYS_ADMIN\fR en
+\fBNET_ADMIN\fR; weigert de runtime ze, dan bouwt urpm verder met open
+netwerk en meldt dat. \fBstrict\fR weigert dan te bouwen. \fBoff\fR
+laat het netwerk open, voor specs die het legitiem nodig hebben
+(upstream\-momentopnamen, tarballs spiegelen). Media\-update en de
+installatie van BuildRequires hebben in elke modus netwerk.
+\fB\-\-with\-network\fR is een alias voor \fBoff\fR.
+\fBNET_RAW\fR wordt in elke modus toegekend, zodat een \fB%check\fR de loopback kan pingen.
+.TP
+.B \-\-nocheck
+Slaat de \fB%check\fR\-sectie van de spec volledig over, door
+\fB\-\-nocheck\fR aan rpmbuild door te geven. Alles of niets: rpm kent geen
+individuele tests. Te gebruiken wanneer een testsuite niet kan slagen in een
+container zonder root-rechten (de \fBtest_posix\fR van python doet een chown
+naar uid 2**31 om grote waarden te beproeven, en geen enkele
+gebruikersnaamruimte zonder root-rechten reikt zo ver), of om een
+ontwikkelronde te bekorten. De geproduceerde pakketten zijn ongetest, en urpm
+meldt dat op de bouwregel.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Geeft \fB\-\-with \fIFEATURE\fR\fR door aan rpmbuild zodat specs met
 \fB%bcond_with\fR gewisseld kunnen worden zonder rpmbuild rechtstreeks
