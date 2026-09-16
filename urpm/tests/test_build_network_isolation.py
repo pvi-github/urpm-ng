@@ -1,5 +1,5 @@
 """``urpm build`` : ``rpmbuild`` runs network-isolated by default,
-opt-out via ``--with-network``.
+controlled by ``--net-isolation``.
 
 Purpose : the spec's ``%prep`` / ``%build`` / ``%install`` /
 ``%check`` runs in a network-less namespace so a stray ``curl`` or
@@ -12,11 +12,16 @@ that is exactly how a broken wrapper reached users :
   container and asserts the *shape* of the issued command.  Fast, no
   podman needed, but it proves only that we emit what we meant to.
 * :class:`TestWrapperActuallyWorks` runs the wrapper for real inside
-  the build image and asserts it does what it claims.  The earlier
-  wrapper was a plain ``unshare -n``, which passed every shape test
-  and then died with « unshare failed: Operation not permitted »
-  because a rootless podman container has no CAP_SYS_ADMIN.  Shape
-  tests cannot catch that class of bug ; only execution can.
+  the build image and asserts it does what it claims.  Both wrappers
+  that shipped broken passed every shape test :
+
+  - a plain ``unshare -n`` died with « unshare failed: Operation not
+    permitted », because a podman container has no CAP_SYS_ADMIN ;
+  - ``unshare --user --map-root-user --net`` started fine, then broke
+    every ``chown`` towards a non-root uid, because the nested user
+    namespace maps uid 0 and nothing else.
+
+  Shape tests cannot catch either ; only execution can.
 """
 
 from __future__ import annotations
@@ -29,8 +34,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from urpm.cli.helpers.build_chain import (
+    NET_ISOLATION_CAPS,
     NET_ISOLATION_WRAP,
+    NET_PING_CAPS,
+    NetIsolationUnavailable,
     _build_one_spec_in_container,
+    resolve_net_wrap,
+    start_build_container,
 )
 
 
@@ -73,7 +83,7 @@ def _rpmbuild_bash_calls(container: _FakeContainer) -> list[str]:
     return out
 
 
-def _run_chain_with(with_network: bool, tmp_path: Path) -> list[str]:
+def _run_chain_with(net_wrap: str, tmp_path: Path) -> list[str]:
     """Drive ``_build_one_spec_in_container`` end-to-end against the
     fake container ; return the rpmbuild-bearing bash strings."""
     container = _FakeContainer()
@@ -88,7 +98,7 @@ def _run_chain_with(with_network: bool, tmp_path: Path) -> list[str]:
         _diagnose_fn=lambda *a, **kw: None,
         limits=None,
         bcond_args="",
-        with_network=with_network,
+        net_wrap=net_wrap,
     )
     return _rpmbuild_bash_calls(container)
 
@@ -100,16 +110,16 @@ class TestBuildNetworkIsolation:
         the isolation prefix.  Asserted against the constant rather
         than a literal, so changing the wrapper cannot leave the test
         passing against a stale string."""
-        calls = _run_chain_with(with_network=False, tmp_path=tmp_path)
+        calls = _run_chain_with(NET_ISOLATION_WRAP, tmp_path=tmp_path)
         assert calls, "no rpmbuild call captured — test fixture broken"
         for cmd in calls:
             assert f"{NET_ISOLATION_WRAP}rpmbuild" in cmd, (
                 f"rpmbuild not net-isolated : {cmd}")
 
-    def test_with_network_leaves_rpmbuild_bare(self, tmp_path):
-        """``--with-network`` opts out : rpmbuild runs with the
-        container's ambient network (no ``unshare -n`` prefix)."""
-        calls = _run_chain_with(with_network=True, tmp_path=tmp_path)
+    def test_no_wrap_leaves_rpmbuild_bare(self, tmp_path):
+        """``--net-isolation=off`` opts out : rpmbuild runs with the
+        container's ambient network (no ``unshare`` prefix)."""
+        calls = _run_chain_with("", tmp_path=tmp_path)
         assert calls, "no rpmbuild call captured — test fixture broken"
         for cmd in calls:
             assert "unshare" not in cmd, (
@@ -121,13 +131,98 @@ class TestBuildNetworkIsolation:
         and the actual build (``rpmbuild -ba``) must be isolated —
         %generate_buildrequires runs a spec-provided script and is
         just as untrusted as %build."""
-        calls = _run_chain_with(with_network=False, tmp_path=tmp_path)
+        calls = _run_chain_with(NET_ISOLATION_WRAP, tmp_path=tmp_path)
         seen_br = any(" -br " in cmd for cmd in calls)
         seen_ba = any(" -ba " in cmd for cmd in calls)
         assert seen_br, "no rpmbuild -br call captured"
         assert seen_ba, "no rpmbuild -ba call captured"
         for cmd in calls:
             assert NET_ISOLATION_WRAP.strip() in cmd, cmd
+
+    def test_wrapper_creates_no_user_namespace(self):
+        """The wrapper must not open a user namespace.
+
+        ``unshare --user --map-root-user`` shipped once as a way to
+        obtain CAP_SYS_ADMIN for free.  It writes a one-line uid_map,
+        so uid 0 becomes the only translatable identity and every
+        ``chown`` towards another uid answers EINVAL — python's %prep
+        died unpacking a tarball owned by uid 1000.  The capabilities
+        come from the container now (:data:`NET_ISOLATION_CAPS`).
+        """
+        assert "--user" not in NET_ISOLATION_WRAP, NET_ISOLATION_WRAP
+        assert "--map-root-user" not in NET_ISOLATION_WRAP, NET_ISOLATION_WRAP
+
+
+class _CapRecordingContainer(_FakeContainer):
+    """Fake container that records ``run`` kwargs and can refuse caps.
+
+    ``probe_rc`` is what ``unshare --net true`` will answer, so a test
+    can drive the unavailable-isolation branches without podman.
+    """
+
+    def __init__(self, refuse_caps: bool = False, probe_rc: int = 0):
+        super().__init__()
+        self.refuse_caps = refuse_caps
+        self.probe_rc = probe_rc
+        self.run_kwargs: list[dict] = []
+
+    def run(self, image, command=None, **kw):
+        self.run_kwargs.append(kw)
+        if self.refuse_caps and kw.get('cap_add'):
+            raise RuntimeError("Container run failed: --cap-add refused")
+        return "fakecid"
+
+    def exec(self, cid, cmd, **kw):
+        rv = super().exec(cid, cmd, **kw)
+        if cmd[:2] == ['unshare', '--net']:
+            rv.returncode = self.probe_rc
+            rv.stderr = "" if self.probe_rc == 0 else "Operation not permitted"
+        return rv
+
+
+class TestIsolationCapabilities:
+    """Where the capabilities come from, and what happens without them."""
+
+    def test_container_asks_for_the_capabilities(self):
+        container = _CapRecordingContainer()
+        start_build_container(container, "img", None, 'auto')
+        asked = container.run_kwargs[0]['cap_add']
+        assert set(asked) == set(NET_ISOLATION_CAPS) | set(NET_PING_CAPS)
+
+    def test_off_still_asks_for_the_ping_capability(self):
+        """No isolation wanted, so no isolation privilege — but ICMP is
+        not an isolation matter and a ``%check`` that pings needs it in
+        either mode."""
+        container = _CapRecordingContainer()
+        start_build_container(container, "img", None, 'off')
+        asked = container.run_kwargs[0]['cap_add']
+        assert set(asked) == set(NET_PING_CAPS)
+        assert not set(asked) & set(NET_ISOLATION_CAPS)
+
+    def test_refused_capabilities_still_start_the_container(self):
+        """A runtime that will not grant them must not break the build
+        outright — ``resolve_net_wrap`` is what reports the downgrade."""
+        container = _CapRecordingContainer(refuse_caps=True)
+        cid = start_build_container(container, "img", None, 'auto')
+        assert cid == "fakecid"
+        assert len(container.run_kwargs) == 2
+        assert 'cap_add' not in container.run_kwargs[1]
+
+    def test_auto_downgrades_when_the_probe_fails(self, capsys):
+        container = _CapRecordingContainer(probe_rc=1)
+        assert resolve_net_wrap(container, "fakecid", 'auto') == ""
+        assert "OPEN" in capsys.readouterr().out
+
+    def test_strict_refuses_when_the_probe_fails(self):
+        container = _CapRecordingContainer(probe_rc=1)
+        with pytest.raises(NetIsolationUnavailable):
+            resolve_net_wrap(container, "fakecid", 'strict')
+
+    def test_off_never_probes(self):
+        """Nothing to check when isolation is not wanted."""
+        container = _CapRecordingContainer(probe_rc=1)
+        assert resolve_net_wrap(container, "fakecid", 'off') == ""
+        assert container.calls == []
 
 
 # ── Execution layer : does the wrapper actually work? ──────────────
@@ -160,21 +255,31 @@ _IMAGE = _build_image_available()
 class TestWrapperActuallyWorks:
     """Run ``NET_ISOLATION_WRAP`` for real inside the build image.
 
-    Regression this exists for : the wrapper was once a plain
-    ``unshare -n``.  It satisfied every shape assertion above and then
-    failed at build time with « unshare failed: Operation not
-    permitted », because a rootless podman container's ``CapEff``
-    lacks CAP_SYS_ADMIN (bit 21) and ``unshare -n`` requires it.
-    Every build broke before ``%build`` even started.
+    Two regressions this exists for, both of which passed every shape
+    assertion above and broke real builds :
 
-    These tests are the ones that can catch that.  They are slow and
+    * a plain ``unshare -n`` failed at build time with « unshare
+      failed: Operation not permitted », because a podman container's
+      ``CapEff`` lacks CAP_SYS_ADMIN (bit 21) ;
+    * ``unshare --user --map-root-user --net`` cleared that, then
+      broke ownership restoration (see
+      :meth:`test_non_root_ownership_is_restorable`).
+
+    These tests are the ones that can catch them.  They are slow and
     skipped without podman, which is the price of testing the claim
     rather than the string.
+
+    The container is started the way ``urpm build`` starts it, caps
+    included : without them the wrapper cannot work, and a test that
+    dropped them would be testing something we never ship.
     """
 
     def _in_container(self, script: str) -> subprocess.CompletedProcess:
+        caps = []
+        for capability in (*NET_ISOLATION_CAPS, *NET_PING_CAPS):
+            caps += ["--cap-add", capability]
         return subprocess.run(
-            ["podman", "run", "--rm", _IMAGE, "bash", "-c", script],
+            ["podman", "run", "--rm", *caps, _IMAGE, "bash", "-c", script],
             capture_output=True, text=True, timeout=180,
         )
 
@@ -220,12 +325,22 @@ class TestWrapperActuallyWorks:
 
         Paired with :meth:`test_network_is_really_cut`, this is what
         makes the guarantee precise: cut outward, intact inward.
+
+        The check is a real TCP connection, which is what those suites
+        actually open.  ICMP gets its own test below.
         """
         res = self._in_container(
-            f"{NET_ISOLATION_WRAP}"
-            "sh -c 'ip -br link show lo; "
-            "timeout 2 ping -c1 -W1 127.0.0.1 >/dev/null 2>&1 "
-            "&& echo LOOPBACK_OK || echo LOOPBACK_KO'"
+            f"{NET_ISOLATION_WRAP}sh -c 'ip -br link show lo'\n"
+            f"{NET_ISOLATION_WRAP}python3 - <<'PY'\n"
+            "import socket, threading\n"
+            "srv = socket.socket()\n"
+            "srv.bind(('127.0.0.1', 0))\n"
+            "srv.listen(1)\n"
+            "threading.Thread(target=lambda: srv.accept()[0].sendall(b'pong'),\n"
+            "                 daemon=True).start()\n"
+            "with socket.create_connection(srv.getsockname(), timeout=5) as c:\n"
+            "    print('LOOPBACK_' + ('OK' if c.recv(4) == b'pong' else 'KO'))\n"
+            "PY\n"
         )
         assert "LOOPBACK_OK" in res.stdout, (
             f"127.0.0.1 unreachable inside the wrapper — every test "
@@ -234,6 +349,43 @@ class TestWrapperActuallyWorks:
         )
         assert "UP" in res.stdout, (
             f"lo is present but not up.\nstdout: {res.stdout}"
+        )
+
+    def test_loopback_answers_icmp(self):
+        """``ping 127.0.0.1`` has to work inside the wrapper.
+
+        It needs a raw socket: a fresh network namespace resets
+        ``net.ipv4.ping_group_range`` to ``65534 65534`` and
+        ``/proc/sys`` is read-only in the container, so the unprivileged
+        ICMP datagram path is closed.  podman dropped ``NET_RAW`` from
+        its defaults, hence :data:`NET_PING_CAPS`.  The nested user
+        namespace used to supply it by accident, handing the build
+        every capability; specs that ping noticed when it went away.
+        """
+        res = self._in_container(
+            f"{NET_ISOLATION_WRAP}"
+            "sh -c 'ping -c1 -W1 127.0.0.1 >/dev/null 2>&1 "
+            "&& echo PING_OK || echo PING_KO'"
+        )
+        assert "PING_OK" in res.stdout, (
+            f"ICMP unusable inside the wrapper — a %check that pings "
+            f"localhost will fail.\nstdout: {res.stdout}\n"
+            f"stderr: {res.stderr}"
+        )
+
+    def test_icmp_still_cannot_leave_the_namespace(self):
+        """Companion to the previous one: a raw socket must not become
+        a way out.  It is not, there being no route off the namespace,
+        but granting NET_RAW is exactly the kind of change that
+        deserves the claim checked rather than assumed."""
+        res = self._in_container(
+            f"{NET_ISOLATION_WRAP}"
+            "sh -c 'ping -c1 -W1 9.9.9.9 >/dev/null 2>&1 "
+            "&& echo OUT_OK || echo OUT_KO'"
+        )
+        assert "OUT_KO" in res.stdout, (
+            f"an external address answers inside the wrapper — the "
+            f"network is not isolated.\nstdout: {res.stdout}"
         )
 
     def test_exit_status_survives_the_wrapper(self):
@@ -276,4 +428,55 @@ class TestWrapperActuallyWorks:
         assert res.returncode == 0, res.stderr
         assert res.stdout.strip() == "root", (
             f"file written as {res.stdout.strip()!r}, expected root"
+        )
+
+    def test_non_root_ownership_is_restorable(self):
+        """Seeing uid 0 is not enough : other uids must stay usable.
+
+        ``unshare --user --map-root-user`` satisfied every check above
+        and still broke builds, because its uid_map has a single line
+        (``0 0 1``). Inside it uid 0 is the only translatable identity
+        and ``chown`` towards any other answers EINVAL.  python's
+        %prep unpacks a documentation tarball whose files belong to
+        uid 1000 and died on it::
+
+            tar: …/genindex-T.html: Cannot change ownership to
+                 uid 1000, gid 1000: Invalid argument
+
+        Any spec unpacking an archive owned by a non-root user, or
+        chowning to a system user in %install, hits the same wall.
+        """
+        res = self._in_container(
+            f"{NET_ISOLATION_WRAP}"
+            "sh -c 'echo x > /tmp/owned && chown 1000:1000 /tmp/owned "
+            "&& stat -c %u:%g /tmp/owned'"
+        )
+        assert res.returncode == 0, (
+            f"chown to a non-root uid failed inside the wrapper — every "
+            f"spec restoring archive ownership in %prep will break.\n"
+            f"stderr: {res.stderr}"
+        )
+        assert res.stdout.strip() == "1000:1000", (
+            f"ownership is {res.stdout.strip()!r}, expected 1000:1000"
+        )
+
+    def test_tar_restores_archive_ownership(self):
+        """The same claim through the tool that actually broke.
+
+        ``chown`` succeeding is the mechanism ; ``tar`` restoring what
+        an archive carries is what %prep does.
+        """
+        res = self._in_container(
+            "mkdir -p /tmp/src/d && echo x > /tmp/src/d/f && "
+            "tar --owner=1000 --group=1000 -cf /tmp/a.tar -C /tmp/src d && "
+            f"{NET_ISOLATION_WRAP}"
+            "sh -c 'mkdir -p /tmp/dst && tar xf /tmp/a.tar -C /tmp/dst "
+            "&& stat -c %u:%g /tmp/dst/d/f'"
+        )
+        assert res.returncode == 0, (
+            f"tar could not restore ownership inside the wrapper.\n"
+            f"stderr: {res.stderr}"
+        )
+        assert res.stdout.strip() == "1000:1000", (
+            f"extracted file is {res.stdout.strip()!r}, expected 1000:1000"
         )

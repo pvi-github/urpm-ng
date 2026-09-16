@@ -1098,17 +1098,25 @@ Examples:
                'Overrides --build-cpus and --build-memory.')
     )
     build_parser.add_argument(
+        '--net-isolation',
+        choices=['auto', 'strict', 'off'],
+        default='auto',
+        help=_('How to handle the network during the ``rpmbuild`` '
+               'phase. ``auto`` (default) cuts it: the spec\'s %%prep '
+               '/ %%build / %%install / %%check run under '
+               '``unshare --net`` so a stray curl / pip install cannot '
+               'sneak unaudited content into the final RPM, and the '
+               'build falls back to an open network with a warning on '
+               'a runtime that cannot isolate. ``strict`` refuses to '
+               'build in that case. ``off`` leaves the network open, '
+               'for specs that legitimately need it (upstream '
+               'snapshots, tarball mirroring, …). Media update and '
+               'BuildRequires install stay networked regardless.')
+    )
+    build_parser.add_argument(
         '--with-network',
         action='store_true',
-        help=_('Leave the network open during the ``rpmbuild`` phase. '
-               'By default the build runs under ``unshare -n`` — the '
-               'spec\'s %%prep / %%build / %%install / %%check execute '
-               'with no network so a stray curl / pip install cannot '
-               'sneak unaudited content into the final RPM. Media '
-               'update and BuildRequires install stay networked '
-               'regardless.  Turn on for specs that legitimately need '
-               'network at build time (upstream snapshots, tarball '
-               'mirroring, …) — opt-in only.')
+        help=_('Alias for --net-isolation=off, kept for compatibility.')
     )
     build_parser.add_argument(
         '--strict-memory',

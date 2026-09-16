@@ -1138,7 +1138,12 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     with_rpms_patterns = getattr(args, 'with_rpms', []) or []
     subrel = getattr(args, 'subrel', None) or None  # treat '' as unset
     rpmmacros_path = getattr(args, 'rpmmacros', None) or None
-    with_network = getattr(args, 'with_network', False)
+    # ``--with-network`` predates ``--net-isolation`` and means exactly
+    # its ``off`` value ; kept as an alias so no existing command line
+    # changes behaviour.
+    net_isolation = getattr(args, 'net_isolation', 'auto')
+    if getattr(args, 'with_network', False):
+        net_isolation = 'off'
     # Media scoping for this build only.  Identifiers are passed to
     # the container verbatim : it has its own database and its own
     # media, so host-side resolution would be meaningless here.
@@ -1254,7 +1259,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             container, image, source_path, output_dir, keep_container,
             with_rpms, no_update=no_update, subrel=subrel,
             rpmmacros_path=rpmmacros_path, limits=limits,
-            bcond_args=bcond_args, with_network=with_network,
+            bcond_args=bcond_args, net_isolation=net_isolation,
             enablemedia=enablemedia, disablemedia=disablemedia,
         )
 
@@ -1293,7 +1298,7 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
             rollback_between_builds=rollback_between_builds,
             limits=limits,
             bcond_args=bcond_args,
-            with_network=with_network,
+            net_isolation=net_isolation,
             enablemedia=enablemedia,
             disablemedia=disablemedia,
             _find_workspace_fn=_find_workspace,
@@ -1371,7 +1376,7 @@ def _build_single_package(
     rpmmacros_path: Path | None = None,
     limits: 'BuildLimits | None' = None,
     bcond_args: str = '',
-    with_network: bool = False,
+    net_isolation: str = 'auto',
     enablemedia=None,
     disablemedia=None,
 ) -> tuple:
@@ -1398,6 +1403,10 @@ def _build_single_package(
         limits: Resolved container resource caps.  When ``None`` the
             container runs uncapped and rpmbuild uses its default
             ``%_smp_mflags`` (typically ``-j$(nproc)``).
+        net_isolation: ``auto``, ``strict`` or ``off`` — whether the
+            spec's ``%prep`` / ``%build`` / ``%install`` / ``%check``
+            runs with the network cut.  See
+            :func:`urpm.cli.helpers.build_chain.resolve_net_wrap`.
 
     Returns:
         Tuple of (source_path, success, message)
@@ -1416,22 +1425,22 @@ def _build_single_package(
 
     try:
         # 1. Start fresh container with host network (for urpmd P2P access)
-        cid = container.run(
-            image,
-            ['sleep', 'infinity'],
-            detach=True,
-            rm=False,
-            network='host',
-            memory=limits.memory if limits else None,
-            memory_swap=limits.memory_swap if limits else None,
-            cpus=limits.cpus if limits else None,
+        from ..helpers.build_chain import (
+            NetIsolationUnavailable,
+            resolve_net_wrap,
+            start_build_container,
         )
+        cid = start_build_container(container, image, limits, net_isolation)
         print(_("  Container: {cid}").format(cid=cid[:12]))
         # See ``Container.probe_arch``: pin the personality wrapper
         # now so that rpmbuild, gcc, meson, Python's
         # ``sysconfig.get_platform`` and friends all see the right
         # ``uname -m`` when this image is 32-bit on a 64-bit kernel.
         container.probe_arch(cid)
+        try:
+            net_wrap = resolve_net_wrap(container, cid, net_isolation)
+        except NetIsolationUnavailable as exc:
+            return (source_path, False, str(exc))
 
         # Build ``/root/.rpmmacros`` from the optional user-supplied
         # file plus the optional ``--subrel`` tag.  ``--subrel`` is
@@ -1618,25 +1627,6 @@ def _build_single_package(
         # build log for post-mortem. The actual `urpm install` of the
         # discovered deps stays visible — that's a real install with progress
         # the user expects to see.
-
-        # Network isolation for the ``rpmbuild`` invocations : the
-        # spec's %prep/%build/%install/%check runs in a net-less
-        # namespace so a stray ``curl`` or ``pip install`` cannot
-        # sneak unaudited content into the RPM.  Media update and
-        # BuildRequires install stay networked (they need it).
-        # ``--with-network`` on the CLI opts out — for specs that
-        # legitimately need net at build time.
-        #
-        # ``--user --map-root-user`` is not optional : a plain
-        # ``unshare -n`` needs CAP_SYS_ADMIN, which a rootless podman
-        # container does not have (CapEff lacks bit 21), and fails with
-        # « unshare failed: Operation not permitted ».  Creating a
-        # nested user namespace first grants CAP_SYS_ADMIN *within it*,
-        # so the network namespace can then be created unprivileged.
-        # ``--map-root-user`` keeps uid 0 inside, so rpmbuild sees the
-        # same identity and file ownership as without the wrapper.
-        from ..helpers.build_chain import NET_ISOLATION_WRAP
-        net_wrap = '' if with_network else NET_ISOLATION_WRAP
 
         for dynbr_pass in range(MAX_DYNBR_PASSES):
             # `rpmbuild -br` runs only %prep + %generate_buildrequires (cheap:

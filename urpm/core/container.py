@@ -116,6 +116,7 @@ class Container:
         memory: Optional[str] = None,
         memory_swap: Optional[str] = None,
         cpus: Optional[int] = None,
+        cap_add: Optional[List[str]] = None,
     ) -> str:
         """Run a container.
 
@@ -149,6 +150,14 @@ class Container:
                 CPU time and does not by itself lower rpmbuild's ``-j``
                 — callers that want fewer parallel compile jobs must
                 also inject the corresponding ``%_smp_mflags`` override.
+            cap_add: Linux capabilities to grant on top of the
+                runtime's default set, without the ``CAP_`` prefix
+                (e.g. ``["SYS_ADMIN", "NET_ADMIN"]``).  Each becomes
+                one ``--cap-add``.  Rootless, a granted capability is
+                confined to the caller's user namespace and conveys
+                nothing on the host ; running as root it is a real
+                privilege inside the container, so callers should ask
+                only for what they need.
 
         Returns:
             Container ID if detached, else stdout
@@ -183,6 +192,8 @@ class Container:
                 args.extend(['--memory-swap', memory_swap])
         if cpus:
             args.extend(['--cpus', str(cpus)])
+        for capability in cap_add or ():
+            args.extend(['--cap-add', capability])
 
         args.append(image)
 

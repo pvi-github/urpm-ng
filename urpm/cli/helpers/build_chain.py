@@ -67,24 +67,51 @@ RPMBUILD_MISSING_BR = 11
 MAX_DYNBR_PASSES = 16
 _VER_RE = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
 
+# Capabilities the build container needs so ``unshare --net`` can
+# create a network namespace: ``SYS_ADMIN`` to create it at all,
+# ``NET_ADMIN`` to bring the loopback interface up inside it.  Neither
+# is in podman's default set.
+#
+# Rootless — the normal case — both stay confined to the operator's
+# user namespace and convey nothing on the host.  Running as root they
+# are real inside the container, which is why the grant is opt-out
+# through ``--net-isolation=off``.
+NET_ISOLATION_CAPS = ('SYS_ADMIN', 'NET_ADMIN')
+
+# Granted in every mode, isolation or not: ``ping`` opens a raw socket
+# and podman dropped ``NET_RAW`` from its default set.  A ``%check``
+# that pings therefore fails without it — which is what specs saw when
+# the nested user namespace went away, since that namespace used to
+# hand the build every capability for free.
+#
+# This is about being able to use a network, not about leaving one
+# open: under ``unshare --net`` a raw socket reaches the loopback and
+# nothing else, there being no route out.  Verified in
+# ``mageia:10-build``: ``ping 127.0.0.1`` answers while an external
+# address and name resolution both stay dead.
+NET_PING_CAPS = ('NET_RAW',)
+
 # Command prefix that runs ``rpmbuild`` without network access, so a
 # spec's %prep/%build/%install/%check cannot pull unaudited content
 # into the RPM.
 #
-# Every word here is load-bearing.  A plain ``unshare -n`` needs
-# CAP_SYS_ADMIN ; a rootless podman container does not have it
-# (``CapEff`` lacks bit 21) and the call dies with « unshare failed:
-# Operation not permitted », taking the whole build with it.  Creating
-# a nested *user* namespace first grants CAP_SYS_ADMIN inside that
-# namespace, which then allows the network namespace unprivileged.
-# ``--map-root-user`` pins uid 0 inside, so rpmbuild sees the same
-# identity and produces the same file ownership as it would unwrapped
-# — without it the build would run as nobody and ownership in the
-# buildroot would be wrong.
+# This used to open with ``unshare --user --map-root-user`` because a
+# plain ``unshare --net`` needs CAP_SYS_ADMIN and the container had
+# none, while a nested user namespace grants it for free.  That detour
+# cost more than it bought: ``--map-root-user`` writes a one-line
+# ``uid_map`` (``0 0 1``), so uid 0 is the *only* translatable
+# identity in there.  Any ``chown`` towards another uid answers
+# EINVAL, and python's %prep died unpacking its documentation tarball,
+# whose files belong to uid 1000::
 #
-# Verified inside ``mageia:10-build`` : interface count drops from 2
-# to 1 (loopback only) and name resolution fails, while ``id -u``
-# still reports 0 and writes keep root ownership.
+#     tar: …/genindex-T.html: Cannot change ownership to uid 1000,
+#          gid 1000: Invalid argument
+#
+# Every spec unpacking an archive owned by a non-root user, or
+# chowning to a system user in %install, hit the same wall.  The
+# capabilities are now granted on the container itself (see
+# :data:`NET_ISOLATION_CAPS`), no user namespace is created, and the
+# identity map stays whole.
 #
 # The loopback has to be brought up by hand.  A fresh network namespace
 # does contain ``lo``, but it is created DOWN, so ``127.0.0.1`` is
@@ -95,19 +122,129 @@ _VER_RE = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
 # two Perl packages were nearly patched to work around this instead.
 # Isolating a build from the network must not isolate it from itself.
 #
+# That includes ICMP, but only because of :data:`NET_PING_CAPS`.  A
+# fresh network namespace resets ``net.ipv4.ping_group_range`` to
+# ``65534 65534`` and ``/proc/sys`` is read-only in the container, so
+# ``ping`` falls back to a raw socket — unusable without ``NET_RAW``.
+#
 # ``sh -c '…' _`` puts ``_`` in ``$0`` so the appended command lands in
 # ``"$@"``, and ``exec`` keeps the process tree and the exit status
 # identical to the unwrapped form.  ``2>/dev/null`` with no ``&&``
-# means an image without iproute2 degrades to the previous behaviour
-# rather than failing the build.
+# means an image without iproute2 degrades to a down loopback rather
+# than failing the build.
 #
 # What stays cut : every route off the container, DNS, and any external
 # address.  Nothing can enter the build through ``127.0.0.1`` that is
 # not already inside the container.
 NET_ISOLATION_WRAP = (
-    'unshare --user --map-root-user --net '
+    'unshare --net '
     'sh -c \'ip link set lo up 2>/dev/null; exec "$@"\' _ '
 )
+
+#: Accepted values of ``urpm build --net-isolation``.
+NET_ISOLATION_MODES = ('auto', 'strict', 'off')
+
+
+class NetIsolationUnavailable(RuntimeError):
+    """``--net-isolation=strict`` asked for isolation we cannot provide.
+
+    Raised by :func:`resolve_net_wrap` when the container cannot create
+    a network namespace.  The message is user-facing and names the
+    escape hatches.
+    """
+
+
+def start_build_container(
+    container: "Container",
+    image: str,
+    limits: "BuildLimits | None" = None,
+    net_isolation: str = 'auto',
+) -> str:
+    """Start the long-lived build container and return its id.
+
+    Always grants :data:`NET_PING_CAPS`, and :data:`NET_ISOLATION_CAPS`
+    on top unless isolation is turned off.  A runtime that refuses the
+    grant makes us retry once without it: the container still builds,
+    only unisolated, and :func:`resolve_net_wrap` is what reports that
+    to the operator.  A failure for any other reason fails the retry
+    too and propagates.
+
+    Args:
+        container: Container runtime wrapper.
+        image: Image tag to boot.
+        limits: Resolved resource caps, or ``None`` for uncapped.
+        net_isolation: One of :data:`NET_ISOLATION_MODES`.
+
+    Returns:
+        The container id.
+    """
+    kwargs = dict(
+        detach=True,
+        rm=False,
+        network='host',
+        memory=limits.memory if limits else None,
+        memory_swap=limits.memory_swap if limits else None,
+        cpus=limits.cpus if limits else None,
+    )
+    caps = list(NET_PING_CAPS)
+    if net_isolation != 'off':
+        caps += list(NET_ISOLATION_CAPS)
+    try:
+        return container.run(
+            image, ['sleep', 'infinity'], cap_add=caps, **kwargs)
+    except RuntimeError:
+        return container.run(image, ['sleep', 'infinity'], **kwargs)
+
+
+def resolve_net_wrap(
+    container: "Container",
+    cid: str,
+    net_isolation: str = 'auto',
+) -> str:
+    """Return the command prefix to put in front of every ``rpmbuild``.
+
+    The empty string means the build runs with the container's ambient
+    network.  Anything else is :data:`NET_ISOLATION_WRAP`.
+
+    The verdict comes from running ``unshare --net true`` in the
+    container rather than from what we asked podman for: that answers
+    the only question that matters, and it stays correct whichever way
+    the capability grant went.
+
+    Args:
+        container: Container runtime wrapper.
+        cid: Id of the running build container.
+        net_isolation: One of :data:`NET_ISOLATION_MODES`.
+
+    Raises:
+        NetIsolationUnavailable: in ``strict`` mode, when the container
+            cannot create a network namespace.
+    """
+    from .. import colors
+
+    if net_isolation == 'off':
+        return ''
+
+    probe = container.exec(cid, ['unshare', '--net', 'true'])
+    if probe.returncode == 0:
+        return NET_ISOLATION_WRAP
+
+    detail = (probe.stderr or probe.stdout or '').strip().splitlines()
+    reason = detail[-1] if detail else _("unknown reason")
+    if net_isolation == 'strict':
+        raise NetIsolationUnavailable(_(
+            "Network isolation is unavailable in this container "
+            "({reason}).\nThe runtime would not grant SYS_ADMIN / "
+            "NET_ADMIN. Build with --net-isolation=auto to continue "
+            "with the network open, or --net-isolation=off to stop "
+            "asking."
+        ).format(reason=reason))
+    print(colors.warning(_(
+        "  Warning: building with the network OPEN — this container "
+        "cannot isolate it ({reason}). The spec's %prep / %build / "
+        "%install / %check can reach the outside."
+    ).format(reason=reason)))
+    return ''
 
 
 def apply_media_scope(container, cid, enablemedia, disablemedia) -> None:
@@ -393,7 +530,7 @@ def _build_one_spec_in_container(
     _diagnose_fn: Callable,
     limits: "BuildLimits | None" = None,
     bcond_args: str = '',
-    with_network: bool = False,
+    net_wrap: str = '',
 ) -> Tuple[Path, bool, str, List[str]]:
     """Build one spec inside a container that has already been set up.
 
@@ -406,6 +543,11 @@ def _build_one_spec_in_container(
     ``--define "_smp_mflags -jN"`` argument to every rpmbuild
     invocation so the spec's ``%build`` runs at the requested
     parallelism instead of rpm's default (typically ``-j$(nproc)``).
+
+    ``net_wrap`` is the network-isolation prefix decided once for the
+    whole run by :func:`resolve_net_wrap` — empty string to build with
+    the network open.  It is passed in rather than recomputed here so
+    the probe runs once per container, not once per spec.
 
     Returns ``(source, success, message, produced_rpm_paths)`` where
     ``produced_rpm_paths`` is the container-side list of the RPMs
@@ -516,11 +658,6 @@ def _build_one_spec_in_container(
     if ret != 0:
         return (source_path, False, "BuildRequires install failed", [])
 
-    # Network isolation for the ``rpmbuild`` invocations : see
-    # ``NET_ISOLATION_WRAP`` above for why the wrapper is shaped the
-    # way it is.
-    net_wrap = '' if with_network else NET_ISOLATION_WRAP
-
     # Dynamic BuildRequires convergence loop.  Identical logic to
     # ``_build_single_package`` — kept inline because factoring it
     # out would require an even bigger surface to move, and the
@@ -587,7 +724,8 @@ def _build_one_spec_in_container(
     result = container.exec_stream(cid, [
         'bash', '-c',
         f'set -o pipefail; '
-        f'{net_wrap}rpmbuild --define "_topdir {pkg_topdir}" {smp_define}{bcond_args}-ba {spec_path} '
+        f'{net_wrap}rpmbuild --define "_topdir {pkg_topdir}" '
+        f'{smp_define}{bcond_args}-ba {spec_path} '
         f'2>&1 | tee -a {container_log}',
     ])
     build_failed = result != 0
@@ -649,7 +787,7 @@ def run_shared_container_chain(
     _diagnose_fn: Callable,
     limits: "BuildLimits | None" = None,
     bcond_args: str = '',
-    with_network: bool = False,
+    net_isolation: str = 'auto',
     enablemedia=None,
     disablemedia=None,
 ) -> List[Tuple[Path, bool, str]]:
@@ -670,16 +808,7 @@ def run_shared_container_chain(
     try:
         # Create the container first so a setup failure still leaves
         # a reachable ``cid`` for the ``finally`` block to reap.
-        cid = container.run(
-            image,
-            ['sleep', 'infinity'],
-            detach=True,
-            rm=False,
-            network='host',
-            memory=limits.memory if limits else None,
-            memory_swap=limits.memory_swap if limits else None,
-            cpus=limits.cpus if limits else None,
-        )
+        cid = start_build_container(container, image, limits, net_isolation)
         print(_("  Container: {cid}").format(cid=cid[:12]))
         try:
             baseline_id = _setup_shared_container(
@@ -696,6 +825,15 @@ def run_shared_container_chain(
                 results.append((src, False, str(e)))
             return results
 
+        # One probe for the whole run : every spec shares this
+        # container, so the verdict cannot differ between them.
+        try:
+            net_wrap = resolve_net_wrap(container, cid, net_isolation)
+        except NetIsolationUnavailable as exc:
+            for src in valid_sources:
+                results.append((src, False, str(exc)))
+            return results
+
         for idx, source_path in enumerate(valid_sources):
             print(f"\n{'=' * 60}")
             print(_("Building: {name}").format(name=source_path.name))
@@ -706,7 +844,7 @@ def run_shared_container_chain(
                 _diagnose_fn=_diagnose_fn,
                 limits=limits,
                 bcond_args=bcond_args,
-                with_network=with_network,
+                net_wrap=net_wrap,
             )
             results.append((src, ok, msg))
             if ok:
