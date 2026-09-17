@@ -1174,6 +1174,8 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --nocheck                     # Salta interamente la sezione %check dello spec (rpmbuild --nocheck).
                               # Tutto o niente: rpm non conosce i test individuali.
                               # I pacchetti prodotti non sono testati.
+-y, --auto                    # Risponde sì alle conferme. L'avviso sulla delega resta visibile,
+                              # la compilazione semplicemente non si ferma più a chiedere.
 --with FEATURE                # Inoltra `--with FEATURE` a rpmbuild (%bcond dello spec). Ripetibile.
 --without FEATURE             # Inoltra `--without FEATURE` a rpmbuild (%bcond dello spec). Ripetibile.
 ```
@@ -1232,6 +1234,28 @@ minuti di test fra due tentativi non portano nulla.
 
 I pacchetti prodotti non sono testati, e urpm lo segnala sulla riga di
 compilazione.  Segnalarlo anche in caso di distribuzione.
+
+#### Delega degli identificatori
+
+Un contenitore senza privilegi può nominare solo gli uid che il suo
+namespace traduce, cioè quanto `/etc/subuid` delega.  shadow-utils ne
+concede 65536 per impostazione predefinita, abbondanti per gli utenti di
+sistema e insufficienti per un `%check`: il `test_posix` di python fa un
+`chown` a 2**31 apposta, per provare i valori grandi.  Oltre l'intervallo
+delegato il kernel risponde EINVAL e la compilazione muore in fondo a una
+suite di test, con un errore che non nomina mai la delega.
+
+`urpm build` verifica questa ampiezza prima di partire e, se è
+insufficiente, mostra i comandi per allargarla e chiede se compilare
+comunque.  `--auto` mostra la stessa raccomandazione senza chiedere; anche
+un'esecuzione senza terminale, dato che una compilazione da script non ha
+nessuno che risponda.
+
+L'allargamento conserva l'inizio dell'intervallo, così immagini e livelli
+già presenti mantengono la proprietà.  La modifica ha effetto tramite
+`podman system migrate`, che esige che nessun contenitore sia attivo: fino
+ad allora il processo pause tiene viva la vecchia mappa, ed è per questo che
+la modifica può sembrare ignorata.
 
 #### Inoltro di bcond a rpmbuild
 

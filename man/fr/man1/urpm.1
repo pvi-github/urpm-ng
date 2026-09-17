@@ -1225,6 +1225,13 @@ noms sans privilèges ne va aussi loin), ou pour raccourcir une itération de
 mise au point. Les paquets produits ne sont pas testés, et urpm le signale
 sur la ligne de compilation.
 .TP
+.BR \-y ", " \-\-auto
+Répond oui aux confirmations. Aujourd'hui il s'agit de l'avertissement sur
+la délégation d'identifiants : la recommandation reste affichée, la
+compilation ne s'arrête simplement plus pour demander. Une exécution sans
+terminal se comporte de même, une compilation scriptée n'ayant personne pour
+répondre.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Passe \fB\-\-with \fIFEATURE\fR\fR à rpmbuild pour que les specs
 utilisant \fB%bcond_with\fR puissent être basculées sans invoquer

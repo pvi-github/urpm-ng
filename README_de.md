@@ -1164,6 +1164,8 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --nocheck                     # Überspringt die %check-Sektion des Spec ganz (rpmbuild --nocheck).
                               # Alles oder nichts: rpm kennt keine einzelnen Tests.
                               # Die erzeugten Pakete sind ungetestet.
+-y, --auto                    # Beantwortet Rückfragen mit ja. Die Warnung zur Delegation wird
+                              # weiterhin angezeigt, der Bau hält nur nicht mehr zum Fragen an.
 --with FEATURE                # Übergibt `--with FEATURE` an rpmbuild (%bcond im Spec). Wiederholbar.
 --without FEATURE             # Übergibt `--without FEATURE` an rpmbuild (%bcond im Spec). Wiederholbar.
 ```
@@ -1222,6 +1224,27 @@ Minuten Testsuite zwischen zwei Versuchen nichts bringen.
 
 Die erzeugten Pakete sind ungetestet, und urpm sagt es in der Bauzeile.  Wer
 sie weitergibt, sollte es ebenfalls sagen.
+
+#### Delegation von Identifikatoren
+
+Ein Container ohne Root-Rechte kann nur die uids benennen, die sein
+User-Namensraum übersetzt, also das, was `/etc/subuid` delegiert.
+shadow-utils vergibt standardmäßig 65536, reichlich für Systembenutzer und
+zu wenig für ein `%check`: pythons `test_posix` chownt absichtlich auf
+2**31, um große Werte zu prüfen.  Jenseits des delegierten Bereichs
+antwortet der Kernel mit EINVAL, und der Bau stirbt tief in einer Testsuite,
+mit einem Fehler, der die Delegation nie erwähnt.
+
+`urpm build` prüft die Breite vor dem Start und zeigt, wenn sie zu klein
+ist, die Befehle zum Erweitern an und fragt, ob trotzdem gebaut werden soll.
+`--auto` zeigt dieselbe Empfehlung und fragt nicht; ein Lauf ohne Terminal
+ebenso, denn ein skriptgesteuerter Bau hat niemanden, der antwortet.
+
+Beim Erweitern bleibt der Bereichsanfang unverändert, damit Images und
+Layer auf der Platte ihre Eigentümer behalten.  Wirksam wird die Änderung
+durch `podman system migrate`, das keinen laufenden Container duldet: bis
+dahin hält der Pause-Prozess die alte Abbildung am Leben, weshalb die
+Bearbeitung ignoriert wirken kann.
 
 #### rpmbuild-bcond-Weitergabe
 

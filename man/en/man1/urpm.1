@@ -1238,6 +1238,12 @@ values, and no rootless user namespace maps that far), or to shorten a
 development iteration. The packages produced are untested, and urpm says so
 on the build line.
 .TP
+.BR \-y ", " \-\-auto
+Answer confirmations yes. Today that means the identifier delegation
+warning: the recommendation is still printed, the build simply does not stop
+to ask. A run with no terminal behaves the same way, since a scripted build
+has nobody to answer.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Pass \fB\-\-with \fIFEATURE\fR\fR to rpmbuild so specs using
 \fB%bcond_with\fR can be flipped without shelling out. Repeatable.

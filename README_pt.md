@@ -1165,6 +1165,8 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --nocheck                     # Salta por completo a secção %check do spec (rpmbuild --nocheck).
                               # Tudo ou nada: o rpm não conhece testes individuais.
                               # Os pacotes produzidos não são testados.
+-y, --auto                    # Responde sim às confirmações. O aviso sobre a delegação continua
+                              # a ser mostrado, a compilação apenas deixa de parar para perguntar.
 --with FEATURE                # Encaminha `--with FEATURE` ao rpmbuild (%bcond do spec). Repetível.
 --without FEATURE             # Encaminha `--without FEATURE` ao rpmbuild (%bcond do spec). Repetível.
 ```
@@ -1223,6 +1225,28 @@ testes entre duas tentativas não trazem nada.
 
 Os pacotes produzidos não são testados, e o urpm avisa na linha de
 compilação.  Avise também se os distribuir.
+
+#### Delegação de identificadores
+
+Um contentor sem privilégios só pode nomear os uid que o seu espaço de nomes
+traduz, ou seja o que o `/etc/subuid` delega.  O shadow-utils concede 65536
+por omissão, de sobra para os utilizadores de sistema e insuficiente para um
+`%check`: o `test_posix` do python faz um `chown` para 2**31 de propósito,
+para exercitar valores grandes.  Para lá do intervalo delegado o núcleo
+responde EINVAL e a compilação morre no fundo de uma suite de testes, num
+erro que nunca menciona a delegação.
+
+O `urpm build` verifica essa largura antes de arrancar e, quando é
+insuficiente, mostra os comandos para a alargar e pergunta se deve compilar
+mesmo assim.  `--auto` mostra a mesma recomendação sem perguntar; uma
+execução sem terminal também, já que uma compilação por guião não tem quem
+responda.
+
+O alargamento mantém o início do intervalo, por isso as imagens e camadas já
+em disco conservam a sua propriedade.  A alteração produz efeito através do
+`podman system migrate`, que exige que nenhum contentor esteja a correr: até
+lá o processo pause mantém o mapa antigo vivo, e é por isso que a edição
+pode parecer ignorada.
 
 #### Encaminhamento de bcond ao rpmbuild
 

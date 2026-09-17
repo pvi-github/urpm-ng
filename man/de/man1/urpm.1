@@ -847,6 +847,12 @@ User-Namensraum reicht so weit), oder um einen Entwicklungsdurchlauf zu
 verkürzen. Die erzeugten Pakete sind ungetestet, und urpm sagt es in der
 Bauzeile.
 .TP
+.BR \-y ", " \-\-auto
+Beantwortet Rückfragen mit ja. Derzeit betrifft das die Warnung zur
+Delegation von Identifikatoren: die Empfehlung wird weiterhin angezeigt, der
+Bau hält nur nicht mehr zum Fragen an. Ein Lauf ohne Terminal verhält sich
+ebenso, denn ein skriptgesteuerter Bau hat niemanden, der antwortet.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Gibt \fB\-\-with \fIFEATURE\fR\fR an rpmbuild weiter, sodass Specs mit
 \fB%bcond_with\fR umgeschaltet werden können, ohne rpmbuild direkt

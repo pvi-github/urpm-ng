@@ -1142,6 +1142,8 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --nocheck                     # Saute entièrement la section %check du spec (rpmbuild --nocheck).
                               # Tout ou rien : rpm ne connaît pas les tests individuels.
                               # Les paquets produits ne sont pas testés.
+-y, --auto                    # Répond oui aux confirmations. L'avertissement sur la délégation
+                              # reste affiché, la compilation ne s'arrête simplement plus pour demander.
 --with FEATURE                # Passe `--with FEATURE` à rpmbuild (%bcond du spec). Répétable.
 --without FEATURE             # Passe `--without FEATURE` à rpmbuild (%bcond du spec). Répétable.
 ```
@@ -1202,6 +1204,28 @@ entre deux essais n'apportent rien.
 
 Les paquets produits ne sont pas testés, et urpm le signale sur la ligne de
 compilation.  Le signaler aussi en cas de diffusion.
+
+#### Délégation d'identifiants
+
+Un conteneur sans privilèges ne peut nommer que les uid que son espace de
+noms sait traduire, c'est-à-dire ce que `/etc/subuid` délègue.  shadow-utils
+en accorde 65536 par défaut, largement assez pour les utilisateurs système
+et pas assez pour un `%check` : le `test_posix` de python fait un `chown`
+vers 2³¹ exprès, pour éprouver les grandes valeurs.  Au-delà de la plage
+déléguée le noyau répond `EINVAL` et la compilation meurt au fond d'une
+suite de tests, sur une erreur qui ne parle jamais de délégation.
+
+`urpm build` vérifie cette largeur avant de démarrer et, si elle est
+insuffisante, affiche les commandes pour l'élargir puis demande s'il faut
+compiler quand même.  `--auto` affiche la même recommandation sans poser la
+question ; une exécution sans terminal aussi, puisqu'une compilation
+scriptée n'a personne pour répondre.
+
+L'élargissement conserve le début de plage, donc les images et couches déjà
+présentes gardent leur propriété.  La modification prend effet via `podman
+system migrate`, qui exige qu'aucun conteneur ne tourne : le processus
+`pause` maintient l'ancienne carte vivante jusque-là, ce qui donne
+l'impression que l'édition a été ignorée.
 
 #### Passage des bcond à rpmbuild
 

@@ -847,6 +847,12 @@ privilegios llega tan lejos), o para acortar una iteración de desarrollo.
 Los paquetes producidos no están probados, y urpm lo indica en la línea de
 compilación.
 .TP
+.BR \-y ", " \-\-auto
+Responde sí a las confirmaciones. Hoy se trata del aviso sobre la delegación
+de identificadores: la recomendación se sigue mostrando, la compilación
+simplemente ya no se detiene a preguntar. Una ejecución sin terminal se
+comporta igual, pues una compilación con guion no tiene quien responda.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Pasa \fB\-\-with \fIFEATURE\fR\fR a rpmbuild para que los specs que
 usan \fB%bcond_with\fR puedan alternarse sin invocar rpmbuild

@@ -848,6 +848,12 @@ privilégios chega tão longe), ou para encurtar uma iteração de
 desenvolvimento. Os pacotes produzidos não são testados, e o urpm avisa na
 linha de compilação.
 .TP
+.BR \-y ", " \-\-auto
+Responde sim às confirmações. Hoje trata-se do aviso sobre a delegação de
+identificadores: a recomendação continua a ser mostrada, a compilação apenas
+deixa de parar para perguntar. Uma execução sem terminal comporta-se do
+mesmo modo, já que uma compilação por guião não tem quem responda.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Encaminha \fB\-\-with \fIFEATURE\fR\fR ao rpmbuild para que specs que
 usam \fB%bcond_with\fR possam ser alternados sem invocar o rpmbuild à

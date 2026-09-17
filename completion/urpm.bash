@@ -470,7 +470,7 @@ _urpm_build() {
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--image -i --output -o --with-rpms -w \
             --runtime --parallel -j --keep-container --no-update \
-            --net-isolation --nocheck" -- "$cur"))
+            --net-isolation --nocheck --auto -y" -- "$cur"))
     else
         _filedir '@(spec|src.rpm)'
     fi

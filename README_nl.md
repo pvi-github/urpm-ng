@@ -1193,6 +1193,8 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --nocheck                     # Slaat de %check-sectie van de spec volledig over (rpmbuild --nocheck).
                               # Alles of niets: rpm kent geen individuele tests.
                               # De geproduceerde pakketten zijn ongetest.
+-y, --auto                    # Beantwoordt bevestigingen met ja. De waarschuwing over de delegatie
+                              # blijft zichtbaar, de bouw stopt alleen niet meer om te vragen.
 --with FEATURE                # Geeft `--with FEATURE` door aan rpmbuild (%bcond in de spec). Herhaalbaar.
 --without FEATURE             # Geeft `--without FEATURE` door aan rpmbuild (%bcond in de spec). Herhaalbaar.
 ```
@@ -1251,6 +1253,28 @@ vijf minuten testsuite tussen twee pogingen niets opleveren.
 
 De geproduceerde pakketten zijn ongetest, en urpm meldt dat op de bouwregel.
 Meld het ook wanneer u ze verspreidt.
+
+#### Delegatie van identificatoren
+
+Een container zonder root-rechten kan alleen de uids benoemen die zijn
+gebruikersnaamruimte vertaalt, dat wil zeggen wat `/etc/subuid` delegeert.
+shadow-utils kent er standaard 65536 toe, ruim voldoende voor
+systeemgebruikers en te weinig voor een `%check`: de `test_posix` van python
+chownt met opzet naar 2**31, om grote waarden te beproeven.  Voorbij het
+gedelegeerde bereik antwoordt de kernel met EINVAL en sterft de bouw diep in
+een testsuite, met een fout die de delegatie nooit noemt.
+
+`urpm build` controleert die breedte voor de start en toont, wanneer ze te
+klein is, de opdrachten om haar te verruimen en vraagt of er toch gebouwd
+moet worden.  `--auto` toont dezelfde aanbeveling en vraagt niets; een run
+zonder terminal evenmin, want een gescripte bouw heeft niemand die
+antwoordt.
+
+Verruimen laat het begin van het bereik staan, zodat images en lagen die al
+op schijf staan hun eigenaar behouden.  De wijziging wordt van kracht via
+`podman system migrate`, dat geen draaiende container duldt: tot dan houdt
+het pause-proces de oude afbeelding in leven, en daarom kan de bewerking
+genegeerd lijken.
 
 #### rpmbuild-bcond doorgeven
 

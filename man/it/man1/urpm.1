@@ -1232,6 +1232,13 @@ arriva così lontano), oppure per accorciare un'iterazione di messa a punto.
 I pacchetti prodotti non sono testati, e urpm lo segnala sulla riga di
 compilazione.
 .TP
+.BR \-y ", " \-\-auto
+Risponde sì alle conferme. Oggi si tratta dell'avviso sulla delega degli
+identificatori: la raccomandazione resta visibile, la compilazione
+semplicemente non si ferma più a chiedere. Un'esecuzione senza terminale si
+comporta allo stesso modo, dato che una compilazione da script non ha
+nessuno che risponda.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Inoltra \fB\-\-with \fIFEATURE\fR\fR a rpmbuild affinché gli spec che
 usano \fB%bcond_with\fR possano essere commutati senza invocare

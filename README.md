@@ -1211,6 +1211,8 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --nocheck                     # Skip the spec's %check section entirely (rpmbuild --nocheck).
                               # All or nothing: rpm has no notion of an individual test.
                               # The packages produced are untested.
+-y, --auto                    # Answer confirmations yes. The delegation warning is still
+                              # printed, the build just does not stop to ask.
 --with FEATURE                # Pass `--with FEATURE` to rpmbuild (spec %bcond).  Repeatable.
 --without FEATURE             # Pass `--without FEATURE` to rpmbuild (spec %bcond).  Repeatable.
 ```
@@ -1266,6 +1268,25 @@ nothing.
 
 The packages produced are untested, and urpm says so on the build line.  Say
 it too if you ship them.
+
+#### Identifier delegation
+
+A rootless container can only name the uids its user namespace translates,
+and that is what `/etc/subuid` delegates.  shadow-utils grants 65536 by
+default, which is plenty for system users and not enough for a `%check`:
+python's `test_posix` chowns to 2**31 on purpose, to exercise large values.
+Past the delegated range the kernel answers EINVAL and the build dies deep
+inside a test suite, on an error that never mentions delegation.
+
+`urpm build` checks the width before starting and, when it is too narrow,
+prints the commands to widen it and asks whether to build anyway.  `--auto`
+prints the same recommendation and does not ask; so does a run with no
+terminal, since a scripted build has nobody to answer.
+
+Widening keeps the range start where it is, so images and layers already on
+disk keep their ownership.  The change takes effect through `podman system
+migrate`, which needs no container running: the pause process holds the old
+map alive until then, which is why the edit can look ignored.
 
 #### rpmbuild bcond passthrough
 

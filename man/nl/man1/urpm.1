@@ -846,6 +846,12 @@ gebruikersnaamruimte zonder root-rechten reikt zo ver), of om een
 ontwikkelronde te bekorten. De geproduceerde pakketten zijn ongetest, en urpm
 meldt dat op de bouwregel.
 .TP
+.BR \-y ", " \-\-auto
+Beantwoordt bevestigingen met ja. Vandaag betreft dat de waarschuwing over
+de delegatie van identificatoren: de aanbeveling blijft zichtbaar, de bouw
+stopt alleen niet meer om te vragen. Een run zonder terminal gedraagt zich
+net zo, want een gescripte bouw heeft niemand die antwoordt.
+.TP
 .BR \-\-with " " \fIFEATURE\fR
 Geeft \fB\-\-with \fIFEATURE\fR\fR door aan rpmbuild zodat specs met
 \fB%bcond_with\fR gewisseld kunnen worden zonder rpmbuild rechtstreeks

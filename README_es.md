@@ -1159,6 +1159,8 @@ urpm build -i mageia:10-build --rpmmacros ./my-macros SPECS/foo.spec
 --nocheck                     # Salta por completo la sección %check del spec (rpmbuild --nocheck).
                               # Todo o nada: rpm no conoce los tests individuales.
                               # Los paquetes producidos no están probados.
+-y, --auto                    # Responde sí a las confirmaciones. El aviso sobre la delegación
+                              # se sigue mostrando, la compilación ya no se detiene a preguntar.
 --with FEATURE                # Pasa `--with FEATURE` a rpmbuild (%bcond del spec). Repetible.
 --without FEATURE             # Pasa `--without FEATURE` a rpmbuild (%bcond del spec). Repetible.
 ```
@@ -1217,6 +1219,27 @@ nada.
 
 Los paquetes producidos no están probados, y urpm lo indica en la línea de
 compilación.  Indíquelo también si los distribuye.
+
+#### Delegación de identificadores
+
+Un contenedor sin privilegios solo puede nombrar los uid que su espacio de
+nombres traduce, es decir lo que delega `/etc/subuid`.  shadow-utils concede
+65536 por defecto, de sobra para los usuarios del sistema e insuficiente
+para un `%check`: el `test_posix` de python hace un `chown` a 2**31 a
+propósito, para probar valores grandes.  Más allá del rango delegado el
+núcleo responde EINVAL y la compilación muere en el fondo de una batería de
+pruebas, con un error que nunca menciona la delegación.
+
+`urpm build` comprueba esa anchura antes de empezar y, si es insuficiente,
+muestra las órdenes para ampliarla y pregunta si compilar de todos modos.
+`--auto` muestra la misma recomendación sin preguntar; una ejecución sin
+terminal también, ya que una compilación con guion no tiene quien responda.
+
+La ampliación conserva el inicio del rango, así las imágenes y capas ya
+presentes mantienen su propiedad.  El cambio surte efecto mediante `podman
+system migrate`, que exige que ningún contenedor esté en marcha: hasta
+entonces el proceso pause mantiene viva la vieja tabla, y por eso la edición
+puede parecer ignorada.
 
 #### Paso de bcond a rpmbuild
 
