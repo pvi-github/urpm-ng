@@ -4,6 +4,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -1122,6 +1123,47 @@ def _cleanup_chroot_for_image(root: str):
             pass
 
 
+def _confirm_id_delegation(auto: bool) -> bool:
+    """Check the id delegation is wide enough, and let the user decide.
+
+    A build in a rootless container can only name the uids its user
+    namespace translates.  Too narrow a delegation does not fail the
+    build outright — most specs never go near the limit — so this is a
+    warning and a question, not a refusal.
+
+    Returns True to go on building.  ``--auto`` still prints the
+    recommendation, it only skips the question ; so does a
+    non-interactive run, since a scripted build has nobody to answer
+    and must not hang on a prompt.
+    """
+    from .. import colors
+    from ...i18n import confirm_yes
+    from ...core.userns import (
+        format_build_range_warning,
+        probe_current_user,
+    )
+
+    capability = probe_current_user()
+    if capability.wide_enough_for_build:
+        return True
+
+    print(colors.warning(format_build_range_warning(capability)))
+
+    if auto or not sys.stdin.isatty():
+        print(colors.dim(_("Continuing anyway.")))
+        return True
+
+    try:
+        answer = input("\n" + _("Build anyway? [y/N] "))
+    except (EOFError, OSError):
+        print(_("\nAborted"))
+        return False
+    if confirm_yes(answer):
+        return True
+    print(_("Aborted"))
+    return False
+
+
 def cmd_build(args, db: 'PackageDatabase') -> int:
     """Build RPM package(s) in isolated containers."""
     import glob as globmod
@@ -1145,6 +1187,11 @@ def cmd_build(args, db: 'PackageDatabase') -> int:
     if getattr(args, 'with_network', False):
         net_isolation = 'off'
     nocheck = getattr(args, 'nocheck', False)
+    auto = getattr(args, 'auto', False)
+
+    if not _confirm_id_delegation(auto):
+        return 1
+
     # Media scoping for this build only.  Identifiers are passed to
     # the container verbatim : it has its own database and its own
     # media, so host-side resolution would be meaningless here.

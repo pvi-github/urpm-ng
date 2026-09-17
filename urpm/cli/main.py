@@ -1119,6 +1119,13 @@ Examples:
         help=_('Alias for --net-isolation=off, kept for compatibility.')
     )
     build_parser.add_argument(
+        '--auto', '-y',
+        action='store_true',
+        help=_('Answer every confirmation yes. Today that means the id '
+               'delegation warning: the recommendation is still printed, '
+               'the build just no longer stops to ask.')
+    )
+    build_parser.add_argument(
         '--nocheck',
         action='store_true',
         help=_('Skip the spec\'s %%check section entirely (passed to '
