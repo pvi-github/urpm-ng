@@ -440,15 +440,20 @@ List configured media.
 .TP
 .B add \fIurl\fR " " \fR[\fIoptions\fR]
 Add a new media. For official Mageia URLs, name and short name are
-auto-detected. For custom or third-party media, use
-\fB\-\-custom \fIname\fR \fIshort_name\fR\fR.
+auto-detected. For custom or third-party media, pass
+\fB\-\-custom\fR.
 .RS
 .TP
-.B \-\-custom \fIname\fR \fIshort_name\fR
-Add as custom media with display name and short identifier.
+.B \-\-custom
+Add as custom media. The URL stays the only positional argument; the
+display name and the short identifier are derived from it unless
+\fB\-\-name\fR and \fB\-\-shortname\fR say otherwise.
 .TP
 .B \-\-name \fIname\fR
-Legacy mode for non-Mageia URLs without \fB\-\-custom\fR.
+Explicit display name, replacing the one derived from the URL.
+.TP
+.B \-\-shortname \fIshort_name\fR
+Explicit short identifier, replacing the one derived from the URL.
 .TP
 .B \-\-update
 Mark as an update media.

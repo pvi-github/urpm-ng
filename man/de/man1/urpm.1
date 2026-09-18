@@ -358,8 +358,42 @@ Verwaltet Medienquellen. Ohne Unterbefehl werden die Medien aufgelistet.
 .B list
 Listet konfigurierte Medien auf.
 .TP
-.B add \fIName\fR \fIURL\fR
-Fügt ein neues Medium hinzu.
+.B add \fIURL\fR " " \fR[\fIOptionen\fR]
+Fügt ein neues Medium hinzu. Bei offiziellen Mageia-URLs werden Name und
+Kurzname erkannt. Für eigene Medien oder Drittanbieter
+\fB\-\-custom\fR angeben.
+.RS
+.TP
+.B \-\-custom
+Fügt als eigenes Medium hinzu. Die URL bleibt das einzige
+Positionsargument; Anzeigename und Kurzbezeichner werden daraus
+abgeleitet, sofern nicht \fB\-\-name\fR und \fB\-\-shortname\fR
+etwas anderes sagen.
+.TP
+.B \-\-name \fIName\fR
+Expliziter Anzeigename, anstelle des aus der URL abgeleiteten.
+.TP
+.B \-\-shortname \fIKurzname\fR
+Expliziter Kurzbezeichner, anstelle des aus der URL abgeleiteten.
+.TP
+.B \-\-update
+Als Aktualisierungsmedium markieren.
+.TP
+.B \-\-disabled
+Hinzufügen, aber deaktiviert lassen.
+.TP
+.B \-\-import\-key
+Importiert den vom Medium angekündigten GPG-Schlüssel.
+.TP
+.B \-\-allow\-unsigned
+Erlaubt unsignierte Pakete (nur eigene Medien).
+.TP
+.B \-\-version \fIVer\fR
+Ziel-Mageia-Version für eigene Medien (9, 10, cauldron, ...).
+.TP
+.BR \-y ", " \-\-auto
+Nicht-interaktiver Modus.
+.RE
 .TP
 .B remove \fIName\fR ...
 Entfernt eines oder mehrere Medien. Server, deren Medienliste nach

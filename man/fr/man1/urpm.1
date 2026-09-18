@@ -443,15 +443,19 @@ Liste les médias configurés.
 .B add \fIurl\fR " " \fR[\fIoptions\fR]
 Ajoute un nouveau média. Pour les URL Mageia officielles, le nom et le
 nom court sont auto-détectés. Pour des médias personnalisés ou tiers,
-utilisez \fB\-\-custom \fInom\fR \fInom_court\fR\fR.
+passez \fB\-\-custom\fR.
 .RS
 .TP
-.B \-\-custom \fInom\fR \fInom_court\fR
-Ajoute en tant que média personnalisé avec un nom d'affichage et un
-identifiant court.
+.B \-\-custom
+Ajoute en tant que média personnalisé. L'URL reste le seul argument
+positionnel ; le nom d'affichage et l'identifiant court en sont déduits,
+sauf si \fB\-\-name\fR et \fB\-\-shortname\fR en décident autrement.
 .TP
 .B \-\-name \fInom\fR
-Mode legacy pour les URL non-Mageia sans \fB\-\-custom\fR.
+Nom d'affichage explicite, en remplacement de celui déduit de l'URL.
+.TP
+.B \-\-shortname \fInom_court\fR
+Identifiant court explicite, en remplacement de celui déduit de l'URL.
 .TP
 .B \-\-update
 Marque comme média de mise à jour.

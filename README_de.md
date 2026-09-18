@@ -622,7 +622,8 @@ neuen Identität abzuholen.
 ```bash
 urpm media list               # Konfigurierte Medien auflisten
 urpm media add <url>          # Ein offizielles Mageia-Medium hinzufügen (auto-parsed)
-urpm media add --custom "Name" kurzname <url>  # Ein eigenes / Drittanbieter-Medium hinzufügen
+urpm media add --custom <url>                   # Ein eigenes / Drittanbieter-Medium hinzufügen
+urpm media add --custom <url> --name "Name" --shortname kurz  # Abgeleitete Namen überschreiben
 urpm media remove <name>...   # Ein oder mehrere Medien entfernen
 urpm media remove --all       # JEDES konfigurierte Medium entfernen (fragt nach
                               # Bestätigung; mit -y/--auto überspringen).
@@ -731,7 +732,7 @@ Beispiele:
 urpm media add https://ftp.belnet.be/mageia/distrib/9/x86_64/media/core/release/
 
 # Drittanbieter-Medium hinzufügen
-urpm media add --custom "RPM Fusion" rpmfusion https://download1.rpmfusion.org/free/fedora/40/x86_64/os/
+urpm media add --custom https://download1.rpmfusion.org/free/fedora/40/x86_64/os/ --name "RPM Fusion" --shortname rpmfusion
 ```
 
 ## Server-Verwaltung

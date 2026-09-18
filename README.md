@@ -626,7 +626,8 @@ metadata.
 ```bash
 urpm media list               # List configured media
 urpm media add <url>          # Add official Mageia media (auto-parsed)
-urpm media add --custom "Name" shortname <url>  # Add custom/third-party media
+urpm media add --custom <url>                    # Add custom/third-party media
+urpm media add --custom <url> --name "Name" --shortname short  # Override the derived names
 urpm media remove <name>...   # Remove one or more media sources
 urpm media remove --all       # Remove EVERY configured media (asks for
                               # confirmation; add -y/--auto to skip it).
@@ -737,7 +738,7 @@ Examples:
 urpm media add https://ftp.belnet.be/mageia/distrib/9/x86_64/media/core/release/
 
 # Add custom third-party media
-urpm media add --custom "RPM Fusion" rpmfusion https://download1.rpmfusion.org/free/fedora/40/x86_64/os/
+urpm media add --custom https://download1.rpmfusion.org/free/fedora/40/x86_64/os/ --name "RPM Fusion" --shortname rpmfusion
 ```
 
 ## Server Management

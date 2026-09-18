@@ -359,8 +359,43 @@ Gestióna las fuentes de medios. Sin subcomando, lista los medios.
 .B list
 Lista los medios configurados.
 .TP
-.B add \fInombre\fR \fIurl\fR
-Añade un nuevo medio.
+.B add \fIurl\fR " " \fR[\fIopciones\fR]
+Añade un nuevo medio. Para las URL oficiales de Mageia, el nombre y el
+nombre corto se detectan solos. Para medios propios o de terceros, pase
+\fB\-\-custom\fR.
+.RS
+.TP
+.B \-\-custom
+Añade como medio personalizado. La URL sigue siendo el único argumento
+posicional; el nombre de visualización y el identificador corto se
+deducen de ella, salvo que \fB\-\-name\fR y \fB\-\-shortname\fR
+digan otra cosa.
+.TP
+.B \-\-name \fInombre\fR
+Nombre de visualización explícito, en lugar del deducido de la URL.
+.TP
+.B \-\-shortname \fInombre_corto\fR
+Identificador corto explícito, en lugar del deducido de la URL.
+.TP
+.B \-\-update
+Marcar como medio de actualizaciones.
+.TP
+.B \-\-disabled
+Añadir pero dejar desactivado.
+.TP
+.B \-\-import\-key
+Importa la clave GPG anunciada por el medio.
+.TP
+.B \-\-allow\-unsigned
+Permite paquetes sin firmar (solo medios personalizados).
+.TP
+.B \-\-version \fIver\fR
+Versión de Mageia objetivo para medios personalizados (9, 10,
+cauldron, ...).
+.TP
+.BR \-y ", " \-\-auto
+Modo no interactivo.
+.RE
 .TP
 .B remove \fInombre\fR ...
 Elimina uno o varios medios. Todo servidor cuya lista de medios

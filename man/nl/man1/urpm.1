@@ -361,8 +361,41 @@ Beheer mediabronnen. Zonder subcommando worden media weergegeven.
 .B list
 Lijst geconfigureerde media.
 .TP
-.B add \fInaam\fR \fIurl\fR
-Voeg een nieuw medium toe.
+.B add \fIurl\fR " " \fR[\fIopties\fR]
+Voeg een nieuw medium toe. Bij officiële Mageia-URL's worden naam en
+kortnaam automatisch herkend. Geef voor eigen media of media van derden
+\fB\-\-custom\fR mee.
+.RS
+.TP
+.B \-\-custom
+Voegt toe als eigen medium. De URL blijft het enige positionele
+argument; de weergavenaam en de korte aanduiding worden eruit afgeleid,
+tenzij \fB\-\-name\fR en \fB\-\-shortname\fR anders bepalen.
+.TP
+.B \-\-name \fInaam\fR
+Expliciete weergavenaam, in plaats van de uit de URL afgeleide.
+.TP
+.B \-\-shortname \fIkortnaam\fR
+Expliciete korte aanduiding, in plaats van de uit de URL afgeleide.
+.TP
+.B \-\-update
+Markeer als updatemedium.
+.TP
+.B \-\-disabled
+Toevoegen maar uitgeschakeld laten.
+.TP
+.B \-\-import\-key
+Importeert de door het medium aangekondigde GPG-sleutel.
+.TP
+.B \-\-allow\-unsigned
+Staat niet-ondertekende pakketten toe (alleen eigen media).
+.TP
+.B \-\-version \fIver\fR
+Doel-Mageia-versie voor eigen media (9, 10, cauldron, ...).
+.TP
+.BR \-y ", " \-\-auto
+Niet-interactieve modus.
+.RE
 .TP
 .B remove \fInaam\fR ...
 Verwijder één of meerdere media. Elke server waarvan de medialijst

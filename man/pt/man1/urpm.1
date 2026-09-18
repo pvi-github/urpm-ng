@@ -358,8 +358,43 @@ Gere as fontes de media. Sem subcomando, lista os media.
 .B list
 Lista os media configurados.
 .TP
-.B add \fInome\fR \fIurl\fR
-Adiciona um novo media.
+.B add \fIurl\fR " " \fR[\fIopções\fR]
+Adiciona um novo media. Para os URL oficiais da Mageia, o nome e o nome
+curto são detectados automaticamente. Para medias personalizados ou de
+terceiros, passe \fB\-\-custom\fR.
+.RS
+.TP
+.B \-\-custom
+Adiciona como media personalizado. O URL continua a ser o único
+argumento posicional; o nome de apresentação e o identificador curto são
+dele deduzidos, salvo se \fB\-\-name\fR e \fB\-\-shortname\fR
+disserem outra coisa.
+.TP
+.B \-\-name \fInome\fR
+Nome de apresentação explícito, em vez do deduzido do URL.
+.TP
+.B \-\-shortname \fInome_curto\fR
+Identificador curto explícito, em vez do deduzido do URL.
+.TP
+.B \-\-update
+Marcar como media de actualizações.
+.TP
+.B \-\-disabled
+Adicionar mas deixar desactivado.
+.TP
+.B \-\-import\-key
+Importa a chave GPG anunciada pelo media.
+.TP
+.B \-\-allow\-unsigned
+Permite pacotes não assinados (apenas medias personalizados).
+.TP
+.B \-\-version \fIver\fR
+Versão da Mageia visada para medias personalizados (9, 10,
+cauldron, ...).
+.TP
+.BR \-y ", " \-\-auto
+Modo não interactivo.
+.RE
 .TP
 .B remove \fInome\fR ...
 Remove um ou vários medias. Todo servidor cuja lista de medias

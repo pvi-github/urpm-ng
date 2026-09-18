@@ -822,8 +822,10 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     Supports two modes:
     1. Official Mageia media: urpm media add <url>
        Auto-parses URL to extract version, arch, class, type
-    2. Custom media: urpm media add --custom <name> <short_name> <url>
-       User provides name and short_name explicitly
+    2. Custom media: urpm media add --custom <url>
+       ``--name`` and ``--shortname`` are optional overrides; left out,
+       both are derived from the URL.  The URL is the only positional
+       this command takes.
 
     Uses v8 schema with server/media/server_media tables.
     Falls back to legacy mode if URL parsing fails.
@@ -904,7 +906,9 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
                 return 1
             print(colors.error(_("Error: URL not recognized as official Mageia media")))
             print(_("For official media, URL must contain: .../version/arch/media/class/type/"))
-            print(_("For custom media, use: urpm media add --custom <name> <short_name> <url>"))
+            print(_("For custom media, use: urpm media add --custom <url>\n"
+                "  (--name and --shortname are optional; both are derived from\n"
+                "  the URL when left out)"))
             return 1
 
         # ``--name`` is the user's explicit override.  Previously it was
@@ -1034,7 +1038,9 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     except MediaTreeFetchError as exc:
         print(colors.error(_("Error: URL not recognized as a media tree.")))
         print(_("For official media, URL must contain: .../version/arch/media/class/type/"))
-        print(_("For custom media, use: urpm media add --custom <name> <short_name> <url>"))
+        print(_("For custom media, use: urpm media add --custom <url>\n"
+                "  (--name and --shortname are optional; both are derived from\n"
+                "  the URL when left out)"))
         print(colors.dim(f"  {exc}"))
         return 1
     except MediaTreeAttributeError as exc:

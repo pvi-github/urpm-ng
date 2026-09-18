@@ -631,7 +631,8 @@ nieuwe identiteit op te halen.
 ```bash
 urpm media list               # Geconfigureerde media opsommen
 urpm media add <url>          # Een officieel Mageia-medium toevoegen (auto-parsed)
-urpm media add --custom "Naam" kortnaam <url>  # Een eigen/derdenmedium toevoegen
+urpm media add --custom <url>                   # Een eigen/derdenmedium toevoegen
+urpm media add --custom <url> --name "Naam" --shortname kort  # De afgeleide namen overschrijven
 urpm media remove <naam>...   # Eén of meerdere media verwijderen
 urpm media remove --all       # ELK geconfigureerd medium verwijderen (vraagt om
                               # bevestiging; met -y/--auto sla je die over).
@@ -741,7 +742,7 @@ Voorbeelden:
 urpm media add https://ftp.belnet.be/mageia/distrib/9/x86_64/media/core/release/
 
 # Custom derdenmedium toevoegen
-urpm media add --custom "RPM Fusion" rpmfusion https://download1.rpmfusion.org/free/fedora/40/x86_64/os/
+urpm media add --custom https://download1.rpmfusion.org/free/fedora/40/x86_64/os/ --name "RPM Fusion" --shortname rpmfusion
 ```
 
 ## Serverbeheer

@@ -450,15 +450,20 @@ Elenca i media configurati.
 .B add \fIurl\fR " " \fR[\fIopzioni\fR]
 Aggiunge un nuovo media. Per gli URL Mageia ufficiali, il nome e il nome
 breve vengono rilevati automaticamente. Per i media personalizzati o di
-terze parti utilizzare \fB\-\-custom \fInome\fR \fInome_breve\fR\fR.
+terze parti passare \fB\-\-custom\fR.
 .RS
 .TP
-.B \-\-custom \fInome\fR \fInome_breve\fR
-Aggiunge come media personalizzato con nome visualizzato e identificatore
-breve.
+.B \-\-custom
+Aggiunge come media personalizzato. La URL resta l'unico argomento
+posizionale; il nome visualizzato e l'identificatore breve ne sono
+dedotti, salvo che \fB\-\-name\fR e \fB\-\-shortname\fR dicano
+altrimenti.
 .TP
 .B \-\-name \fInome\fR
-Modalità legacy per URL non Mageia senza \fB\-\-custom\fR.
+Nome visualizzato esplicito, al posto di quello dedotto dalla URL.
+.TP
+.B \-\-shortname \fInome_breve\fR
+Identificatore breve esplicito, al posto di quello dedotto dalla URL.
 .TP
 .B \-\-update
 Marca come media di aggiornamento.
