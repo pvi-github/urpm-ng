@@ -83,6 +83,15 @@ Installa uno o più pacchetti.
 rollback dell'intera transazione. Utilizzare \fB\-\-no\-atomic\fR per
 passare alla modalità best-effort. Vedi \fBTRANSAZIONI PARZIALI\fR più
 avanti.
+.PP
+È accettata anche una URL \fBhttp\fR, \fBhttps\fR o \fBftp\fR che
+finisce in \fB.rpm\fR, mescolata liberamente a nomi di pacchetti e file
+locali. Il pacchetto viene recuperato in
+\fI/var/lib/urpm/downloads/\fR, accanto alla cache dei media e mai
+dentro, poi trattato esattamente come un file locale: intestazione letta,
+firma verificata salvo \fB\-\-nosignature\fR, dipendenze risolte dai
+media configurati. È cache, quindi \fBurpm cache flush\fR lo spazza e
+\fBurpm cache clean\fR lo conta come orfano.
 .RS
 .TP
 .BR \-y ", " \-\-auto
@@ -1141,6 +1150,17 @@ Runtime del container (predefinito: rilevamento automatico).
 Compila pacchetti RPM in container isolati. I metadati dei media e i
 pacchetti installati nel container vengono aggiornati automaticamente
 prima della compilazione.
+.PP
+Prima di partire viene verificata la delega degli identificatori. Un
+contenitore senza privilegi può nominare solo gli uid che il suo namespace
+traduce, e \fI/etc/subuid\fR ne delega 65536 per impostazione predefinita:
+abbondanti per gli utenti di sistema, insufficienti per un \fB%check\fR, che
+è codice ordinario e può nominare qualsiasi uid accettato dal kernel. Oltre,
+il kernel risponde EINVAL e la compilazione muore in fondo a una suite di
+test. Se l'intervallo è troppo stretto, urpm nomina la riga esatta di
+\fI/etc/subuid\fR da sostituire, fornisce i comandi per una shell di root e
+chiede se compilare comunque. \fB\-\-auto\fR mostra la stessa
+raccomandazione senza chiedere.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR

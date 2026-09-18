@@ -80,13 +80,40 @@ Ablehnungsbegründung pro Paket im best-effort-Modus vollständig angezeigt.
 .TP
 .B i|install \fIPaket\fR ...
 Installiert ein oder mehrere Pakete.
+.PP
+Eine \fBhttp\fR\-, \fBhttps\fR\- oder \fBftp\fR\-URL, die auf
+\fB.rpm\fR endet, wird ebenfalls angenommen, frei gemischt mit
+Paketnamen und lokalen Dateien. Das Paket wird nach
+\fI/var/lib/urpm/downloads/\fR geholt, neben dem Medien-Cache und niemals
+darin, und dann genau wie eine lokale Datei behandelt: Header gelesen,
+Signatur geprüft außer bei \fB\-\-nosignature\fR, Abhängigkeiten aus
+den konfigurierten Medien gelöst. Es ist Cache, also erfasst es
+\fBurpm cache flush\fR und \fBurpm cache clean\fR zählt es als Waise.
 .RS
 .TP
 .BR \-y ", " \-\-auto
 Keine Bestätigung erforderlich.
 .TP
+.B \-\-test
+Simulation (Trockenlauf).
+.TP
+.B \-\-no\-atomic
+Best-effort-Modus: installiert, was installierbar ist, und listet die
+ausgelassenen Pakete mit Begründung auf (Exit 2 bei Teilerfolg).
+Standard ist atomar.
+.TP
+.B \-\-reinstall
+Installiert bereits installierte Pakete neu (Reparatur).
+.TP
+.B \-\-force
+Erzwingt die Installation trotz Abhängigkeitsproblemen oder Konflikten.
+.TP
 .B \-\-download\-only
 Pakete herunterladen, ohne sie zu installieren.
+.TP
+.B \-\-nodeps
+Überspringt die Abhängigkeitsauflösung (mit
+\fB\-\-download\-only\fR zu verwenden).
 .TP
 .B \-\-without\-recommends
 Empfohlene Pakete nicht installieren.
@@ -94,8 +121,36 @@ Empfohlene Pakete nicht installieren.
 .B \-\-with\-suggests
 Auch vorgeschlagene Pakete installieren.
 .TP
+.B \-\-all
+Installiert alle passenden Familien gleichzeitig (z. B. php8.4 und
+php8.5, wenn beide die gewünschte Fähigkeit bereitstellen).
+.TP
+.B \-\-no\-peers
+Deaktiviert den P2P-Download von LAN-Nachbarn.
+.TP
 .B \-\-only\-peers
 Nur von LAN-Peers herunterladen, keine Upstream-Spiegel verwenden.
+.TP
+.B \-\-noscripts
+Überspringt die pre/post-Install-Scriptlets (chroot/Container-Bauten).
+.TP
+.B \-\-nosignature
+Überspringt die GPG-Signaturprüfung (nicht empfohlen).
+.TP
+.B \-\-config\-policy " " \fBkeep\fR|\fBreplace\fR|\fBask\fR
+Umgang mit Konflikten in Konfigurationsdateien. Standard \fBkeep\fR
+behält die vorhandenen Dateien (\fI.rpmnew\fR für die Paketversion),
+\fBreplace\fR nimmt die Paketversion (\fI.rpmsave\fR für die lokale),
+\fBask\fR fragt bei jedem Konflikt.
+.TP
+.B \-\-install\-src
+Installiert ein Quell-RPM: entpackt dessen \fI.spec\fR und Quellen
+nach \fI~/rpmbuild/\fR.
+.TP
+.B \-\-prefer " " \fIprefs\fR
+Kommagetrennte Präferenzen für Alternativen (z. B.
+\fIphp:8.4,nginx,-apache-mod_php\fR). Siehe \fBPREFERENCES\fR in der
+README.
 .TP
 .BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
 Build-Abhängigkeiten aus einer Spec-Datei oder SRPM installieren. Automatische Erkennung, wenn keine Datei angegeben.
@@ -759,6 +814,17 @@ Container-Laufzeitumgebung (Standard: automatische Erkennung).
 .B build \fB\-\-image\fR \fITag\fR \fIQuelle\fR ...
 RPM-Pakete in isolierten Containern bauen. Medien-Metadaten und installierte Pakete
 im Container werden vor dem Build automatisch aktualisiert.
+.PP
+Vor dem Start wird die Delegation von Identifikatoren geprüft. Ein Container
+ohne Root-Rechte kann nur die uids benennen, die sein User-Namensraum
+übersetzt, und \fI/etc/subuid\fR delegiert standardmäßig 65536: reichlich
+für Systembenutzer, zu wenig für ein \fB%check\fR, das gewöhnlicher Code ist
+und jede vom Kernel akzeptierte uid benennen darf. Darüber hinaus antwortet
+der Kernel mit EINVAL und der Bau stirbt tief in einer Testsuite. Ist der
+Bereich zu schmal, nennt urpm die genaue zu ersetzende Zeile in
+\fI/etc/subuid\fR, gibt die Befehle für eine Root-Shell und fragt, ob
+trotzdem gebaut werden soll. \fB\-\-auto\fR zeigt dieselbe Empfehlung
+ohne Rückfrage.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fITag\fR

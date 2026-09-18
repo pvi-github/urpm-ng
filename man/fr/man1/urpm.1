@@ -84,6 +84,15 @@ Installe un ou plusieurs paquets.
 est atomique par défaut : tout échec annule la transaction entière.
 Utilisez \fB\-\-no\-atomic\fR pour passer en mode best-effort. Voir la
 section \fBTRANSACTIONS PARTIELLES\fR ci-dessous.
+.PP
+Une URL \fBhttp\fR, \fBhttps\fR ou \fBftp\fR finissant par \fB.rpm\fR
+est acceptée aussi, mélangée librement aux noms de paquets et aux fichiers
+locaux. Le paquet est récupéré dans \fI/var/lib/urpm/downloads/\fR, à côté
+du cache des médias et jamais dedans, puis traité exactement comme un
+fichier local : lecture d'en-tête, signature vérifiée sauf
+\fB\-\-nosignature\fR, dépendances résolues depuis les médias
+configurés. C'est du cache, donc \fBurpm cache flush\fR le balaie et
+\fBurpm cache clean\fR le compte comme orphelin.
 .RS
 .TP
 .BR \-y ", " \-\-auto
@@ -1136,6 +1145,17 @@ Runtime conteneur (défaut: auto-détection).
 .B build \fB\-\-image\fR \fItag\fR \fIsource\fR ...
 Compiler des paquets RPM dans des conteneurs isolés. Les métadonnées des médias et
 les paquets installés dans le conteneur sont automatiquement mis à jour avant la compilation.
+.PP
+Avant de démarrer, la délégation d'identifiants est vérifiée. Un conteneur
+sans privilèges ne peut nommer que les uid que son espace de noms sait
+traduire, et \fI/etc/subuid\fR en délègue 65536 par défaut : largement assez
+pour les utilisateurs système, trop peu pour un \fB%check\fR, qui est du code
+ordinaire et peut nommer n'importe quel uid accepté par le noyau. Au-delà, le
+noyau répond EINVAL et la compilation meurt au fond d'une suite de tests. Si
+la plage est trop étroite, urpm nomme la ligne exacte de \fI/etc/subuid\fR à
+remplacer, donne les commandes pour un shell root, et demande s'il faut
+compiler quand même. \fB\-\-auto\fR affiche la même recommandation sans
+poser la question.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR

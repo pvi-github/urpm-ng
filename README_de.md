@@ -276,6 +276,30 @@ urpm i <paket>                # Kurzalias
 --sync                        # Auf vollständigen Abschluss warten (Post-Install-Trigger)
 ```
 
+#### Installation von einer URL
+
+`urpm install` nimmt eine `http`-, `https`- oder `ftp`-URL an, die auf
+`.rpm` endet, neben Paketnamen und lokalen Dateien, in beliebiger
+Mischung.  Das Paket wird zuerst geholt und dann genau wie eine schon
+vorhandene Datei behandelt: Header gelesen, Signatur geprüft außer bei
+`--nosignature`, Abhängigkeiten aus den konfigurierten Medien gelöst.
+
+Die Datei landet in `/var/lib/urpm/downloads/`, neben `medias/` und
+niemals darin.  Jener Baum spiegelt Medium für Medium einen entfernten,
+und jede Datei darin soll etwas entsprechen, das ihr Spiegel ausliefert;
+ein per URL benanntes Paket gehört zu keinem Medium.  Cache ist es
+dennoch, also erfasst es `urpm cache flush` und `urpm cache clean` zählt
+es als Waise, da kein Medium es beansprucht.
+
+`--install-src` nimmt ebenfalls eine URL, ein `.src.rpm` lässt sich also direkt
+von einem Server entpacken.
+
+Abhängigkeiten werden nicht neben der URL gesucht.  Bei einer lokalen
+Datei wird das Nachbarverzeichnis nach Kandidaten durchsucht; ein
+entferntes Gegenstück gibt es nicht, was das Paket braucht, muss also
+aus den Medien kommen.
+
+
 #### Präferenzgesteuerte Installation
 
 Beim Installieren von Paketen mit Alternativen (z. B. phpmyadmin, das verschiedene PHP-Versionen und Webserver nutzen kann) steuere die Wahl mit `--prefer`:

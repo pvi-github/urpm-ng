@@ -79,13 +79,42 @@ expande la razón de descarte por paquete en modo best-effort.
 .TP
 .B i|install \fIpaquete\fR ...
 Instala uno o más paquetes.
+.PP
+También se acepta una URL \fBhttp\fR, \fBhttps\fR o \fBftp\fR que
+termine en \fB.rpm\fR, mezclada libremente con nombres de paquetes y
+ficheros locales. El paquete se obtiene en
+\fI/var/lib/urpm/downloads/\fR, al lado de la caché de medios y nunca
+dentro, y luego se trata exactamente como un fichero local: cabecera
+leída, firma verificada salvo con \fB\-\-nosignature\fR, dependencias
+resueltas desde los medios configurados. Es caché, así que
+\fBurpm cache flush\fR lo barre y \fBurpm cache clean\fR lo cuenta como
+huérfano.
 .RS
 .TP
 .BR \-y ", " \-\-auto
 Sin confirmación.
 .TP
+.B \-\-test
+Simulación (ejecución en seco).
+.TP
+.B \-\-no\-atomic
+Modo de mejor esfuerzo: instala lo que se puede instalar y enumera los
+paquetes descartados con su motivo (salida 2 si es parcial). Por
+defecto es atómico.
+.TP
+.B \-\-reinstall
+Reinstala paquetes ya instalados (reparación).
+.TP
+.B \-\-force
+Fuerza la instalación a pesar de problemas de dependencias o
+conflictos.
+.TP
 .B \-\-download\-only
 Descarga sin instalar.
+.TP
+.B \-\-nodeps
+Omite la resolución de dependencias (usar con
+\fB\-\-download\-only\fR).
 .TP
 .B \-\-without\-recommends
 No instala los paquetes recomendados.
@@ -93,8 +122,37 @@ No instala los paquetes recomendados.
 .B \-\-with\-suggests
 Instala también los paquetes sugeridos.
 .TP
+.B \-\-all
+Instala todas las familias coincidentes a la vez (por ejemplo php8.4 y
+php8.5 si ambas proporcionan la capacidad pedida).
+.TP
+.B \-\-no\-peers
+Desactiva la descarga P2P desde pares de la red local.
+.TP
 .B \-\-only\-peers
 Descarga únicamente desde pares LAN, sin espejos upstream.
+.TP
+.B \-\-noscripts
+Omite los scriptlets pre/post instalación (compilaciones en
+chroot/contenedor).
+.TP
+.B \-\-nosignature
+Omite la verificación de la firma GPG (no recomendado).
+.TP
+.B \-\-config\-policy " " \fBkeep\fR|\fBreplace\fR|\fBask\fR
+Política ante conflictos en ficheros de configuración. Por defecto
+\fBkeep\fR conserva los existentes (\fI.rpmnew\fR para la versión del
+paquete), \fBreplace\fR usa la del paquete (\fI.rpmsave\fR para la
+local), \fBask\fR pregunta en cada conflicto.
+.TP
+.B \-\-install\-src
+Instala un RPM de fuentes: extrae su \fI.spec\fR y sus fuentes en
+\fI~/rpmbuild/\fR.
+.TP
+.B \-\-prefer " " \fIprefs\fR
+Preferencias separadas por comas para las alternativas (por ejemplo
+\fIphp:8.4,nginx,-apache-mod_php\fR). Véase \fBPREFERENCES\fR en el
+README.
 .TP
 .BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
 Instala las dependencias de compilación desde un archivo spec o SRPM. Detección automática si no se especifica.
@@ -758,6 +816,17 @@ Motor de contenedores (por defecto: detección automática).
 .B build \fB\-\-image\fR \fItag\fR \fIfuente\fR ...
 Compilar paquetes RPM en contenedores aislados. Los metadatos de medios y los
 paquetes instalados dentro del contenedor se actualizan automáticamente antes de compilar.
+.PP
+Antes de empezar se comprueba la delegación de identificadores. Un contenedor
+sin privilegios solo puede nombrar los uid que su espacio de nombres traduce,
+y \fI/etc/subuid\fR delega 65536 por defecto: de sobra para los usuarios del
+sistema, insuficiente para un \fB%check\fR, que es código ordinario y puede
+nombrar cualquier uid que el núcleo acepte. Más allá, el núcleo responde
+EINVAL y la compilación muere en el fondo de una batería de pruebas. Si el
+rango es demasiado estrecho, urpm nombra la línea exacta de
+\fI/etc/subuid\fR a reemplazar, da las órdenes para un shell de root y
+pregunta si compilar de todos modos. \fB\-\-auto\fR muestra la misma
+recomendación sin preguntar.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR

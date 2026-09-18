@@ -285,6 +285,31 @@ urpm i <pakket>               # Korte alias
 --sync                        # Wachten op volledige afronding (post-install-triggers)
 ```
 
+#### Installeren vanaf een URL
+
+`urpm install` aanvaardt een `http`-, `https`- of `ftp`-URL die op `.rpm`
+eindigt, naast pakketnamen en lokale bestanden, in elke mengeling.  Het
+pakket wordt eerst opgehaald en daarna precies behandeld als een
+bestand dat er al stond: header gelezen, ondertekening gecontroleerd
+tenzij `--nosignature`, afhankelijkheden opgelost uit de geconfigureerde
+media.
+
+Het bestand belandt in `/var/lib/urpm/downloads/`, naast `medias/` en
+nooit erin.  Die boom spiegelt medium per medium een externe, en elk
+bestand erin hoort te beantwoorden aan iets dat zijn spiegel uitlevert;
+een pakket dat met een URL is benoemd hoort bij geen enkel medium.  Het
+is toch cache, dus `urpm cache flush` veegt het mee en `urpm cache clean`
+rekent het als wees, aangezien geen medium het opeist.
+
+`--install-src` aanvaardt ook een URL, zodat een `.src.rpm` rechtstreeks vanaf een
+server uitgepakt kan worden.
+
+Afhankelijkheden worden niet naast de URL gezocht.  Bij een lokaal
+bestand wordt de buurmap op kandidaten doorzocht; een externe
+tegenhanger bestaat niet, dus wat het pakket nodig heeft moet uit de
+media komen.
+
+
 #### Voorkeurgestuurde installatie
 
 Bij het installeren van pakketten met alternatieven (bv. phpmyadmin, dat verschillende PHP-versies en webservers kan gebruiken) stuur je de keuze met `--prefer`:

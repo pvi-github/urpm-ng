@@ -277,6 +277,31 @@ urpm i <pacote>               # Alias curto
 --sync                        # Esperar pela conclusão total (triggers pós-instalação)
 ```
 
+#### Instalação a partir de um URL
+
+O `urpm install` aceita um URL `http`, `https` ou `ftp` terminado em
+`.rpm`, ao lado de nomes de pacotes e ficheiros locais, em qualquer
+mistura.  O pacote é primeiro obtido e depois tratado exactamente como um
+ficheiro já presente: cabeçalho lido, assinatura verificada salvo com
+`--nosignature`, dependências resolvidas a partir das médias
+configuradas.
+
+O ficheiro aterra em `/var/lib/urpm/downloads/`, ao lado de `medias/` e
+nunca dentro.  Essa árvore espelha uma remota, média por média, e cada
+ficheiro seu deve corresponder a algo que o seu espelho serve; um pacote
+nomeado por um URL não pertence a média alguma.  Continua a ser cache,
+pelo que o `urpm cache flush` o varre e o `urpm cache clean` o conta como
+órfão, não havendo média que o reclame.
+
+`--install-src` aceita também um URL, pelo que um `.src.rpm` pode ser desempacotado
+directamente a partir de um servidor.
+
+As dependências não são procuradas ao lado do URL.  Para um ficheiro
+local percorre-se o directório vizinho à procura de candidatos; não há
+equivalente remoto, pelo que o que o pacote precisar tem de vir das
+médias.
+
+
 #### Instalação guiada por preferências
 
 Quando se instalam pacotes com alternativas (ex.: phpmyadmin, que pode usar diferentes versões de PHP e servidores web), usa `--prefer` para orientar as escolhas:

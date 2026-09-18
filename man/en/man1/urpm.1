@@ -82,6 +82,14 @@ Install one or more packages.
 is atomic by default: any failure rolls back the whole transaction.
 Pass \fB\-\-no\-atomic\fR to switch to best-effort mode. See \fBPARTIAL
 TRANSACTIONS\fR below.
+.PP
+An \fBhttp\fR, \fBhttps\fR or \fBftp\fR URL ending in \fB.rpm\fR is
+accepted too, mixed freely with package names and local files. The package
+is fetched into \fI/var/lib/urpm/downloads/\fR, beside the media cache and
+never inside it, then treated exactly like a local file: header read,
+signature verified unless \fB\-\-nosignature\fR, dependencies resolved
+from the configured media. It is cache, so \fBurpm cache flush\fR sweeps
+it and \fBurpm cache clean\fR counts it as an orphan.
 .RS
 .TP
 .BR \-y ", " \-\-auto
@@ -1138,6 +1146,15 @@ RPMs built during the chain are re-injected as a local media so a later spec
 whose BuildRequires depends on them picks them up via the resolver.
 Use \fB\-\-parallel\fR to switch to the isolated multi-container path (one
 container per spec, useful for build-system-of-the-poor experiments).
+.PP
+Before starting, the id delegation is checked. A rootless container can only
+name the uids its user namespace translates, and \fI/etc/subuid\fR delegates
+65536 by default: plenty for system users, short for a \fB%check\fR, which
+is ordinary code and may name any uid the kernel accepts. Past that range the
+kernel answers EINVAL and the build dies deep inside a test suite. When the
+range is too narrow, urpm names the exact \fI/etc/subuid\fR line to replace,
+gives the commands for a root shell, and asks whether to build anyway.
+\fB\-\-auto\fR prints the same recommendation without asking.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR

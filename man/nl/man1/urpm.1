@@ -80,13 +80,42 @@ afwijsreden per pakket in best-effort-modus volledig getoond.
 .TP
 .B i|install \fIpakket\fR ...
 Installeer een of meer pakketten.
+.PP
+Een \fBhttp\fR\-, \fBhttps\fR\- of \fBftp\fR\-URL die op \fB.rpm\fR
+eindigt wordt ook aanvaard, vrij gemengd met pakketnamen en lokale
+bestanden. Het pakket wordt opgehaald in
+\fI/var/lib/urpm/downloads/\fR, naast de mediacache en nooit erin, en
+daarna precies behandeld als een lokaal bestand: header gelezen,
+ondertekening gecontroleerd tenzij \fB\-\-nosignature\fR,
+afhankelijkheden opgelost uit de geconfigureerde media. Het is cache, dus
+\fBurpm cache flush\fR veegt het mee en \fBurpm cache clean\fR rekent
+het als wees.
 .RS
 .TP
 .BR \-y ", " \-\-auto
 Geen bevestigingsvraag.
 .TP
+.B \-\-test
+Simulatie (proefrun).
+.TP
+.B \-\-no\-atomic
+Best-effort-modus: installeert wat installeerbaar is en somt de
+overgeslagen pakketten met hun reden op (exit 2 bij gedeeltelijk
+resultaat). Standaard is atomair.
+.TP
+.B \-\-reinstall
+Herinstalleert al geïnstalleerde pakketten (herstel).
+.TP
+.B \-\-force
+Forceert de installatie ondanks afhankelijkheidsproblemen of
+conflicten.
+.TP
 .B \-\-download\-only
 Download pakketten zonder te installeren.
+.TP
+.B \-\-nodeps
+Slaat het oplossen van afhankelijkheden over (te gebruiken met
+\fB\-\-download\-only\fR).
 .TP
 .B \-\-without\-recommends
 Installeer geen aanbevolen pakketten.
@@ -94,8 +123,36 @@ Installeer geen aanbevolen pakketten.
 .B \-\-with\-suggests
 Installeer ook voorgestelde pakketten.
 .TP
+.B \-\-all
+Installeert alle passende families tegelijk (bijvoorbeeld php8.4 en
+php8.5 als beide de gevraagde capaciteit leveren).
+.TP
+.B \-\-no\-peers
+Schakelt P2P-download van LAN-buren uit.
+.TP
 .B \-\-only\-peers
 Download alleen van LAN-peers, geen upstream-mirrors.
+.TP
+.B \-\-noscripts
+Slaat de pre/post-installatiescriptlets over (chroot/container-bouwen).
+.TP
+.B \-\-nosignature
+Slaat de GPG-ondertekeningscontrole over (niet aanbevolen).
+.TP
+.B \-\-config\-policy " " \fBkeep\fR|\fBreplace\fR|\fBask\fR
+Beleid bij conflicten in configuratiebestanden. Standaard \fBkeep\fR
+behoudt de bestaande (\fI.rpmnew\fR voor de pakketversie),
+\fBreplace\fR neemt die van het pakket (\fI.rpmsave\fR voor de
+lokale), \fBask\fR vraagt bij elk conflict.
+.TP
+.B \-\-install\-src
+Installeert een bron-RPM: pakt de \fI.spec\fR en de bronnen uit in
+\fI~/rpmbuild/\fR.
+.TP
+.B \-\-prefer " " \fIprefs\fR
+Door komma's gescheiden voorkeuren voor alternatieven (bijvoorbeeld
+\fIphp:8.4,nginx,-apache-mod_php\fR). Zie \fBPREFERENCES\fR in de
+README.
 .TP
 .BR \-b ", " \-\-buildrequires ", " \-\-builddeps ", " \-\-br " " \fI[spec]\fR
 Installeer build-afhankelijkheden van spec-bestand of SRPM. Automatische detectie indien niet opgegeven.
@@ -758,6 +815,17 @@ Containerruntime (standaard: automatische detectie).
 .B build \fB\-\-image\fR \fItag\fR \fIbron\fR ...
 RPM-pakketten bouwen in geïsoleerde containers. Mediametadata en geïnstalleerde pakketten
 in de container worden automatisch bijgewerkt voor het bouwen.
+.PP
+Voor de start wordt de delegatie van identificatoren gecontroleerd. Een
+container zonder root-rechten kan alleen de uids benoemen die zijn
+gebruikersnaamruimte vertaalt, en \fI/etc/subuid\fR delegeert er standaard
+65536: ruim voldoende voor systeemgebruikers, te weinig voor een
+\fB%check\fR, dat gewone code is en elke door de kernel aanvaarde uid mag
+benoemen. Daarvoorbij antwoordt de kernel met EINVAL en sterft de bouw diep
+in een testsuite. Is het bereik te klein, dan benoemt urpm de precieze te
+vervangen regel in \fI/etc/subuid\fR, geeft de opdrachten voor een
+root-shell en vraagt of er toch gebouwd moet worden. \fB\-\-auto\fR toont
+dezelfde aanbeveling zonder te vragen.
 .RS
 .TP
 .BR \-i ", " \-\-image " " \fItag\fR
