@@ -15,6 +15,169 @@ For an active backlog of what is in progress or planned, see
 
 ---
 
+## [0.9.12] — 2026-09-18
+
+`urpm install` now takes a URL.  And building got unblocked: `urpm build`
+could not compile python, whose `%prep` died restoring file ownership
+and whose test suite could not run in a rootless container, while
+`urpm image make` stalled on a key confirmation nobody could answer.  A
+Mageia spec now builds untouched with its `%check` passing, and the
+packaging review is applied.
+
+### Major Features
+
+- **`urpm install` accepts a URL.**  `urpm i
+  https://host/path/pkg.rpm`, mixed freely with package names and local
+  files.  A URL used to satisfy `is_local_rpm` (it ends in `.rpm` and
+  holds a slash), so it was handed to `Path()` and the command died on
+  « file not found » having never tried to fetch anything.
+  `file:///path/pkg.rpm` failed the same way, the scheme never being
+  stripped.
+
+  The package is fetched first, then treated exactly like a file
+  already on disk: header read, signature verified unless
+  `--nosignature`, dependencies resolved from the configured media.
+  That is the point of fetching it rather than teaching the resolver
+  about URLs.  A body that is not an RPM, the usual shape of a mirror
+  answering 404 with an HTML page, is refused and leaves nothing
+  behind, and neither does a failed transfer: no partial file, so a
+  retry never resumes onto a truncated body.
+
+  The file lands in `/var/lib/urpm/downloads/`, beside `medias/` and
+  never inside it.  That tree mirrors a remote one medium by medium and
+  every file in it is expected to correspond to something its mirror
+  serves; a package named by a URL belongs to no medium, so filing it
+  under one would leave that medium's cache disagreeing with its source
+  for no benefit.  It is cache all the same, so `urpm cache flush`
+  sweeps it and `urpm cache clean` counts it as an orphan, no medium
+  claiming it.
+
+  Dependencies are not looked for next to the URL: for a local file the
+  sibling directory is scanned for candidates, and there is no remote
+  equivalent.  `--install-src` takes a URL too, for symmetry — that
+  option is redundant in the first place, a `.src.rpm` being
+  recognisable from a binary one, and is to be revisited.
+
+### Bug Fixes
+
+- **Network isolation made non-root file ownership unrestorable.**
+  Every `rpmbuild` ran under `unshare --user --map-root-user --net`, a
+  detour taken because `unshare --net` needs `CAP_SYS_ADMIN` and the
+  container had none, while creating a nested user namespace grants it
+  for free.  The detour cost more than it bought: `--map-root-user`
+  writes a one-line `uid_map` (`0 0 1`), so uid 0 is the only
+  translatable identity in there and every `chown` towards another uid
+  answers `EINVAL`.  python's `%prep` died unpacking its documentation
+  tarball, whose files belong to uid 1000:
+
+      tar: …/genindex-T.html: Cannot change ownership to uid 1000,
+           gid 1000: Invalid argument
+
+  Every spec unpacking an archive owned by a non-root user, or chowning
+  to a system user in `%install`, hit the same wall.
+
+  The capabilities now come from the container itself: `SYS_ADMIN` to
+  create the network namespace, `NET_ADMIN` to bring its loopback up,
+  and `NET_RAW` in every mode because `ping` opens a raw socket that
+  podman no longer grants by default and a `%check` pinging localhost
+  would otherwise fail.  No user namespace is created, the identity map
+  stays whole, and the network is still cut: only `lo` is present, name
+  resolution is dead, and a raw socket reaches the loopback and nothing
+  else.
+
+  `--net-isolation auto|strict|off` exposes the choice.  `auto`, the
+  default, isolates and falls back to an open network with a visible
+  warning on a runtime that cannot; `strict` refuses to build in that
+  case; `off` leaves the network open.  `--with-network` is kept as an
+  alias for `off`, so no existing command line changes behaviour.  The
+  verdict comes from running `unshare --net true` in the container
+  rather than from what podman was asked for.
+
+- **`urpm image make --import-key` asked a question nobody could
+  answer.**  The confirmation ran inside the container: `media add
+  --import-key` prints the key's id, fingerprint and uid, then asks.
+  But it is run through `podman exec`, which gets a pseudo-terminal for
+  its output and no stdin, so the question appeared, waited, and the
+  media add aborted on end-of-file — failing the whole image build on
+  an operation the operator had already consented to.
+
+  `--import-key` on the `urpm image make` command line *is* the
+  consent, so the second question is gone.  The key's identity is still
+  printed, the container's output being streamed through.  `--auto`
+  travels with `--import-key` and only with it: without a key to
+  import, that command asks nothing, and a blanket yes would be one
+  nobody requested.  Every other `urpm` command run inside a container
+  was audited; `install`, `upgrade`, `erase` and `rollback` already
+  carried `--auto`, and this was the only site.
+
+### Improvements
+
+- **`urpm build` checks the id delegation before starting.**  A
+  rootless container can only name the uids its user namespace
+  translates, and `/etc/subuid` delegates 65536 by default.  That is
+  plenty for system users and short for a `%check`, which is ordinary
+  code and may name any uid the kernel accepts: python's `test_posix`
+  chowns to 2³¹ on purpose, to exercise large values.  Past the
+  delegated range the kernel answers `EINVAL` and the build dies eleven
+  thousand log lines into a test suite, on an error that never mentions
+  delegation.
+
+  The check reads the width first and, when it is too narrow, names the
+  exact `/etc/subuid` line to replace, gives the commands for a root
+  shell (not `sudo`, since the `podman system migrate` that follows has
+  to run back as the packager), and asks whether to build anyway.  An
+  uncanonical layout, several ranges or uid and gid delegated
+  differently, gets prose instead of a `sed`: a wrong `sed` there locks
+  a user out of rootless containers entirely.
+
+  Widening keeps the range start, so the first ids keep the same
+  translation and images already on disk stay valid.  The change takes
+  effect through `podman system migrate`, which needs no container
+  running: until then the pause process holds the old map alive, which
+  is why the edit can look ignored.  With the delegation widened,
+  python 2.7.18 builds with its full test suite passing, spec
+  untouched.
+
+- **`--auto` / `-y` on `urpm build`.**  Answers confirmations yes.
+  Today that is the delegation warning: the recommendation is still
+  printed, the build simply does not stop to ask.  A run with no
+  terminal behaves the same way, a scripted build having nobody to
+  answer.
+
+- **`--nocheck` skips a spec's `%check` section.**  Handed to
+  `rpmbuild`, so it is all or nothing: rpm has no notion of an
+  individual test.  For a suite that cannot pass in a rootless
+  container, or simply to shorten a development iteration.  Only the
+  `-ba` pass takes the flag, `-br` stopping before `%build`.  The
+  packages produced are untested and the build line says so.
+
+### Packaging & Distribution
+
+- **The spec review is applied**, seven points of eight, each checked
+  against the packages on a Mageia 10 machine rather than taken on
+  trust, then built and installed before committing.
+
+  `Requires: python3` is redundant in both specs: rpm generates
+  `python(abi) = 3.13` from the `.py` files and only python3 satisfies
+  it.  rpmdrake-ng's `%post` and `%postun` are gone entirely, since
+  desktop-file-utils ships a `transfiletriggerin` on
+  `/usr/share/applications/` and hicolor-icon-theme ships both a
+  `transfiletriggerin` and a `transfiletriggerpostun` on
+  `/usr/share/icons/hicolor/`; that also drops two generated `Requires`
+  on `/bin/sh`.  `%setup` gives way to `%autosetup -p1`, and to
+  `-a 1` for urpm-ng's second source.  `python3-setuptools` and
+  `python3-wheel` are hard requirements of pyproject-rpm-macros.
+
+  Two points were not applied.  pyproject-rpm-macros stays: on Mageia
+  `python3-devel` is provided by `lib64python3-devel`, which pulls
+  nothing that would expand `%pyproject_install`.  And `python3dist()`
+  fits four dependencies out of seven: `python3-curl` provides
+  `python3dist(pycurl)`, not `(curl)`, and the three
+  `python3-pyside6-*` provide no `python3dist` capability at all, so
+  converting them would make rpmdrake-ng uninstallable.
+
+---
+
 ## [0.9.11] — 2026-09-15
 
 Three bug fixes, all from beta-tester reports on 0.9.10.  A fresh
