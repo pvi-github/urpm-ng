@@ -30,9 +30,27 @@ class CacheManager:
             db: Database instance
             base_dir: Base urpm directory (auto-detected if None)
         """
+        from .download import STANDALONE_DIR_NAME
+
         self.db = db
         self.base_dir = base_dir or get_base_dir()
         self.medias_dir = self.base_dir / "medias"
+        # ``.rpm`` files named by a URL rather than by a medium.  A
+        # sibling of ``medias/`` on purpose, see ``STANDALONE_DIR_NAME``.
+        self.standalone_dir = self.base_dir / STANDALONE_DIR_NAME
+
+    @property
+    def payload_dirs(self) -> tuple:
+        """Every directory that holds cached ``.rpm`` payloads.
+
+        Two of them, and any sweep has to walk both: a package fetched
+        straight from a URL is cache exactly like one fetched from a
+        medium, it simply has no medium to file it under.  Derived here
+        so the flush and the orphan clean cannot end up disagreeing on
+        what the cache is.
+        """
+        return tuple(d for d in (self.medias_dir, self.standalone_dir)
+                     if d.exists())
 
     # =========================================================================
     # File registration
@@ -443,8 +461,12 @@ def flush_payloads(db, base_dir=None, dry_run: bool = False) -> "tuple[int, int]
     only useful to reinstall without re-downloading.  Metadata is not —
     synthesis, media_info and the AppStream blobs live in the same tree,
     are small, and are read on every operation.  So the sweep is
-    restricted to ``*.rpm`` under ``medias/`` rather than emptying the
-    directory.
+    restricted to ``*.rpm`` rather than emptying the directories.
+
+    Both payload directories are walked, see
+    :attr:`CacheManager.payload_dirs`: a package fetched from a URL is
+    cache too, and leaving it behind would make ``flush`` a half
+    measure.
 
     ``reconcile()`` afterwards drops the index rows whose file just
     went; failing at that costs accuracy in ``urpm cache``, never
@@ -456,21 +478,20 @@ def flush_payloads(db, base_dir=None, dry_run: bool = False) -> "tuple[int, int]
     manager = CacheManager(db, base_dir)
     files = 0
     total = 0
-    if not manager.medias_dir.exists():
-        return 0, 0
 
-    for rpm_path in manager.medias_dir.rglob("*.rpm"):
-        try:
-            size = rpm_path.stat().st_size
-            if not dry_run:
-                rpm_path.unlink()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:  # noqa: BLE001
-            logger.debug("flush: cannot remove %s: %s", rpm_path, exc)
-            continue
-        files += 1
-        total += size
+    for payload_dir in manager.payload_dirs:
+        for rpm_path in payload_dir.rglob("*.rpm"):
+            try:
+                size = rpm_path.stat().st_size
+                if not dry_run:
+                    rpm_path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:  # noqa: BLE001
+                logger.debug("flush: cannot remove %s: %s", rpm_path, exc)
+                continue
+            files += 1
+            total += size
 
     if files and not dry_run:
         try:

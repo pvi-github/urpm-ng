@@ -41,7 +41,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     from ...core.resolver import Resolver, format_size, set_solver_debug
     from ...auth.privileges import require_privileges
     from pathlib import Path
-    from ...core.rpm import is_local_rpm, read_rpm_header
+    from ...core.rpm import (
+        is_local_rpm, is_remote_rpm, local_rpm_path, read_rpm_header,
+    )
     from ...core.download import verify_rpm_signature
 
     # Set up debug if requested
@@ -76,28 +78,35 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     verify_sigs = not getattr(args, 'nosignature', False)
 
     for pkg in packages:
-        if is_local_rpm(pkg):
-            path = Path(pkg)
+        # A URL is fetched first, then treated exactly like a file
+        # that was already on disk. ``install`` does the same.
+        if is_remote_rpm(pkg):
+            from .install import _fetch_remote_rpm
+            path = _fetch_remote_rpm(pkg)
+            if path is None:
+                return 1
+        elif is_local_rpm(pkg):
+            path = local_rpm_path(pkg)
             if not path.exists():
                 print(colors.error(_("Error: file not found: {pkg}").format(pkg=pkg)))
                 return 1
-            # Read RPM header
-            info = read_rpm_header(path)
-            if not info:
-                print(colors.error(_("Error: cannot read RPM file: {pkg}").format(pkg=pkg)))
-                return 1
-            # Verify signature
-            if verify_sigs:
-                valid, error = verify_rpm_signature(path)
-                if not valid:
-                    print(colors.error(_("Error: signature verification failed for {pkg}").format(pkg=pkg)))
-                    print(colors.error(f"  {error}"))
-                    print(colors.dim(_("  Use --nosignature to skip verification (not recommended)")))
-                    return 1
-            local_rpm_paths.append(str(path.resolve()))
-            local_rpm_infos.append(info)
         else:
             package_names.append(pkg)
+            continue
+
+        info = read_rpm_header(path)
+        if not info:
+            print(colors.error(_("Error: cannot read RPM file: {pkg}").format(pkg=pkg)))
+            return 1
+        if verify_sigs:
+            valid, error = verify_rpm_signature(path)
+            if not valid:
+                print(colors.error(_("Error: signature verification failed for {pkg}").format(pkg=pkg)))
+                print(colors.error(f"  {error}"))
+                print(colors.dim(_("  Use --nosignature to skip verification (not recommended)")))
+                return 1
+        local_rpm_paths.append(str(path.resolve()))
+        local_rpm_infos.append(info)
 
     # If we have local RPMs, show what we're upgrading
     if local_rpm_infos:

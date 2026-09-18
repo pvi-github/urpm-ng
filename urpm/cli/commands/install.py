@@ -9,7 +9,7 @@ import sys
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,47 @@ def _apply_config_policy(rpmnew_files: List[str], policy: str) -> int:
         print("  " + ngettext("{count} config file updated (old saved as .rpmold)", "{count} config files updated (old saved as .rpmold)", processed).format(count=processed))
 
     return processed
+
+
+def _fetch_remote_rpm(url: str) -> Optional[Path]:
+    """Fetch an ``.rpm`` named by a URL, or report why not.
+
+    The file lands in the standalone download directory, outside the
+    media tree: it belongs to no medium, and dropping it into one would
+    leave that medium's cache holding a file its mirror never served.
+
+    A one-line progress readout, because these are packages and a
+    hundred megabytes of silence reads like a hang.
+
+    Args:
+        url: ``http``, ``https`` or ``ftp`` URL ending in ``.rpm``.
+
+    Returns:
+        The path on success, ``None`` after printing the reason.
+    """
+    from .. import colors
+    from ...core.download import fetch_standalone_rpm
+    from ..display import format_size
+
+    name = url.rsplit('/', 1)[-1]
+    print(_("Fetching {name}...").format(name=name))
+
+    def progress(done: int, total: int) -> None:
+        if total > 0:
+            print(f"\r\033[K  {format_size(done)} / {format_size(total)}"
+                  f" ({done * 100 // total}%)", end='', flush=True)
+        else:
+            print(f"\r\033[K  {format_size(done)}", end='', flush=True)
+
+    path, reason = fetch_standalone_rpm(url, progress_callback=progress)
+    print()
+
+    if path is None:
+        print(colors.error(
+            _("Error: could not fetch {url}: {reason}").format(
+                url=url, reason=reason)))
+        return None
+    return path
 
 
 def cmd_install(args, db: 'PackageDatabase') -> int:
@@ -234,7 +275,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         return 1
 
     # Separate local RPM files from package names
-    from ...core.rpm import is_local_rpm, read_rpm_header
+    from ...core.rpm import (
+        is_local_rpm, is_remote_rpm, local_rpm_path, read_rpm_header,
+    )
     from ...core.download import verify_rpm_signature
 
     local_rpm_paths = []
@@ -243,28 +286,36 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     verify_sigs = not getattr(args, 'nosignature', False)
 
     for pkg in args.packages:
-        if is_local_rpm(pkg):
-            path = Path(pkg)
+        if is_remote_rpm(pkg):
+            path = _fetch_remote_rpm(pkg)
+            if path is None:
+                return 1
+        elif is_local_rpm(pkg):
+            path = local_rpm_path(pkg)
             if not path.exists():
                 print(colors.error(_("Error: file not found: {path}").format(path=pkg)))
                 return 1
-            # Read RPM header
-            info = read_rpm_header(path)
-            if not info:
-                print(colors.error(_("Error: cannot read RPM file: {path}").format(path=pkg)))
-                return 1
-            # Verify signature
-            if verify_sigs:
-                valid, error = verify_rpm_signature(path)
-                if not valid:
-                    print(colors.error(_("Error: signature verification failed for {path}").format(path=pkg)))
-                    print(colors.error(f"  {error}"))
-                    print(colors.dim(_("  Use --nosignature to skip verification (not recommended)")))
-                    return 1
-            local_rpm_paths.append(str(path.resolve()))
-            local_rpm_infos.append(info)
         else:
             package_names.append(pkg)
+            continue
+
+        # From here a fetched RPM is treated exactly like one that was
+        # already on disk: same header read, same signature check.  That
+        # is the whole point of fetching it first rather than teaching
+        # the resolver about URLs.
+        info = read_rpm_header(path)
+        if not info:
+            print(colors.error(_("Error: cannot read RPM file: {path}").format(path=pkg)))
+            return 1
+        if verify_sigs:
+            valid, error = verify_rpm_signature(path)
+            if not valid:
+                print(colors.error(_("Error: signature verification failed for {path}").format(path=pkg)))
+                print(colors.error(f"  {error}"))
+                print(colors.dim(_("  Use --nosignature to skip verification (not recommended)")))
+                return 1
+        local_rpm_paths.append(str(path.resolve()))
+        local_rpm_infos.append(info)
 
     # Scan directories of local RPMs for sibling packages (potential dependencies)
     # Also scan sibling architecture directories (e.g., ../x86_64/, ../noarch/)
@@ -1505,11 +1556,17 @@ def _resolve_srpm_path(pkg: str, db: 'PackageDatabase') -> 'Path | None':
     Returns:
         Path to the .src.rpm file, or None if not found.
     """
-    from ...core.rpm import is_local_rpm
+    from ...core.rpm import is_local_rpm, is_remote_rpm, local_rpm_path
+
+    # Case 0: a URL.  Fetched first, then handled as the file it now
+    # is.  Without this, ``--install-src`` would refuse a URL that
+    # plain ``install`` accepts, for no reason a user could guess.
+    if is_remote_rpm(pkg):
+        return _fetch_remote_rpm(pkg)
 
     # Case 1: direct .src.rpm file path
     if pkg.endswith('.src.rpm'):
-        p = Path(pkg)
+        p = local_rpm_path(pkg)
         return p if p.exists() else None
 
     # Case 2: local RPM file (non-source) — not valid for --install-src

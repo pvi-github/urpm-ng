@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import unquote, urlsplit
 
 
 def decode_rpmsense_flags(flags: int) -> str:
@@ -63,16 +64,60 @@ def decode_rpmdep_sense(value: int) -> str:
     return mapping.get(value, "unknown")
 
 
+#: URL schemes an ``.rpm`` can be fetched from.  ``file://`` is absent
+#: on purpose: it denotes a path, and :func:`is_local_rpm` claims it.
+REMOTE_RPM_SCHEMES = ('http://', 'https://', 'ftp://')
+
+
+def is_remote_rpm(pkg_spec: str) -> bool:
+    """Check if a package spec is an RPM to fetch over the network.
+
+    Args:
+        pkg_spec: Package specification (name, path or URL)
+
+    Returns:
+        True when it is an ``.rpm`` behind one of
+        :data:`REMOTE_RPM_SCHEMES`.
+    """
+    return (pkg_spec.endswith('.rpm')
+            and pkg_spec.startswith(REMOTE_RPM_SCHEMES))
+
+
 def is_local_rpm(pkg_spec: str) -> bool:
     """Check if a package spec is a local RPM file path.
 
+    A URL is not one, even though it ends in ``.rpm`` and contains a
+    slash: it used to pass this test, get handed to ``Path()``, and the
+    command died on « file not found » having never tried to fetch
+    anything.  See :func:`is_remote_rpm`.
+
     Args:
-        pkg_spec: Package specification (name or path)
+        pkg_spec: Package specification (name, path or URL)
 
     Returns:
         True if it looks like a local RPM file path
     """
+    if is_remote_rpm(pkg_spec):
+        return False
     return pkg_spec.endswith('.rpm') and ('/' in pkg_spec or pkg_spec.startswith('.'))
+
+
+def local_rpm_path(pkg_spec: str) -> Path:
+    """The filesystem path a local RPM spec denotes.
+
+    Only ``file://`` needs work: it is a perfectly good way to name a
+    local file, media already accept it, and handing it to ``Path()``
+    verbatim yields a path that cannot exist.
+
+    Args:
+        pkg_spec: A spec :func:`is_local_rpm` accepted.
+
+    Returns:
+        The path, scheme stripped.
+    """
+    if pkg_spec.startswith('file://'):
+        return Path(unquote(urlsplit(pkg_spec).path))
+    return Path(pkg_spec)
 
 
 def read_rpm_header(rpm_path: Path) -> Optional[Dict[str, Any]]:

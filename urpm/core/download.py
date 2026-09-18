@@ -155,6 +155,76 @@ def resolve_payload_dir(payload_dir: str = None,
     return default if default is not None else get_base_dir()
 
 
+#: Subdirectory of the payload directory holding ``.rpm`` files fetched
+#: straight from a URL.  A sibling of ``medias/``, never inside it: that
+#: tree mirrors a remote one, medium by medium, and every file in it is
+#: expected to correspond to something the mirror serves.  A package
+#: named by a URL belongs to no medium, so dropping it in one would
+#: make the cache disagree with its source for no benefit.
+STANDALONE_DIR_NAME = 'downloads'
+
+
+def standalone_rpm_dir(payload_dir: str = None) -> Path:
+    """Where an ``.rpm`` fetched from a URL lands.
+
+    Args:
+        payload_dir: Explicit payload directory, as for
+            :func:`resolve_payload_dir`.
+
+    Returns:
+        The directory, created if missing.
+    """
+    directory = resolve_payload_dir(payload_dir) / STANDALONE_DIR_NAME
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def fetch_standalone_rpm(url: str, payload_dir: str = None,
+                         progress_callback=None) -> Tuple[Optional[Path], str]:
+    """Fetch the ``.rpm`` at *url* into :func:`standalone_rpm_dir`.
+
+    The file is rewritten on every call rather than reused when
+    present: a plain drop box cannot go stale, whereas a cache keyed on
+    a basename would happily serve the ``foo-1.0.rpm`` of another
+    server.  Callers get a path and are expected to put it through the
+    same header read and signature check as any local RPM.
+
+    Args:
+        url: ``http``, ``https`` or ``ftp`` URL ending in ``.rpm``.
+        payload_dir: Explicit payload directory, or ``None``.
+        progress_callback: Optional ``callback(done, total)``.
+
+    Returns:
+        ``(path, "")`` on success, ``(None, reason)`` otherwise.  The
+        partial file is removed on failure, so a retry never resumes
+        onto a truncated body.
+    """
+    from urllib.parse import unquote, urlsplit
+
+    from ..i18n import _
+    from .sync import download_file
+
+    name = Path(unquote(urlsplit(url).path)).name
+    if not name.endswith('.rpm'):
+        return None, _("the URL does not name an .rpm file")
+
+    destination = standalone_rpm_dir(payload_dir) / name
+    result = download_file(url, destination,
+                           progress_callback=progress_callback)
+    if not result.success:
+        destination.unlink(missing_ok=True)
+        return None, getattr(result, 'error', None) or _("download failed")
+
+    valid, reason = is_valid_rpm(destination)
+    if not valid:
+        # A mirror answering 404 with an HTML page is the common case,
+        # and rpm would report something far less obvious about it.
+        destination.unlink(missing_ok=True)
+        return None, reason
+
+    return destination, ""
+
+
 def is_valid_rpm(file_path: Path) -> Tuple[bool, str]:
     """Quick check if a file is a valid RPM by checking magic bytes.
 

@@ -39,9 +39,9 @@ def cmd_cache_clean(args, db: 'PackageDatabase') -> int:
     # So the command reported « no RPM cache found » and did nothing,
     # on a machine holding several gigabytes of orphan payloads.
     from ...core.cache import CacheManager
-    medias_dir = CacheManager(db).medias_dir
+    payload_dirs = CacheManager(db).payload_dirs
 
-    if not medias_dir.exists():
+    if not payload_dirs:
         print(_("No RPM cache found"))
         return 0
 
@@ -59,12 +59,19 @@ def cmd_cache_clean(args, db: 'PackageDatabase') -> int:
     orphans = []
     total_size = 0
 
-    for rpm_file in medias_dir.rglob("*.rpm"):
-        # Extract NEVRA from filename (e.g., firefox-120.0-1.mga9.x86_64.rpm)
-        filename = rpm_file.stem  # Remove .rpm
-        if filename not in db_nevras:
-            orphans.append(rpm_file)
-            total_size += rpm_file.stat().st_size
+    # Both payload directories.  Everything in the standalone one is an
+    # orphan by construction: a package named by a URL belongs to no
+    # medium, so no row will ever claim it.  That is the right verdict
+    # rather than an accident of the rule — once installed, the file is
+    # only good for a reinstall, and nothing refers to it.
+    for payload_dir in payload_dirs:
+        for rpm_file in payload_dir.rglob("*.rpm"):
+            # Extract NEVRA from filename (e.g.
+            # firefox-120.0-1.mga9.x86_64.rpm)
+            filename = rpm_file.stem  # Remove .rpm
+            if filename not in db_nevras:
+                orphans.append(rpm_file)
+                total_size += rpm_file.stat().st_size
 
     if not orphans:
         print(_("No orphan RPMs found in cache"))
