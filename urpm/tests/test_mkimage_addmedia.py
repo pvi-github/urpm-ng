@@ -21,7 +21,6 @@ undone then.
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from unittest import mock
 
@@ -50,12 +49,23 @@ class TestTheMediaAddCommandLine:
 
     def test_the_builder_passes_the_name_as_an_option(self):
         """The regression itself: names passed positionally left
-        argparse with three positionals for one."""
-        source = inspect.getsource(build_cmd._phase2_container_promote)
-        line = next(l for l in source.splitlines() if "'media', 'add'" in l
-                    or '"media", "add"' in l)
-        assert "--name" in source[source.index(line):source.index(line) + 300]
-        assert "'--custom', name, name" not in source
+        argparse with three positionals for one.
+
+        Asserted on the argv the builder produces rather than on the
+        text of its source, which is what ``media_add_command`` exists
+        for.  The previous form scanned
+        ``_phase2_container_promote`` for the literal line and broke
+        the moment the command moved into its own function.
+        """
+        command = build_cmd.media_add_command("https://s/repo", "Extra",
+                                              False)
+        assert "--name" in command
+        assert command[command.index("--name") + 1] == "Extra"
+        assert "--shortname" in command
+        positionals = [word for index, word in enumerate(command)
+                       if index > 2 and not word.startswith('-')
+                       and not command[index - 1].startswith('-')]
+        assert positionals == [], positionals
 
     def test_the_built_command_parses(self):
         """Fed to the real parser, it must resolve."""

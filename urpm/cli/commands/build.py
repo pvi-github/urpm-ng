@@ -437,6 +437,37 @@ def _local_media_mounts(addmedia) -> "list[tuple[str, str]]":
     return mounts
 
 
+def media_add_command(url: str, name: str, import_key: bool) -> list:
+    """The ``urpm media add`` to run inside an image being promoted.
+
+    ``--auto`` travels with ``--import-key``, and only with it.  Without
+    the key, this command asks nothing.  With it, ``media add`` prints
+    the key's id, fingerprint and uid, then asks for confirmation.
+    Nobody can answer: it runs through ``podman exec``, which gets a
+    pseudo-tty for its output and no stdin, so the question appeared and
+    the media add then aborted on end-of-file, taking the image build
+    with it.
+
+    ``--import-key`` on the ``urpm image make`` command line is the
+    operator's consent.  Asking a second time where the answer cannot
+    arrive is the defect, not the safeguard: the key's identity is
+    still printed, the container's output being streamed through.
+
+    Args:
+        url: Media URL, passed as the only positional.
+        name: Display name, reused as the short name.
+        import_key: Whether the media's GPG key should be imported.
+
+    Returns:
+        The argv to hand to the container.
+    """
+    command = ['urpm', 'media', 'add', '--custom', url,
+               '--name', name, '--shortname', name]
+    if import_key:
+        command += ['--import-key', '--auto']
+    return command
+
+
 def _phase2_container_promote(
     container: 'Container',
     minimal_tag: str,
@@ -497,10 +528,7 @@ def _phase2_container_promote(
             # them positionally — as this did — leaves argparse with
             # three positionals for one and the whole build stops at
             # « unrecognized arguments ».
-            add_cmd = ['urpm', 'media', 'add', '--custom', url,
-                       '--name', name, '--shortname', name]
-            if import_key:
-                add_cmd.append('--import-key')
+            add_cmd = media_add_command(url, name, import_key)
             ret = container.exec_stream(cid, add_cmd)
             if ret != 0:
                 print(colors.error(
