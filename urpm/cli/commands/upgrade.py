@@ -297,8 +297,23 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         pkg_names = [a.nevra for a in sorted(orphans, key=lambda x: x.name.lower())]
         display.print_package_list(pkg_names, indent=4, color_func=colors.error)
 
+    # The items are built here, before the prompt, so the summary can
+    # say how much of the payload is already on the disk.  Enlarging
+    # the mirror pool stays after the prompt — it writes server rows
+    # and probes latencies — and the items pick the new mirrors up via
+    # ``refresh_item_servers``.
+    import dataclasses
+
     from ..helpers.transaction_sizes import compute_sizes, format_totals
-    sizes = compute_sizes(result.actions)
+
+    ops = PackageOperations(db)
+    download_items, local_action_paths = ops.build_download_items(
+        result.actions, resolver, local_rpm_infos
+    )
+    sizes = dataclasses.replace(
+        compute_sizes(result.actions),
+        cached=ops.cached_payload_bytes(
+            download_items, urpm_root=getattr(args, 'urpm_root', None)))
     if sizes.download or sizes.installed or sizes.freed:
         print("\n" + format_totals(sizes, count=len(result.actions)))
 
@@ -346,11 +361,9 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
             n=get_settings().download.parallel,
             had=_pool.had, needed=_pool.needed)))
 
-    # Build download items and download
-    ops = PackageOperations(db)
-    download_items, local_action_paths = ops.build_download_items(
-        result.actions, resolver, local_rpm_infos
-    )
+    # The items were built before the prompt, for the cache figure in
+    # the summary; fold in whatever mirrors the pool just gained.
+    ops.refresh_item_servers(download_items)
 
     dl_results = []
     downloaded = 0

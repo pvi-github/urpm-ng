@@ -239,3 +239,152 @@ class TestDownloadErrorGrammar:
         )
         with pytest.raises(Exception):
             err.message = "y"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Where a payload lives, and whether it is already there
+# ---------------------------------------------------------------------------
+#
+# The cache check used to be a method on ``Downloader``, reachable only
+# once the download stage had started — long past the point where the
+# operator was asked to confirm.  The summary therefore announced the
+# whole payload to someone whose cache already held most of it.
+#
+# Pulling the two out as functions makes the probe affordable before the
+# prompt.  The risk that buys is divergence: a second copy of the layout
+# rules drifting from the one the downloader writes through.  The last
+# test here is the one that would catch that.
+
+from urpm.core.download import (  # noqa: E402
+    RPM_MAGIC,
+    cache_path_for,
+    cached_payload_bytes,
+    is_cached_at,
+)
+
+
+def _item(name="foo", version="1.0", release="1", arch="x86_64",
+          size=1000, is_official=True,
+          relative_path="10/x86_64/media/core/release", **kw):
+    return DownloadItem(name=name, version=version, release=release,
+                        arch=arch, size=size, media_id=1,
+                        relative_path=relative_path,
+                        is_official=is_official, **kw)
+
+
+def _write_rpm(path: Path, body=b"x" * 64):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(RPM_MAGIC + body)
+
+
+class TestCachePathFor:
+
+    def test_official_media_land_under_their_relative_path(self, tmp_path):
+        path = cache_path_for(_item(), tmp_path)
+        assert path == (tmp_path / "medias" / "official"
+                        / "10/x86_64/media/core/release"
+                        / "foo-1.0-1.x86_64.rpm")
+
+    def test_custom_media_land_under_their_name(self, tmp_path):
+        item = _item(is_official=False, media_name="BDK-Free")
+        path = cache_path_for(item, tmp_path)
+        assert path.parent == tmp_path / "medias" / "custom" / "BDK-Free"
+
+    def test_a_probe_creates_nothing(self, tmp_path):
+        """The probe runs before the confirmation.  Answering « no » must
+        not leave a tree of empty directories behind."""
+        cache_path_for(_item(), tmp_path)
+        assert not (tmp_path / "medias").exists()
+
+    def test_a_download_creates_its_directory(self, tmp_path):
+        path = cache_path_for(_item(), tmp_path, create=True)
+        assert path.parent.is_dir()
+
+
+class TestIsCachedAt:
+
+    def test_absent_file(self, tmp_path):
+        assert is_cached_at(_item(), tmp_path) is False
+
+    def test_present_and_valid(self, tmp_path):
+        _write_rpm(cache_path_for(_item(), tmp_path))
+        assert is_cached_at(_item(), tmp_path) is True
+
+    def test_empty_file_is_not_a_package(self, tmp_path):
+        """An interrupted download leaves a zero-length file behind."""
+        path = cache_path_for(_item(), tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"")
+        assert is_cached_at(_item(), tmp_path) is False
+
+    def test_wrong_magic_is_not_a_package(self, tmp_path):
+        """A proxy error page saved under the package's name."""
+        path = cache_path_for(_item(), tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"<html>403</html>")
+        assert is_cached_at(_item(), tmp_path) is False
+
+
+class TestCachedPayloadBytes:
+
+    def test_counts_only_what_is_there(self, tmp_path):
+        here = _item("here", size=700)
+        missing = _item("missing", size=300)
+        _write_rpm(cache_path_for(here, tmp_path))
+        assert cached_payload_bytes([here, missing], tmp_path) == 700
+
+    def test_an_empty_plan_costs_nothing(self, tmp_path):
+        assert cached_payload_bytes([], tmp_path) == 0
+
+    def test_a_truncated_file_does_not_count(self, tmp_path):
+        item = _item(size=700)
+        path = cache_path_for(item, tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"")
+        assert cached_payload_bytes([item], tmp_path) == 0
+
+
+class TestTheProbeAndTheDownloaderAgree:
+    """Two copies of the layout rules would drift; there is only one."""
+
+    def test_same_path(self, tmp_path):
+        downloader = Downloader(cache_dir=tmp_path, use_peers=False)
+        item = _item()
+        assert (downloader.get_cache_path(item)
+                == cache_path_for(item, downloader.payload_dir))
+
+    def test_same_verdict(self, tmp_path):
+        downloader = Downloader(cache_dir=tmp_path, use_peers=False)
+        item = _item()
+        assert downloader.is_cached(item) is False
+        _write_rpm(downloader.get_cache_path(item))
+        assert downloader.is_cached(item) is True
+        assert is_cached_at(item, downloader.payload_dir) is True
+
+
+class TestThePathDoesNotDependOnTheMirrorCount:
+    """``uses_new_schema`` also requires a non-empty server list.
+
+    That is the right question for fetching and the wrong one for a
+    path.  The probe runs before the mirror pool is enlarged, so an
+    item reaches it with whatever servers the database held at the
+    time — sometimes none.  Keying the layout on that would send the
+    probe looking in the flat fallback while the download writes under
+    ``medias/official/``, and every already-cached package would read
+    as missing.
+    """
+
+    def test_same_path_with_and_without_servers(self, tmp_path):
+        bare = _item()
+        served = _item(servers=[{"protocol": "https", "host": "a.b",
+                                 "base_path": "/mageia"}])
+        assert not bare.uses_new_schema()
+        assert served.uses_new_schema()
+        assert (cache_path_for(bare, tmp_path)
+                == cache_path_for(served, tmp_path))
+
+    def test_a_serverless_item_is_still_found_in_the_cache(self, tmp_path):
+        served = _item(servers=[{"protocol": "https", "host": "a.b",
+                                 "base_path": "/mageia"}])
+        _write_rpm(cache_path_for(served, tmp_path))
+        assert is_cached_at(_item(), tmp_path) is True

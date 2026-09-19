@@ -282,6 +282,59 @@ class PackageOperations:
 
         return download_items, local_action_paths
 
+    def refresh_item_servers(self, items: List[DownloadItem]) -> None:
+        """Re-read the server list of every item, in place.
+
+        The items are built before the confirmation prompt so the
+        summary can tell the operator how much of the payload is
+        already on the disk.  Enlarging the mirror pool, on the other
+        hand, writes server rows and probes latencies, which has no
+        business happening for a transaction that may still be
+        refused — so it stays after the prompt, and the items it
+        should have fed are already built by then.
+
+        Rather than building them twice, the newly added mirrors are
+        folded back in here.  One query per distinct medium, not per
+        package.
+        """
+        by_media: dict = {}
+        for item in items:
+            if not item.media_id:
+                continue
+            if item.media_id not in by_media:
+                by_media[item.media_id] = [
+                    dict(s) for s in
+                    self.db.get_servers_for_media(item.media_id)
+                ]
+            item.servers = [dict(s) for s in by_media[item.media_id]]
+
+    def cached_payload_bytes(
+        self,
+        download_items: List[DownloadItem],
+        options: InstallOptions = None,
+        urpm_root: str = None,
+    ) -> int:
+        """How much of *download_items* is already on the disk.
+
+        Resolves the payload directory exactly as
+        :meth:`download_packages` does, so the figure shown before the
+        prompt describes the same files the download stage will find.
+        Cheap enough to run before a confirmation: a stat and four
+        bytes read per package.
+        """
+        from .download import cached_payload_bytes as _cached_bytes
+        from .download import resolve_payload_dir
+
+        if urpm_root:
+            from .config import get_base_dir
+            cache_dir = get_base_dir(urpm_root=urpm_root)
+        else:
+            cache_dir = self.base_dir
+
+        payload_dir = resolve_payload_dir(
+            getattr(options, 'payload_dir', '') or None, default=cache_dir)
+        return _cached_bytes(download_items, payload_dir)
+
     def download_packages(
         self,
         download_items: List[DownloadItem],

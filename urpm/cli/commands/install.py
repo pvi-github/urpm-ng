@@ -827,8 +827,27 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     # The parenthesised figure used to be `total_size` with no label at
     # all — an installed footprint that read as a download total to
     # anyone who assumed the usual meaning.  Both are named now.
+    #
+    # The download items are built here rather than after the prompt so
+    # the summary can say how much of the payload is already on the
+    # disk.  Announcing a full download to someone whose cache holds
+    # most of it answers a question nobody asked.  Enlarging the mirror
+    # pool stays after the prompt — it writes server rows and probes
+    # latencies, which has no business happening for a transaction that
+    # may still be refused — and the items pick the new mirrors up via
+    # ``refresh_item_servers``.
+    import dataclasses
+
     from ..helpers.transaction_sizes import compute_sizes, format_totals
-    summary_sizes = compute_sizes(final_actions)
+
+    ops = PackageOperations(db)
+    download_items, local_action_paths = ops.build_download_items(
+        final_actions, resolver, local_rpm_infos
+    )
+    summary_sizes = dataclasses.replace(
+        compute_sizes(final_actions),
+        cached=ops.cached_payload_bytes(
+            download_items, urpm_root=getattr(args, 'urpm_root', None)))
     if remove_pkgs:
         print("\n" + colors.bold(_("Total: {install} to install, {remove} to remove").format(install=len(install_actions), remove=len(remove_pkgs))))
     else:
@@ -882,11 +901,9 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
             n=get_settings().download.parallel,
             had=_pool.had, needed=_pool.needed)))
 
-    # Build download items (skip local RPMs - we already have them)
-    ops = PackageOperations(db)
-    download_items, local_action_paths = ops.build_download_items(
-        result.actions, resolver, local_rpm_infos
-    )
+    # The items were built before the prompt, for the cache figure in
+    # the summary; fold in whatever mirrors the pool just gained.
+    ops.refresh_item_servers(download_items)
 
     # Download remote packages (if any)
     dl_results = []
@@ -1356,9 +1373,31 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
         print(colors.success(_("Nothing to download - all packages already available.")))
         return 0
 
+    # Build download items via the canonical operations helper so the
+    # cmd_install / cmd_upgrade / cmd_download paths agree on EVR
+    # parsing, media lookup, and the legacy-URL vs new-schema branch.
+    # The helper also picks ``action.filesize`` over ``action.size``
+    # when the former is set — a small accuracy win over the older
+    # inline code.
+    #
+    # Built before the summary so the cache figure can be shown while
+    # the operator still has a choice.  Nothing enlarges the mirror
+    # pool on this path, so there is no ordering constraint to respect.
+    import dataclasses
+
+    from ...core.operations import PackageOperations
+
+    ops = PackageOperations(db)
+    download_items, _local_paths = ops.build_download_items(
+        install_actions, resolver,
+    )
+
     # Calculate total size
     from ..helpers.transaction_sizes import compute_sizes, format_totals
-    sizes = compute_sizes(install_actions)
+    sizes = dataclasses.replace(
+        compute_sizes(install_actions),
+        cached=ops.cached_payload_bytes(
+            download_items, urpm_root=getattr(args, 'urpm_root', None)))
 
     # Show summary
     print(colors.info("\n" + _("Packages to download ({count}):").format(count=len(install_actions))))
@@ -1382,18 +1421,6 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
         except KeyboardInterrupt:
             print(_("\nAborted."))
             return 0
-
-    # Build download items via the canonical operations helper so the
-    # cmd_install / cmd_upgrade / cmd_download paths agree on EVR
-    # parsing, media lookup, and the legacy-URL vs new-schema branch.
-    # The helper also picks ``action.filesize`` over ``action.size``
-    # when the former is set — a small accuracy win over the older
-    # inline code.
-    from ...core.operations import PackageOperations
-    ops = PackageOperations(db)
-    download_items, _local_paths = ops.build_download_items(
-        install_actions, resolver,
-    )
 
     if not download_items:
         print(colors.error(_("No packages to download")))

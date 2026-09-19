@@ -17,7 +17,7 @@ import urllib.error
 import time as _time_mod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Callable, Tuple, Dict, Set
+from typing import List, Optional, Callable, Tuple, Dict, Set, Iterable
 
 import pycurl
 
@@ -1144,6 +1144,81 @@ def _maybe_replan(work_queue, downloader, assignments, drift_threshold):
     return True
 
 
+def cache_path_for(item: DownloadItem, payload_dir: Path, *,
+                   create: bool = False) -> Path:
+    """Where *item* lives, or would live, under *payload_dir*.
+
+    New schema: ``<payload_dir>/medias/official/<relative_path>/*.rpm``
+                ``<payload_dir>/medias/custom/<short_name>/*.rpm``
+    Legacy:     ``<payload_dir>/medias/<hostname>/<media_name>/*.rpm``
+
+    Anchored on the payload directory rather than the cache directory so
+    a relocated payload keeps the same layout.
+
+    *create* makes the parent directories.  A download needs that; a
+    probe does not, and asking for one before the user has confirmed
+    the transaction would leave empty directories behind on a refusal.
+
+    The schema is decided on ``relative_path`` alone, not on
+    :meth:`DownloadItem.uses_new_schema`, which also requires a
+    non-empty server list.  That is the right question for *fetching* —
+    no mirror, nothing to fetch — and the wrong one for a path: where a
+    file lives cannot depend on how many mirrors happen to serve it.
+    The probe runs before the mirror pool is enlarged, so an item can
+    legitimately reach here with no server yet and must still be looked
+    for where the download will later write it.  ``build_download_items``
+    fills ``relative_path`` and ``media_url`` in mutually exclusive
+    branches, so the two layouts never compete.
+    """
+    base = payload_dir
+    if item.relative_path:
+        if item.is_official:
+            media_dir = base / "medias" / "official" / item.relative_path
+        else:
+            media_dir = base / "medias" / "custom" / item.media_name
+    elif item.media_name and item.media_url:
+        media_dir = base / "medias" / item.hostname / item.media_name
+    else:
+        return base / item.filename
+    if create:
+        media_dir.mkdir(parents=True, exist_ok=True)
+    return media_dir / item.filename
+
+
+def is_cached_at(item: DownloadItem, payload_dir: Path) -> bool:
+    """Whether *item* is already on the disk under *payload_dir*.
+
+    Verifies that the file exists, is not empty, and carries the RPM
+    magic bytes, which is what separates a usable payload from a
+    truncated or corrupted download.  Signature verification happens at
+    install time.
+    """
+    path = cache_path_for(item, payload_dir)
+    if not path.exists():
+        return False
+    if path.stat().st_size == 0:
+        return False
+    try:
+        with open(path, 'rb') as f:
+            magic = f.read(4)
+        return magic == RPM_MAGIC
+    except OSError:
+        return False
+
+
+def cached_payload_bytes(items: Iterable[DownloadItem],
+                         payload_dir: Path) -> int:
+    """Bytes of *items* that will not cross the network.
+
+    Two syscalls and a four-byte read per package, so it is affordable
+    before the confirmation prompt — which is the only place the figure
+    is worth anything.  Announcing the whole payload to someone whose
+    cache already holds most of it answers a question nobody asked.
+    """
+    return sum(item.size or 0 for item in items
+               if is_cached_at(item, payload_dir))
+
+
 class Downloader:
     """Download manager for RPM packages."""
 
@@ -1213,56 +1288,18 @@ class Downloader:
 
 
     def get_cache_path(self, item: DownloadItem) -> Path:
-        """Get cache path for a download item.
+        """Where *item* is written, creating the directory on the way.
 
-        New schema: <payload_dir>/medias/official/<relative_path>/*.rpm
-                    <payload_dir>/medias/custom/<short_name>/*.rpm
-        Legacy:     <payload_dir>/medias/<hostname>/<media_name>/*.rpm
-
-        Anchored on ``payload_dir`` rather than ``cache_dir`` so a
-        relocated payload keeps the same layout.  ``is_cached`` goes
-        through here too, so a package written to the relocated
-        directory is still found there afterwards — the two must never
-        disagree on where a file lives.
+        Delegates to :func:`cache_path_for`, which the pre-confirmation
+        cache probe also goes through: the two must never disagree on
+        where a file lives, and a second copy of the layout rules is
+        how they would come to.
         """
-        base = self.payload_dir
-        if item.uses_new_schema():
-            # New schema - use relative_path
-            if item.is_official:
-                media_dir = base / "medias" / "official" / item.relative_path
-            else:
-                media_dir = base / "medias" / "custom" / item.media_name
-            media_dir.mkdir(parents=True, exist_ok=True)
-            return media_dir / item.filename
-        elif item.media_name and item.media_url:
-            # Legacy schema
-            media_dir = base / "medias" / item.hostname / item.media_name
-            media_dir.mkdir(parents=True, exist_ok=True)
-            return media_dir / item.filename
-        return base / item.filename
+        return cache_path_for(item, self.payload_dir, create=True)
 
     def is_cached(self, item: DownloadItem) -> bool:
-        """Check if package is already in cache and is a valid RPM.
-
-        Verifies:
-        - File exists and is not empty
-        - File has valid RPM magic bytes (0xedabeedb)
-
-        This catches partial downloads and corrupted files.
-        Full signature verification is done at install time.
-        """
-        path = self.get_cache_path(item)
-        if not path.exists():
-            return False
-        if path.stat().st_size == 0:
-            return False
-        # Check RPM magic bytes
-        try:
-            with open(path, 'rb') as f:
-                magic = f.read(4)
-            return magic == RPM_MAGIC
-        except OSError:
-            return False
+        """Whether *item* is already on the disk and usable."""
+        return is_cached_at(item, self.payload_dir)
 
     def _register_cache_file(self, item: DownloadItem, cache_path: Path,
                              served_by_server_id: Optional[int] = None):

@@ -477,7 +477,7 @@ def _undo_stage1_media_swap(db, lock_fd: int) -> None:
 
 
 def _render_plan_and_confirm(result, *, space, source: str, target: str,
-                             auto: bool) -> bool:
+                             auto: bool, cached_bytes: int = 0) -> bool:
     """Show the Stage 2 plan (``urpm u``-style) and prompt Y/N.
 
     Categorises actions by ``action.value`` (upgrade / install /
@@ -504,8 +504,11 @@ def _render_plan_and_confirm(result, *, space, source: str, target: str,
     installs = [a for a in result.actions if a.action.value == "install"]
     removes = [a for a in result.actions if a.action.value == "remove"]
 
+    import dataclasses
+
     from ..helpers.transaction_sizes import compute_sizes, format_totals
-    sizes = compute_sizes(result.actions)
+    sizes = dataclasses.replace(
+        compute_sizes(result.actions), cached=cached_bytes)
 
     print("\n" + colors.bold(_(
         "Distupgrade summary : Mageia {src} → {tgt}").format(
@@ -1034,12 +1037,33 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         "Resolving the target-release package plan...")))
 
     def _stage2_confirm(result, space) -> bool:
+        # How much of the plan is already in the payload directory.
+        # Stage 2 builds the same items again once the answer is yes;
+        # doing it here too costs one extra pass over the actions, and
+        # buys the operator the difference between « 4.3 GB to fetch »
+        # and « 4.3 GB, of which 3.9 already downloaded » — which on a
+        # resumed distupgrade is the whole question.
+        cached_bytes = 0
+        try:
+            from ...core.operations import PackageOperations
+            _ops = PackageOperations(db)
+            _items, _ = _ops.build_download_items(
+                result.actions, getattr(result, "_resolver", None))
+            cached_bytes = _ops.cached_payload_bytes(
+                _items, urpm_root=getattr(args, "urpm_root", None))
+        except Exception:  # noqa: BLE001
+            # A summary refinement must never be what stops a
+            # distupgrade; without it the line reads as it always did.
+            import logging
+            logging.getLogger(__name__).debug(
+                "cache probe failed", exc_info=True)
         return _render_plan_and_confirm(
             result,
             space=space,
             source=stage0.current or "?",
             target=stage0.target.display(),
-            auto=getattr(args, "auto", False))
+            auto=getattr(args, "auto", False),
+            cached_bytes=cached_bytes)
 
     # Live download progress — same DownloadProgressDisplay ``urpm i``
     # / ``urpm u`` use.  Instantiated lazily inside the callback so

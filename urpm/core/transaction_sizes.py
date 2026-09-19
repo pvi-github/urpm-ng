@@ -62,6 +62,12 @@ class TransactionSizes:
     download: int
     installed: int
     freed: int
+    #: Of ``download``, the bytes already sitting in the payload
+    #: directory.  Zero unless the caller probed the cache: the probe
+    #: needs media rows and a payload path, neither of which belongs in
+    #: a module that only adds integers up.  See
+    #: :func:`urpm.core.download.cached_payload_bytes`.
+    cached: int = 0
 
     @property
     def net(self) -> int:
@@ -72,6 +78,18 @@ class TransactionSizes:
         obsolete packages go.
         """
         return self.installed - self.freed
+
+    @property
+    def to_fetch(self) -> int:
+        """What actually crosses the network.
+
+        Clamped at zero: ``cached`` is summed over the download items
+        while ``download`` is summed over the actions, and a medium
+        with neither a URL nor a server produces an action without an
+        item.  That is a broken configuration rather than a routine
+        case, and it should not surface as a negative byte count.
+        """
+        return max(0, self.download - self.cached)
 
 
 def compute_sizes(actions: Iterable) -> TransactionSizes:

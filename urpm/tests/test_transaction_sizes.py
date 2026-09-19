@@ -18,6 +18,7 @@ disk hold this ».
 
 from __future__ import annotations
 
+import dataclasses
 from types import SimpleNamespace
 
 from urpm.cli.helpers.transaction_sizes import (
@@ -229,6 +230,49 @@ class TestTheReplacedVersionsAreFreedToo:
         bare = SimpleNamespace(action=SimpleNamespace(value="upgrade"),
                                size=5 * MB, filesize=2 * MB)
         assert compute_sizes([bare]).freed == 0
+
+
+class TestWhatIsAlreadyInTheCache:
+    """The figure that decides whether the wait is worth it.
+
+    The download total is summed over the plan, before anything has
+    looked at the payload directory — the cache check used to live
+    inside the download stage, well past the confirmation prompt.  So
+    someone whose cache held most of the transaction was told they
+    would fetch all of it.
+    """
+
+    def _sizes(self, cached: int) -> TransactionSizes:
+        return dataclasses.replace(
+            compute_sizes([_action("install", 300 * MB, 100 * MB)]),
+            cached=cached)
+
+    def test_to_fetch_is_the_remainder(self):
+        assert self._sizes(70 * MB).to_fetch == 30 * MB
+
+    def test_nothing_cached_leaves_the_total_alone(self):
+        assert self._sizes(0).to_fetch == 100 * MB
+
+    def test_everything_cached_means_nothing_to_fetch(self):
+        assert self._sizes(100 * MB).to_fetch == 0
+
+    def test_it_never_goes_negative(self):
+        """``cached`` is summed over the download items and ``download``
+        over the actions; a medium with neither URL nor server yields an
+        action without an item.  A broken configuration must not print a
+        negative byte count."""
+        assert self._sizes(250 * MB).to_fetch == 0
+
+    def test_the_line_names_both(self):
+        line = format_totals(self._sizes(70 * MB), count=1)
+        assert "30" in line and "70" in line
+        assert "cach" in line.lower()
+
+    def test_the_line_stays_quiet_when_the_cache_is_empty(self):
+        """A parenthesis reading « 0 B already cached » on every fresh
+        install is the kind of noise that stops being read."""
+        line = format_totals(self._sizes(0), count=1)
+        assert "cach" not in line.lower()
 
 
 class TestAPackageAlreadyOnTheDisk:

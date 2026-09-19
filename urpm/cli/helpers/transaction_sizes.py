@@ -33,6 +33,17 @@ def format_totals(sizes: TransactionSizes, *, count: int) -> str:
     """
     from ..display import format_size
 
+    # The cache split modifies one quantity, so it is rendered into
+    # that quantity rather than into four more variants of the whole
+    # sentence.  Four templates times two states would be eight
+    # msgids for one parenthesis.
+    if sizes.cached:
+        download = _("{dl} ({cached} already cached)").format(
+            dl=format_size(sizes.to_fetch),
+            cached=format_size(sizes.cached))
+    else:
+        download = format_size(sizes.download)
+
     if sizes.freed:
         if sizes.net < 0:
             template = _("Total : {n} package(s), download {dl}, "
@@ -44,11 +55,11 @@ def format_totals(sizes: TransactionSizes, *, count: int) -> str:
             return _("Total : {n} package(s), download {dl}, "
                      "installed footprint {inst}, no net change.").format(
                          n=count,
-                         dl=format_size(sizes.download),
+                         dl=download,
                          inst=format_size(sizes.installed))
         return template.format(
             n=count,
-            dl=format_size(sizes.download),
+            dl=download,
             inst=format_size(sizes.installed),
             delta=format_size(abs(sizes.net)))
 
@@ -56,5 +67,5 @@ def format_totals(sizes: TransactionSizes, *, count: int) -> str:
         "Total : {n} package(s), download {dl}, "
         "installed footprint {inst}.").format(
             n=count,
-            dl=format_size(sizes.download),
+            dl=download,
             inst=format_size(sizes.installed))
