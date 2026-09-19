@@ -940,7 +940,12 @@ def cmd_media_add(args, db: 'PackageDatabase') -> int:
     import_key = getattr(args, 'import_key', False)
 
     if import_key and protocol != 'file':
-        print(_("Fetching GPG key from {url}/media_info/pubkey...").format(url=url))
+        # ``fetch_media_pubkey`` strips the trailing slash before
+        # appending the path; announce the URL it will actually
+        # request rather than the raw argument, which otherwise
+        # shows a doubled slash whenever the user typed one.
+        print(_("Fetching GPG key from {url}/media_info/pubkey...").format(
+            url=url.rstrip('/')))
         try:
             key_data = _fetch_media_pubkey(url)
         except Exception as e:
