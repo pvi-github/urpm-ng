@@ -18,23 +18,39 @@ __all__ = ["TransactionSizes", "compute_sizes", "format_totals"]
 def format_totals(sizes: TransactionSizes, *, count: int) -> str:
     """One line summarising *sizes*, for *count* packages.
 
-    The freed and net figures only appear when something is actually
-    being removed: « freed 0 B » on an ordinary install is noise, and
-    noise is what trains an operator to stop reading the line that
+    The third figure only appears when something is actually being
+    given back: on an ordinary install the net change *is* the
+    installed footprint, and repeating it under a second name is noise
+    — noise is what trains an operator to stop reading the line that
     matters.
+
+    When it does appear, it is the net, not the gross.  An upgrade
+    frees the old version and immediately spends most of it again on
+    the new one; announcing the gross told the operator a firefox
+    upgrade would give back 390 MB, when the disk ends up a couple of
+    megabytes lighter.  Only the net answers « will my disk hold
+    this », which is the question being asked.
     """
     from ..display import format_size
 
     if sizes.freed:
-        return _(
-            "Total : {n} package(s), download {dl}, "
-            "installed footprint {inst}, freed {freed} "
-            "(net {net}).").format(
-                n=count,
-                dl=format_size(sizes.download),
-                inst=format_size(sizes.installed),
-                freed=format_size(sizes.freed),
-                net=_format_net(sizes.net))
+        if sizes.net < 0:
+            template = _("Total : {n} package(s), download {dl}, "
+                         "installed footprint {inst}, {delta} freed.")
+        elif sizes.net > 0:
+            template = _("Total : {n} package(s), download {dl}, "
+                         "installed footprint {inst}, {delta} more used.")
+        else:
+            return _("Total : {n} package(s), download {dl}, "
+                     "installed footprint {inst}, no net change.").format(
+                         n=count,
+                         dl=format_size(sizes.download),
+                         inst=format_size(sizes.installed))
+        return template.format(
+            n=count,
+            dl=format_size(sizes.download),
+            inst=format_size(sizes.installed),
+            delta=format_size(abs(sizes.net)))
 
     return _(
         "Total : {n} package(s), download {dl}, "
@@ -42,12 +58,3 @@ def format_totals(sizes: TransactionSizes, *, count: int) -> str:
             n=count,
             dl=format_size(sizes.download),
             inst=format_size(sizes.installed))
-
-
-def _format_net(net: int) -> str:
-    """Signed, because the sign is the whole point of the figure."""
-    from ..display import format_size
-
-    if net < 0:
-        return "-" + format_size(-net)
-    return "+" + format_size(net)

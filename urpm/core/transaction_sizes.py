@@ -48,6 +48,12 @@ from typing import Iterable
 #: barely moves.
 _INCOMING = ("install", "upgrade", "reinstall")
 
+#: Repository name the resolver gives to packages named as a path on the
+#: command line (``urpm install ./foo.rpm``).  Set in
+#: :meth:`urpm.core.resolution.pool.SolvPool.add_local_rpms`; the literal
+#: lives in several modules and has no single home yet.
+_LOCAL_MEDIA = "@LocalRPMs"
+
 
 @dataclass(frozen=True)
 class TransactionSizes:
@@ -75,14 +81,23 @@ def compute_sizes(actions: Iterable) -> TransactionSizes:
     populate it — synthesis metadata is not always complete, and a
     download total that silently reads zero is worse than one that
     over-estimates.
+
+    A package named as a path on the command line is exempt from that
+    fallback and from the download total entirely: its payload is
+    already on the disk, so nothing crosses the network.  Without the
+    exemption the fallback would read its installed footprint and
+    announce a download that will never happen — 390 MB, for a firefox
+    handed over as a local file.
     """
     actions = list(actions)
     incoming = [a for a in actions if getattr(a.action, "value", a.action) in _INCOMING]
     outgoing = [a for a in actions if getattr(a.action, "value", a.action) == "remove"]
+    fetched = [a for a in incoming
+               if getattr(a, "media_name", "") != _LOCAL_MEDIA]
 
     return TransactionSizes(
         download=sum((getattr(a, "filesize", 0) or getattr(a, "size", 0) or 0)
-                     for a in incoming),
+                     for a in fetched),
         installed=sum(getattr(a, "size", 0) or 0 for a in incoming),
         # Explicit removals, plus the versions the incoming upgrades
         # replace : both give their bytes back, and only the first kind

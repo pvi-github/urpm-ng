@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.7.11\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-09-18 08:54+0200\n"
+"POT-Creation-Date: 2026-09-19 15:55+0200\n"
 "PO-Revision-Date: 2026-05-09 13:20+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -2673,7 +2673,7 @@ msgstr "Scelta non valida"
 #: urpm/cli/commands/distupgrade.py:561 urpm/cli/commands/distupgrade.py:786
 #: urpm/cli/commands/distupgrade.py:803 urpm/cli/commands/distupgrade.py:827
 #: urpm/cli/commands/system.py:720 urpm/cli/commands/system.py:776
-#: urpm/cli/commands/system.py:811 urpm/cli/commands/media.py:1766
+#: urpm/cli/commands/system.py:811 urpm/cli/commands/media.py:1771
 #: urpm/cli/commands/cleanup.py:234
 msgid ""
 "\n"
@@ -2745,7 +2745,7 @@ msgstr "File RPM locali ({count}):"
 #: urpm/cli/commands/upgrade.py:314 urpm/cli/commands/distupgrade.py:789
 #: urpm/cli/commands/distupgrade.py:806 urpm/cli/commands/distupgrade.py:830
 #: urpm/cli/commands/system.py:723 urpm/cli/commands/system.py:779
-#: urpm/cli/commands/media.py:1763 urpm/cli/commands/server.py:873
+#: urpm/cli/commands/media.py:1768 urpm/cli/commands/server.py:873
 #: urpm/cli/commands/cleanup.py:231
 msgid "Aborted."
 msgstr "Annullato."
@@ -2797,8 +2797,8 @@ msgstr "Installare i pacchetti raccomandati? [S/n] "
 
 #: urpm/cli/commands/install.py:678 urpm/cli/commands/install.py:691
 #: urpm/cli/commands/install.py:845 urpm/cli/commands/media.py:564
-#: urpm/cli/commands/media.py:980 urpm/cli/commands/media.py:1163
-#: urpm/cli/commands/media.py:1195 urpm/cli/commands/media.py:2659
+#: urpm/cli/commands/media.py:985 urpm/cli/commands/media.py:1168
+#: urpm/cli/commands/media.py:1200 urpm/cli/commands/media.py:2664
 #: urpm/cli/commands/cache.py:104 urpm/cli/commands/history.py:297
 #: urpm/cli/commands/history.py:754 urpm/cli/commands/config.py:480
 #: urpm/cli/commands/peer.py:207 urpm/cli/commands/cleanup.py:801
@@ -2879,8 +2879,8 @@ msgstr ""
 "Procedere con l'installazione? [s/N] "
 
 #: urpm/cli/commands/install.py:842 urpm/cli/commands/media.py:561
-#: urpm/cli/commands/media.py:977 urpm/cli/commands/media.py:1166
-#: urpm/cli/commands/media.py:1198 urpm/cli/commands/media.py:2656
+#: urpm/cli/commands/media.py:982 urpm/cli/commands/media.py:1171
+#: urpm/cli/commands/media.py:1203 urpm/cli/commands/media.py:2661
 #: urpm/cli/commands/cache.py:101 urpm/cli/commands/cache.py:314
 #: urpm/cli/commands/history.py:294 urpm/cli/commands/history.py:751
 #: urpm/cli/commands/config.py:477 urpm/cli/commands/peer.py:204
@@ -4610,7 +4610,7 @@ msgstr "Media:"
 msgid "Group:"
 msgstr "Gruppo:"
 
-#: urpm/cli/commands/query.py:248 urpm/cli/commands/media.py:1828
+#: urpm/cli/commands/query.py:248 urpm/cli/commands/media.py:1833
 msgid "Summary:"
 msgstr "Riassunto:"
 
@@ -4793,7 +4793,7 @@ msgid "No enabled media (use --all to see disabled)"
 msgstr ""
 "Nessun media abilitato (utilizzare --all per vedere quelli disabilitati)"
 
-#: urpm/cli/commands/media.py:177 urpm/cli/commands/media.py:2200
+#: urpm/cli/commands/media.py:177 urpm/cli/commands/media.py:2205
 msgid "[x]"
 msgstr "[x]"
 
@@ -5030,7 +5030,7 @@ msgstr[0] "{count} pacchetto"
 msgstr[1] "{count} pacchetti"
 
 #: urpm/cli/commands/media.py:715 urpm/cli/commands/media.py:718
-#: urpm/cli/commands/media.py:2258 urpm/cli/commands/server.py:613
+#: urpm/cli/commands/media.py:2263 urpm/cli/commands/server.py:613
 #, python-brace-format
 msgid "failed: {error}"
 msgstr "fallito: {error}"
@@ -5116,14 +5116,14 @@ msgstr ""
 msgid "Error: URL not recognized as official Mageia media"
 msgstr "Errore: URL non riconosciuto come media Mageia ufficiale"
 
-#: urpm/cli/commands/media.py:908 urpm/cli/commands/media.py:1040
+#: urpm/cli/commands/media.py:908 urpm/cli/commands/media.py:1045
 msgid ""
 "For official media, URL must contain: .../version/arch/media/class/type/"
 msgstr ""
 "Per i media ufficiali, l'URL deve contenere: "
 ".../version/arch/media/class/type/"
 
-#: urpm/cli/commands/media.py:909 urpm/cli/commands/media.py:1041
+#: urpm/cli/commands/media.py:909 urpm/cli/commands/media.py:1046
 msgid ""
 "For custom media, use: urpm media add --custom <url>\n"
 "  (--name and --shortname are optional; both are derived from\n"
@@ -5138,45 +5138,45 @@ msgid "Error: --allow-unsigned can only be used with custom media"
 msgstr ""
 "Errore: --allow-unsigned può essere usato solo con i media personalizzati"
 
-#: urpm/cli/commands/media.py:943
+#: urpm/cli/commands/media.py:947
 #, python-brace-format
 msgid "Fetching GPG key from {url}/media_info/pubkey..."
 msgstr "Recupero della chiave GPG da {url}/media_info/pubkey..."
 
-#: urpm/cli/commands/media.py:947
+#: urpm/cli/commands/media.py:952
 #, python-brace-format
 msgid "Error: could not fetch pubkey: {error}"
 msgstr "Errore: impossibile recuperare la chiave pubblica: {error}"
 
-#: urpm/cli/commands/media.py:951
+#: urpm/cli/commands/media.py:956
 msgid "Error: no pubkey found at media"
 msgstr "Errore: nessuna chiave pubblica trovata sul media"
 
-#: urpm/cli/commands/media.py:956
+#: urpm/cli/commands/media.py:961
 msgid "Error: could not parse pubkey"
 msgstr "Errore: impossibile analizzare la chiave pubblica"
 
-#: urpm/cli/commands/media.py:960 urpm/cli/commands/media.py:2640
+#: urpm/cli/commands/media.py:965 urpm/cli/commands/media.py:2645
 #, python-brace-format
 msgid "  Key ID:      {keyid}"
 msgstr "  ID chiave:   {keyid}"
 
-#: urpm/cli/commands/media.py:964 urpm/cli/commands/media.py:2645
+#: urpm/cli/commands/media.py:969 urpm/cli/commands/media.py:2650
 #, python-brace-format
 msgid "  Fingerprint: {fingerprint}"
 msgstr "  Fingerprint: {fingerprint}"
 
-#: urpm/cli/commands/media.py:966 urpm/cli/commands/media.py:2648
+#: urpm/cli/commands/media.py:971 urpm/cli/commands/media.py:2653
 #, python-brace-format
 msgid "  User ID:     {uid}"
 msgstr "  ID utente:   {uid}"
 
-#: urpm/cli/commands/media.py:969 urpm/cli/commands/media.py:2651
+#: urpm/cli/commands/media.py:974 urpm/cli/commands/media.py:2656
 #, python-brace-format
 msgid "  Key {keyid} already in keyring"
 msgstr "  La chiave {keyid} è già presente nel portachiavi"
 
-#: urpm/cli/commands/media.py:975 urpm/cli/commands/media.py:2654
+#: urpm/cli/commands/media.py:980 urpm/cli/commands/media.py:2659
 msgid ""
 "\n"
 "Import this key? [y/N] "
@@ -5184,16 +5184,16 @@ msgstr ""
 "\n"
 "Importare questa chiave? [s/N] "
 
-#: urpm/cli/commands/media.py:986 urpm/cli/commands/media.py:2663
+#: urpm/cli/commands/media.py:991 urpm/cli/commands/media.py:2668
 #, python-brace-format
 msgid "  Key {keyid} imported"
 msgstr "  Chiave {keyid} importata"
 
-#: urpm/cli/commands/media.py:988 urpm/cli/commands/media.py:2665
+#: urpm/cli/commands/media.py:993 urpm/cli/commands/media.py:2670
 msgid "  Failed to import key"
 msgstr "  Importazione della chiave non riuscita"
 
-#: urpm/cli/commands/media.py:1005
+#: urpm/cli/commands/media.py:1010
 msgid ""
 "Error: media name {name!r} already taken by media #{id} ({existing}); pass a"
 " different --name"
@@ -5201,26 +5201,26 @@ msgstr ""
 "Errore: il nome del media {name!r} è già utilizzato dal media #{id} "
 "({existing}); fornire un --name diverso"
 
-#: urpm/cli/commands/media.py:1039
+#: urpm/cli/commands/media.py:1044
 msgid "Error: URL not recognized as a media tree."
 msgstr "Errore: URL non riconosciuto come albero di media."
 
-#: urpm/cli/commands/media.py:1047
+#: urpm/cli/commands/media.py:1052
 #, python-brace-format
 msgid "Cannot determine {field} for this media — {exc}"
 msgstr "Impossibile determinare {field} per questo media — {exc}"
 
-#: urpm/cli/commands/media.py:1062
+#: urpm/cli/commands/media.py:1067
 #, python-brace-format
 msgid "  Created server '{name}' (id={id})"
 msgstr "  Server '{name}' creato (id={id})"
 
-#: urpm/cli/commands/media.py:1065
+#: urpm/cli/commands/media.py:1070
 #, python-brace-format
 msgid "  Using existing server '{name}' (id={id})"
 msgstr "  Utilizzo del server esistente '{name}' (id={id})"
 
-#: urpm/cli/commands/media.py:1073
+#: urpm/cli/commands/media.py:1078
 msgid ""
 "Pass --name to choose a different display name, or remove the colliding "
 "media first."
@@ -5228,90 +5228,90 @@ msgstr ""
 "Passare --name per scegliere un nome di visualizzazione diverso, o rimuovere"
 " prima il media in conflitto."
 
-#: urpm/cli/commands/media.py:1078
+#: urpm/cli/commands/media.py:1083
 #, python-brace-format
 msgid "  Created media '{name}' (id={id})"
 msgstr "  Media '{name}' creato (id={id})"
 
-#: urpm/cli/commands/media.py:1081
+#: urpm/cli/commands/media.py:1086
 #, python-brace-format
 msgid "  Using existing media '{name}' (id={id})"
 msgstr "  Utilizzo del media esistente '{name}' (id={id})"
 
-#: urpm/cli/commands/media.py:1093
+#: urpm/cli/commands/media.py:1098
 #, python-brace-format
 msgid "  Media '{name}' re-enabled (was disabled)"
 msgstr "  Media '{name}' riabilitato (era disabilitato)"
 
-#: urpm/cli/commands/media.py:1097
+#: urpm/cli/commands/media.py:1102
 #, python-brace-format
 msgid "  Linked server '{server}' -> media '{media}'"
 msgstr "  Collegato il server '{server}' -> media '{media}'"
 
-#: urpm/cli/commands/media.py:1100
+#: urpm/cli/commands/media.py:1105
 #, python-brace-format
 msgid "  Link already exists: server '{server}' -> media '{media}'"
 msgstr "  Collegamento già esistente: server '{server}' -> media '{media}'"
 
-#: urpm/cli/commands/media.py:1108
+#: urpm/cli/commands/media.py:1113
 #, python-brace-format
 msgid "Added media '{name}' with new server"
 msgstr "Aggiunto media '{name}' con un nuovo server"
 
-#: urpm/cli/commands/media.py:1110
+#: urpm/cli/commands/media.py:1115
 #, python-brace-format
 msgid "Added media '{name}' to existing server"
 msgstr "Aggiunto media '{name}' a un server esistente"
 
-#: urpm/cli/commands/media.py:1112
+#: urpm/cli/commands/media.py:1117
 #, python-brace-format
 msgid "Added new server for existing media '{name}'"
 msgstr "Aggiunto un nuovo server per il media esistente '{name}'"
 
-#: urpm/cli/commands/media.py:1114
+#: urpm/cli/commands/media.py:1119
 #, python-brace-format
 msgid "Re-enabled existing media '{name}'"
 msgstr "Riabilitato il media esistente '{name}'"
 
-#: urpm/cli/commands/media.py:1116
+#: urpm/cli/commands/media.py:1121
 #, python-brace-format
 msgid "Linked existing server to existing media '{name}'"
 msgstr "Collegato un server esistente al media esistente '{name}'"
 
-#: urpm/cli/commands/media.py:1148
+#: urpm/cli/commands/media.py:1153
 msgid ""
 "--all, --distupgraded and an explicit list of names are mutually exclusive"
 msgstr ""
 "--all, --distupgraded e un elenco esplicito di nomi si escludono a vicenda"
 
-#: urpm/cli/commands/media.py:1155
+#: urpm/cli/commands/media.py:1160
 msgid "No media to remove"
 msgstr "Nessun media da rimuovere"
 
-#: urpm/cli/commands/media.py:1159
+#: urpm/cli/commands/media.py:1164
 #, python-brace-format
 msgid "About to remove ALL {n} media sources"
 msgstr "Sto per rimuovere TUTTE le {n} sorgenti media"
 
-#: urpm/cli/commands/media.py:1161 urpm/cli/commands/media.py:1193
+#: urpm/cli/commands/media.py:1166 urpm/cli/commands/media.py:1198
 msgid "Proceed? [y/N] "
 msgstr "Procedere? [s/N] "
 
-#: urpm/cli/commands/media.py:1180
+#: urpm/cli/commands/media.py:1185
 msgid "No distupgrade-migrated media to remove"
 msgstr "Nessun media migrato da distupgrade da rimuovere"
 
-#: urpm/cli/commands/media.py:1185
+#: urpm/cli/commands/media.py:1190
 #, python-brace-format
 msgid "About to remove {n} distupgrade-migrated media"
 msgstr "Sto per rimuovere {n} media migrati da distupgrade"
 
-#: urpm/cli/commands/media.py:1191
+#: urpm/cli/commands/media.py:1196
 #, python-brace-format
 msgid "  (+ {n} more)"
 msgstr "  (+ altri {n})"
 
-#: urpm/cli/commands/media.py:1204
+#: urpm/cli/commands/media.py:1209
 msgid ""
 "Missing media name; pass one or more names, or --all to remove everything, "
 "or --distupgraded to remove migrated media only"
@@ -5319,169 +5319,169 @@ msgstr ""
 "Nome del media mancante; indicare uno o più nomi, oppure --all per rimuovere"
 " tutto, oppure --distupgraded per rimuovere solo i media migrati"
 
-#: urpm/cli/commands/media.py:1212 urpm/cli/commands/media.py:1247
-#: urpm/cli/commands/media.py:1367 urpm/cli/commands/media.py:1882
-#: urpm/cli/commands/media.py:1976 urpm/cli/commands/media.py:2110
+#: urpm/cli/commands/media.py:1217 urpm/cli/commands/media.py:1252
+#: urpm/cli/commands/media.py:1372 urpm/cli/commands/media.py:1887
+#: urpm/cli/commands/media.py:1981 urpm/cli/commands/media.py:2115
 #, python-brace-format
 msgid "Media '{name}' not found"
 msgstr "Media '{name}' non trovato"
 
-#: urpm/cli/commands/media.py:1216
+#: urpm/cli/commands/media.py:1221
 #, python-brace-format
 msgid "Removed media '{name}'"
 msgstr "Media '{name}' rimosso"
 
-#: urpm/cli/commands/media.py:1229
+#: urpm/cli/commands/media.py:1234
 #, python-brace-format
 msgid "Removed orphan server '{name}' (no media left)"
 msgstr "Server orfano '{name}' rimosso (nessun media rimanente)"
 
-#: urpm/cli/commands/media.py:1250
+#: urpm/cli/commands/media.py:1255
 #, python-brace-format
 msgid "  Did you mean: {names}?"
 msgstr "  Intendevi: {names}?"
 
-#: urpm/cli/commands/media.py:1267
+#: urpm/cli/commands/media.py:1272
 #, python-brace-format
 msgid "Enabled media '{name}'"
 msgstr "Media '{name}' abilitato"
 
-#: urpm/cli/commands/media.py:1283
+#: urpm/cli/commands/media.py:1288
 #, python-brace-format
 msgid "Disabled media '{name}'"
 msgstr "Media '{name}' disabilitato"
 
-#: urpm/cli/commands/media.py:1323
+#: urpm/cli/commands/media.py:1328
 #, python-brace-format
 msgid "Media update already in progress (PID {pid})."
 msgstr "Aggiornamento dei media già in corso (PID {pid})."
 
-#: urpm/cli/commands/media.py:1326
+#: urpm/cli/commands/media.py:1331
 msgid "Media update already in progress."
 msgstr "Aggiornamento dei media già in corso."
 
-#: urpm/cli/commands/media.py:1327
+#: urpm/cli/commands/media.py:1332
 msgid "Waiting for lock... (Ctrl+C to cancel)"
 msgstr "In attesa del lock... (Ctrl+C per annullare)"
 
-#: urpm/cli/commands/media.py:1338
+#: urpm/cli/commands/media.py:1343
 msgid "Database is busy. Another operation may be in progress."
 msgstr "Database occupato. Potrebbe essere in corso un'altra operazione."
 
-#: urpm/cli/commands/media.py:1339
+#: urpm/cli/commands/media.py:1344
 msgid "Please retry in a few moments."
 msgstr "Riprovare tra qualche istante."
 
-#: urpm/cli/commands/media.py:1370
+#: urpm/cli/commands/media.py:1375
 #, python-brace-format
 msgid "Updating {name}..."
 msgstr "Aggiornamento di {name}..."
 
-#: urpm/cli/commands/media.py:1383 urpm/cli/commands/media.py:1466
+#: urpm/cli/commands/media.py:1388 urpm/cli/commands/media.py:1471
 msgid "up-to-date"
 msgstr "aggiornato"
 
-#: urpm/cli/commands/media.py:1385
+#: urpm/cli/commands/media.py:1390
 #, python-brace-format
 msgid "  {count} package"
 msgid_plural "  {count} packages"
 msgstr[0] "  {count} pacchetto"
 msgstr[1] "  {count} pacchetti"
 
-#: urpm/cli/commands/media.py:1388
+#: urpm/cli/commands/media.py:1393
 msgid "Error"
 msgstr "Errore"
 
-#: urpm/cli/commands/media.py:1393
+#: urpm/cli/commands/media.py:1398
 msgid "Updating all media (parallel)..."
 msgstr "Aggiornamento di tutti i media (in parallelo)..."
 
-#: urpm/cli/commands/media.py:1450
+#: urpm/cli/commands/media.py:1455
 #, python-brace-format
 msgid "ERROR - {error}"
 msgstr "ERRORE - {error}"
 
-#: urpm/cli/commands/media.py:1472
+#: urpm/cli/commands/media.py:1477
 msgid "package"
 msgid_plural "packages"
 msgstr[0] "pacchetto"
 msgstr[1] "pacchetti"
 
-#: urpm/cli/commands/media.py:1478 urpm/cli/commands/media.py:1480
-#: urpm/cli/commands/media.py:1482
+#: urpm/cli/commands/media.py:1483 urpm/cli/commands/media.py:1485
+#: urpm/cli/commands/media.py:1487
 msgid "Total"
 msgstr "Totale"
 
-#: urpm/cli/commands/media.py:1478
+#: urpm/cli/commands/media.py:1483
 #, python-brace-format
 msgid "packages from {count} media in {elapsed} ({errors} errors)"
 msgstr "pacchetti da {count} media in {elapsed} ({errors} errori)"
 
-#: urpm/cli/commands/media.py:1480
+#: urpm/cli/commands/media.py:1485
 #, python-brace-format
 msgid "all {count} media up-to-date in {elapsed}"
 msgstr "tutti i {count} media aggiornati in {elapsed}"
 
-#: urpm/cli/commands/media.py:1482
+#: urpm/cli/commands/media.py:1487
 #, python-brace-format
 msgid "packages from {count} media in {elapsed}"
 msgstr "pacchetti da {count} media in {elapsed}"
 
-#: urpm/cli/commands/media.py:1653 urpm/cli/commands/config.py:275
+#: urpm/cli/commands/media.py:1658 urpm/cli/commands/config.py:275
 #, python-brace-format
 msgid "File not found: {path}"
 msgstr "File non trovato: {path}"
 
-#: urpm/cli/commands/media.py:1659
+#: urpm/cli/commands/media.py:1664
 #, python-brace-format
 msgid "Failed to parse {path}: {error}"
 msgstr "Analisi di {path} non riuscita: {error}"
 
-#: urpm/cli/commands/media.py:1663
+#: urpm/cli/commands/media.py:1668
 msgid "No media found in file"
 msgstr "Nessun media trovato nel file"
 
-#: urpm/cli/commands/media.py:1716
+#: urpm/cli/commands/media.py:1721
 msgid "Import from:"
 msgstr "Importazione da:"
 
-#: urpm/cli/commands/media.py:1717
+#: urpm/cli/commands/media.py:1722
 #, python-brace-format
 msgid ""
 "Found: {total} media ({direct} with URL, {mirrorlist} mirrorlist-based)"
 msgstr ""
 "Trovati: {total} media ({direct} con URL, {mirrorlist} basati su mirrorlist)"
 
-#: urpm/cli/commands/media.py:1720
+#: urpm/cli/commands/media.py:1725
 #, python-brace-format
 msgid "Cannot resolve version for {n} mirrorlist media"
 msgstr "Impossibile risolvere la versione per {n} media mirrorlist"
 
-#: urpm/cli/commands/media.py:1721
+#: urpm/cli/commands/media.py:1726
 msgid "    Pass --release <version> so the target Mageia version is known."
 msgstr ""
 "    Passare --release <versione> affinché la versione Mageia di destinazione"
 " sia nota."
 
-#: urpm/cli/commands/media.py:1724
+#: urpm/cli/commands/media.py:1729
 msgid "Mirrorlist-based to add (server links via `urpm server autoconfig`):"
 msgstr ""
 "Basati su mirrorlist da aggiungere (link server via `urpm server "
 "autoconfig`):"
 
-#: urpm/cli/commands/media.py:1734
+#: urpm/cli/commands/media.py:1739
 msgid "To add:"
 msgstr "Da aggiungere:"
 
-#: urpm/cli/commands/media.py:1744
+#: urpm/cli/commands/media.py:1749
 msgid "To replace:"
 msgstr "Da sostituire:"
 
-#: urpm/cli/commands/media.py:1749
+#: urpm/cli/commands/media.py:1754
 msgid "Skipped (already exist):"
 msgstr "Saltati (già esistenti):"
 
-#: urpm/cli/commands/media.py:1754
+#: urpm/cli/commands/media.py:1759
 msgid ""
 "\n"
 "Nothing to import"
@@ -5489,37 +5489,37 @@ msgstr ""
 "\n"
 "Niente da importare"
 
-#: urpm/cli/commands/media.py:1761
+#: urpm/cli/commands/media.py:1766
 #, python-brace-format
 msgid "Import {count} media? [y/N] "
 msgstr "Importare {count} media? [s/N] "
 
-#: urpm/cli/commands/media.py:1781
+#: urpm/cli/commands/media.py:1786
 msgid "Replaced:"
 msgstr "Sostituiti:"
 
-#: urpm/cli/commands/media.py:1783 urpm/cli/commands/media.py:1792
-#: urpm/cli/commands/media.py:1825
+#: urpm/cli/commands/media.py:1788 urpm/cli/commands/media.py:1797
+#: urpm/cli/commands/media.py:1830
 msgid "Error:"
 msgstr "Errore:"
 
-#: urpm/cli/commands/media.py:1790
+#: urpm/cli/commands/media.py:1795
 msgid "Added:"
 msgstr "Aggiunti:"
 
-#: urpm/cli/commands/media.py:1817
+#: urpm/cli/commands/media.py:1822
 msgid "Pending:"
 msgstr "In sospeso:"
 
-#: urpm/cli/commands/media.py:1819
+#: urpm/cli/commands/media.py:1824
 msgid "Already present:"
 msgstr "Già presente:"
 
-#: urpm/cli/commands/media.py:1821
+#: urpm/cli/commands/media.py:1826
 msgid "Skipped:"
 msgstr "Saltato:"
 
-#: urpm/cli/commands/media.py:1829
+#: urpm/cli/commands/media.py:1834
 #, python-brace-format
 msgid ""
 "{added} added, {mirrorlist} mirrorlist-based, {replaced} replaced, {errors} "
@@ -5528,7 +5528,7 @@ msgstr ""
 "{added} aggiunti, {mirrorlist} basati su mirrorlist, {replaced} sostituiti, "
 "{errors} errori"
 
-#: urpm/cli/commands/media.py:1836
+#: urpm/cli/commands/media.py:1841
 #, python-brace-format
 msgid ""
 "Next step: run 'urpm server autoconfig' to attach servers to the {n} "
@@ -5537,12 +5537,12 @@ msgstr ""
 "Prossimo passo: eseguire 'urpm server autoconfig' per collegare server ai "
 "{n} media basati su mirrorlist"
 
-#: urpm/cli/commands/media.py:1849
+#: urpm/cli/commands/media.py:1854
 #, python-brace-format
 msgid "Probing {count} servers..."
 msgstr "Sondaggio di {count} server..."
 
-#: urpm/cli/commands/media.py:1861
+#: urpm/cli/commands/media.py:1866
 msgid ""
 "\n"
 "Run 'urpm media update' to fetch package lists"
@@ -5550,46 +5550,46 @@ msgstr ""
 "\n"
 "Eseguire 'urpm media update' per recuperare gli elenchi dei pacchetti"
 
-#: urpm/cli/commands/media.py:1877
+#: urpm/cli/commands/media.py:1882
 msgid "Media name required"
 msgstr "Nome del media richiesto"
 
-#: urpm/cli/commands/media.py:1900
+#: urpm/cli/commands/media.py:1905
 #, python-brace-format
 msgid "Invalid replication policy: {policy}"
 msgstr "Politica di replicazione non valida: {policy}"
 
-#: urpm/cli/commands/media.py:1901
+#: urpm/cli/commands/media.py:1906
 msgid "Valid values: none, on_demand, seed"
 msgstr "Valori validi: none, on_demand, seed"
 
-#: urpm/cli/commands/media.py:1924 urpm/cli/commands/mirror.py:127
+#: urpm/cli/commands/media.py:1929 urpm/cli/commands/mirror.py:127
 #, python-brace-format
 msgid "Invalid size format: {size}"
 msgstr "Formato di dimensione non valido: {size}"
 
-#: urpm/cli/commands/media.py:1936
+#: urpm/cli/commands/media.py:1941
 msgid "No changes specified"
 msgstr "Nessuna modifica specificata"
 
-#: urpm/cli/commands/media.py:1937
+#: urpm/cli/commands/media.py:1942
 msgid ""
 "Use --shared, --replication, --seeds, --quota, --retention or --priority"
 msgstr ""
 "Utilizzare --shared, --replication, --seeds, --quota, --retention o "
 "--priority"
 
-#: urpm/cli/commands/media.py:1960
+#: urpm/cli/commands/media.py:1965
 #, python-brace-format
 msgid "Updated '{name}':"
 msgstr "Aggiornato '{name}':"
 
-#: urpm/cli/commands/media.py:1981
+#: urpm/cli/commands/media.py:1986
 #, python-brace-format
 msgid "Media '{name}' has replication_policy='{policy}', not 'seed'"
 msgstr "Il media '{name}' ha replication_policy='{policy}', non 'seed'"
 
-#: urpm/cli/commands/media.py:1982
+#: urpm/cli/commands/media.py:1987
 msgid ""
 "Use: urpm media set <name> --replication=seed "
 "--seeds=INSTALL,CAT_PLASMA5,..."
@@ -5597,21 +5597,21 @@ msgstr ""
 "Utilizzo: urpm media set <nome> --replication=seed "
 "--seeds=INSTALL,CAT_PLASMA5,..."
 
-#: urpm/cli/commands/media.py:2014
+#: urpm/cli/commands/media.py:2019
 msgid "Invalid replication_seeds JSON in database"
 msgstr "JSON di replication_seeds non valido nel database"
 
-#: urpm/cli/commands/media.py:2019
+#: urpm/cli/commands/media.py:2024
 #, python-brace-format
 msgid "Media: {name}"
 msgstr "Media: {name}"
 
-#: urpm/cli/commands/media.py:2020
+#: urpm/cli/commands/media.py:2025
 #, python-brace-format
 msgid "Sections: {sections}"
 msgstr "Sezioni: {sections}"
 
-#: urpm/cli/commands/media.py:2024
+#: urpm/cli/commands/media.py:2029
 #, python-brace-format
 msgid ""
 "\n"
@@ -5620,38 +5620,38 @@ msgstr ""
 "\n"
 "rpmsrate-raw non trovato in {path}"
 
-#: urpm/cli/commands/media.py:2025 urpm/cli/commands/mirror.py:296
+#: urpm/cli/commands/media.py:2030 urpm/cli/commands/mirror.py:296
 msgid "Install the meta-task package to enable seed-based replication"
 msgstr ""
 "Installare il pacchetto meta-task per abilitare la replicazione basata su "
 "seed"
 
-#: urpm/cli/commands/media.py:2033 urpm/cli/commands/mirror.py:303
+#: urpm/cli/commands/media.py:2038 urpm/cli/commands/mirror.py:303
 #, python-brace-format
 msgid "Error parsing rpmsrate-raw: {error}"
 msgstr "Errore nell'analisi di rpmsrate-raw: {error}"
 
-#: urpm/cli/commands/media.py:2047
+#: urpm/cli/commands/media.py:2052
 #, python-brace-format
 msgid "Packages from rpmsrate: {count}"
 msgstr "Pacchetti da rpmsrate: {count}"
 
-#: urpm/cli/commands/media.py:2054
+#: urpm/cli/commands/media.py:2059
 #, python-brace-format
 msgid "Matching in this media: {count}"
 msgstr "Corrispondenze in questo media: {count}"
 
-#: urpm/cli/commands/media.py:2058
+#: urpm/cli/commands/media.py:2063
 #, python-brace-format
 msgid "Installed size (seeds only): {size} GB"
 msgstr "Dimensione installata (solo seed): {size} GB"
 
-#: urpm/cli/commands/media.py:2063
+#: urpm/cli/commands/media.py:2068
 #, python-brace-format
 msgid "{count} seeds not in media: {names}..."
 msgstr "{count} seed non presenti nel media: {names}..."
 
-#: urpm/cli/commands/media.py:2065
+#: urpm/cli/commands/media.py:2070
 msgid ""
 "\n"
 "Collecting dependencies..."
@@ -5659,164 +5659,164 @@ msgstr ""
 "\n"
 "Raccolta delle dipendenze..."
 
-#: urpm/cli/commands/media.py:2074 urpm/cli/commands/mirror.py:335
+#: urpm/cli/commands/media.py:2079 urpm/cli/commands/mirror.py:335
 #, python-brace-format
 msgid "With dependencies: {count} packages"
 msgstr "Con le dipendenze: {count} pacchetti"
 
-#: urpm/cli/commands/media.py:2076
+#: urpm/cli/commands/media.py:2081
 #, python-brace-format
 msgid "Estimated download: ~{download} GB (installed: {installed:.1f} GB)"
 msgstr "Scaricamento stimato: ~{download} GB (installati: {installed:.1f} GB)"
 
-#: urpm/cli/commands/media.py:2080
+#: urpm/cli/commands/media.py:2085
 #, python-brace-format
 msgid "  - Seeds: {seeds}, Dependencies: {deps}"
 msgstr "  - Seed: {seeds}, dipendenze: {deps}"
 
-#: urpm/cli/commands/media.py:2083
+#: urpm/cli/commands/media.py:2088
 #, python-brace-format
 msgid "Not found: {count} ({names}...)"
 msgstr "Non trovati: {count} ({names}...)"
 
-#: urpm/cli/commands/media.py:2086
+#: urpm/cli/commands/media.py:2091
 #, python-brace-format
 msgid "Dependency collection failed: {error}"
 msgstr "Raccolta delle dipendenze fallita: {error}"
 
-#: urpm/cli/commands/media.py:2092
+#: urpm/cli/commands/media.py:2097
 #, python-brace-format
 msgid "Example seed packages: {packages}..."
 msgstr "Pacchetti seed di esempio: {packages}..."
 
-#: urpm/cli/commands/media.py:2141
+#: urpm/cli/commands/media.py:2146
 #, python-brace-format
 msgid "Checking {count} servers..."
 msgstr "Controllo di {count} server..."
 
-#: urpm/cli/commands/media.py:2185
+#: urpm/cli/commands/media.py:2190
 #, python-brace-format
 msgid "Added: {names}"
 msgstr "Aggiunti: {names}"
 
-#: urpm/cli/commands/media.py:2187
+#: urpm/cli/commands/media.py:2192
 #, python-brace-format
 msgid "Removed: {names}"
 msgstr "Rimossi: {names}"
 
-#: urpm/cli/commands/media.py:2189
+#: urpm/cli/commands/media.py:2194
 #, python-brace-format
 msgid "Skipped (media not available): {names}"
 msgstr "Saltati (media non disponibile): {names}"
 
-#: urpm/cli/commands/media.py:2198
+#: urpm/cli/commands/media.py:2203
 #, python-brace-format
 msgid "Servers for '{name}':"
 msgstr "Server per '{name}':"
 
-#: urpm/cli/commands/media.py:2200
+#: urpm/cli/commands/media.py:2205
 msgid "[ ]"
 msgstr "[ ]"
 
-#: urpm/cli/commands/media.py:2203
+#: urpm/cli/commands/media.py:2208
 #, python-brace-format
 msgid "No servers linked to '{name}'"
 msgstr "Nessun server collegato a '{name}'"
 
-#: urpm/cli/commands/media.py:2233
+#: urpm/cli/commands/media.py:2238
 #, python-brace-format
 msgid "Auto-configuring media for Mageia {release} ({arch})"
 msgstr "Autoconfigurazione dei media per Mageia {release} ({arch})"
 
-#: urpm/cli/commands/media.py:2253
+#: urpm/cli/commands/media.py:2258
 msgid "Fetching mirrorlist..."
 msgstr "Recupero della mirrorlist..."
 
-#: urpm/cli/commands/media.py:2262
+#: urpm/cli/commands/media.py:2267
 msgid "no http/https mirrors found"
 msgstr "nessun mirror http/https trovato"
 
-#: urpm/cli/commands/media.py:2267
+#: urpm/cli/commands/media.py:2272
 #, python-brace-format
 msgid "{count} http(s) mirror"
 msgid_plural "{count} http(s) mirrors"
 msgstr[0] "{count} mirror http(s)"
 msgstr[1] "{count} mirror http(s)"
 
-#: urpm/cli/commands/media.py:2270
+#: urpm/cli/commands/media.py:2275
 msgid "Testing mirror latency..."
 msgstr "Test della latenza dei mirror..."
 
-#: urpm/cli/commands/media.py:2301
+#: urpm/cli/commands/media.py:2306
 msgid "all mirrors unreachable"
 msgstr "tutti i mirror irraggiungibili"
 
-#: urpm/cli/commands/media.py:2308
+#: urpm/cli/commands/media.py:2313
 #, python-brace-format
 msgid "best: {latency:.0f}ms"
 msgstr "migliore: {latency:.0f}ms"
 
-#: urpm/cli/commands/media.py:2352
+#: urpm/cli/commands/media.py:2357
 #, python-brace-format
 msgid "Failed to fetch catalogue: {error}"
 msgstr "Impossibile recuperare il catalogo: {error}"
 
-#: urpm/cli/commands/media.py:2358
+#: urpm/cli/commands/media.py:2363
 #, python-brace-format
 msgid "Dry run — would attach {n} media from {n_mirrors} mirror(s):"
 msgstr "Simulazione — collegherebbe {n} media da {n_mirrors} mirror:"
 
-#: urpm/cli/commands/media.py:2381
+#: urpm/cli/commands/media.py:2386
 #, python-brace-format
 msgid "  Skipping {url}: {exc}"
 msgstr "  Salto {url}: {exc}"
 
-#: urpm/cli/commands/media.py:2385
+#: urpm/cli/commands/media.py:2390
 #, python-brace-format
 msgid "  Skipping {url}: missing {field}"
 msgstr "  Salto {url}: manca {field}"
 
-#: urpm/cli/commands/media.py:2391
+#: urpm/cli/commands/media.py:2396
 #, python-brace-format
 msgid "  Added server: {name} ({lat:.0f}ms)"
 msgstr "  Server aggiunto: {name} ({lat:.0f}ms)"
 
-#: urpm/cli/commands/media.py:2405
+#: urpm/cli/commands/media.py:2410
 #, python-brace-format
 msgid "Added {servers} server(s), {added} new media, {relinked} re-linked"
 msgstr ""
 "Aggiunti {servers} server, {added} nuovi media, {relinked} ricollegati"
 
-#: urpm/cli/commands/media.py:2408 urpm/cli/commands/media.py:2748
+#: urpm/cli/commands/media.py:2413 urpm/cli/commands/media.py:2753
 msgid "Run 'urpm media update' to sync metadata"
 msgstr "Eseguire 'urpm media update' per sincronizzare i metadati"
 
-#: urpm/cli/commands/media.py:2487
+#: urpm/cli/commands/media.py:2492
 #, python-brace-format
 msgid "Fetching media.cfg from {url}..."
 msgstr "Recupero di media.cfg da {url}..."
 
-#: urpm/cli/commands/media.py:2499
+#: urpm/cli/commands/media.py:2504
 msgid "media.cfg has no version — cannot proceed"
 msgstr "media.cfg non ha una versione — impossibile procedere"
 
-#: urpm/cli/commands/media.py:2517
+#: urpm/cli/commands/media.py:2522
 msgid "No media found in media.cfg"
 msgstr "Nessun media trovato in media.cfg"
 
-#: urpm/cli/commands/media.py:2525
+#: urpm/cli/commands/media.py:2530
 msgid "  Detected nonfree packages installed"
 msgstr "  Rilevati pacchetti nonfree installati"
 
-#: urpm/cli/commands/media.py:2527
+#: urpm/cli/commands/media.py:2532
 msgid "  Detected tainted packages installed"
 msgstr "  Rilevati pacchetti tainted installati"
 
-#: urpm/cli/commands/media.py:2529
+#: urpm/cli/commands/media.py:2534
 msgid "  Detected 32-bit packages installed"
 msgstr "  Rilevati pacchetti a 32 bit installati"
 
-#: urpm/cli/commands/media.py:2547
+#: urpm/cli/commands/media.py:2552
 #, python-brace-format
 msgid ""
 "Warning: these media are for Mageia {repo_ver}, this system runs Mageia "
@@ -5825,38 +5825,38 @@ msgstr ""
 "Attenzione: questi media sono per Mageia {repo_ver}, questo sistema esegue "
 "Mageia {local_ver}"
 
-#: urpm/cli/commands/media.py:2551
+#: urpm/cli/commands/media.py:2556
 msgid "  They will only be served to LAN peers, not used locally."
 msgstr "  Saranno serviti solo ai peer della LAN, non utilizzati localmente."
 
-#: urpm/cli/commands/media.py:2555
+#: urpm/cli/commands/media.py:2560
 #, python-brace-format
 msgid "Found {n} media for {branch} {version} ({arch}):"
 msgstr "Trovati {n} media per {branch} {version} ({arch}):"
 
-#: urpm/cli/commands/media.py:2573 urpm/cli/commands/server.py:40
+#: urpm/cli/commands/media.py:2578 urpm/cli/commands/server.py:40
 #: urpm/cli/commands/server.py:957 urpm/cli/commands/cache.py:204
 #: urpm/cli/commands/config.py:337 urpm/cli/commands/mirror.py:23
 msgid "enabled"
 msgstr "abilitato"
 
-#: urpm/cli/commands/media.py:2573 urpm/cli/commands/server.py:42
+#: urpm/cli/commands/media.py:2578 urpm/cli/commands/server.py:42
 #: urpm/cli/commands/server.py:959 urpm/cli/commands/cache.py:204
 #: urpm/cli/commands/config.py:337 urpm/cli/commands/mirror.py:23
 msgid "disabled"
 msgstr "disabilitato"
 
-#: urpm/cli/commands/media.py:2583
+#: urpm/cli/commands/media.py:2588
 #, python-brace-format
 msgid "  ({n} source media hidden, use --sources to include)"
 msgstr "  ({n} media sorgente nascosti, utilizzare --sources per includerli)"
 
-#: urpm/cli/commands/media.py:2585
+#: urpm/cli/commands/media.py:2590
 #, python-brace-format
 msgid "  ({n} debug media hidden, use --debug to include)"
 msgstr "  ({n} media di debug nascosti, utilizzare --debug per includerli)"
 
-#: urpm/cli/commands/media.py:2588
+#: urpm/cli/commands/media.py:2593
 msgid ""
 "\n"
 "Dry run — no changes made"
@@ -5864,28 +5864,28 @@ msgstr ""
 "\n"
 "Esecuzione di prova — nessuna modifica apportata"
 
-#: urpm/cli/commands/media.py:2613
+#: urpm/cli/commands/media.py:2618
 msgid "--import-keys: no enabled media to sample a pubkey from"
 msgstr ""
 "--import-keys: nessun supporto attivato da cui campionare una chiave "
 "pubblica"
 
-#: urpm/cli/commands/media.py:2622
+#: urpm/cli/commands/media.py:2627
 #, python-brace-format
 msgid "  {media}: could not fetch pubkey ({error})"
 msgstr "  {media}: impossibile scaricare la chiave pubblica ({error})"
 
-#: urpm/cli/commands/media.py:2627
+#: urpm/cli/commands/media.py:2632
 #, python-brace-format
 msgid "  {media}: no pubkey published"
 msgstr "  {media}: nessuna chiave pubblica pubblicata"
 
-#: urpm/cli/commands/media.py:2632
+#: urpm/cli/commands/media.py:2637
 #, python-brace-format
 msgid "  {media}: could not parse pubkey"
 msgstr "  {media}: impossibile analizzare la chiave pubblica"
 
-#: urpm/cli/commands/media.py:2639
+#: urpm/cli/commands/media.py:2644
 #, python-brace-format
 msgid ""
 "\n"
@@ -5894,27 +5894,27 @@ msgstr ""
 "\n"
 "Chiave annunciata da {media}:"
 
-#: urpm/cli/commands/media.py:2696
+#: urpm/cli/commands/media.py:2701
 #, python-brace-format
 msgid "Cannot determine {field} for media — {exc}"
 msgstr "Impossibile determinare {field} per il media — {exc}"
 
-#: urpm/cli/commands/media.py:2702
+#: urpm/cli/commands/media.py:2707
 #, python-brace-format
 msgid "  Server: {name} (new)"
 msgstr "  Server: {name} (nuovo)"
 
-#: urpm/cli/commands/media.py:2704
+#: urpm/cli/commands/media.py:2709
 #, python-brace-format
 msgid "  Server: {name} (existing)"
 msgstr "  Server: {name} (esistente)"
 
-#: urpm/cli/commands/media.py:2740
+#: urpm/cli/commands/media.py:2745
 #, python-brace-format
 msgid "{count} additional server-media links (MD5 verified)"
 msgstr "{count} collegamenti server-media aggiuntivi (verificati con MD5)"
 
-#: urpm/cli/commands/media.py:2745
+#: urpm/cli/commands/media.py:2750
 #, python-brace-format
 msgid ""
 "\n"
@@ -9991,16 +9991,34 @@ msgstr ""
 "⚠ ALLARME DI SICUREZZA: {n} server potenzialmente compromessi (in lista "
 "nera): {names} — lanciare «urpm server status <nome>» per il dettaglio."
 
-#: urpm/cli/helpers/transaction_sizes.py:30
+#: urpm/cli/helpers/transaction_sizes.py:38
 #, python-brace-format
 msgid ""
-"Total : {n} package(s), download {dl}, installed footprint {inst}, freed "
-"{freed} (net {net})."
+"Total : {n} package(s), download {dl}, installed footprint {inst}, {delta} "
+"freed."
 msgstr ""
-"Totale: {n} pacchetto/i, scaricamento {dl}, impronta installata {inst}, "
-"liberato {freed} (saldo {net})."
+"Totale: {n} pacchetto/i, scaricamento {dl}, ingombro installato {inst}, "
+"{delta} liberati."
 
-#: urpm/cli/helpers/transaction_sizes.py:40
+#: urpm/cli/helpers/transaction_sizes.py:41
+#, python-brace-format
+msgid ""
+"Total : {n} package(s), download {dl}, installed footprint {inst}, {delta} "
+"more used."
+msgstr ""
+"Totale: {n} pacchetto/i, scaricamento {dl}, ingombro installato {inst}, "
+"{delta} occupati in più."
+
+#: urpm/cli/helpers/transaction_sizes.py:44
+#, python-brace-format
+msgid ""
+"Total : {n} package(s), download {dl}, installed footprint {inst}, no net "
+"change."
+msgstr ""
+"Totale: {n} pacchetto/i, scaricamento {dl}, ingombro installato {inst}, "
+"occupazione invariata."
+
+#: urpm/cli/helpers/transaction_sizes.py:56
 #, python-brace-format
 msgid "Total : {n} package(s), download {dl}, installed footprint {inst}."
 msgstr "Totale : {n} pacchetto(i), download {dl}, spazio installato {inst}."
@@ -10405,6 +10423,14 @@ msgstr "Eseguire: {cmd}"
 #: urpm/auth/privileges.py:113
 msgid "Try one of:"
 msgstr "Provare una delle seguenti:"
+
+#, python-brace-format
+#~ msgid ""
+#~ "Total : {n} package(s), download {dl}, installed footprint {inst}, freed "
+#~ "{freed} (net {net})."
+#~ msgstr ""
+#~ "Totale: {n} pacchetto/i, scaricamento {dl}, impronta installata {inst}, "
+#~ "liberato {freed} (saldo {net})."
 
 #, python-brace-format
 #~ msgid "Total download size: {size}"

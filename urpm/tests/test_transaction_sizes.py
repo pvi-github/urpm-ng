@@ -30,10 +30,10 @@ MB = 1024 * 1024
 
 
 def _action(kind: str, size: int, filesize: int | None = None,
-            from_size: int = 0):
+            from_size: int = 0, media_name: str = "Core Release"):
     return SimpleNamespace(
         action=SimpleNamespace(value=kind), size=size, filesize=filesize,
-        from_size=from_size)
+        from_size=from_size, media_name=media_name)
 
 
 class TestTheTwoAreKeptApart:
@@ -108,21 +108,35 @@ class TestTheNetFigure:
         ])
         assert sizes.net == -890 * MB
 
-    def test_sign_is_shown(self):
-        """A bare « 890 MB » next to « freed » reads as more space used,
-        which is the opposite of the truth."""
-        sizes = compute_sizes([
+    def test_a_negative_net_reads_as_freed(self):
+        """890 MB, not 900: the install spends 10 of what the removal
+        gave back, and the operator is told what the disk actually
+        gains."""
+        line = format_totals(compute_sizes([
             _action("install", 10 * MB, 3 * MB),
             _action("remove", 900 * MB),
-        ])
-        assert "-" in format_totals(sizes, count=2)
+        ]), count=2)
+        low = line.lower()
+        assert "freed" in low or "libér" in low
+        assert "890" in line
 
-    def test_positive_net_is_signed_too(self):
-        sizes = compute_sizes([
+    def test_a_positive_net_reads_as_used(self):
+        line = format_totals(compute_sizes([
             _action("install", 300 * MB, 90 * MB),
             _action("remove", 100 * MB),
-        ])
-        assert "+" in format_totals(sizes, count=2)
+        ]), count=2)
+        low = line.lower()
+        assert "used" in low or "occup" in low
+        assert "200" in line
+
+    def test_a_zero_net_says_so(self):
+        """Swapping a package for one of the same weight neither frees
+        nor spends, and « 0 B freed » invites a second reading."""
+        line = format_totals(compute_sizes([
+            _action("upgrade", 40 * MB, 12 * MB, from_size=40 * MB),
+        ]), count=1)
+        low = line.lower()
+        assert "no net change" in low or "inchang" in low
 
 
 class TestTheLine:
@@ -142,13 +156,29 @@ class TestTheLine:
         assert "freed" not in line.lower()
         assert "net" not in line.lower()
 
-    def test_mentions_freed_when_something_is_removed(self):
+    def test_reports_the_net_not_the_gross(self):
+        """Installing 100 MB while removing 50 uses 50 more; saying
+        « 50 MB freed » would be true of one half of the transaction and
+        false of the whole."""
         line = format_totals(compute_sizes([
             _action("install", 100 * MB, 30 * MB),
             _action("remove", 50 * MB),
         ]), count=2)
         low = line.lower()
-        assert "freed" in low or "libér" in low
+        assert "used" in low or "occup" in low
+        assert "freed" not in low and "libér" not in low
+
+    def test_an_upgrade_does_not_claim_the_old_version_as_a_gain(self):
+        """The reported case : firefox handed over as a local file,
+        390 MB replacing 388.  The line announced « freed 388 MB », as
+        if the upgrade were a cleanup, when the disk ends up 2 MB
+        heavier."""
+        line = format_totals(compute_sizes([
+            _action("upgrade", 390 * MB, 120 * MB, from_size=388 * MB),
+        ]), count=1)
+        low = line.lower()
+        assert "388" not in line
+        assert "used" in low or "occup" in low
 
 
 class TestTheReplacedVersionsAreFreedToo:
@@ -199,3 +229,39 @@ class TestTheReplacedVersionsAreFreedToo:
         bare = SimpleNamespace(action=SimpleNamespace(value="upgrade"),
                                size=5 * MB, filesize=2 * MB)
         assert compute_sizes([bare]).freed == 0
+
+
+class TestAPackageAlreadyOnTheDisk:
+    """``urpm install ./foo.rpm`` fetches nothing."""
+
+    def test_a_local_rpm_is_not_a_download(self):
+        sizes = compute_sizes(
+            [_action("install", 390 * MB, 120 * MB,
+                     media_name="@LocalRPMs")])
+        assert sizes.download == 0
+
+    def test_it_still_occupies_its_footprint(self):
+        sizes = compute_sizes(
+            [_action("install", 390 * MB, 120 * MB,
+                     media_name="@LocalRPMs")])
+        assert sizes.installed == 390 * MB
+
+    def test_the_fallback_does_not_resurrect_it(self):
+        """A header carries no download size.  With the fallback still
+        applying, the missing figure would be replaced by the installed
+        footprint and announce 390 MB crossing a network nothing is
+        crossing."""
+        sizes = compute_sizes(
+            [_action("install", 390 * MB, None, media_name="@LocalRPMs")])
+        assert sizes.download == 0
+
+    def test_media_packages_in_the_same_plan_still_count(self):
+        """A local RPM usually drags dependencies in behind it, and
+        those do get fetched."""
+        sizes = compute_sizes([
+            _action("install", 390 * MB, 120 * MB,
+                    media_name="@LocalRPMs"),
+            _action("install", 10 * MB, 4 * MB),
+        ])
+        assert sizes.download == 4 * MB
+        assert sizes.installed == 400 * MB

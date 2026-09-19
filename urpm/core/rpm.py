@@ -129,7 +129,7 @@ def read_rpm_header(rpm_path: Path) -> Optional[Dict[str, Any]]:
     Returns:
         Dict with package metadata, or None if reading failed.
         Keys: name, version, release, epoch, arch, nevra, size,
-              requires, provides, conflicts, obsoletes,
+              filesize, path, requires, provides, conflicts, obsoletes,
               recommends, suggests, supplements, enhances
     """
     import rpm
@@ -219,6 +219,12 @@ def read_rpm_header(rpm_path: Path) -> Optional[Dict[str, Any]]:
             'arch': arch,
             'nevra': nevra,
             'size': size,
+            # The compressed payload, as the media metadata would report
+            # it.  A header has no such tag — the file *is* the payload —
+            # so it comes from the filesystem.  Media packages carry both
+            # figures and every size summary expects both; leaving this
+            # one out made a local RPM read as zero bytes throughout.
+            'filesize': path.stat().st_size,
             'path': str(path.resolve()),
             'requires': get_versioned_deps(rpm.RPMTAG_REQUIRENAME, rpm.RPMTAG_REQUIREVERSION, rpm.RPMTAG_REQUIREFLAGS),
             'provides': get_versioned_deps(rpm.RPMTAG_PROVIDENAME, rpm.RPMTAG_PROVIDEVERSION, rpm.RPMTAG_PROVIDEFLAGS),

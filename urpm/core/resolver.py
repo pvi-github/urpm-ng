@@ -1645,7 +1645,15 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 size = installed_size_of(s, self._solvable_to_pkg)
                 remove_size += size
             else:
-                size = pkg_info.get('filesize', 0)
+                # ``size`` is the installed footprint and ``filesize`` the
+                # compressed payload : two different numbers, and this
+                # site used to put the second one in the first.  Every
+                # summary built on ``PackageAction.size`` then announced
+                # the download as the space the root filesystem would
+                # have to hold — figlet's 344 kB read as 231 kB — and a
+                # local RPM, whose header carries no download size at
+                # all, read as zero on both counts.
+                size = pkg_info.get('size', 0)
                 if action in (TransactionType.INSTALL,
                               TransactionType.UPGRADE):
                     install_size += size
@@ -1668,6 +1676,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 arch=s.arch,
                 nevra=f"{s.name}-{s.evr}.{s.arch}",
                 size=size,
+                filesize=pkg_info.get('filesize', 0),
                 media_name=pkg_info.get('media_name', ''),
                 reason=reason,
                 from_evr=from_evr,
