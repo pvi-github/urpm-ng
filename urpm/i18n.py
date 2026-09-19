@@ -122,6 +122,29 @@ def confirm_yes(response: str) -> bool:
     return r in ('y', 'yes', _('y'), _('yes'))
 
 
+def confirm_no(response: str) -> bool:
+    """Check if a user response means 'no' in the current locale.
+
+    The counterpart of :func:`confirm_yes`, for the prompts whose
+    default is yes.  Those cannot be phrased as ``not confirm_yes(...)``
+    — that would read an empty line, or a typo, as a refusal, and the
+    prompts that default to yes are the ones protecting something.
+
+    A prompt asking whether to keep the target machine's drivers is the
+    case in point: with the negated form, a fumbled keystroke removed
+    them.  Asking the question the other way round makes anything that
+    is not an explicit refusal fall back on the safe default.
+
+    Args:
+        response: Raw user input string.
+
+    Returns:
+        True if the response is an explicit refusal.
+    """
+    r = response.strip().lower()
+    return r in ('n', 'no', _('n'), _('no'))
+
+
 def pgettext(context: str, message: str) -> str:
     """Translate a string with context disambiguation.
 

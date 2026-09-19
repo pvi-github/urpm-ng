@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
-from ...i18n import _, confirm_yes
+from ...i18n import _, confirm_no, confirm_yes
 from .. import colors
 from ...core import system_profile as sp
 
@@ -810,10 +810,12 @@ def cmd_system_import(args, db: 'PackageDatabase') -> int:
             except (KeyboardInterrupt, EOFError):
                 print(_("\nAborted."))
                 return 1
-            # Default is Y (preserve) — an empty response OR anything
-            # starting with 'y'/'o' (yes/oui) accepts preservation.
-            resp = resp.strip().lower()
-            preserve = (resp == "" or resp[0:1] in ("y", "o"))
+            # Default is yes, so the question is whether the operator
+            # refused — not whether they agreed.  The previous form
+            # tested for an English or French yes in the clear, which
+            # read « j » from a German operator as a refusal and took
+            # their drivers with it; it read a typo the same way.
+            preserve = not confirm_no(resp)
         if preserve:
             hw_preserved = list(hw_specific)
             hw_set = set(hw_specific)

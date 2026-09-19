@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.4.1\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-09-19 19:08+0200\n"
+"POT-Creation-Date: 2026-09-19 22:15+0200\n"
 "PO-Revision-Date: 2026-07-10 14:30-0300\n"
 "Last-Translator: Grok (assistente de tradução)\n"
 "Language-Team: Brazilian Portuguese <i18n@mageia.org>\n"
@@ -25,6 +25,14 @@ msgstr "s"
 #: urpm/cli/helpers/orphans_triage.py:439
 msgid "yes"
 msgstr "sim"
+
+#: urpm/i18n.py:145
+msgid "n"
+msgstr "n"
+
+#: urpm/i18n.py:145 urpm/cli/helpers/orphans_triage.py:441
+msgid "no"
+msgstr "não"
 
 #: urpm/cli/main.py:189
 msgid "ERROR: Missing or broken runtime dependencies:"
@@ -2504,9 +2512,9 @@ msgstr "Instale o subpacote urpm-ng-genmedia:"
 msgid "Interrupted"
 msgstr "Interrompido"
 
-#: urpm/cli/main.py:3434 urpm/cli/commands/install.py:256
-#: urpm/cli/commands/install.py:259 urpm/cli/commands/install.py:1234
-#: urpm/cli/commands/install.py:1237 urpm/cli/commands/history.py:632
+#: urpm/cli/main.py:3434 urpm/cli/commands/install.py:257
+#: urpm/cli/commands/install.py:260 urpm/cli/commands/install.py:1235
+#: urpm/cli/commands/install.py:1238 urpm/cli/commands/history.py:632
 #: urpm/cli/commands/config.py:425 urpm/cli/commands/build.py:2165
 #, python-brace-format
 msgid "Error: {error}"
@@ -2545,42 +2553,42 @@ msgstr "... (--show-all para o detalhe completo)"
 msgid "To rerun these operations later: {cmd} <package>"
 msgstr "Para repetir estas operações mais tarde: {cmd} <pacote>"
 
-#: urpm/cli/commands/install.py:75
+#: urpm/cli/commands/install.py:76
 #, python-brace-format
 msgid "Config: failed to replace {path}: {error}"
 msgstr "Config: falha ao substituir {path}: {error}"
 
-#: urpm/cli/commands/install.py:78
+#: urpm/cli/commands/install.py:79
 #, python-brace-format
 msgid "Config conflict: {path}"
 msgstr "Conflito de configuração: {path}"
 
-#: urpm/cli/commands/install.py:79
+#: urpm/cli/commands/install.py:80
 msgid "[k] Keep existing (new saved as .rpmnew)"
 msgstr "[k] Manter existente (nova salva como .rpmnew)"
 
-#: urpm/cli/commands/install.py:80
+#: urpm/cli/commands/install.py:81
 msgid "[r] Replace with new (old saved as .rpmold)"
 msgstr "[r] Substituir pela nova (antiga salva como .rpmold)"
 
-#: urpm/cli/commands/install.py:81
+#: urpm/cli/commands/install.py:82
 msgid "[d] Show diff"
 msgstr "[d] Mostrar diferenças"
 
-#: urpm/cli/commands/install.py:84
+#: urpm/cli/commands/install.py:85
 msgid "  Choice [k/r/d]: "
 msgstr " Escolha [k/r/d]: "
 
-#: urpm/cli/commands/install.py:94
+#: urpm/cli/commands/install.py:95
 #, python-brace-format
 msgid "Failed to replace: {error}"
 msgstr "Falha ao substituir: {error}"
 
-#: urpm/cli/commands/install.py:99
+#: urpm/cli/commands/install.py:100
 msgid "  Invalid choice"
 msgstr " Escolha inválida"
 
-#: urpm/cli/commands/install.py:102
+#: urpm/cli/commands/install.py:103
 #, python-brace-format
 msgid "{count} config file updated (old saved as .rpmold)"
 msgid_plural "{count} config files updated (old saved as .rpmold)"
@@ -2589,27 +2597,27 @@ msgstr[0] ""
 msgstr[1] ""
 "{count} ficheiros de configuração atualizados (antigos salvos como .rpmold)"
 
-#: urpm/cli/commands/install.py:128
+#: urpm/cli/commands/install.py:129
 #, python-brace-format
 msgid "Fetching {name}..."
 msgstr "A obter {name}..."
 
-#: urpm/cli/commands/install.py:142
+#: urpm/cli/commands/install.py:143
 #, python-brace-format
 msgid "Error: could not fetch {url}: {reason}"
 msgstr "Erro: não foi possível obter {url}: {reason}"
 
-#: urpm/cli/commands/install.py:184 urpm/cli/commands/remove.py:39
+#: urpm/cli/commands/install.py:185 urpm/cli/commands/remove.py:39
 #: urpm/cli/commands/upgrade.py:36 urpm/cli/commands/cleanup.py:36
 msgid "Warning: Previous background operation had an error:"
 msgstr "Aviso: A operação anterior em segundo plano teve um erro:"
 
-#: urpm/cli/commands/install.py:186 urpm/cli/commands/remove.py:41
+#: urpm/cli/commands/install.py:187 urpm/cli/commands/remove.py:41
 #: urpm/cli/commands/upgrade.py:38 urpm/cli/commands/cleanup.py:38
 msgid "  (This message will not appear again)"
 msgstr " (Esta mensagem não aparecerá novamente)"
 
-#: urpm/cli/commands/install.py:198
+#: urpm/cli/commands/install.py:199
 msgid ""
 "  --nodeps: dependency resolution skipped (installing exactly the requested "
 "packages)"
@@ -2617,24 +2625,24 @@ msgstr ""
 "  --nodeps: resolução de dependências ignorada (instalação exata dos pacotes"
 " solicitados)"
 
-#: urpm/cli/commands/install.py:217 urpm/cli/commands/install.py:1195
+#: urpm/cli/commands/install.py:218 urpm/cli/commands/install.py:1196
 msgid "Multiple .spec files found:"
 msgstr "Vários ficheiros .spec encontrados:"
 
-#: urpm/cli/commands/install.py:221 urpm/cli/commands/install.py:1199
+#: urpm/cli/commands/install.py:222 urpm/cli/commands/install.py:1200
 msgid "Error: Multiple .spec files found. Specify which one to use."
 msgstr "Erro: Vários ficheiros .spec encontrados. Especifique qual usar."
 
-#: urpm/cli/commands/install.py:224 urpm/cli/commands/install.py:1202
+#: urpm/cli/commands/install.py:225 urpm/cli/commands/install.py:1203
 msgid "Select spec file (number): "
 msgstr "Selecione o ficheiro spec (número): "
 
-#: urpm/cli/commands/install.py:229 urpm/cli/commands/install.py:1207
+#: urpm/cli/commands/install.py:230 urpm/cli/commands/install.py:1208
 msgid "Invalid choice"
 msgstr "Escolha inválida"
 
-#: urpm/cli/commands/install.py:232 urpm/cli/commands/install.py:1210
-#: urpm/cli/commands/install.py:1422 urpm/cli/commands/upgrade.py:332
+#: urpm/cli/commands/install.py:233 urpm/cli/commands/install.py:1211
+#: urpm/cli/commands/install.py:1423 urpm/cli/commands/upgrade.py:332
 #: urpm/cli/commands/distupgrade.py:564 urpm/cli/commands/distupgrade.py:789
 #: urpm/cli/commands/distupgrade.py:806 urpm/cli/commands/distupgrade.py:830
 #: urpm/cli/commands/system.py:720 urpm/cli/commands/system.py:776
@@ -2647,63 +2655,63 @@ msgstr ""
 "\n"
 "Abortado."
 
-#: urpm/cli/commands/install.py:245 urpm/cli/commands/install.py:1223
+#: urpm/cli/commands/install.py:246 urpm/cli/commands/install.py:1224
 #, python-brace-format
 msgid "Build dependencies from: {source}"
 msgstr "Dependências de compilação a partir de: {source}"
 
-#: urpm/cli/commands/install.py:246 urpm/cli/commands/install.py:1224
+#: urpm/cli/commands/install.py:247 urpm/cli/commands/install.py:1225
 #, python-brace-format
 msgid "Found {count} BuildRequires"
 msgstr "{count} BuildRequires encontrados"
 
-#: urpm/cli/commands/install.py:249
+#: urpm/cli/commands/install.py:250
 msgid "Spec has no BuildRequires — nothing to install."
 msgstr "O spec não tem nenhum BuildRequires, nada a instalar."
 
-#: urpm/cli/commands/install.py:266 urpm/cli/commands/install.py:273
-#: urpm/cli/commands/install.py:1241
+#: urpm/cli/commands/install.py:267 urpm/cli/commands/install.py:274
+#: urpm/cli/commands/install.py:1242
 msgid "Error: No packages specified"
 msgstr "Erro: Nenhum pacote especificado"
 
-#: urpm/cli/commands/install.py:267
+#: urpm/cli/commands/install.py:268
 msgid "Usage: urpm install --install-src <srpm_file_or_package_name>"
 msgstr "Utilização: urpm install --install-src <ficheiro_srpm_ou_nome_pacote>"
 
-#: urpm/cli/commands/install.py:274
+#: urpm/cli/commands/install.py:275
 msgid "Usage: urpm install <packages> or urpm install --buildrequires <spec>"
 msgstr "Uso: urpm install <pacotes> ou urpm install --buildrequires <spec>"
 
-#: urpm/cli/commands/install.py:296 urpm/cli/commands/config.py:435
+#: urpm/cli/commands/install.py:297 urpm/cli/commands/config.py:435
 #, python-brace-format
 msgid "Error: file not found: {path}"
 msgstr "Erro: ficheiro não encontrado: {path}"
 
-#: urpm/cli/commands/install.py:308
+#: urpm/cli/commands/install.py:309
 #, python-brace-format
 msgid "Error: cannot read RPM file: {path}"
 msgstr "Erro: não é possível ler o ficheiro RPM: {path}"
 
-#: urpm/cli/commands/install.py:313
+#: urpm/cli/commands/install.py:314
 #, python-brace-format
 msgid "Error: signature verification failed for {path}"
 msgstr "Erro: verificação de assinatura falhou para {path}"
 
-#: urpm/cli/commands/install.py:315 urpm/cli/commands/upgrade.py:106
+#: urpm/cli/commands/install.py:316 urpm/cli/commands/upgrade.py:106
 msgid "  Use --nosignature to skip verification (not recommended)"
 msgstr " Use --nosignature para ignorar a verificação (não recomendado)"
 
-#: urpm/cli/commands/install.py:354
+#: urpm/cli/commands/install.py:355
 #, python-brace-format
 msgid "Found {count} sibling RPMs (available for dependencies)"
 msgstr "{count} RPMs irmãos encontrados (disponíveis para dependências)"
 
-#: urpm/cli/commands/install.py:358 urpm/cli/commands/upgrade.py:113
+#: urpm/cli/commands/install.py:359 urpm/cli/commands/upgrade.py:113
 #, python-brace-format
 msgid "Local RPM files ({count}):"
 msgstr "Ficheiros RPM locais ({count}):"
 
-#: urpm/cli/commands/install.py:408 urpm/cli/commands/install.py:1419
+#: urpm/cli/commands/install.py:409 urpm/cli/commands/install.py:1420
 #: urpm/cli/commands/remove.py:187 urpm/cli/commands/remove.py:190
 #: urpm/cli/commands/upgrade.py:329 urpm/cli/commands/distupgrade.py:792
 #: urpm/cli/commands/distupgrade.py:809 urpm/cli/commands/distupgrade.py:833
@@ -2713,22 +2721,22 @@ msgstr "Ficheiros RPM locais ({count}):"
 msgid "Aborted."
 msgstr "Abortado."
 
-#: urpm/cli/commands/install.py:460 urpm/cli/commands/install.py:1346
+#: urpm/cli/commands/install.py:461 urpm/cli/commands/install.py:1347
 #, python-brace-format
 msgid "Packages not found ({count}):"
 msgstr "Pacotes não encontrados ({count}):"
 
-#: urpm/cli/commands/install.py:464 urpm/cli/commands/history.py:142
+#: urpm/cli/commands/install.py:465 urpm/cli/commands/history.py:142
 #: urpm/cli/commands/mirror.py:514 urpm/cli/helpers/failure_report.py:66
 #, python-brace-format
 msgid "... and {count} more"
 msgstr "... e mais {count}"
 
-#: urpm/cli/commands/install.py:482
+#: urpm/cli/commands/install.py:483
 msgid "The requested package(s) cannot be installed:"
 msgstr "O ou os pacotes solicitados não podem ser instalados:"
 
-#: urpm/cli/commands/install.py:495
+#: urpm/cli/commands/install.py:496
 msgid ""
 "Retry in partial mode (skip the unsolvable request(s) and install the rest) "
 "? [y/N] "
@@ -2736,7 +2744,7 @@ msgstr ""
 "Tentar novamente em modo parcial (ignorar os pedidos sem solução e instalar "
 "o resto)? [s/N] "
 
-#: urpm/cli/commands/install.py:618
+#: urpm/cli/commands/install.py:619
 #, python-brace-format
 msgid ""
 "Error: package '{pkg}' is not available for arch '{arch}' (available for: "
@@ -2745,28 +2753,28 @@ msgstr ""
 "Erro: o pacote '{pkg}' não está disponível para a arquitectura '{arch}' "
 "(disponível para: {archs})"
 
-#: urpm/cli/commands/install.py:632
+#: urpm/cli/commands/install.py:633
 msgid "Nothing to do"
 msgstr "Nada a fazer"
 
-#: urpm/cli/commands/install.py:670
+#: urpm/cli/commands/install.py:671
 #, python-brace-format
 msgid "Recommended packages ({count})"
 msgstr "Pacotes recomendados ({count})"
 
-#: urpm/cli/commands/install.py:675
+#: urpm/cli/commands/install.py:676
 msgid "Install recommended packages? [Y/n] "
 msgstr "Instalar pacotes recomendados? [S/n] "
 
-#: urpm/cli/commands/install.py:678 urpm/cli/commands/install.py:691
-#: urpm/cli/commands/install.py:864 urpm/cli/commands/media.py:564
+#: urpm/cli/commands/install.py:679 urpm/cli/commands/install.py:692
+#: urpm/cli/commands/install.py:865 urpm/cli/commands/media.py:564
 #: urpm/cli/commands/media.py:985 urpm/cli/commands/media.py:1168
 #: urpm/cli/commands/media.py:1200 urpm/cli/commands/media.py:2664
 #: urpm/cli/commands/cache.py:104 urpm/cli/commands/history.py:297
 #: urpm/cli/commands/history.py:754 urpm/cli/commands/config.py:480
 #: urpm/cli/commands/peer.py:207 urpm/cli/commands/cleanup.py:801
-#: urpm/cli/commands/build.py:1187 urpm/cli/helpers/suggests.py:140
-#: urpm/cli/helpers/suggests.py:157
+#: urpm/cli/commands/build.py:1187 urpm/cli/helpers/suggests.py:141
+#: urpm/cli/helpers/suggests.py:158
 msgid ""
 "\n"
 "Aborted"
@@ -2774,66 +2782,66 @@ msgstr ""
 "\n"
 "Abortado"
 
-#: urpm/cli/commands/install.py:683
+#: urpm/cli/commands/install.py:684
 #, python-brace-format
 msgid "Suggested packages ({count})"
 msgstr "Pacotes sugeridos ({count})"
 
-#: urpm/cli/commands/install.py:688
+#: urpm/cli/commands/install.py:689
 msgid "Install suggested packages? [Y/n] "
 msgstr "Instalar pacotes sugeridos? [S/n] "
 
-#: urpm/cli/commands/install.py:755 urpm/cli/commands/install.py:1364
+#: urpm/cli/commands/install.py:756 urpm/cli/commands/install.py:1365
 #: urpm/cli/commands/remove.py:77 urpm/cli/commands/upgrade.py:149
 msgid "Resolution failed:"
 msgstr "Resolução falhou:"
 
-#: urpm/cli/commands/install.py:763
+#: urpm/cli/commands/install.py:764
 msgid "Skipped suggests:"
 msgstr "Sugestões ignoradas:"
 
-#: urpm/cli/commands/install.py:797 urpm/cli/commands/upgrade.py:275
+#: urpm/cli/commands/install.py:798 urpm/cli/commands/upgrade.py:275
 msgid "Transaction summary:"
 msgstr "Resumo da transação:"
 
-#: urpm/cli/commands/install.py:801
+#: urpm/cli/commands/install.py:802
 #, python-brace-format
 msgid "Requested ({count})"
 msgstr "Solicitados ({count})"
 
-#: urpm/cli/commands/install.py:806
+#: urpm/cli/commands/install.py:807
 #, python-brace-format
 msgid "Dependencies ({count})"
 msgstr "Dependências ({count})"
 
-#: urpm/cli/commands/install.py:811
+#: urpm/cli/commands/install.py:812
 #, python-brace-format
 msgid "Recommended ({count})"
 msgstr "Recomendados ({count})"
 
-#: urpm/cli/commands/install.py:816
+#: urpm/cli/commands/install.py:817
 #, python-brace-format
 msgid "Suggested ({count})"
 msgstr "Sugeridos ({count})"
 
-#: urpm/cli/commands/install.py:822
+#: urpm/cli/commands/install.py:823
 #, python-brace-format
 msgid "Obsoleted ({count})"
 msgstr "Obsoletos ({count})"
 
-#: urpm/cli/commands/install.py:852
+#: urpm/cli/commands/install.py:853
 #, python-brace-format
 msgid "Total: {install} to install, {remove} to remove"
 msgstr "Total: {install} para instalar, {remove} para remover"
 
-#: urpm/cli/commands/install.py:854
+#: urpm/cli/commands/install.py:855
 #, python-brace-format
 msgid "Total: {count} package"
 msgid_plural "Total: {count} packages"
 msgstr[0] "Total: {count} pacote"
 msgstr[1] "Total: {count} pacotes"
 
-#: urpm/cli/commands/install.py:859
+#: urpm/cli/commands/install.py:860
 msgid ""
 "\n"
 "Proceed with installation? [y/N] "
@@ -2841,20 +2849,20 @@ msgstr ""
 "\n"
 "Prosseguir com a instalação? [s/N] "
 
-#: urpm/cli/commands/install.py:861 urpm/cli/commands/media.py:561
+#: urpm/cli/commands/install.py:862 urpm/cli/commands/media.py:561
 #: urpm/cli/commands/media.py:982 urpm/cli/commands/media.py:1171
 #: urpm/cli/commands/media.py:1203 urpm/cli/commands/media.py:2661
 #: urpm/cli/commands/cache.py:101 urpm/cli/commands/cache.py:314
 #: urpm/cli/commands/history.py:294 urpm/cli/commands/history.py:751
 #: urpm/cli/commands/config.py:477 urpm/cli/commands/peer.py:204
 #: urpm/cli/commands/depends.py:111 urpm/cli/commands/cleanup.py:798
-#: urpm/cli/commands/build.py:1191 urpm/cli/helpers/alternatives.py:423
-#: urpm/cli/helpers/alternatives.py:563 urpm/cli/helpers/alternatives.py:948
-#: urpm/cli/helpers/alternatives.py:1047 urpm/cli/helpers/alternatives.py:1116
+#: urpm/cli/commands/build.py:1191 urpm/cli/helpers/alternatives.py:424
+#: urpm/cli/helpers/alternatives.py:564 urpm/cli/helpers/alternatives.py:949
+#: urpm/cli/helpers/alternatives.py:1048 urpm/cli/helpers/alternatives.py:1117
 msgid "Aborted"
 msgstr "Abortado"
 
-#: urpm/cli/commands/install.py:876 urpm/cli/commands/upgrade.py:336
+#: urpm/cli/commands/install.py:877 urpm/cli/commands/upgrade.py:336
 msgid ""
 "\n"
 "(dry run - no changes made)"
@@ -2862,7 +2870,7 @@ msgstr ""
 "\n"
 "(execução simulada - nenhuma alteração realizada)"
 
-#: urpm/cli/commands/install.py:886 urpm/cli/commands/upgrade.py:346
+#: urpm/cli/commands/install.py:887 urpm/cli/commands/upgrade.py:346
 #, python-brace-format
 msgid "Auto-added {count} mirror for parallel downloads:"
 msgid_plural "Auto-added {count} mirrors for parallel downloads:"
@@ -2871,12 +2879,12 @@ msgstr[0] ""
 msgstr[1] ""
 "Adicionados automaticamente {count} mirrors para descargas paralelas:"
 
-#: urpm/cli/commands/install.py:895 urpm/cli/commands/upgrade.py:355
+#: urpm/cli/commands/install.py:896 urpm/cli/commands/upgrade.py:355
 #, python-brace-format
 msgid "Not adding servers to reach {needed} (auto_add disabled)"
 msgstr "Não adicionar servidores para atingir {needed} (auto_add desativado)"
 
-#: urpm/cli/commands/install.py:899 urpm/cli/commands/upgrade.py:359
+#: urpm/cli/commands/install.py:900 urpm/cli/commands/upgrade.py:359
 #, python-brace-format
 msgid ""
 "Not enough mirrors for {n} parallel downloads (have {had}, need {needed})"
@@ -2884,7 +2892,7 @@ msgstr ""
 "Mirrors insuficientes para {n} descargas paralelas (tem {had}, precisa de "
 "{needed})"
 
-#: urpm/cli/commands/install.py:915 urpm/cli/commands/install.py:1430
+#: urpm/cli/commands/install.py:916 urpm/cli/commands/install.py:1431
 msgid ""
 "\n"
 "Downloading packages..."
@@ -2892,7 +2900,7 @@ msgstr ""
 "\n"
 "A descarregar pacotes..."
 
-#: urpm/cli/commands/install.py:950 urpm/cli/commands/install.py:1461
+#: urpm/cli/commands/install.py:951 urpm/cli/commands/install.py:1462
 #: urpm/cli/commands/upgrade.py:409
 #, python-brace-format
 msgid "{count} download failed:"
@@ -2900,25 +2908,25 @@ msgid_plural "{count} downloads failed:"
 msgstr[0] "{count} descarga falhou:"
 msgstr[1] "{count} descargas falharam:"
 
-#: urpm/cli/commands/install.py:967 urpm/cli/commands/install.py:971
+#: urpm/cli/commands/install.py:968 urpm/cli/commands/install.py:972
 #: urpm/cli/commands/upgrade.py:423 urpm/cli/commands/upgrade.py:428
 #, python-brace-format
 msgid "{count} downloaded"
 msgstr "{count} descarregados"
 
-#: urpm/cli/commands/install.py:968
+#: urpm/cli/commands/install.py:969
 #, python-brace-format
 msgid ""
 "({peers} from peers, {upstream} from mirrors), {cached} from cache in {time}"
 msgstr ""
 "({peers} de pares, {upstream} de mirrors), {cached} da cache em {time}"
 
-#: urpm/cli/commands/install.py:972
+#: urpm/cli/commands/install.py:973
 #, python-brace-format
 msgid "{cached} from cache in {time}"
 msgstr "{cached} da cache em {time}"
 
-#: urpm/cli/commands/install.py:981
+#: urpm/cli/commands/install.py:982
 msgid ""
 "\n"
 "Packages downloaded to cache. Use 'urpm install' to install them later."
@@ -2926,11 +2934,11 @@ msgstr ""
 "\n"
 "Pacotes descarregados para a cache. Use 'urpm install' para instalá-los depois."
 
-#: urpm/cli/commands/install.py:995
+#: urpm/cli/commands/install.py:996
 msgid "No packages to install"
 msgstr "Nenhum pacote para instalar"
 
-#: urpm/cli/commands/install.py:1020
+#: urpm/cli/commands/install.py:1021
 #, python-brace-format
 msgid ""
 "System restart required ({packages}) — triggers will run in synchronous "
@@ -2939,51 +2947,51 @@ msgstr ""
 "Reinício do sistema necessário ({packages}) — os triggers serão executados "
 "em modo síncrono."
 
-#: urpm/cli/commands/install.py:1094 urpm/cli/commands/history.py:509
+#: urpm/cli/commands/install.py:1095 urpm/cli/commands/history.py:509
 #, python-brace-format
 msgid "Installing {count} package..."
 msgid_plural "Installing {count} packages..."
 msgstr[0] "A instalar {count} pacote..."
 msgstr[1] "A instalar {count} pacotes..."
 
-#: urpm/cli/commands/install.py:1180
+#: urpm/cli/commands/install.py:1181
 #, python-brace-format
 msgid "Cannot read --from-file {path}: {err}"
 msgstr "Não é possível ler --from-file {path} : {err}"
 
-#: urpm/cli/commands/install.py:1227
+#: urpm/cli/commands/install.py:1228
 msgid "Spec has no BuildRequires — nothing to download."
 msgstr "O spec não tem nenhum BuildRequires, nada a transferir."
 
-#: urpm/cli/commands/install.py:1242
+#: urpm/cli/commands/install.py:1243
 msgid "Usage: urpm download [packages...] [--buildrequires [spec]]"
 msgstr "Uso: urpm download [pacotes...] [--buildrequires [spec]]"
 
-#: urpm/cli/commands/install.py:1267
+#: urpm/cli/commands/install.py:1268
 msgid "Resolving packages for download..."
 msgstr "A resolver pacotes para download..."
 
-#: urpm/cli/commands/install.py:1269
+#: urpm/cli/commands/install.py:1270
 #, python-brace-format
 msgid "Target release: {release}"
 msgstr "Release alvo: {release}"
 
-#: urpm/cli/commands/install.py:1270
+#: urpm/cli/commands/install.py:1271
 #, python-brace-format
 msgid "Target arch: {arch}"
 msgstr "Arquitetura alvo: {arch}"
 
-#: urpm/cli/commands/install.py:1271
+#: urpm/cli/commands/install.py:1272
 #, python-brace-format
 msgid "Packages: {packages}"
 msgstr "Pacotes: {packages}"
 
-#: urpm/cli/commands/install.py:1271
+#: urpm/cli/commands/install.py:1272
 #, python-brace-format
 msgid " ... (+{count} more)"
 msgstr " ... (+{count} mais)"
 
-#: urpm/cli/commands/install.py:1330
+#: urpm/cli/commands/install.py:1331
 #, python-brace-format
 msgid ""
 "Skipping {count} NEVRA(s) not found in the peer's pool (mirror divergence or"
@@ -2992,29 +3000,29 @@ msgstr ""
 "A ignorar {count} NEVRA(s) não encontrada(s) no pool do peer (divergência de"
 " mirror ou repos testing desativados):"
 
-#: urpm/cli/commands/install.py:1337 urpm/cli/commands/install.py:1352
-#: urpm/cli/commands/install.py:1410
+#: urpm/cli/commands/install.py:1338 urpm/cli/commands/install.py:1353
+#: urpm/cli/commands/install.py:1411
 #, python-brace-format
 msgid "... and {count} more (use --show-all to list them)"
 msgstr "... e mais {count} (usar --show-all para listá-los)"
 
-#: urpm/cli/commands/install.py:1341
+#: urpm/cli/commands/install.py:1342
 msgid ""
 "No package from the plan could be resolved. Check the peer's enabled media "
 "set."
 msgstr ""
 "Nenhum pacote do plano pôde ser resolvido. Verifica os média ativos no peer."
 
-#: urpm/cli/commands/install.py:1373
+#: urpm/cli/commands/install.py:1374
 msgid "Nothing to download - all packages already available."
 msgstr "Nada para descarregar - todos os pacotes já estão disponíveis."
 
-#: urpm/cli/commands/install.py:1403
+#: urpm/cli/commands/install.py:1404
 #, python-brace-format
 msgid "Packages to download ({count}):"
 msgstr "Pacotes a descarregar ({count}):"
 
-#: urpm/cli/commands/install.py:1417
+#: urpm/cli/commands/install.py:1418
 msgid ""
 "\n"
 "Proceed with download? [Y/n] "
@@ -3022,11 +3030,11 @@ msgstr ""
 "\n"
 "Prosseguir com o download? [S/n] "
 
-#: urpm/cli/commands/install.py:1426
+#: urpm/cli/commands/install.py:1427
 msgid "No packages to download"
 msgstr "Nenhum pacote para descarregar"
 
-#: urpm/cli/commands/install.py:1476
+#: urpm/cli/commands/install.py:1477
 #, python-brace-format
 msgid "{count} downloaded package failed signature verification:"
 msgid_plural "{count} downloaded packages failed signature verification:"
@@ -3034,44 +3042,44 @@ msgstr[0] "{count} pacote descarregado falhou a verificação de assinatura:"
 msgstr[1] ""
 "{count} pacotes descarregados falharam a verificação de assinatura:"
 
-#: urpm/cli/commands/install.py:1483
+#: urpm/cli/commands/install.py:1484
 msgid "Corrupt files have been removed from cache."
 msgstr "Os ficheiros corrompidos foram removidos da cache."
 
-#: urpm/cli/commands/install.py:1490
+#: urpm/cli/commands/install.py:1491
 msgid "Download complete"
 msgstr "Download concluído"
 
-#: urpm/cli/commands/install.py:1491
+#: urpm/cli/commands/install.py:1492
 #, python-brace-format
 msgid "{downloaded} downloaded, {cached} from cache in {time}"
 msgstr "{downloaded} descarregados, {cached} da cache em {time}"
 
-#: urpm/cli/commands/install.py:1493
+#: urpm/cli/commands/install.py:1494
 #, python-brace-format
 msgid "P2P: {peers} from peers, {upstream} from upstream"
 msgstr "P2P: {peers} de pares, {upstream} de upstream"
 
-#: urpm/cli/commands/install.py:1499
+#: urpm/cli/commands/install.py:1500
 msgid "Packages saved to cache. Use 'urpm install' to install them."
 msgstr "Pacotes guardados na cache. Use 'urpm install' para instalá-los."
 
-#: urpm/cli/commands/install.py:1529
+#: urpm/cli/commands/install.py:1530
 #, python-brace-format
 msgid "Error: cannot find source RPM for '{pkg}'"
 msgstr "Erro: não é possível ler o ficheiro RPM: {pkg}"
 
-#: urpm/cli/commands/install.py:1545
+#: urpm/cli/commands/install.py:1546
 #, python-brace-format
 msgid "Extracting source RPM: {srpm}"
 msgstr "A extrair RPM fonte: {srpm}"
 
-#: urpm/cli/commands/install.py:1557
+#: urpm/cli/commands/install.py:1558
 #, python-brace-format
 msgid "Error: rpm -i failed for {srpm}"
 msgstr "Erro: rpm -i falhou para {srpm}"
 
-#: urpm/cli/commands/install.py:1568
+#: urpm/cli/commands/install.py:1569
 #, python-brace-format
 msgid ""
 "  Extracted {specs} spec file(s) and {sources} source file(s) to {dest}"
@@ -3521,7 +3529,7 @@ msgstr "  {n} candidato(s) retido(s) :"
 #: urpm/cli/commands/distupgrade.py:435 urpm/cli/commands/distupgrade.py:1006
 #: urpm/cli/commands/distupgrade.py:1521 urpm/cli/commands/distupgrade.py:1537
 #: urpm/cli/commands/system.py:387 urpm/cli/commands/system.py:398
-#: urpm/cli/commands/system.py:922
+#: urpm/cli/commands/system.py:924
 #, python-brace-format
 msgid "    (+ {n} more)"
 msgstr "    (+ mais {n})"
@@ -4439,14 +4447,14 @@ msgstr ""
 #: urpm/cli/commands/system.py:808
 #, python-brace-format
 msgid "Preserve these {n} hardware-specific package(s) ? [Y/n] "
-msgstr "Preservar estes {n} pacote(s) específicos do hardware? [Y/n] "
+msgstr "Preservar estes {n} pacote(s) específicos do hardware? [S/n] "
 
-#: urpm/cli/commands/system.py:832
+#: urpm/cli/commands/system.py:834
 #, python-brace-format
 msgid "Installing {n} package(s)..."
 msgstr "A instalar {n} pacote(s)..."
 
-#: urpm/cli/commands/system.py:838
+#: urpm/cli/commands/system.py:840
 #, python-brace-format
 msgid ""
 "install refused (exit {rc}) — dep conflict, insufficient space, or signature"
@@ -4455,12 +4463,12 @@ msgstr ""
 "instalação recusada (código {rc}): conflito de dependências, espaço "
 "insuficiente ou problema de assinatura; ver a saída do urpm acima."
 
-#: urpm/cli/commands/system.py:880
+#: urpm/cli/commands/system.py:882
 msgid "  Waiting for background install to finish committing rpmdb..."
 msgstr ""
 "  À espera que a instalação em segundo plano termine de escrever a rpmdb..."
 
-#: urpm/cli/commands/system.py:897
+#: urpm/cli/commands/system.py:899
 msgid ""
 "⚠ --allow-incoherent : dep rescue skipped, erase will be forced through RPM "
 "pre-checks — the system will be left with unmet dependencies"
@@ -4469,7 +4477,7 @@ msgstr ""
 "remoção forçará as verificações prévias do RPM; o sistema ficará com "
 "dependências por satisfazer"
 
-#: urpm/cli/commands/system.py:913
+#: urpm/cli/commands/system.py:915
 #, python-brace-format
 msgid ""
 "⚠ Source profile is incoherent : {n} package(s) kept from erase to satisfy "
@@ -4478,17 +4486,17 @@ msgstr ""
 "⚠ O perfil de origem é incoerente: {n} pacote(s) poupados à remoção para "
 "satisfazer as dependências de execução dos pacotes mantidos"
 
-#: urpm/cli/commands/system.py:918
+#: urpm/cli/commands/system.py:920
 #, python-brace-format
 msgid "(required by {k} for {d})"
 msgstr "(requerido por {k} para {d})"
 
-#: urpm/cli/commands/system.py:927
+#: urpm/cli/commands/system.py:929
 #, python-brace-format
 msgid "Removing {n} package(s) no longer in target profile..."
 msgstr "A remover {n} pacote(s) que já não estão no perfil de destino..."
 
-#: urpm/cli/commands/system.py:947
+#: urpm/cli/commands/system.py:949
 #, python-brace-format
 msgid ""
 "erase refused (exit {rc}) — see urpm output above ; resolve manually then "
@@ -7728,8 +7736,8 @@ msgstr[1] "Dependências de {package}: {count} pacotes"
 msgid "Alternatives ({count} capabilities with choices):"
 msgstr "Alternativas ({count} capacidades com escolhas):"
 
-#: urpm/cli/commands/depends.py:202 urpm/cli/helpers/alternatives.py:1029
-#: urpm/cli/helpers/alternatives.py:1099
+#: urpm/cli/commands/depends.py:202 urpm/cli/helpers/alternatives.py:1030
+#: urpm/cli/helpers/alternatives.py:1100
 msgid "required by"
 msgstr "requerido por"
 
@@ -9276,21 +9284,21 @@ msgstr ""
 "  Aviso: o regresso ao estado de referência n.º {n} falhou; o spec seguinte "
 "partirá do estado atual."
 
-#: urpm/cli/helpers/alternatives.py:408
+#: urpm/cli/helpers/alternatives.py:409
 msgid "multiple versions available:"
 msgstr "várias versões disponíveis:"
 
-#: urpm/cli/helpers/alternatives.py:415 urpm/cli/helpers/alternatives.py:556
-#: urpm/cli/helpers/alternatives.py:937 urpm/cli/helpers/alternatives.py:1038
-#: urpm/cli/helpers/alternatives.py:1106
+#: urpm/cli/helpers/alternatives.py:416 urpm/cli/helpers/alternatives.py:557
+#: urpm/cli/helpers/alternatives.py:938 urpm/cli/helpers/alternatives.py:1039
+#: urpm/cli/helpers/alternatives.py:1107
 msgid "Choice?"
 msgstr "Escolha?"
 
-#: urpm/cli/helpers/alternatives.py:551
+#: urpm/cli/helpers/alternatives.py:552
 msgid "provided by:"
 msgstr "fornecido por:"
 
-#: urpm/cli/helpers/alternatives.py:929
+#: urpm/cli/helpers/alternatives.py:930
 msgid "Multiple versions in preferences:"
 msgstr "Várias versões nas preferências:"
 
@@ -9336,12 +9344,12 @@ msgid "Multiple providers for '{pkg}':"
 msgstr "Vários fornecedores para «{pkg}»:"
 
 #: urpm/cli/helpers/package.py:294 urpm/cli/helpers/package.py:326
-#: urpm/cli/helpers/suggests.py:135
+#: urpm/cli/helpers/suggests.py:136
 msgid "All"
 msgstr "Todos"
 
 #: urpm/cli/helpers/package.py:297 urpm/cli/helpers/package.py:329
-#: urpm/cli/helpers/suggests.py:138
+#: urpm/cli/helpers/suggests.py:139
 msgid "Choice [1]: "
 msgstr "Escolha [1]: "
 
@@ -9715,10 +9723,6 @@ msgstr[1] "Aplicar « manter » a {n} pacotes visíveis?"
 msgid "list first"
 msgstr "listar primeiro"
 
-#: urpm/cli/helpers/orphans_triage.py:441
-msgid "no"
-msgstr "não"
-
 #: urpm/cli/helpers/orphans_triage.py:446
 msgid "confirm"
 msgstr "confirmar"
@@ -9952,12 +9956,12 @@ msgstr ""
 msgid "Total : {n} package(s), download {dl}, installed footprint {inst}."
 msgstr "Total : {n} pacote(s), transferência {dl}, espaço instalado {inst}."
 
-#: urpm/core/resolver.py:843
+#: urpm/core/resolver.py:844
 #, python-brace-format
 msgid "probe solve failed: {err}"
 msgstr "falhou a resolução de sondagem: {err}"
 
-#: urpm/core/resolver.py:850
+#: urpm/core/resolver.py:851
 #, python-brace-format
 msgid ""
 "candidate {name}-{evr} from {repo} installs fine in isolation but the "
@@ -9970,12 +9974,12 @@ msgstr ""
 "pacote ou uma cadeia de obsoletos; junte a saída de `urpm distupgrade --to N"
 " --dry-run --verbose` ao relatório de erro)."
 
-#: urpm/core/resolver.py:969
+#: urpm/core/resolver.py:970
 #, python-brace-format
 msgid "rdep of {pkg} (silently held)"
 msgstr "rdep de {pkg} (retido em silêncio)"
 
-#: urpm/core/resolver.py:998
+#: urpm/core/resolver.py:999
 msgid "resolver anomaly; see log for details"
 msgstr "anomalia do resolver; ver o log para detalhes"
 
@@ -10341,6 +10345,23 @@ msgstr ""
 "Estes valores não contam o que o sistema regenera durante a instalação — a "
 "initramfs, as caches de tipos de letra e ícones. Conte com mais do que "
 "indicam."
+
+#: urpm/core/image_urpm_ng.py:974
+#, python-brace-format
+msgid ""
+"  Local urpm-ng-core is newer ({local}) than the media version ({media}).\n"
+"  Use the local build?  [y/N] "
+msgstr ""
+"  O urpm-ng-core local é mais recente ({local}) do que a versão do media ({media}).\n"
+"  Usar a compilação local?  [s/N] "
+
+#: urpm/core/image_urpm_ng.py:989
+msgid ""
+"  Host has no media providing urpm-ng-core for this target.\n"
+"  Fall back to GitHub latest release?  [y/N] "
+msgstr ""
+"  O anfitrião não tem nenhum media que forneça urpm-ng-core para este destino.\n"
+"  Recorrer à última versão do GitHub?  [s/N] "
 
 #: urpm/auth/privileges.py:109
 msgid "This operation requires root privileges."

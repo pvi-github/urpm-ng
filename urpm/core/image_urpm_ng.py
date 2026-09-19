@@ -53,6 +53,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
+from ..i18n import _, confirm_yes
+
 if TYPE_CHECKING:
     from .container import Container
     from .database import PackageDatabase
@@ -969,29 +971,30 @@ def _confirm_local_over_media(
 ) -> bool:
     local_ver = _rpm_file_version(local_rpm)
     print(
-        f"  Local urpm-ng-core is newer ({local_ver}) than the media "
-        f"version ({media_version}).\n"
-        f"  Use the local build?  [y/N] ",
+        _("  Local urpm-ng-core is newer ({local}) than the media "
+          "version ({media}).\n"
+          "  Use the local build?  [y/N] ").format(
+              local=local_ver, media=media_version),
         end="",
     )
     try:
-        reply = input().strip().lower()
+        reply = input()
     except (EOFError, KeyboardInterrupt):
         return False
-    return reply in ("y", "yes", "o", "oui")
+    return confirm_yes(reply)
 
 
 def _confirm_fallback_github(log: callable) -> bool:
     print(
-        "  Host has no media providing urpm-ng-core for this target.\n"
-        "  Fall back to GitHub latest release?  [y/N] ",
+        _("  Host has no media providing urpm-ng-core for this target.\n"
+          "  Fall back to GitHub latest release?  [y/N] "),
         end="",
     )
     try:
-        reply = input().strip().lower()
+        reply = input()
     except (EOFError, KeyboardInterrupt):
         return False
-    return reply in ("y", "yes", "o", "oui")
+    return confirm_yes(reply)
 
 
 # ══════════════════════════════════════════════════════════════════════
