@@ -27,9 +27,8 @@ msgid "yes"
 msgstr "sim"
 
 #: urpm/cli/main.py:189
-#, fuzzy
 msgid "ERROR: Missing or broken runtime dependencies:"
-msgstr "ERRO: Módulos Python obrigatórios em falta:"
+msgstr "ERRO: dependências de execução em falta ou danificadas:"
 
 #: urpm/cli/main.py:192
 #, python-brace-format
@@ -148,12 +147,12 @@ msgid "Show all items without truncation"
 msgstr "Mostrar todos os itens sem cortar"
 
 #: urpm/cli/main.py:373
-#, fuzzy
 msgid ""
 "Enable debug output (solver, tsrun, orphans, download, timing, distupgrade, "
 "all)"
 msgstr ""
-"Ativar saída de depuração (solver, tsrun, orphans, download, timing, all)"
+"Activar a saída de depuração (solver, tsrun, orphans, download, timing, "
+"distupgrade, all)"
 
 #: urpm/cli/main.py:379
 msgid "Watch specific packages during resolution (comma-separated)"
@@ -246,9 +245,10 @@ msgid "Do not sync media after adding (just configure)"
 msgstr "Não sincronizar meios após adicionar (apenas configurar)"
 
 #: urpm/cli/main.py:493
-#, fuzzy
 msgid "Unmount chroot filesystems or migrate legacy scriptlet rows"
-msgstr "Desmontar sistemas de ficheiros do chroot (/dev, /proc)"
+msgstr ""
+"Desmontar os sistemas de ficheiros do chroot ou migrar as linhas de "
+"scriptlet herdadas"
 
 #: urpm/cli/main.py:495
 msgid ""
@@ -266,17 +266,30 @@ msgid ""
 "  urpm cleanup --legacy-scriptlets\n"
 "  urpm cleanup --legacy-scriptlets --dry-run\n"
 msgstr ""
+"Tarefas de limpeza.\n"
+"\n"
+"Sem opção, desmonta os sistemas de ficheiros montados pelo « urpm init »\n"
+"num chroot (--urpm-root obrigatório).\n"
+"\n"
+"Com --legacy-scriptlets, migra todas as linhas da tabela\n"
+"`history_scriptlet_output` anterior à v34 para `history_scriptlets`,\n"
+"passando a sua saída pelo saneador.  É idempotente.\n"
+"\n"
+"Exemplos:\n"
+"  urpm --urpm-root /tmp/rootfs cleanup\n"
+"  urpm cleanup --legacy-scriptlets\n"
+"  urpm cleanup --legacy-scriptlets --dry-run\n"
 
 #: urpm/cli/main.py:512
 msgid ""
 "Migrate history_scriptlet_output → history_scriptlets (SPEC_DISTUPGRADE "
 "§3.C)"
 msgstr ""
+"Migrar history_scriptlet_output → history_scriptlets (SPEC_DISTUPGRADE §3.C)"
 
 #: urpm/cli/main.py:517
-#, fuzzy
 msgid "Print what would be migrated without touching the DB"
-msgstr "Mostrar o que seria adicionado sem fazer alterações"
+msgstr "Mostrar o que seria migrado sem tocar na base de dados"
 
 #: urpm/cli/main.py:525
 msgid "Install packages"
@@ -407,6 +420,10 @@ msgid ""
 "with # ignored) and merge them with the positional arguments. Pair with "
 "`urpm distupgrade --export-plan` to preload a neighbour peer."
 msgstr ""
+"Ler os identificadores de pacotes de FILE (um por linha; linhas vazias e "
+"linhas começadas por # são ignoradas) e juntá-los aos argumentos "
+"posicionais. A combinar com `urpm distupgrade --export-plan` para pré-"
+"carregar um par vizinho."
 
 #: urpm/cli/main.py:671
 msgid "Target release (e.g., 10, cauldron). Downloads for this release."
@@ -840,16 +857,15 @@ msgstr ""
 "apenas as dependências específicas a cada spec. Desativado por omissão."
 
 #: urpm/cli/main.py:1080
-#, fuzzy, python-format
+#, python-format
 msgid ""
 "Cap the build parallelism at N threads (translated to rpmbuild %%_smp_mflags"
 " = -jN). Default: max(1, nproc - 2), so the host keeps two cores free for "
 "interactive work. Use --full-throttle for the whole CPU."
 msgstr ""
-"Limita o paralelismo de compilação a N threads (traduzido em rpmbuild "
-"%_smp_mflags = -jN). Por omissão: max(1, nproc - 2), para que o host "
-"mantenha dois núcleos livres para o trabalho interactivo. --full-throttle "
-"para todo o CPU."
+"Limitar o paralelismo de compilação a N tarefas (traduzido em rpmbuild "
+"%%_smp_mflags = -jN). Por omissão: max(1, nproc - 2), para deixar dois "
+"núcleos livres para o trabalho interactivo. --full-throttle para todo o CPU."
 
 #: urpm/cli/main.py:1088
 msgid ""
@@ -935,23 +951,23 @@ msgstr ""
 "silencioso não seria distinguível de um timeout."
 
 #: urpm/cli/main.py:1153
-#, fuzzy, python-format
+#, python-format
 msgid ""
 "Enable a spec %%bcond, e.g. ``--with debug``. Passed to rpmbuild verbatim.  "
 "Repeatable."
 msgstr ""
-"Activa um %bcond do spec, p. ex. ``--with debug``. Encaminhado tal e qual ao"
-" rpmbuild. Repetível."
+"Activar um %%bcond do spec, por exemplo ``--with debug``. Passado tal e qual"
+" ao rpmbuild.  Repetível."
 
 #: urpm/cli/main.py:1160
-#, fuzzy, python-format
+#, python-format
 msgid ""
 "Disable a spec %%bcond, e.g. ``--without unified_build`` to force firefox's "
 "per-file translation units.  Passed to rpmbuild verbatim.  Repeatable."
 msgstr ""
-"Desactiva um %bcond do spec, p. ex. ``--without unified_build`` para forçar "
-"as unidades de tradução por ficheiro do firefox. Encaminhado tal e qual ao "
-"rpmbuild. Repetível."
+"Desactivar um %%bcond do spec, por exemplo ``--without unified_build`` para "
+"forçar as unidades de tradução por ficheiro do firefox.  Passado tal e qual "
+"ao rpmbuild.  Repetível."
 
 #: urpm/cli/main.py:1170
 msgid "Generate media metadata (requires the urpm-ng-genmedia sub-package)"
@@ -1065,6 +1081,7 @@ msgstr "Ativar saída de depuração (solver, tsrun, all)"
 #: urpm/cli/main.py:1304
 msgid "Full release migration N → N+1 (Mageia dist-upgrade)"
 msgstr ""
+"Migração completa da versão N para N+1 (actualização de distribuição Mageia)"
 
 #: urpm/cli/main.py:1306
 msgid ""
@@ -1076,25 +1093,33 @@ msgid ""
 "\n"
 "Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.\n"
 msgstr ""
+"Migrar todo o sistema da Mageia N para N+1.\n"
+"\n"
+"Lançar e esquecer: arrancar, sair, voltar alguns minutos ou algumas dezenas\n"
+"de minutos depois.  O sistema passou, ou parou num ponto de bloqueio\n"
+"claro.\n"
+"\n"
+"Ver doc/SPEC_DISTUPGRADE.md para o contrato completo.\n"
 
 #: urpm/cli/main.py:1318
 msgid "Resume a previously interrupted distupgrade"
-msgstr ""
+msgstr "Retomar um distupgrade interrompido anteriormente"
 
 #: urpm/cli/main.py:1326
 msgid "Abandon a running or interrupted distupgrade"
-msgstr ""
+msgstr "Abandonar um distupgrade em curso ou interrompido"
 
 #: urpm/cli/main.py:1330
-#, fuzzy
 msgid "Target release identity (e.g. 11, cauldron, cauldron:12)"
-msgstr "Versão do Mageia (ex.: 10, cauldron)"
+msgstr "Identidade da versão de destino (p. ex. 11, cauldron, cauldron:12)"
 
 #: urpm/cli/main.py:1334
 msgid ""
 "Run Stage 0 checks + refresh but skip Phase A upgrade and downstream "
 "mutations"
 msgstr ""
+"Executar as verificações e a actualização da etapa 0 sem a actualização da "
+"fase A nem as alterações seguintes"
 
 #: urpm/cli/main.py:1340
 msgid ""
@@ -1111,6 +1136,8 @@ msgid ""
 "Skip the Stage 2 confirmation prompt and proceed straight to "
 "download/install"
 msgstr ""
+"Ignorar o pedido de confirmação da etapa 2 e passar directamente à "
+"transferência e instalação"
 
 #: urpm/cli/main.py:1353
 msgid ""
@@ -1118,10 +1145,13 @@ msgid ""
 "without downloading or mutating the system. Useful to preload a neighbour "
 "peer with `urpm download --from-file FILE`."
 msgstr ""
+"Resolver o plano da versão de destino e escrever os NEVRA em FILE (um por "
+"linha), sem transferir nada nem alterar o sistema. Útil para pré-carregar um"
+" par vizinho com `urpm download --from-file FILE`."
 
 #: urpm/cli/main.py:1364
 msgid "Reconcile transactions interrupted by crash/SIGKILL"
-msgstr ""
+msgstr "Reconciliar as transacções interrompidas por uma falha ou um SIGKILL"
 
 #: urpm/cli/main.py:1372
 msgid ""
@@ -1342,7 +1372,7 @@ msgstr "Execução simulada – mostrar o que seria feito"
 
 #: urpm/cli/main.py:1728
 msgid "Resume a previously interrupted upgrade (Phase D)"
-msgstr ""
+msgstr "Retomar uma actualização interrompida anteriormente (fase D)"
 
 #: urpm/cli/main.py:1733
 msgid "Install recommended packages (not installed by default for upgrades)"
@@ -1567,6 +1597,9 @@ msgid ""
 "counterpart (rows with disabled_by=distupgrade).  Orphan rows without a "
 "target counterpart are left alone."
 msgstr ""
+"Remover todos os medias mga N que o distupgrade substituiu pelo equivalente "
+"mga N+1 (linhas com disabled_by=distupgrade).  As linhas órfãs sem "
+"equivalente de destino ficam intactas."
 
 #: urpm/cli/main.py:2022 urpm/cli/main.py:2768
 msgid "Skip the confirmation prompt"
@@ -2237,37 +2270,40 @@ msgstr "ID da chave a remover (ex.: 80420f66)"
 #: urpm/cli/main.py:2738
 msgid "Export / import a machine profile (packages + media + servers)"
 msgstr ""
+"Exportar ou importar um perfil de máquina (pacotes, medias e servidores)"
 
 #: urpm/cli/main.py:2749
 msgid "Write current system state to JSON"
-msgstr ""
+msgstr "Escrever o estado actual do sistema em JSON"
 
 #: urpm/cli/main.py:2753
 msgid "Destination file (default: ~/system-<hostname>-<UTC-timestamp>.json)"
 msgstr ""
+"Ficheiro de destino (por omissão: ~/system-<hostname>-<UTC-timestamp>.json)"
 
 #: urpm/cli/main.py:2760
 msgid "Reconcile this system against a profile JSON"
-msgstr ""
+msgstr "Reconciliar este sistema com um perfil JSON"
 
 #: urpm/cli/main.py:2764
-#, fuzzy
 msgid "Profile file to import"
-msgstr " Falha ao importar chave"
+msgstr "Ficheiro de perfil a importar"
 
 #: urpm/cli/main.py:2772
 msgid "Skip the automatic backup of the current state"
-msgstr ""
+msgstr "Ignorar a cópia de segurança automática do estado actual"
 
 #: urpm/cli/main.py:2776
 msgid "Show the plan but do not apply anything"
-msgstr ""
+msgstr "Mostrar o plano sem aplicar nada"
 
 #: urpm/cli/main.py:2780
 msgid ""
 "Keep local media/servers not in the profile (default: replace — remove local"
 " extras)"
 msgstr ""
+"Manter os medias e servidores locais ausentes do perfil (por omissão: "
+"substituir, ou seja, remover os excedentes locais)"
 
 #: urpm/cli/main.py:2785
 msgid ""
@@ -2275,6 +2311,9 @@ msgid ""
 "profile that are not in the pool or not currently installed are silently "
 "dropped from the install / erase lists)"
 msgstr ""
+"Ignorar as lacunas da verificação prévia sem confirmação (os pacotes do "
+"perfil ausentes do conjunto ou não instalados são retirados em silêncio das "
+"listas de instalação e remoção)"
 
 #: urpm/cli/main.py:2792
 msgid ""
@@ -2284,6 +2323,11 @@ msgid ""
 "for faithful bug reproduction ; the resulting system will have broken "
 "dependencies."
 msgstr ""
+"Reproduzir o perfil de origem à letra, mesmo que deixe pacotes mantidos com "
+"dependências por satisfazer.  Desactiva a rede de segurança das dependências"
+" E força a remoção com ``urpm erase --force`` (contorna a verificação prévia"
+" do RPM).  Destinado a reproduzir fielmente um erro; o sistema resultante "
+"terá dependências danificadas."
 
 #: urpm/cli/main.py:2801
 msgid ""
@@ -2295,6 +2339,14 @@ msgid ""
 " / iwlwifi / nvidia driver, distupgrade brings a new kernel, no DKMS "
 "rebuild, graphics stack breaks » failure."
 msgstr ""
+"Modo não interactivo: preservar os pacotes específicos do hardware (módulos "
+"DKMS, controladores X11, ferramentas de convidado, firmware, microcódigo) "
+"mesmo quando faltam no perfil de origem.  Em modo interactivo, a mesma "
+"protecção já é oferecida por uma pergunta cuja resposta por omissão é sim; "
+"esta opção é o equivalente para ``--auto``.  Evita a falha clássica: « o "
+"perfil clonado retira o controlador vboxvideo, iwlwifi ou nvidia da máquina "
+"de destino, o distupgrade traz um núcleo novo, o DKMS não recompila nada e a"
+" pilha gráfica parte-se »."
 
 #: urpm/cli/main.py:2818
 msgid "Manage P2P peers (provenance, blacklist)"
@@ -2607,7 +2659,7 @@ msgstr "{count} BuildRequires encontrados"
 
 #: urpm/cli/commands/install.py:249
 msgid "Spec has no BuildRequires — nothing to install."
-msgstr ""
+msgstr "O spec não tem nenhum BuildRequires, nada a instalar."
 
 #: urpm/cli/commands/install.py:266 urpm/cli/commands/install.py:273
 #: urpm/cli/commands/install.py:1224
@@ -2900,9 +2952,8 @@ msgid "Cannot read --from-file {path}: {err}"
 msgstr "Não é possível ler --from-file {path} : {err}"
 
 #: urpm/cli/commands/install.py:1210
-#, fuzzy
 msgid "Spec has no BuildRequires — nothing to download."
-msgstr "Já em {id} — nada a fazer"
+msgstr "O spec não tem nenhum BuildRequires, nada a transferir."
 
 #: urpm/cli/commands/install.py:1225
 msgid "Usage: urpm download [packages...] [--buildrequires [spec]]"
@@ -3332,9 +3383,8 @@ msgstr ""
 "Ou reverter com :  urpm distupgrade --abort"
 
 #: urpm/cli/commands/distupgrade.py:114
-#, fuzzy
 msgid "No distupgrade state to resume from."
-msgstr "Nenhum media migrado para remover."
+msgstr "Não há estado de distupgrade a retomar."
 
 #: urpm/cli/commands/distupgrade.py:119
 #, python-brace-format
@@ -3364,9 +3414,9 @@ msgid "cannot resume Tx A : plan absent from .state."
 msgstr "Não é possível retomar Tx A : plano ausente de .state."
 
 #: urpm/cli/commands/distupgrade.py:208
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Tx A retry failed : {err}"
-msgstr "falhou: {error}"
+msgstr "Falhou a nova tentativa da Tx A: {err}"
 
 #: urpm/cli/commands/distupgrade.py:212 urpm/cli/commands/distupgrade.py:1289
 msgid ""
@@ -3383,14 +3433,14 @@ msgstr ""
 "testemunho (execvp)…"
 
 #: urpm/cli/commands/distupgrade.py:227
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "execvp handoff failed : {err}"
-msgstr "Desfazer falhou: {error}"
+msgstr "Falhou a passagem de testemunho execvp: {err}"
 
 #: urpm/cli/commands/distupgrade.py:239
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Stage 4 retry failed : {err}"
-msgstr "falhou: {error}"
+msgstr "Falhou a nova tentativa da etapa 4: {err}"
 
 #: urpm/cli/commands/distupgrade.py:242
 #, python-brace-format
@@ -3472,9 +3522,9 @@ msgstr "  {n} candidato(s) retido(s) :"
 #: urpm/cli/commands/distupgrade.py:1497 urpm/cli/commands/distupgrade.py:1513
 #: urpm/cli/commands/system.py:387 urpm/cli/commands/system.py:398
 #: urpm/cli/commands/system.py:922
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    (+ {n} more)"
-msgstr "    (+ {n} mais)"
+msgstr "    (+ mais {n})"
 
 #: urpm/cli/commands/distupgrade.py:462
 msgid ""
@@ -3959,9 +4009,9 @@ msgstr ""
 "próximo arranque."
 
 #: urpm/cli/commands/distupgrade.py:1572
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "{n} orphan packages detected after the distupgrade."
-msgstr "{n} pacote órfão detetado"
+msgstr "{n} pacotes órfãos detectados após o distupgrade."
 
 #: urpm/cli/commands/distupgrade.py:1575
 msgid ""
@@ -3973,15 +4023,12 @@ msgstr ""
 "pena rever um a um."
 
 #: urpm/cli/commands/distupgrade.py:1580
-#, fuzzy
 msgid "  Enter interactive triage now ? [y/N] "
-msgstr "  Remover estes repositórios antigos agora ? [s/N] "
+msgstr "  Iniciar agora a triagem interactiva? [s/N] "
 
 #: urpm/cli/commands/distupgrade.py:1586
-#, fuzzy
 msgid "    Skipped ; run later with :  urpm autoremove --interactive"
-msgstr ""
-"    Mantidos ; remover mais tarde com :  urpm media remove --distupgraded"
+msgstr "    Ignorado; executar mais tarde com:  urpm autoremove --interactive"
 
 #: urpm/cli/commands/distupgrade.py:1611
 #, python-brace-format
@@ -4016,125 +4063,118 @@ msgstr[0] "Marcado {n} repositório antigo para limpeza pós-reinício."
 msgstr[1] "Marcados {n} repositórios antigos para limpeza pós-reinício."
 
 #: urpm/cli/commands/genmedia.py:22
-#, fuzzy
 msgid "Error: urpm-ng-genmedia is not installed."
-msgstr "urpm genmedia não está instalado neste sistema."
+msgstr "Erro: o urpm-ng-genmedia não está instalado."
 
 #: urpm/cli/commands/genmedia.py:23
 msgid "Install it with: sudo urpm install urpm-ng-genmedia"
-msgstr ""
+msgstr "Instale-o com: sudo urpm install urpm-ng-genmedia"
 
 #: urpm/cli/commands/genmedia.py:28
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Error: {path} is not a directory."
-msgstr "Erro: {path} não existe"
+msgstr "Erro: {path} não é um directório."
 
 #: urpm/cli/commands/genmedia.py:62
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "{count} packages indexed."
-msgstr "{count} pacote apagado"
+msgstr "{count} pacotes indexados."
 
 #: urpm/cli/commands/progress.py:90
-#, fuzzy, python-format
+#, python-format
 msgid "Transaction error: %s"
-msgstr "Transações:"
+msgstr "Erro de transacção: %s"
 
 #: urpm/cli/commands/progress.py:105
-#, fuzzy
 msgid "Preparing transaction..."
-msgstr ""
-"\n"
-"A preparar downloads..."
+msgstr "A preparar a transacção..."
 
 #: urpm/cli/commands/progress.py:145
-#, fuzzy
 msgid "Transaction completed."
-msgstr "Transação #{tid}"
+msgstr "Transacção concluída."
 
 #: urpm/cli/commands/progress.py:152
 #, python-format
 msgid "Transaction process (PID %s) is no longer running."
-msgstr ""
+msgstr "O processo de transacção (PID %s) já não está em execução."
 
 #: urpm/cli/commands/progress.py:168
-#, fuzzy
 msgid "No background transaction is running."
-msgstr "Mostrar detalhes do ID da transação"
+msgstr "Não há nenhuma transacção em segundo plano."
 
 #: urpm/cli/commands/progress.py:173
 #, python-format
 msgid "Background %s in progress (PID %s)"
-msgstr ""
+msgstr "%s em curso em segundo plano (PID %s)"
 
 #: urpm/cli/commands/progress.py:180
 msgid "Use --watch / -w to follow in real time."
-msgstr ""
+msgstr "Use --watch / -w para acompanhar em tempo real."
 
 #: urpm/cli/commands/readme.py:92
-#, fuzzy
 msgid "No README messages stored."
-msgstr "Mostrar detalhes do ID da transação"
+msgstr "Não há mensagens README guardadas."
 
 #: urpm/cli/commands/readme.py:94
-#, fuzzy
 msgid "Transactions with README messages:"
-msgstr "Listar transacções que têm mensagens README"
+msgstr "Transacções com mensagens README:"
 
 #: urpm/cli/commands/readme.py:106
-#, fuzzy, python-format
+#, python-format
 msgid "No README messages for transaction #%d."
-msgstr "Mostrar detalhes do ID da transação"
+msgstr "Não há mensagens README para a transacção n.º %d."
 
 #: urpm/cli/commands/readme.py:108
-#, fuzzy
 msgid "No README messages from recent transactions."
-msgstr "Mostrar detalhes do ID da transação"
+msgstr "Não há mensagens README nas transacções recentes."
 
 #: urpm/cli/commands/readme.py:114
-#, fuzzy, python-format
+#, python-format
 msgid "README messages from transaction #%d"
-msgstr "Mostrar detalhes do ID da transação"
+msgstr "Mensagens README da transacção n.º %d"
 
 #: urpm/cli/commands/recover.py:31
-#, fuzzy
 msgid "No interrupted transaction to reconcile."
-msgstr "Nenhuma transação interrompida encontrada"
+msgstr "Não há transacções interrompidas a reconciliar."
 
 #: urpm/cli/commands/recover.py:35
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Reconciling {n} interrupted transaction(s) against the rpmdb..."
-msgstr "Nenhuma transação interrompida encontrada"
+msgstr ""
+"A reconciliar {n} transacção/transacções interrompida(s) com a rpmdb..."
 
 #: urpm/cli/commands/recover.py:41
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Reconciliation failed: {error}"
-msgstr "Rollback falhou: {error}"
+msgstr "Falhou a reconciliação: {error}"
 
 #: urpm/cli/commands/recover.py:47
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  transaction #{tid}: complete (rpmdb matches recorded intent)"
-msgstr "Transação #{tid} não está completa (estado: {status})"
+msgstr ""
+"  transacção n.º {tid}: completa (a rpmdb corresponde à intenção registada)"
 
 #: urpm/cli/commands/recover.py:51
 #, python-brace-format
 msgid ""
 "  transaction #{tid}: interrupted (rpmdb diverges from recorded intent)"
 msgstr ""
+"  transacção n.º {tid}: interrompida (a rpmdb diverge da intenção registada)"
 
 #: urpm/cli/commands/system.py:42
 #, python-brace-format
 msgid "Exporting system state to {path}..."
-msgstr ""
+msgstr "A exportar o estado do sistema para {path}..."
 
 #: urpm/cli/commands/system.py:48
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Export failed: {err}"
-msgstr "Desfazer falhou: {error}"
+msgstr "Falhou a exportação: {err}"
 
 #: urpm/cli/commands/system.py:55
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Cannot write {path}: {err}"
-msgstr "Não é possível ler --from-file {path} : {err}"
+msgstr "Não é possível escrever {path}: {err}"
 
 #: urpm/cli/commands/system.py:65
 #, python-brace-format
@@ -4142,39 +4182,39 @@ msgid ""
 "  {srv} server(s), {media} media, {expl} explicit / {dep} dependency / {br} "
 "buildrequires packages."
 msgstr ""
+"  {srv} servidor(es), {media} medias, {expl} pacotes explícitos / {dep} "
+"dependências / {br} buildrequires."
 
 #: urpm/cli/commands/system.py:70
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Wrote {path}"
-msgstr " {path} desmontado"
+msgstr "{path} escrito"
 
 #: urpm/cli/commands/system.py:82
-#, fuzzy
 msgid "Import plan"
-msgstr "Importar de:"
+msgstr "Plano de importação"
 
 #: urpm/cli/commands/system.py:91
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    + add ({n})"
-msgstr "    … e mais {n}"
+msgstr "    + adicionar ({n})"
 
 #: urpm/cli/commands/system.py:96 urpm/cli/commands/system.py:105
 #: urpm/cli/commands/system.py:129 urpm/cli/commands/system.py:139
 #: urpm/cli/commands/system.py:430 urpm/cli/commands/system.py:453
 #: urpm/cli/commands/system.py:465
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "        (+ {n} more)"
-msgstr "    (+ {n} mais)"
+msgstr "        (+ mais {n})"
 
 #: urpm/cli/commands/system.py:100
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    - remove ({n})"
-msgstr "  Fornece ({n}):"
+msgstr "    - remover ({n})"
 
 #: urpm/cli/commands/system.py:108
-#, fuzzy
 msgid "Servers"
-msgstr "Nome do servidor"
+msgstr "Servidores"
 
 #: urpm/cli/commands/system.py:109 urpm/cli/commands/peer.py:67
 #: urpm/cli/commands/appstream.py:91
@@ -4182,44 +4222,42 @@ msgid "Media"
 msgstr "Meios"
 
 #: urpm/cli/commands/system.py:116
-#, fuzzy
 msgid "  Packages"
-msgstr "Pacotes"
+msgstr "  Pacotes"
 
 #: urpm/cli/commands/system.py:119
 #, python-brace-format
 msgid "    + install ({n} = {e} explicit + {d} deps + {b} BR)"
-msgstr ""
+msgstr "    + instalar ({n} = {e} explícitos + {d} dependências + {b} BR)"
 
 #: urpm/cli/commands/system.py:133
 #, python-brace-format
 msgid "    - remove ({n} not in target profile)"
-msgstr ""
+msgstr "    - remover ({n} ausentes do perfil de destino)"
 
 #: urpm/cli/commands/system.py:146
-#, fuzzy
 msgid "  Warnings"
-msgstr "Aviso"
+msgstr "  Avisos"
 
 #: urpm/cli/commands/system.py:164
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  server remove failed for '{name}': {err}"
-msgstr "  Falha ao adicionar {name}: {err}"
+msgstr "  falhou a remoção do servidor « {name} »: {err}"
 
 #: urpm/cli/commands/system.py:182
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  server add failed for '{name}': {err}"
-msgstr "  Falha ao adicionar {name}: {err}"
+msgstr "  falhou a adição do servidor « {name} »: {err}"
 
 #: urpm/cli/commands/system.py:196
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  media remove failed for '{name}': {err}"
-msgstr "  Falha ao adicionar {name}: {err}"
+msgstr "  falhou a remoção do media « {name} »: {err}"
 
 #: urpm/cli/commands/system.py:217
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  media add failed for '{name}': {err}"
-msgstr "  Falha ao adicionar {name}: {err}"
+msgstr "  falhou a adição do media « {name} »: {err}"
 
 #: urpm/cli/commands/system.py:228
 #, python-brace-format
@@ -4227,30 +4265,32 @@ msgid ""
 "  media '{m}' expected server '{s}' but it is not present in this DB — link "
 "skipped"
 msgstr ""
+"  o media « {m} » espera o servidor « {s} », ausente desta base de dados; "
+"ligação ignorada"
 
 #: urpm/cli/commands/system.py:237
 #, python-brace-format
 msgid "  link '{s}' → '{m}' failed: {err}"
-msgstr ""
+msgstr "  falhou a ligação « {s} » → « {m} »: {err}"
 
 #: urpm/cli/commands/system.py:253
 #, python-brace-format
 msgid "  official server↔media mesh: {n} link(s) added"
-msgstr ""
+msgstr "  malha oficial servidor↔media: {n} ligação(ões) adicionada(s)"
 
 #: urpm/cli/commands/system.py:257
 #, python-brace-format
 msgid "  official mesh refresh failed: {err}"
-msgstr ""
+msgstr "  falhou a actualização da malha oficial: {err}"
 
 #: urpm/cli/commands/system.py:282 urpm/cli/commands/system.py:294
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  could not rewrite {path}: {err}"
-msgstr "    não foi possível remover {name} : {err}"
+msgstr "  não foi possível reescrever {path}: {err}"
 
 #: urpm/cli/commands/system.py:377
 msgid "Pre-flight gap detected"
-msgstr ""
+msgstr "Lacuna detectada na verificação prévia"
 
 #: urpm/cli/commands/system.py:380
 #, python-brace-format
@@ -4258,6 +4298,8 @@ msgid ""
 "  {n} package(s) in the profile are not in any enabled medium's pool (cannot"
 " be installed) :"
 msgstr ""
+"  {n} pacote(s) do perfil não estão no conjunto de nenhum media activo (não "
+"podem ser instalados):"
 
 #: urpm/cli/commands/system.py:391
 #, python-brace-format
@@ -4265,40 +4307,41 @@ msgid ""
 "  {n} package(s) in the profile's remove-set are not currently installed "
 "(nothing to erase) :"
 msgstr ""
+"  {n} pacote(s) da lista de remoção do perfil não estão instalados (nada a "
+"apagar):"
 
 #: urpm/cli/commands/system.py:415
-#, fuzzy
 msgid "Delta summary"
-msgstr "Resumo da triagem:"
+msgstr "Resumo das diferenças"
 
 #: urpm/cli/commands/system.py:420
 #, python-brace-format
 msgid "  Install : {ok}/{plan} applied"
-msgstr ""
+msgstr "  Instalação : {ok}/{plan} aplicados"
 
 #: urpm/cli/commands/system.py:424
 #, python-brace-format
 msgid "    - {n} not in pool (skipped) :"
-msgstr ""
+msgstr "    - {n} ausentes do conjunto (ignorados):"
 
 #: urpm/cli/commands/system.py:434 urpm/cli/commands/system.py:477
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    - transaction refused : {err}"
-msgstr "Relatório pós-transacção falhado : {err}"
+msgstr "    - transacção recusada: {err}"
 
 #: urpm/cli/commands/system.py:441
 msgid "[--allow-incoherent : forced, no rescue]"
-msgstr ""
+msgstr "[--allow-incoherent: forçado, sem rede de segurança]"
 
 #: urpm/cli/commands/system.py:443
 #, python-brace-format
 msgid "  Erase   : {ok}/{plan} applied"
-msgstr ""
+msgstr "  Remoção    : {ok}/{plan} aplicados"
 
 #: urpm/cli/commands/system.py:447
 #, python-brace-format
 msgid "    - {n} not in rpmdb (skipped) :"
-msgstr ""
+msgstr "    - {n} ausentes da rpmdb (ignorados):"
 
 #: urpm/cli/commands/system.py:458
 #, python-brace-format
@@ -4306,26 +4349,28 @@ msgid ""
 "    - {n} rescued from erase (source profile incoherent — kept-pkgs still "
 "need them) :"
 msgstr ""
+"    - {n} salvos da remoção (perfil de origem incoerente: pacotes mantidos "
+"ainda precisam deles):"
 
 #: urpm/cli/commands/system.py:471
 #, python-brace-format
 msgid "    - {n} hardware-specific package(s) preserved :"
-msgstr ""
+msgstr "    - {n} pacote(s) específicos do hardware preservados:"
 
 #: urpm/cli/commands/system.py:652
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  failed to invoke urpm: {err}"
-msgstr "Falha ao inicializar rpmdb: {error}"
+msgstr "  falhou a invocação do urpm: {err}"
 
 #: urpm/cli/commands/system.py:671
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Profile not found: {path}"
-msgstr "Ficheiro não encontrado: {path}"
+msgstr "Perfil não encontrado: {path}"
 
 #: urpm/cli/commands/system.py:688
 #, python-brace-format
 msgid "Backup of current state written to {path}"
-msgstr ""
+msgstr "Cópia de segurança do estado actual escrita em {path}"
 
 #: urpm/cli/commands/system.py:694
 #, python-brace-format
@@ -4333,41 +4378,38 @@ msgid ""
 "Cannot write backup ({err}). Refusing to proceed. Re-run with --no-backup to"
 " override."
 msgstr ""
+"Não é possível escrever a cópia de segurança ({err}). A parar. Execute de "
+"novo com --no-backup para ignorar."
 
 #: urpm/cli/commands/system.py:713
-#, fuzzy
 msgid "--dry-run : no changes applied."
-msgstr "(execução simulada - nenhuma alteração realizada)"
+msgstr "--dry-run: nenhuma alteração aplicada."
 
 #: urpm/cli/commands/system.py:718
-#, fuzzy
 msgid "Apply this plan ? [y/N] "
-msgstr ""
-"\n"
-"Importar esta chave? [s/N] "
+msgstr "Aplicar este plano? [s/N] "
 
 #: urpm/cli/commands/system.py:729
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  {n} server(s) reconciled"
-msgstr "Nenhum servidor configurado"
+msgstr "  {n} servidor(es) reconciliado(s)"
 
 #: urpm/cli/commands/system.py:733
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  {n} media reconciled"
-msgstr "Nenhum meio configurado"
+msgstr "  {n} media reconciliado(s)"
 
 #: urpm/cli/commands/system.py:737
-#, fuzzy
 msgid "Syncing metadata for newly-added media..."
-msgstr ""
-"\n"
-"Sincronizando metadados para {n} mídias ativadas..."
+msgstr "A sincronizar os metadados dos medias recém adicionados..."
 
 #: urpm/cli/commands/system.py:741
 #, python-brace-format
 msgid ""
 "  media sync returned {rc} — some packages may not resolve on install below"
 msgstr ""
+"  a sincronização dos medias devolveu {rc}; alguns pacotes podem não se "
+"resolver na instalação abaixo"
 
 #: urpm/cli/commands/system.py:765
 msgid ""
@@ -4375,10 +4417,13 @@ msgid ""
 "the pool nor in rpmdb.  Re-run with --force to skip the missing entries, or "
 "fix the profile / media list first."
 msgstr ""
+"Importação do sistema recusada: o perfil refere pacotes que não estão nem no"
+" conjunto nem na rpmdb. Execute de novo com --force para ignorar as entradas"
+" em falta, ou corrija primeiro o perfil ou a lista de medias."
 
 #: urpm/cli/commands/system.py:773
 msgid "Proceed anyway (skipping the missing entries) ? [y/N] "
-msgstr ""
+msgstr "Continuar mesmo assim (ignorando as entradas em falta)? [s/N] "
 
 #: urpm/cli/commands/system.py:800
 #, python-brace-format
@@ -4387,16 +4432,19 @@ msgid ""
 "leave the target machine broken (kernel modules, drivers, guest tools, "
 "firmware)."
 msgstr ""
+"⚠ {n} pacote(s) específicos do hardware na lista de remoção; retirá-los pode"
+" deixar a máquina de destino inutilizável (módulos do núcleo, controladores,"
+" ferramentas de convidado, firmware)."
 
 #: urpm/cli/commands/system.py:808
 #, python-brace-format
 msgid "Preserve these {n} hardware-specific package(s) ? [Y/n] "
-msgstr ""
+msgstr "Preservar estes {n} pacote(s) específicos do hardware? [Y/n] "
 
 #: urpm/cli/commands/system.py:832
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Installing {n} package(s)..."
-msgstr "A instalar {count} pacote..."
+msgstr "A instalar {n} pacote(s)..."
 
 #: urpm/cli/commands/system.py:838
 #, python-brace-format
@@ -4404,16 +4452,22 @@ msgid ""
 "install refused (exit {rc}) — dep conflict, insufficient space, or signature"
 " issue ; see the urpm output above."
 msgstr ""
+"instalação recusada (código {rc}): conflito de dependências, espaço "
+"insuficiente ou problema de assinatura; ver a saída do urpm acima."
 
 #: urpm/cli/commands/system.py:880
 msgid "  Waiting for background install to finish committing rpmdb..."
 msgstr ""
+"  À espera que a instalação em segundo plano termine de escrever a rpmdb..."
 
 #: urpm/cli/commands/system.py:897
 msgid ""
 "⚠ --allow-incoherent : dep rescue skipped, erase will be forced through RPM "
 "pre-checks — the system will be left with unmet dependencies"
 msgstr ""
+"⚠ --allow-incoherent: a rede de segurança das dependências é ignorada e a "
+"remoção forçará as verificações prévias do RPM; o sistema ficará com "
+"dependências por satisfazer"
 
 #: urpm/cli/commands/system.py:913
 #, python-brace-format
@@ -4421,16 +4475,18 @@ msgid ""
 "⚠ Source profile is incoherent : {n} package(s) kept from erase to satisfy "
 "runtime deps of retained pkgs"
 msgstr ""
+"⚠ O perfil de origem é incoerente: {n} pacote(s) poupados à remoção para "
+"satisfazer as dependências de execução dos pacotes mantidos"
 
 #: urpm/cli/commands/system.py:918
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "(required by {k} for {d})"
-msgstr "requerido por"
+msgstr "(requerido por {k} para {d})"
 
 #: urpm/cli/commands/system.py:927
 #, python-brace-format
 msgid "Removing {n} package(s) no longer in target profile..."
-msgstr ""
+msgstr "A remover {n} pacote(s) que já não estão no perfil de destino..."
 
 #: urpm/cli/commands/system.py:947
 #, python-brace-format
@@ -4438,6 +4494,8 @@ msgid ""
 "erase refused (exit {rc}) — see urpm output above ; resolve manually then "
 "re-run."
 msgstr ""
+"remoção recusada (código {rc}): ver a saída do urpm acima; resolva à mão e "
+"execute de novo."
 
 #: urpm/cli/commands/query.py:58
 msgid "All installed packages are available in configured media"
@@ -6890,7 +6948,7 @@ msgstr "version-mode definido para '{mode}'"
 #: urpm/cli/commands/config.py:132
 #, python-brace-format
 msgid "/etc/version branch set to '{branch}'"
-msgstr ""
+msgstr "ramo de /etc/version definido para « {branch} »"
 
 #: urpm/cli/commands/config.py:141
 #, python-brace-format
@@ -8058,9 +8116,8 @@ msgstr ""
 "modo não interativo."
 
 #: urpm/cli/commands/cleanup.py:406
-#, fuzzy
 msgid "No orphaned packages found."
-msgstr " Nenhum pacote órfão encontrado"
+msgstr "Não foram encontrados pacotes órfãos."
 
 #: urpm/cli/commands/cleanup.py:409
 #, python-brace-format
@@ -8261,39 +8318,42 @@ msgstr[1] " {count} sistemas de ficheiros desmontados"
 
 #: urpm/cli/commands/build.py:204
 msgid "history_scriptlet_output already migrated — nothing to do."
-msgstr ""
+msgstr "history_scriptlet_output já migrada, nada a fazer."
 
 #: urpm/cli/commands/build.py:215
 msgid "history_scriptlet_output is empty — dropping the legacy table."
-msgstr ""
+msgstr "history_scriptlet_output está vazia, a tabela herdada é removida."
 
 #: urpm/cli/commands/build.py:222
 #, python-brace-format
 msgid "Migrating {n} legacy scriptlet row(s) → history_scriptlets{suffix}..."
 msgstr ""
+"A migrar {n} linha(s) de scriptlet herdada(s) → "
+"history_scriptlets{suffix}..."
 
 #: urpm/cli/commands/build.py:225
 msgid " (dry-run)"
-msgstr ""
+msgstr " (simulação)"
 
 #: urpm/cli/commands/build.py:234
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  … and {n} more"
-msgstr "    … e mais {n}"
+msgstr "  … e mais {n}"
 
 #: urpm/cli/commands/build.py:236
 msgid "dry-run : source table would be dropped after successful migration."
 msgstr ""
+"simulação: a tabela de origem seria removida após uma migração bem sucedida."
 
 #: urpm/cli/commands/build.py:259
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Migration failed (rolled back): {error}"
-msgstr "Erro: falha ao descarregar chave: {error}"
+msgstr "Falhou a migração (revertida): {error}"
 
 #: urpm/cli/commands/build.py:263
 #, python-brace-format
 msgid "Migrated {n} row(s); legacy table dropped."
-msgstr ""
+msgstr "{n} linha(s) migrada(s); tabela herdada removida."
 
 #: urpm/cli/commands/build.py:327
 #, python-brace-format
@@ -9292,7 +9352,7 @@ msgstr "Várias famílias instaladas fornecem «{pkg}»:"
 
 #: urpm/cli/helpers/progress.py:408
 msgid "removing"
-msgstr ""
+msgstr "a remover"
 
 #: urpm/cli/helpers/progress.py:411
 msgid "Running triggers..."
@@ -9870,9 +9930,9 @@ msgid "Total : {n} package(s), download {dl}, installed footprint {inst}."
 msgstr "Total : {n} pacote(s), transferência {dl}, espaço instalado {inst}."
 
 #: urpm/core/resolver.py:843
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "probe solve failed: {err}"
-msgstr "Desfazer falhou: {error}"
+msgstr "falhou a resolução de sondagem: {err}"
 
 #: urpm/core/resolver.py:850
 #, python-brace-format
@@ -9882,6 +9942,10 @@ msgid ""
 "please attach `urpm distupgrade --to N --dry-run --verbose` output to the "
 "bug report)."
 msgstr ""
+"o candidato {name}-{evr} de {repo} instala-se correctamente isoladamente, "
+"mas a resolução do distupgrade recusou-o (provavelmente uma prioridade de "
+"pacote ou uma cadeia de obsoletos; junte a saída de `urpm distupgrade --to N"
+" --dry-run --verbose` ao relatório de erro)."
 
 #: urpm/core/resolver.py:969
 #, python-brace-format

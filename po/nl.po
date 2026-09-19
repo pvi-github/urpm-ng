@@ -27,9 +27,8 @@ msgid "yes"
 msgstr "ja"
 
 #: urpm/cli/main.py:189
-#, fuzzy
 msgid "ERROR: Missing or broken runtime dependencies:"
-msgstr "FOUT: Ontbrekende vereiste Python-modules:"
+msgstr "FOUT: ontbrekende of kapotte looptijdafhankelijkheden:"
 
 #: urpm/cli/main.py:192
 #, python-brace-format
@@ -149,12 +148,12 @@ msgid "Show all items without truncation"
 msgstr "Alle items tonen zonder afkapping"
 
 #: urpm/cli/main.py:373
-#, fuzzy
 msgid ""
 "Enable debug output (solver, tsrun, orphans, download, timing, distupgrade, "
 "all)"
 msgstr ""
-"Debug-uitvoer inschakelen (solver, tsrun, orphans, download, timing, all)"
+"Foutopsporingsuitvoer inschakelen (solver, tsrun, orphans, download, timing,"
+" distupgrade, all)"
 
 #: urpm/cli/main.py:379
 msgid "Watch specific packages during resolution (comma-separated)"
@@ -245,9 +244,8 @@ msgid "Do not sync media after adding (just configure)"
 msgstr "Media niet synchroniseren na toevoegen (alleen configureren)"
 
 #: urpm/cli/main.py:493
-#, fuzzy
 msgid "Unmount chroot filesystems or migrate legacy scriptlet rows"
-msgstr "chroot-bestandssystemen ontkoppelen (/dev, /proc)"
+msgstr "Chroot-bestandssystemen afkoppelen of oude scriptlet-rijen migreren"
 
 #: urpm/cli/main.py:495
 msgid ""
@@ -265,17 +263,31 @@ msgid ""
 "  urpm cleanup --legacy-scriptlets\n"
 "  urpm cleanup --legacy-scriptlets --dry-run\n"
 msgstr ""
+"Opruimtaken.\n"
+"\n"
+"Zonder optie koppelt het de bestandssystemen af die « urpm init » in een\n"
+"chroot heeft aangekoppeld (--urpm-root vereist).\n"
+"\n"
+"Met --legacy-scriptlets migreert het elke rij uit de tabel\n"
+"`history_scriptlet_output` van vóór v34 naar `history_scriptlets`, en\n"
+"haalt hun uitvoer onderweg door de opschoner.  Idempotent.\n"
+"\n"
+"Voorbeelden:\n"
+"  urpm --urpm-root /tmp/rootfs cleanup\n"
+"  urpm cleanup --legacy-scriptlets\n"
+"  urpm cleanup --legacy-scriptlets --dry-run\n"
 
 #: urpm/cli/main.py:512
 msgid ""
 "Migrate history_scriptlet_output → history_scriptlets (SPEC_DISTUPGRADE "
 "§3.C)"
 msgstr ""
+"history_scriptlet_output → history_scriptlets migreren (SPEC_DISTUPGRADE "
+"§3.C)"
 
 #: urpm/cli/main.py:517
-#, fuzzy
 msgid "Print what would be migrated without touching the DB"
-msgstr "Tonen wat er zou worden toegevoegd zonder wijzigingen door te voeren"
+msgstr "Tonen wat er gemigreerd zou worden zonder de database aan te raken"
 
 #: urpm/cli/main.py:525
 msgid "Install packages"
@@ -404,6 +416,10 @@ msgid ""
 "with # ignored) and merge them with the positional arguments. Pair with "
 "`urpm distupgrade --export-plan` to preload a neighbour peer."
 msgstr ""
+"Pakketaanduidingen uit FILE lezen (één per regel; lege regels en regels die "
+"met # beginnen worden genegeerd) en samenvoegen met de positionele "
+"argumenten. Te combineren met `urpm distupgrade --export-plan` om een "
+"buurpeer voor te laden."
 
 #: urpm/cli/main.py:671
 msgid "Target release (e.g., 10, cauldron). Downloads for this release."
@@ -837,15 +853,15 @@ msgstr ""
 "alleen spec-specifieke afhankelijkheden. Standaard uitgeschakeld."
 
 #: urpm/cli/main.py:1080
-#, fuzzy, python-format
+#, python-format
 msgid ""
 "Cap the build parallelism at N threads (translated to rpmbuild %%_smp_mflags"
 " = -jN). Default: max(1, nproc - 2), so the host keeps two cores free for "
 "interactive work. Use --full-throttle for the whole CPU."
 msgstr ""
-"Beperkt het build-parallellisme tot N threads (vertaald in rpmbuild "
-"%_smp_mflags = -jN). Standaard: max(1, nproc - 2), zodat de host twee kernen"
-" vrij houdt voor interactief werk. --full-throttle voor de hele CPU."
+"Het bouwparallellisme begrenzen op N threads (vertaald naar rpmbuild "
+"%%_smp_mflags = -jN). Standaard: max(1, nproc - 2), zodat er twee kernen "
+"vrij blijven voor interactief werk. --full-throttle voor de hele CPU."
 
 #: urpm/cli/main.py:1088
 msgid ""
@@ -932,23 +948,23 @@ msgstr ""
 " CI waar stil swappen niet van een timeout te onderscheiden zou zijn."
 
 #: urpm/cli/main.py:1153
-#, fuzzy, python-format
+#, python-format
 msgid ""
 "Enable a spec %%bcond, e.g. ``--with debug``. Passed to rpmbuild verbatim.  "
 "Repeatable."
 msgstr ""
-"Activeert een %bcond in de spec, bv. ``--with debug``. Woordelijk aan "
-"rpmbuild doorgegeven. Herhaalbaar."
+"Een %%bcond uit het spec-bestand inschakelen, bijvoorbeeld ``--with debug``."
+" Wordt ongewijzigd aan rpmbuild doorgegeven.  Herhaalbaar."
 
 #: urpm/cli/main.py:1160
-#, fuzzy, python-format
+#, python-format
 msgid ""
 "Disable a spec %%bcond, e.g. ``--without unified_build`` to force firefox's "
 "per-file translation units.  Passed to rpmbuild verbatim.  Repeatable."
 msgstr ""
-"Deactiveert een %bcond in de spec, bv. ``--without unified_build`` om "
-"firefox' per-bestand vertaaleenheden af te dwingen. Woordelijk aan rpmbuild "
-"doorgegeven. Herhaalbaar."
+"Een %%bcond uit het spec-bestand uitschakelen, bijvoorbeeld ``--without "
+"unified_build`` om bij firefox vertaaleenheden per bestand af te dwingen.  "
+"Wordt ongewijzigd aan rpmbuild doorgegeven.  Herhaalbaar."
 
 #: urpm/cli/main.py:1170
 msgid "Generate media metadata (requires the urpm-ng-genmedia sub-package)"
@@ -1062,6 +1078,7 @@ msgstr "Debug-uitvoer inschakelen (solver, tsrun, all)"
 #: urpm/cli/main.py:1304
 msgid "Full release migration N → N+1 (Mageia dist-upgrade)"
 msgstr ""
+"Volledige migratie van uitgave N naar N+1 (Mageia-distributieopwaardering)"
 
 #: urpm/cli/main.py:1306
 msgid ""
@@ -1073,25 +1090,33 @@ msgid ""
 "\n"
 "Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.\n"
 msgstr ""
+"Het hele systeem van Mageia N naar N+1 migreren.\n"
+"\n"
+"Starten en vergeten: aftrappen, weglopen, een paar minuten of enkele\n"
+"tientallen minuten later terugkomen.  Het systeem is overgezet, of is\n"
+"gestopt op een duidelijk struikelpunt.\n"
+"\n"
+"Zie doc/SPEC_DISTUPGRADE.md voor het volledige contract.\n"
 
 #: urpm/cli/main.py:1318
 msgid "Resume a previously interrupted distupgrade"
-msgstr ""
+msgstr "Een eerder onderbroken distupgrade hervatten"
 
 #: urpm/cli/main.py:1326
 msgid "Abandon a running or interrupted distupgrade"
-msgstr ""
+msgstr "Een lopend of onderbroken distupgrade opgeven"
 
 #: urpm/cli/main.py:1330
-#, fuzzy
 msgid "Target release identity (e.g. 11, cauldron, cauldron:12)"
-msgstr "Mageia-release (bijv. 10, cauldron)"
+msgstr "Aanduiding van de doeluitgave (bijv. 11, cauldron, cauldron:12)"
 
 #: urpm/cli/main.py:1334
 msgid ""
 "Run Stage 0 checks + refresh but skip Phase A upgrade and downstream "
 "mutations"
 msgstr ""
+"De controles en de verversing van fase 0 uitvoeren, maar de opwaardering van"
+" fase A en de daaropvolgende wijzigingen overslaan"
 
 #: urpm/cli/main.py:1340
 msgid ""
@@ -1109,6 +1134,8 @@ msgid ""
 "Skip the Stage 2 confirmation prompt and proceed straight to "
 "download/install"
 msgstr ""
+"De bevestigingsvraag van fase 2 overslaan en meteen doorgaan naar downloaden"
+" en installeren"
 
 #: urpm/cli/main.py:1353
 msgid ""
@@ -1116,10 +1143,13 @@ msgid ""
 "without downloading or mutating the system. Useful to preload a neighbour "
 "peer with `urpm download --from-file FILE`."
 msgstr ""
+"Het plan voor de doeluitgave oplossen en de NEVRA's naar FILE schrijven (één"
+" per regel), zonder iets te downloaden of het systeem te wijzigen. Handig om"
+" een buurpeer voor te laden met `urpm download --from-file FILE`."
 
 #: urpm/cli/main.py:1364
 msgid "Reconcile transactions interrupted by crash/SIGKILL"
-msgstr ""
+msgstr "Transacties verrekenen die door een crash of SIGKILL zijn onderbroken"
 
 #: urpm/cli/main.py:1372
 msgid ""
@@ -1340,7 +1370,7 @@ msgstr "Simulatie - tonen wat er zou worden gedaan"
 
 #: urpm/cli/main.py:1728
 msgid "Resume a previously interrupted upgrade (Phase D)"
-msgstr ""
+msgstr "Een eerder onderbroken opwaardering hervatten (fase D)"
 
 #: urpm/cli/main.py:1733
 msgid "Install recommended packages (not installed by default for upgrades)"
@@ -1570,6 +1600,9 @@ msgid ""
 "counterpart (rows with disabled_by=distupgrade).  Orphan rows without a "
 "target counterpart are left alone."
 msgstr ""
+"Alle mga N-media verwijderen die het distupgrade heeft vervangen door hun "
+"mga N+1-tegenhanger (rijen met disabled_by=distupgrade).  Verweesde rijen "
+"zonder tegenhanger blijven ongemoeid."
 
 #: urpm/cli/main.py:2022 urpm/cli/main.py:2768
 msgid "Skip the confirmation prompt"
@@ -2241,37 +2274,39 @@ msgstr "Te verwijderen sleutel-ID (bijv. 80420f66)"
 #: urpm/cli/main.py:2738
 msgid "Export / import a machine profile (packages + media + servers)"
 msgstr ""
+"Een machineprofiel exporteren of importeren (pakketten, media en servers)"
 
 #: urpm/cli/main.py:2749
 msgid "Write current system state to JSON"
-msgstr ""
+msgstr "De huidige systeemtoestand als JSON wegschrijven"
 
 #: urpm/cli/main.py:2753
 msgid "Destination file (default: ~/system-<hostname>-<UTC-timestamp>.json)"
-msgstr ""
+msgstr "Doelbestand (standaard: ~/system-<hostname>-<UTC-timestamp>.json)"
 
 #: urpm/cli/main.py:2760
 msgid "Reconcile this system against a profile JSON"
-msgstr ""
+msgstr "Dit systeem verrekenen met een JSON-profiel"
 
 #: urpm/cli/main.py:2764
-#, fuzzy
 msgid "Profile file to import"
-msgstr " Importeren van sleutel mislukt"
+msgstr "Te importeren profielbestand"
 
 #: urpm/cli/main.py:2772
 msgid "Skip the automatic backup of the current state"
-msgstr ""
+msgstr "De automatische reservekopie van de huidige toestand overslaan"
 
 #: urpm/cli/main.py:2776
 msgid "Show the plan but do not apply anything"
-msgstr ""
+msgstr "Het plan tonen zonder iets toe te passen"
 
 #: urpm/cli/main.py:2780
 msgid ""
 "Keep local media/servers not in the profile (default: replace — remove local"
 " extras)"
 msgstr ""
+"Lokale media en servers behouden die niet in het profiel staan (standaard: "
+"vervangen, dus lokale extra's verwijderen)"
 
 #: urpm/cli/main.py:2785
 msgid ""
@@ -2279,6 +2314,9 @@ msgid ""
 "profile that are not in the pool or not currently installed are silently "
 "dropped from the install / erase lists)"
 msgstr ""
+"Verschillen bij de voorcontrole overslaan zonder bevestiging (pakketten uit "
+"het profiel die niet in de pool zitten of niet geïnstalleerd zijn, "
+"verdwijnen stilzwijgend uit de installatie- en verwijderlijsten)"
 
 #: urpm/cli/main.py:2792
 msgid ""
@@ -2288,6 +2326,11 @@ msgid ""
 "for faithful bug reproduction ; the resulting system will have broken "
 "dependencies."
 msgstr ""
+"Het bronprofiel letterlijk nabootsen, ook als behouden pakketten daardoor "
+"onvervulde afhankelijkheden houden.  Schakelt het vangnet voor "
+"afhankelijkheden uit ÉN forceert het verwijderen met ``urpm erase --force`` "
+"(omzeilt de RPM-voorcontrole).  Bedoeld om een fout getrouw na te bootsen; "
+"het resulterende systeem heeft kapotte afhankelijkheden."
 
 #: urpm/cli/main.py:2801
 msgid ""
@@ -2299,6 +2342,14 @@ msgid ""
 " / iwlwifi / nvidia driver, distupgrade brings a new kernel, no DKMS "
 "rebuild, graphics stack breaks » failure."
 msgstr ""
+"Niet-interactieve modus: hardwarespecifieke pakketten behouden (DKMS-"
+"modules, X11-stuurprogramma's, gasthulpmiddelen, firmware, microcode), ook "
+"als ze in het bronprofiel ontbreken.  In interactieve modus wordt dezelfde "
+"bescherming al aangeboden met een vraag waarvan het antwoord standaard ja "
+"is; deze optie is de tegenhanger voor ``--auto``.  Voorkomt het klassieke "
+"euvel: « het gekloonde profiel haalt het vboxvideo-, iwlwifi- of nvidia-"
+"stuurprogramma van de doelmachine weg, het distupgrade brengt een nieuwe "
+"kernel, DKMS bouwt niets opnieuw en de grafische laag breekt »."
 
 #: urpm/cli/main.py:2818
 msgid "Manage P2P peers (provenance, blacklist)"
@@ -2612,7 +2663,7 @@ msgstr "{count} BuildRequires gevonden"
 
 #: urpm/cli/commands/install.py:249
 msgid "Spec has no BuildRequires — nothing to install."
-msgstr ""
+msgstr "Het spec-bestand heeft geen BuildRequires, niets te installeren."
 
 #: urpm/cli/commands/install.py:266 urpm/cli/commands/install.py:273
 #: urpm/cli/commands/install.py:1224
@@ -2907,9 +2958,8 @@ msgid "Cannot read --from-file {path}: {err}"
 msgstr "Kan --from-file {path} niet lezen : {err}"
 
 #: urpm/cli/commands/install.py:1210
-#, fuzzy
 msgid "Spec has no BuildRequires — nothing to download."
-msgstr "Reeds op {id} — niets te doen"
+msgstr "Het spec-bestand heeft geen BuildRequires, niets te downloaden."
 
 #: urpm/cli/commands/install.py:1225
 msgid "Usage: urpm download [packages...] [--buildrequires [spec]]"
@@ -3340,9 +3390,8 @@ msgstr ""
 "Of terugdraaien met :  urpm distupgrade --abort"
 
 #: urpm/cli/commands/distupgrade.py:114
-#, fuzzy
 msgid "No distupgrade state to resume from."
-msgstr "Geen gemigreerde media om te verwijderen."
+msgstr "Geen distupgrade-toestand om te hervatten."
 
 #: urpm/cli/commands/distupgrade.py:119
 #, python-brace-format
@@ -3372,9 +3421,9 @@ msgid "cannot resume Tx A : plan absent from .state."
 msgstr "Tx A kan niet hervat worden : plan ontbreekt in .state."
 
 #: urpm/cli/commands/distupgrade.py:208
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Tx A retry failed : {err}"
-msgstr "mislukt: {error}"
+msgstr "Nieuwe poging voor Tx A mislukt: {err}"
 
 #: urpm/cli/commands/distupgrade.py:212 urpm/cli/commands/distupgrade.py:1289
 msgid ""
@@ -3391,14 +3440,14 @@ msgstr ""
 "(execvp)…"
 
 #: urpm/cli/commands/distupgrade.py:227
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "execvp handoff failed : {err}"
-msgstr "Ongedaan maken mislukt: {error}"
+msgstr "execvp-overdracht mislukt: {err}"
 
 #: urpm/cli/commands/distupgrade.py:239
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Stage 4 retry failed : {err}"
-msgstr "mislukt: {error}"
+msgstr "Nieuwe poging voor fase 4 mislukt: {err}"
 
 #: urpm/cli/commands/distupgrade.py:242
 #, python-brace-format
@@ -3481,9 +3530,9 @@ msgstr "  {n} kandida(a)t(en) tegengehouden :"
 #: urpm/cli/commands/distupgrade.py:1497 urpm/cli/commands/distupgrade.py:1513
 #: urpm/cli/commands/system.py:387 urpm/cli/commands/system.py:398
 #: urpm/cli/commands/system.py:922
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    (+ {n} more)"
-msgstr "    (+ {n} meer)"
+msgstr "    (+ nog {n})"
 
 #: urpm/cli/commands/distupgrade.py:462
 msgid ""
@@ -3967,9 +4016,9 @@ msgstr ""
 "te voeren."
 
 #: urpm/cli/commands/distupgrade.py:1572
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "{n} orphan packages detected after the distupgrade."
-msgstr "{n} wees-pakket gevonden"
+msgstr "{n} verweesde pakketten aangetroffen na het distupgrade."
 
 #: urpm/cli/commands/distupgrade.py:1575
 msgid ""
@@ -3981,15 +4030,12 @@ msgstr ""
 "voor stuk bekeken horen te worden."
 
 #: urpm/cli/commands/distupgrade.py:1580
-#, fuzzy
 msgid "  Enter interactive triage now ? [y/N] "
-msgstr "  Deze oude repositories nu verwijderen ? [j/N] "
+msgstr "  Nu de interactieve triage starten? [j/N] "
 
 #: urpm/cli/commands/distupgrade.py:1586
-#, fuzzy
 msgid "    Skipped ; run later with :  urpm autoremove --interactive"
-msgstr ""
-"    Behouden ; later verwijderen met :  urpm media remove --distupgraded"
+msgstr "    Overgeslagen; later uitvoeren met:  urpm autoremove --interactive"
 
 #: urpm/cli/commands/distupgrade.py:1611
 #, python-brace-format
@@ -4025,125 +4071,119 @@ msgstr[0] "{n} oude repository gemarkeerd voor opruiming na herstart."
 msgstr[1] "{n} oude repositories gemarkeerd voor opruiming na herstart."
 
 #: urpm/cli/commands/genmedia.py:22
-#, fuzzy
 msgid "Error: urpm-ng-genmedia is not installed."
-msgstr "urpm genmedia is niet geïnstalleerd op dit systeem."
+msgstr "Fout: urpm-ng-genmedia is niet geïnstalleerd."
 
 #: urpm/cli/commands/genmedia.py:23
 msgid "Install it with: sudo urpm install urpm-ng-genmedia"
-msgstr ""
+msgstr "Installeer het met: sudo urpm install urpm-ng-genmedia"
 
 #: urpm/cli/commands/genmedia.py:28
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Error: {path} is not a directory."
-msgstr "Fout: {path} bestaat niet"
+msgstr "Fout: {path} is geen map."
 
 #: urpm/cli/commands/genmedia.py:62
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "{count} packages indexed."
-msgstr "{count} pakket gewist"
+msgstr "{count} pakketten geïndexeerd."
 
 #: urpm/cli/commands/progress.py:90
-#, fuzzy, python-format
+#, python-format
 msgid "Transaction error: %s"
-msgstr "Transacties:"
+msgstr "Transactiefout: %s"
 
 #: urpm/cli/commands/progress.py:105
-#, fuzzy
 msgid "Preparing transaction..."
-msgstr ""
-"\n"
-"Voorbereiden van downloads..."
+msgstr "Transactie wordt voorbereid..."
 
 #: urpm/cli/commands/progress.py:145
-#, fuzzy
 msgid "Transaction completed."
-msgstr "Transactie #{tid}"
+msgstr "Transactie voltooid."
 
 #: urpm/cli/commands/progress.py:152
 #, python-format
 msgid "Transaction process (PID %s) is no longer running."
-msgstr ""
+msgstr "Het transactieproces (PID %s) draait niet meer."
 
 #: urpm/cli/commands/progress.py:168
-#, fuzzy
 msgid "No background transaction is running."
-msgstr "Details van transactie-ID tonen"
+msgstr "Er draait geen transactie op de achtergrond."
 
 #: urpm/cli/commands/progress.py:173
 #, python-format
 msgid "Background %s in progress (PID %s)"
-msgstr ""
+msgstr "%s bezig op de achtergrond (PID %s)"
 
 #: urpm/cli/commands/progress.py:180
 msgid "Use --watch / -w to follow in real time."
-msgstr ""
+msgstr "Gebruik --watch / -w om live mee te kijken."
 
 #: urpm/cli/commands/readme.py:92
-#, fuzzy
 msgid "No README messages stored."
-msgstr "Details van transactie-ID tonen"
+msgstr "Geen README-berichten opgeslagen."
 
 #: urpm/cli/commands/readme.py:94
-#, fuzzy
 msgid "Transactions with README messages:"
-msgstr "Transacties met README-berichten weergeven"
+msgstr "Transacties met README-berichten:"
 
 #: urpm/cli/commands/readme.py:106
-#, fuzzy, python-format
+#, python-format
 msgid "No README messages for transaction #%d."
-msgstr "Details van transactie-ID tonen"
+msgstr "Geen README-berichten voor transactie nr. %d."
 
 #: urpm/cli/commands/readme.py:108
-#, fuzzy
 msgid "No README messages from recent transactions."
-msgstr "Details van transactie-ID tonen"
+msgstr "Geen README-berichten uit recente transacties."
 
 #: urpm/cli/commands/readme.py:114
-#, fuzzy, python-format
+#, python-format
 msgid "README messages from transaction #%d"
-msgstr "Details van transactie-ID tonen"
+msgstr "README-berichten uit transactie nr. %d"
 
 #: urpm/cli/commands/recover.py:31
-#, fuzzy
 msgid "No interrupted transaction to reconcile."
-msgstr "Geen onderbroken transacties gevonden"
+msgstr "Geen onderbroken transactie om te verrekenen."
 
 #: urpm/cli/commands/recover.py:35
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Reconciling {n} interrupted transaction(s) against the rpmdb..."
-msgstr "Geen onderbroken transacties gevonden"
+msgstr "{n} onderbroken transactie(s) worden vergeleken met de rpmdb..."
 
 #: urpm/cli/commands/recover.py:41
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Reconciliation failed: {error}"
-msgstr "Terugdraaien mislukt: {error}"
+msgstr "Verrekening mislukt: {error}"
 
 #: urpm/cli/commands/recover.py:47
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  transaction #{tid}: complete (rpmdb matches recorded intent)"
-msgstr "Transactie #{tid} niet volledig (status: {status})"
+msgstr ""
+"  transactie nr. {tid}: volledig (de rpmdb komt overeen met de vastgelegde "
+"bedoeling)"
 
 #: urpm/cli/commands/recover.py:51
 #, python-brace-format
 msgid ""
 "  transaction #{tid}: interrupted (rpmdb diverges from recorded intent)"
 msgstr ""
+"  transactie nr. {tid}: onderbroken (de rpmdb wijkt af van de vastgelegde "
+"bedoeling)"
 
 #: urpm/cli/commands/system.py:42
 #, python-brace-format
 msgid "Exporting system state to {path}..."
-msgstr ""
+msgstr "Systeemtoestand wordt geëxporteerd naar {path}..."
 
 #: urpm/cli/commands/system.py:48
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Export failed: {err}"
-msgstr "Ongedaan maken mislukt: {error}"
+msgstr "Export mislukt: {err}"
 
 #: urpm/cli/commands/system.py:55
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Cannot write {path}: {err}"
-msgstr "Kan --from-file {path} niet lezen : {err}"
+msgstr "Kan {path} niet schrijven: {err}"
 
 #: urpm/cli/commands/system.py:65
 #, python-brace-format
@@ -4151,39 +4191,39 @@ msgid ""
 "  {srv} server(s), {media} media, {expl} explicit / {dep} dependency / {br} "
 "buildrequires packages."
 msgstr ""
+"  {srv} server(s), {media} media, {expl} expliciete pakketten / {dep} "
+"afhankelijkheden / {br} buildrequires."
 
 #: urpm/cli/commands/system.py:70
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Wrote {path}"
-msgstr " Ontkoppeld {path}"
+msgstr "{path} geschreven"
 
 #: urpm/cli/commands/system.py:82
-#, fuzzy
 msgid "Import plan"
-msgstr "Importeren van:"
+msgstr "Importplan"
 
 #: urpm/cli/commands/system.py:91
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    + add ({n})"
-msgstr "    … en nog {n}"
+msgstr "    + toevoegen ({n})"
 
 #: urpm/cli/commands/system.py:96 urpm/cli/commands/system.py:105
 #: urpm/cli/commands/system.py:129 urpm/cli/commands/system.py:139
 #: urpm/cli/commands/system.py:430 urpm/cli/commands/system.py:453
 #: urpm/cli/commands/system.py:465
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "        (+ {n} more)"
-msgstr "    (+ {n} meer)"
+msgstr "        (+ nog {n})"
 
 #: urpm/cli/commands/system.py:100
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    - remove ({n})"
-msgstr "  Biedt ({n}):"
+msgstr "    - verwijderen ({n})"
 
 #: urpm/cli/commands/system.py:108
-#, fuzzy
 msgid "Servers"
-msgstr "Servernaam"
+msgstr "Servers"
 
 #: urpm/cli/commands/system.py:109 urpm/cli/commands/peer.py:67
 #: urpm/cli/commands/appstream.py:91
@@ -4191,44 +4231,43 @@ msgid "Media"
 msgstr "Media"
 
 #: urpm/cli/commands/system.py:116
-#, fuzzy
 msgid "  Packages"
-msgstr "Pakketten"
+msgstr "  Pakketten"
 
 #: urpm/cli/commands/system.py:119
 #, python-brace-format
 msgid "    + install ({n} = {e} explicit + {d} deps + {b} BR)"
 msgstr ""
+"    + installeren ({n} = {e} expliciet + {d} afhankelijkheden + {b} BR)"
 
 #: urpm/cli/commands/system.py:133
 #, python-brace-format
 msgid "    - remove ({n} not in target profile)"
-msgstr ""
+msgstr "    - verwijderen ({n} niet in het doelprofiel)"
 
 #: urpm/cli/commands/system.py:146
-#, fuzzy
 msgid "  Warnings"
-msgstr "Waarschuwing"
+msgstr "  Waarschuwingen"
 
 #: urpm/cli/commands/system.py:164
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  server remove failed for '{name}': {err}"
-msgstr "  Toevoegen van {name} mislukt: {err}"
+msgstr "  verwijderen van server « {name} » mislukt: {err}"
 
 #: urpm/cli/commands/system.py:182
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  server add failed for '{name}': {err}"
-msgstr "  Toevoegen van {name} mislukt: {err}"
+msgstr "  toevoegen van server « {name} » mislukt: {err}"
 
 #: urpm/cli/commands/system.py:196
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  media remove failed for '{name}': {err}"
-msgstr "  Toevoegen van {name} mislukt: {err}"
+msgstr "  verwijderen van medium « {name} » mislukt: {err}"
 
 #: urpm/cli/commands/system.py:217
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  media add failed for '{name}': {err}"
-msgstr "  Toevoegen van {name} mislukt: {err}"
+msgstr "  toevoegen van medium « {name} » mislukt: {err}"
 
 #: urpm/cli/commands/system.py:228
 #, python-brace-format
@@ -4236,30 +4275,32 @@ msgid ""
 "  media '{m}' expected server '{s}' but it is not present in this DB — link "
 "skipped"
 msgstr ""
+"  medium « {m} » verwacht server « {s} », die niet in deze database staat; "
+"koppeling overgeslagen"
 
 #: urpm/cli/commands/system.py:237
 #, python-brace-format
 msgid "  link '{s}' → '{m}' failed: {err}"
-msgstr ""
+msgstr "  koppeling « {s} » → « {m} » mislukt: {err}"
 
 #: urpm/cli/commands/system.py:253
 #, python-brace-format
 msgid "  official server↔media mesh: {n} link(s) added"
-msgstr ""
+msgstr "  officieel server↔medium-netwerk: {n} koppeling(en) toegevoegd"
 
 #: urpm/cli/commands/system.py:257
 #, python-brace-format
 msgid "  official mesh refresh failed: {err}"
-msgstr ""
+msgstr "  vernieuwen van het officiële netwerk mislukt: {err}"
 
 #: urpm/cli/commands/system.py:282 urpm/cli/commands/system.py:294
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  could not rewrite {path}: {err}"
-msgstr "    kon {name} niet verwijderen : {err}"
+msgstr "  kon {path} niet herschrijven: {err}"
 
 #: urpm/cli/commands/system.py:377
 msgid "Pre-flight gap detected"
-msgstr ""
+msgstr "Verschil vastgesteld bij de voorcontrole"
 
 #: urpm/cli/commands/system.py:380
 #, python-brace-format
@@ -4267,6 +4308,8 @@ msgid ""
 "  {n} package(s) in the profile are not in any enabled medium's pool (cannot"
 " be installed) :"
 msgstr ""
+"  {n} pakket(ten) uit het profiel zitten in geen enkele pool van een "
+"ingeschakeld medium (niet installeerbaar):"
 
 #: urpm/cli/commands/system.py:391
 #, python-brace-format
@@ -4274,40 +4317,41 @@ msgid ""
 "  {n} package(s) in the profile's remove-set are not currently installed "
 "(nothing to erase) :"
 msgstr ""
+"  {n} pakket(ten) uit de verwijderlijst van het profiel zijn niet "
+"geïnstalleerd (niets te wissen):"
 
 #: urpm/cli/commands/system.py:415
-#, fuzzy
 msgid "Delta summary"
-msgstr "Sorteersamenvatting:"
+msgstr "Samenvatting van de verschillen"
 
 #: urpm/cli/commands/system.py:420
 #, python-brace-format
 msgid "  Install : {ok}/{plan} applied"
-msgstr ""
+msgstr "  Installeren : {ok}/{plan} toegepast"
 
 #: urpm/cli/commands/system.py:424
 #, python-brace-format
 msgid "    - {n} not in pool (skipped) :"
-msgstr ""
+msgstr "    - {n} niet in de pool (overgeslagen):"
 
 #: urpm/cli/commands/system.py:434 urpm/cli/commands/system.py:477
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "    - transaction refused : {err}"
-msgstr "Post-transactierapport mislukt : {err}"
+msgstr "    - transactie geweigerd: {err}"
 
 #: urpm/cli/commands/system.py:441
 msgid "[--allow-incoherent : forced, no rescue]"
-msgstr ""
+msgstr "[--allow-incoherent: geforceerd, zonder vangnet]"
 
 #: urpm/cli/commands/system.py:443
 #, python-brace-format
 msgid "  Erase   : {ok}/{plan} applied"
-msgstr ""
+msgstr "  Verwijderen : {ok}/{plan} toegepast"
 
 #: urpm/cli/commands/system.py:447
 #, python-brace-format
 msgid "    - {n} not in rpmdb (skipped) :"
-msgstr ""
+msgstr "    - {n} niet in de rpmdb (overgeslagen):"
 
 #: urpm/cli/commands/system.py:458
 #, python-brace-format
@@ -4315,26 +4359,28 @@ msgid ""
 "    - {n} rescued from erase (source profile incoherent — kept-pkgs still "
 "need them) :"
 msgstr ""
+"    - {n} gered van verwijdering (bronprofiel inconsistent: behouden "
+"pakketten hebben ze nog nodig):"
 
 #: urpm/cli/commands/system.py:471
 #, python-brace-format
 msgid "    - {n} hardware-specific package(s) preserved :"
-msgstr ""
+msgstr "    - {n} hardwarespecifiek(e) pakket(ten) behouden:"
 
 #: urpm/cli/commands/system.py:652
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  failed to invoke urpm: {err}"
-msgstr "Initialiseren van rpmdb mislukt: {error}"
+msgstr "  aanroep van urpm mislukt: {err}"
 
 #: urpm/cli/commands/system.py:671
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Profile not found: {path}"
-msgstr "Bestand niet gevonden: {path}"
+msgstr "Profiel niet gevonden: {path}"
 
 #: urpm/cli/commands/system.py:688
 #, python-brace-format
 msgid "Backup of current state written to {path}"
-msgstr ""
+msgstr "Reservekopie van de huidige toestand geschreven naar {path}"
 
 #: urpm/cli/commands/system.py:694
 #, python-brace-format
@@ -4342,41 +4388,39 @@ msgid ""
 "Cannot write backup ({err}). Refusing to proceed. Re-run with --no-backup to"
 " override."
 msgstr ""
+"Kan de reservekopie niet schrijven ({err}). Gestopt. Voer opnieuw uit met "
+"--no-backup om dit te negeren."
 
 #: urpm/cli/commands/system.py:713
-#, fuzzy
 msgid "--dry-run : no changes applied."
-msgstr "(droogloop - geen wijzigingen aangebracht)"
+msgstr "--dry-run: geen wijzigingen toegepast."
 
 #: urpm/cli/commands/system.py:718
-#, fuzzy
 msgid "Apply this plan ? [y/N] "
-msgstr ""
-"\n"
-"Deze sleutel importeren? [j/N] "
+msgstr "Dit plan toepassen? [j/N] "
 
 #: urpm/cli/commands/system.py:729
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  {n} server(s) reconciled"
-msgstr "Geen servers geconfigureerd"
+msgstr "  {n} server(s) verrekend"
 
 #: urpm/cli/commands/system.py:733
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  {n} media reconciled"
-msgstr "Geen media geconfigureerd"
+msgstr "  {n} media verrekend"
 
 #: urpm/cli/commands/system.py:737
-#, fuzzy
 msgid "Syncing metadata for newly-added media..."
 msgstr ""
-"\n"
-"Metadata synchroniseren voor {n} ingeschakelde media..."
+"Metagegevens van de nieuw toegevoegde media worden gesynchroniseerd..."
 
 #: urpm/cli/commands/system.py:741
 #, python-brace-format
 msgid ""
 "  media sync returned {rc} — some packages may not resolve on install below"
 msgstr ""
+"  de mediasynchronisatie gaf {rc} terug; sommige pakketten worden bij de "
+"installatie hieronder mogelijk niet opgelost"
 
 #: urpm/cli/commands/system.py:765
 msgid ""
@@ -4384,10 +4428,14 @@ msgid ""
 "the pool nor in rpmdb.  Re-run with --force to skip the missing entries, or "
 "fix the profile / media list first."
 msgstr ""
+"Systeemimport geweigerd: het profiel verwijst naar pakketten die noch in de "
+"pool noch in de rpmdb zitten. Voer opnieuw uit met --force om de ontbrekende"
+" vermeldingen over te slaan, of corrigeer eerst het profiel of de "
+"medialijst."
 
 #: urpm/cli/commands/system.py:773
 msgid "Proceed anyway (skipping the missing entries) ? [y/N] "
-msgstr ""
+msgstr "Toch doorgaan (ontbrekende vermeldingen overslaan)? [j/N] "
 
 #: urpm/cli/commands/system.py:800
 #, python-brace-format
@@ -4396,16 +4444,19 @@ msgid ""
 "leave the target machine broken (kernel modules, drivers, guest tools, "
 "firmware)."
 msgstr ""
+"⚠ {n} hardwarespecifiek(e) pakket(ten) in de verwijderlijst; ze weghalen kan"
+" de doelmachine onbruikbaar maken (kernelmodules, stuurprogramma's, "
+"gasthulpmiddelen, firmware)."
 
 #: urpm/cli/commands/system.py:808
 #, python-brace-format
 msgid "Preserve these {n} hardware-specific package(s) ? [Y/n] "
-msgstr ""
+msgstr "Deze {n} hardwarespecifieke pakketten behouden? [Y/n] "
 
 #: urpm/cli/commands/system.py:832
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Installing {n} package(s)..."
-msgstr "Installeren van {count} pakket..."
+msgstr "{n} pakket(ten) worden geïnstalleerd..."
 
 #: urpm/cli/commands/system.py:838
 #, python-brace-format
@@ -4413,16 +4464,21 @@ msgid ""
 "install refused (exit {rc}) — dep conflict, insufficient space, or signature"
 " issue ; see the urpm output above."
 msgstr ""
+"installatie geweigerd (code {rc}): afhankelijkheidsconflict, te weinig "
+"ruimte of een handtekeningprobleem; zie de urpm-uitvoer hierboven."
 
 #: urpm/cli/commands/system.py:880
 msgid "  Waiting for background install to finish committing rpmdb..."
-msgstr ""
+msgstr "  Wachten tot de achtergrondinstallatie de rpmdb wegschrijft..."
 
 #: urpm/cli/commands/system.py:897
 msgid ""
 "⚠ --allow-incoherent : dep rescue skipped, erase will be forced through RPM "
 "pre-checks — the system will be left with unmet dependencies"
 msgstr ""
+"⚠ --allow-incoherent: het vangnet voor afhankelijkheden vervalt en het "
+"verwijderen forceert de RPM-voorcontroles; het systeem blijft achter met "
+"onvervulde afhankelijkheden"
 
 #: urpm/cli/commands/system.py:913
 #, python-brace-format
@@ -4430,16 +4486,19 @@ msgid ""
 "⚠ Source profile is incoherent : {n} package(s) kept from erase to satisfy "
 "runtime deps of retained pkgs"
 msgstr ""
+"⚠ Het bronprofiel is inconsistent: {n} pakket(ten) gespaard van verwijdering"
+" om de looptijdafhankelijkheden van behouden pakketten te vervullen"
 
 #: urpm/cli/commands/system.py:918
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "(required by {k} for {d})"
-msgstr "vereist door"
+msgstr "(vereist door {k} voor {d})"
 
 #: urpm/cli/commands/system.py:927
 #, python-brace-format
 msgid "Removing {n} package(s) no longer in target profile..."
 msgstr ""
+"{n} pakket(ten) worden verwijderd die niet meer in het doelprofiel staan..."
 
 #: urpm/cli/commands/system.py:947
 #, python-brace-format
@@ -4447,6 +4506,8 @@ msgid ""
 "erase refused (exit {rc}) — see urpm output above ; resolve manually then "
 "re-run."
 msgstr ""
+"verwijderen geweigerd (code {rc}): zie de urpm-uitvoer hierboven; los het "
+"handmatig op en voer opnieuw uit."
 
 #: urpm/cli/commands/query.py:58
 msgid "All installed packages are available in configured media"
@@ -6899,7 +6960,7 @@ msgstr "version-mode ingesteld op '{mode}'"
 #: urpm/cli/commands/config.py:132
 #, python-brace-format
 msgid "/etc/version branch set to '{branch}'"
-msgstr ""
+msgstr "tak in /etc/version ingesteld op « {branch} »"
 
 #: urpm/cli/commands/config.py:141
 #, python-brace-format
@@ -8068,9 +8129,8 @@ msgstr ""
 "voor niet-interactieve modus."
 
 #: urpm/cli/commands/cleanup.py:406
-#, fuzzy
 msgid "No orphaned packages found."
-msgstr " Geen verweesde pakketten gevonden"
+msgstr "Geen verweesde pakketten gevonden."
 
 #: urpm/cli/commands/cleanup.py:409
 #, python-brace-format
@@ -8270,39 +8330,42 @@ msgstr[1] " {count} bestandssystemen ontkoppeld"
 
 #: urpm/cli/commands/build.py:204
 msgid "history_scriptlet_output already migrated — nothing to do."
-msgstr ""
+msgstr "history_scriptlet_output al gemigreerd, niets te doen."
 
 #: urpm/cli/commands/build.py:215
 msgid "history_scriptlet_output is empty — dropping the legacy table."
-msgstr ""
+msgstr "history_scriptlet_output is leeg, de oude tabel wordt verwijderd."
 
 #: urpm/cli/commands/build.py:222
 #, python-brace-format
 msgid "Migrating {n} legacy scriptlet row(s) → history_scriptlets{suffix}..."
 msgstr ""
+"Bezig met migreren van {n} oude scriptlet-rij(en) → "
+"history_scriptlets{suffix}..."
 
 #: urpm/cli/commands/build.py:225
 msgid " (dry-run)"
-msgstr ""
+msgstr " (proefdraaien)"
 
 #: urpm/cli/commands/build.py:234
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "  … and {n} more"
-msgstr "    … en nog {n}"
+msgstr "  … en nog {n}"
 
 #: urpm/cli/commands/build.py:236
 msgid "dry-run : source table would be dropped after successful migration."
 msgstr ""
+"proefdraaien: de brontabel zou na een geslaagde migratie worden verwijderd."
 
 #: urpm/cli/commands/build.py:259
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Migration failed (rolled back): {error}"
-msgstr "Fout: downloaden van sleutel mislukt: {error}"
+msgstr "Migratie mislukt (teruggedraaid): {error}"
 
 #: urpm/cli/commands/build.py:263
 #, python-brace-format
 msgid "Migrated {n} row(s); legacy table dropped."
-msgstr ""
+msgstr "{n} rij(en) gemigreerd; oude tabel verwijderd."
 
 #: urpm/cli/commands/build.py:327
 #, python-brace-format
@@ -9305,7 +9368,7 @@ msgstr "Meerdere geïnstalleerde families leveren «{pkg}»:"
 
 #: urpm/cli/helpers/progress.py:408
 msgid "removing"
-msgstr ""
+msgstr "verwijderen"
 
 #: urpm/cli/helpers/progress.py:411
 msgid "Running triggers..."
@@ -9886,9 +9949,9 @@ msgstr ""
 "Totaal : {n} pakket(ten), download {dl}, geïnstalleerde omvang {inst}."
 
 #: urpm/core/resolver.py:843
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "probe solve failed: {err}"
-msgstr "Ongedaan maken mislukt: {error}"
+msgstr "peilingsoplossing mislukt: {err}"
 
 #: urpm/core/resolver.py:850
 #, python-brace-format
@@ -9898,6 +9961,10 @@ msgid ""
 "please attach `urpm distupgrade --to N --dry-run --verbose` output to the "
 "bug report)."
 msgstr ""
+"kandidaat {name}-{evr} uit {repo} installeert op zichzelf prima, maar de "
+"distupgrade-oplossing heeft hem geweigerd (waarschijnlijk een "
+"pakketprioriteit of een obsoletes-keten; voeg de uitvoer van `urpm "
+"distupgrade --to N --dry-run --verbose` bij het foutrapport)."
 
 #: urpm/core/resolver.py:969
 #, python-brace-format
