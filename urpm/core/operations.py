@@ -24,6 +24,7 @@ from typing import (
 from .database import PackageDatabase
 from .download import Downloader, DownloadItem
 from .install import InstallResult
+from .pseudo_media import LOCAL_RPMS
 from .resilient_install import (
     pre_verify_signatures, purge_failed_from_cache,
     find_dependents, retry_failed_downloads, _extract_name_from_path,
@@ -180,7 +181,7 @@ class PackageOperations:
             # PackageAction construction and by add_local_rpms via the
             # NEVRA→id secondary index for REINSTALL cases); we use it to
             # go straight to the LocalRPM metadata in O(1).
-            if media_name == '@LocalRPMs':
+            if media_name == LOCAL_RPMS:
                 pkg_info = None
                 if action.solvable_id is not None:
                     pkg_info = resolver._solvable_to_pkg.get(action.solvable_id)

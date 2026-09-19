@@ -43,16 +43,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from .pseudo_media import LOCAL_RPMS
+
 #: Actions that bring bytes in.  ``reinstall`` counts: the payload is
 #: fetched and unpacked like any other, even though the net footprint
 #: barely moves.
 _INCOMING = ("install", "upgrade", "reinstall")
-
-#: Repository name the resolver gives to packages named as a path on the
-#: command line (``urpm install ./foo.rpm``).  Set in
-#: :meth:`urpm.core.resolution.pool.SolvPool.add_local_rpms`; the literal
-#: lives in several modules and has no single home yet.
-_LOCAL_MEDIA = "@LocalRPMs"
 
 
 @dataclass(frozen=True)
@@ -111,7 +107,7 @@ def compute_sizes(actions: Iterable) -> TransactionSizes:
     incoming = [a for a in actions if getattr(a.action, "value", a.action) in _INCOMING]
     outgoing = [a for a in actions if getattr(a.action, "value", a.action) == "remove"]
     fetched = [a for a in incoming
-               if getattr(a, "media_name", "") != _LOCAL_MEDIA]
+               if getattr(a, "media_name", "") != LOCAL_RPMS]
 
     return TransactionSizes(
         download=sum((getattr(a, "filesize", 0) or getattr(a, "size", 0) or 0)

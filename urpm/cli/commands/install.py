@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, List, Optional
 logger = logging.getLogger(__name__)
 
 from ...i18n import _, ngettext, confirm_yes
+from ...core.pseudo_media import LOCAL_RPMS
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
@@ -549,7 +550,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                     arch=info['arch'],
                     nevra=info['nevra'],
                     size=info.get('filesize', 0) or 0,
-                    media_name='@LocalRPMs',
+                    media_name=LOCAL_RPMS,
                     reason=InstallReason.EXPLICIT,
                     solvable_id=resolver._localrpm_nevra_to_id.get(info['nevra']),
                 )

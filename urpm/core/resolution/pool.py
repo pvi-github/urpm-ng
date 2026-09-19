@@ -7,6 +7,8 @@ from typing import Any, Dict, List
 
 import solv
 
+from ..pseudo_media import INSTALLED, LOCAL_RPMS
+
 try:
     import rpm
     HAS_RPM = True
@@ -78,7 +80,7 @@ class PoolMixin:
             debug.log("ignore_installed=True: skipping rpmdb loading")
             self._installed_count = 0
         else:
-            installed = pool.add_repo("@System")
+            installed = pool.add_repo(INSTALLED)
             installed.appdata = {"type": "installed"}
             pool.installed = installed
 
@@ -278,7 +280,7 @@ class PoolMixin:
         if self.root:
             pool.set_rootdir(self.root)
 
-        installed = pool.add_repo("@System")
+        installed = pool.add_repo(INSTALLED)
         installed.appdata = {"type": "installed"}
         pool.installed = installed
 
@@ -597,7 +599,7 @@ class PoolMixin:
                 'nevra': f"{name}-{s.evr}.{arch}",
                 'size': size,
                 'filesize': size,
-                'media_name': '@System',
+                'media_name': INSTALLED,
             }
             count += 1
 
@@ -631,11 +633,11 @@ class PoolMixin:
         # Find existing @LocalRPMs repo or create new one
         local_repo = None
         for repo in self.pool.repos:
-            if repo.name == '@LocalRPMs':
+            if repo.name == LOCAL_RPMS:
                 local_repo = repo
                 break
         if local_repo is None:
-            local_repo = self.pool.add_repo("@LocalRPMs")
+            local_repo = self.pool.add_repo(LOCAL_RPMS)
             local_repo.appdata = {"type": "local"}
 
         for info in rpm_infos:
@@ -696,7 +698,7 @@ class PoolMixin:
                 'nevra': info['nevra'],
                 'size': info.get('size', 0),
                 'filesize': info.get('filesize', 0),
-                'media_name': '@LocalRPMs',
+                'media_name': LOCAL_RPMS,
                 'local_path': info['path'],  # Critical: path to the RPM file
             }
             # Secondary index by NEVRA — used by REINSTALL actions in the

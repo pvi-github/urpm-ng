@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from ...core.resolver import Resolver, Resolution
 
 from ...i18n import _
+from ...core.pseudo_media import INSTALLED, LOCAL_RPMS
 from .resolver import _group_by_version
 
 # Debug flag for preferences matching
@@ -70,7 +71,7 @@ class PreferencesMatcher:
             candidates = set()
             dep = pool.Dep(cap)
             for p in pool.whatprovides(dep):
-                if p.repo and p.repo.name != '@System':
+                if p.repo and p.repo.name != INSTALLED:
                     name_lower = p.name.lower()
                     if version is None:
                         candidates.add(name_lower)
@@ -130,7 +131,7 @@ class PreferencesMatcher:
                 # Try as glob pattern on package names
                 import fnmatch
                 for s in pool.solvables_iter():
-                    if s.repo and s.repo.name != '@System':
+                    if s.repo and s.repo.name != INSTALLED:
                         name_lower = s.name.lower()
                         # Match if pattern is substring or glob
                         if neg_pattern in name_lower or fnmatch.fnmatch(name_lower, f'*{neg_pattern}*'):
@@ -166,7 +167,7 @@ class PreferencesMatcher:
         for pkg_name in self.resolved_packages:
             sel = pool.select(pkg_name, solv.Selection.SELECTION_NAME)
             for s in sel.solvables():
-                if s.repo and s.repo.name != '@System':
+                if s.repo and s.repo.name != INSTALLED:
                     for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
                         cap = str(dep).split()[0]
                         if not cap.startswith(('rpmlib(', '/', 'lib')):
@@ -175,7 +176,7 @@ class PreferencesMatcher:
         # Find packages that require capabilities from resolved_packages
         # but exclude alternatives (packages that provide same caps without requiring them)
         for s in pool.solvables_iter():
-            if not s.repo or s.repo.name == '@System':
+            if not s.repo or s.repo.name == INSTALLED:
                 continue
             name_lower = s.name.lower()
             if name_lower in self.resolved_packages:
@@ -597,7 +598,7 @@ def _get_hard_dep_provides(packages: list, pool, alternative_caps: set) -> set:
     for pkg_name in packages:
         sel = pool.select(pkg_name, solv.Selection.SELECTION_NAME)
         for s in sel.solvables():
-            if s.repo and s.repo.name != '@System':
+            if s.repo and s.repo.name != INSTALLED:
                 for dep in lookup_all_requires(s):
                     req_cap = str(dep).split()[0]
                     if req_cap.startswith(('lib', 'rpmlib(', '/', 'config(')):
@@ -675,7 +676,7 @@ def _filter_by_existing_choices(providers: list, choices: dict,
     for prov_name in providers:
         sel = pool.select(prov_name, solv.Selection.SELECTION_NAME)
         for s in sel.solvables():
-            if s.repo and s.repo.name != '@System':
+            if s.repo and s.repo.name != INSTALLED:
                 for dep in lookup_all_requires(s):
                     req = str(dep).split()[0].lower()
                     if req.startswith(('lib', 'rpmlib(', '/', 'config(')):
@@ -793,7 +794,7 @@ def _sort_alternatives_by_cascade(alternatives: list, pool) -> None:
         for prov_name in alt.providers:
             sel = pool.select(prov_name, solv.Selection.SELECTION_NAME)
             for s in sel.solvables():
-                if s.repo and s.repo.name != '@System':
+                if s.repo and s.repo.name != INSTALLED:
                     for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
                         cap = str(dep).split()[0].lower()
                         if cap in other_caps:
@@ -856,7 +857,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
 
         sel = resolver.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
         for s in sel.solvables():
-            if s.repo and s.repo.name != '@System':
+            if s.repo and s.repo.name != INSTALLED:
                 # Propagate to provided capabilities
                 for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
                     prov_cap = str(dep).split()[0]
@@ -878,7 +879,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
                     # Find the provider for this require (excluding disfavored)
                     req_dep = resolver.pool.Dep(req_cap)
                     providers = [p for p in resolver.pool.whatprovides(req_dep)
-                                if p.repo and p.repo.name != '@System'
+                                if p.repo and p.repo.name != INSTALLED
                                 and p.name.lower() not in preferences.disfavored_packages]
                     if len(providers) == 1:
                         # Only one provider - auto-select it
@@ -902,7 +903,7 @@ def _resolve_with_alternatives(resolver, packages: list, choices: dict,
             # Create pool without solving to resolve preferences
             # Preserve pool only if it has @LocalRPMs repo (for local RPM installation)
             has_local_rpms = resolver.pool is not None and any(
-                r.name == '@LocalRPMs' for r in resolver.pool.repos
+                r.name == LOCAL_RPMS for r in resolver.pool.repos
             )
             if not has_local_rpms:
                 resolver.pool = resolver._create_pool()

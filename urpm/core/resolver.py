@@ -20,6 +20,7 @@ except ImportError:
     HAS_RPM = False
 
 from .database import PackageDatabase
+from .pseudo_media import INSTALLED, LOCAL_RPMS
 from .config import get_media_local_path, get_base_dir, get_system_version
 from .compression import decompress_stream
 from .resolution import PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin
@@ -1269,7 +1270,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         # Preserve pool if it has @LocalRPMs repo or if _preserve_pool is set
         # (used by depends command to avoid costly pool recreation in alternatives loop)
         has_local_rpms = self.pool is not None and any(
-            r.name == '@LocalRPMs' for r in self.pool.repos
+            r.name == LOCAL_RPMS for r in self.pool.repos
         )
         if not has_local_rpms and not (self._preserve_pool and self.pool is not None):
             self._solvable_to_pkg = {}
@@ -1300,7 +1301,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             cap_dep = self.pool.Dep(cap)
             if cap_dep:
                 for provider in self.pool.whatprovides(cap_dep):
-                    if provider.repo and provider.repo.name != '@System':
+                    if provider.repo and provider.repo.name != INSTALLED:
                         if provider.name != pkg_name:
                             # Don't disfavor if it's in favored_packages
                             if provider.name.lower() not in favored_packages_lower:
@@ -1312,7 +1313,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         for pkg_name in explicit_disfavor:
             sel = self.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
             for s in sel.solvables():
-                if s.repo and s.repo.name != '@System':
+                if s.repo and s.repo.name != INSTALLED:
                     for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
                         cap = str(dep).split()[0]
                         if not cap.startswith(('rpmlib(', '/', 'lib', 'pkgconfig(')):
@@ -1356,7 +1357,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 # 1. REQUIRE or PROVIDE all preference capabilities
                 # 2. Share capabilities with disfavored packages
                 for s in sel.solvables():
-                    if s.repo and s.repo.name != '@System':
+                    if s.repo and s.repo.name != INSTALLED:
                         if preference_patterns and pkg_matches_preferences(s, preference_patterns):
                             pkg_caps = set()
                             for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
@@ -1480,7 +1481,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 # For local packages, find directly in @LocalRPMs repo (pool.select doesn't work)
                 local_solvable = None
                 for repo in self.pool.repos:
-                    if repo.name == '@LocalRPMs':
+                    if repo.name == LOCAL_RPMS:
                         for s in repo.solvables:
                             if s.name == base_name:
                                 local_solvable = s
@@ -1743,7 +1744,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         for name in resolved_names:
             sel = self.pool.select(name, solv.Selection.SELECTION_NAME)
             for s in sel.solvables():
-                if s.repo and s.repo.name != '@System':
+                if s.repo and s.repo.name != INSTALLED:
                     # Get all provides of this package
                     for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
                         cap_str = str(dep).split()[0]  # Remove version constraints
@@ -1759,7 +1760,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         for name in resolved_names:
             sel = self.pool.select(name, solv.Selection.SELECTION_NAME)
             for s in sel.solvables():
-                if s.repo and s.repo.name != '@System':
+                if s.repo and s.repo.name != INSTALLED:
                     # Get requires
                     for dep in lookup_all_requires(s):
                         dep_str = str(dep)
@@ -1933,7 +1934,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
 
         # Preserve pool only if it has @LocalRPMs repo (for local RPM upgrade)
         has_local_rpms = self.pool is not None and any(
-            r.name == '@LocalRPMs' for r in self.pool.repos
+            r.name == LOCAL_RPMS for r in self.pool.repos
         )
         if not has_local_rpms:
             self._solvable_to_pkg = {}
@@ -1956,7 +1957,7 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 if name in local_packages:
                     local_solvable = None
                     for repo in self.pool.repos:
-                        if repo.name == '@LocalRPMs':
+                        if repo.name == LOCAL_RPMS:
                             for s in repo.solvables:
                                 if s.name == name:
                                     local_solvable = s

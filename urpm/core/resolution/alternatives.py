@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import solv
 
 from urpm.core.resolution.pool import lookup_all_requires
+from urpm.core.pseudo_media import INSTALLED
 
 
 class AlternativesMixin:
@@ -257,7 +258,7 @@ class AlternativesMixin:
                 return
 
             for s in sel.solvables():
-                if s.repo and s.repo.name != '@System':
+                if s.repo and s.repo.name != INSTALLED:
                     for dep in s.lookup_deparray(solv.SOLVABLE_REQUIRES):
                         dep_str = str(dep).split()[0]
                         if dep_str.startswith(('rpmlib(', '/', 'config(')):
@@ -276,7 +277,7 @@ class AlternativesMixin:
                         if not is_satisfied:
                             # Find first available provider
                             for p in providers:
-                                if p.repo and p.repo.name != '@System':
+                                if p.repo and p.repo.name != INSTALLED:
                                     if p.name.lower() not in missing:
                                         missing.add(p.name.lower())
                                         # Recurse into this dependency
@@ -541,7 +542,7 @@ class AlternativesMixin:
                     # Find packages that satisfy this suggest
                     providers = self.pool.whatprovides(dep)
                     if DEBUG_RESOLVER and pkg_name == 'phpmyadmin':
-                        prov_names = [p.name for p in providers if p.repo and p.repo.name != '@System']
+                        prov_names = [p.name for p in providers if p.repo and p.repo.name != INSTALLED]
                         if prov_names:
                             print(f"  {dep} -> providers: {prov_names[:5]}")
 

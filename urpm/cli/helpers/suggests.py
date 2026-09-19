@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Tuple
 import solv
 
 from ...core.resolution.pool import lookup_all_requires
+from ...core.pseudo_media import INSTALLED
 from ...core.resolver import (
     Alternative,
     InstallReason,
@@ -67,7 +68,7 @@ def _pick_first_non_system_solvable(resolver, pkg_name: str):
     """Return the first non-@System solvable providing ``pkg_name``, or None."""
     sel = resolver.pool.select(pkg_name, solv.Selection.SELECTION_NAME)
     for s in sel.solvables():
-        if s.repo and s.repo.name != '@System':
+        if s.repo and s.repo.name != INSTALLED:
             return s
     return None
 
@@ -93,7 +94,7 @@ def _walk_requires_for_next_check(resolver, suggest_action: PackageAction,
             continue
         dep_obj = resolver.pool.Dep(dep_str)
         for provider in resolver.pool.whatprovides(dep_obj):
-            if provider.repo and provider.repo.name != '@System':
+            if provider.repo and provider.repo.name != INSTALLED:
                 if provider.name.lower() not in checked_packages:
                     checked_packages.add(provider.name.lower())
                     discovered.append(provider.name)

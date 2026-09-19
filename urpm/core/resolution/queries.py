@@ -5,6 +5,8 @@ from typing import Dict, List
 
 import solv
 
+from ..pseudo_media import INSTALLED
+
 from urpm.core.resolution.pool import lookup_all_requires
 
 
@@ -35,7 +37,7 @@ class QueriesMixin:
         provider_names = set()
         for p in providers:
             if p.repo:
-                if include_installed or p.repo.name != '@System':
+                if include_installed or p.repo.name != INSTALLED:
                     provider_names.add(p.name)
 
         return sorted(provider_names)
@@ -172,7 +174,7 @@ class QueriesMixin:
             providers = self.pool.whatprovides(dep)
 
             for p in providers:
-                if p.repo and p.repo.name != '@System':
+                if p.repo and p.repo.name != INSTALLED:
                     if p.name not in providers_info:
                         providers_info[p.name] = self._get_versioned_requires(p)
 
@@ -197,7 +199,7 @@ class QueriesMixin:
             providers = self.pool.whatprovides(dep)
 
             for p in providers:
-                if p.repo and p.repo.name != '@System':
+                if p.repo and p.repo.name != INSTALLED:
                     versioned_reqs = providers_info.get(p.name, {})
 
                     # Get bloc key from versioned requires
