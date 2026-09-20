@@ -1305,11 +1305,11 @@ Examples:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=_('''Migrate the whole system from Mageia N to N+1.
 
-Fire-and-forget : lance, sors, reviens quelques minutes / dizaines de
-minutes plus tard.  Le système est passé ou s'est arrêté sur un point
-bloquant clair.
+Start it and walk away: come back a few minutes, or a few tens of
+minutes, later.  The system has either gone over or stopped on a clear
+obstacle.
 
-Voir doc/SPEC_DISTUPGRADE.md pour le contrat complet.
+See doc/SPEC_DISTUPGRADE.md for the full contract.
 '''),
         parents=[debug_parent],
     )
