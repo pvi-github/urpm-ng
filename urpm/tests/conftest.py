@@ -41,3 +41,24 @@ def _force_null_translations(monkeypatch):
     """
     from urpm import i18n
     monkeypatch.setattr(i18n, "_translation", gettext.NullTranslations())
+
+
+@pytest.fixture(autouse=True)
+def _force_c_locale_for_subprocesses(monkeypatch):
+    """Pin the locale a spawned process will speak.
+
+    :func:`_force_null_translations` only reaches code running in this
+    interpreter.  A test that shells out — to ``rpm``, to ``rpmbuild``,
+    or to ``urpm`` itself — hands the child whatever locale the
+    developer's session happens to use, and an assertion on the child's
+    output then passes in English and fails in French.
+
+    ``LC_ALL=C`` is enough on its own: GNU gettext stops consulting
+    ``LANGUAGE`` once the locale is C, which is the same reasoning
+    ``Container._locale_env`` relies on when it pins a container's
+    locale.
+
+    Tests that are *about* locale handling override this from their own
+    ``monkeypatch``, which runs after this fixture and therefore wins.
+    """
+    monkeypatch.setenv("LC_ALL", "C")
