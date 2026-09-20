@@ -106,8 +106,10 @@ class TestInstallArchNotAvailable:
         args = _make_args(arch='i686', packages=['lib64fuse2'], auto=True)
         rc = cmd_install(args, db)
         out = capsys.readouterr().out
-        # Must not print the legacy "no-op" message (English or French).
-        assert "Nothing to do" not in out and "Rien à faire" not in out, (
+        # Must not print the legacy "no-op" message.  ``conftest``
+        # neutralises the catalogues, so the English msgid is what
+        # reaches the capture whatever the machine's locale says.
+        assert "Nothing to do" not in out, (
             "install must NOT report a no-op when the package is missing for the arch"
         )
         assert rc == 1
@@ -134,6 +136,5 @@ class TestInstallArchNotAvailable:
         args = _make_args(arch='x86_64', packages=['lib64fuse2'], auto=True)
         rc = cmd_install(args, db)
         out = capsys.readouterr().out
-        # Locale-agnostic: any of the standard "no-op" messages.
-        assert ("Nothing to do" in out) or ("Rien à faire" in out)
+        assert "Nothing to do" in out
         assert rc == 0

@@ -118,7 +118,7 @@ class TestTheNetFigure:
             _action("remove", 900 * MB),
         ]), count=2)
         low = line.lower()
-        assert "freed" in low or "libér" in low
+        assert "freed" in low
         assert "890" in line
 
     def test_a_positive_net_reads_as_used(self):
@@ -127,7 +127,7 @@ class TestTheNetFigure:
             _action("remove", 100 * MB),
         ]), count=2)
         low = line.lower()
-        assert "used" in low or "occup" in low
+        assert "used" in low
         assert "200" in line
 
     def test_a_zero_net_says_so(self):
@@ -137,7 +137,7 @@ class TestTheNetFigure:
             _action("upgrade", 40 * MB, 12 * MB, from_size=40 * MB),
         ]), count=1)
         low = line.lower()
-        assert "no net change" in low or "inchang" in low
+        assert "no net change" in low
 
 
 class TestTheLine:
@@ -147,7 +147,7 @@ class TestTheLine:
             [_action("install", 100 * MB, 30 * MB)]), count=1)
         low = line.lower()
         assert "30" in line and "100" in line
-        assert "download" in low or "téléchargement" in low
+        assert "download" in low
 
     def test_stays_quiet_about_freed_when_nothing_is_removed(self):
         """« freed 0 B » on an ordinary install is noise, and noise is
@@ -166,8 +166,8 @@ class TestTheLine:
             _action("remove", 50 * MB),
         ]), count=2)
         low = line.lower()
-        assert "used" in low or "occup" in low
-        assert "freed" not in low and "libér" not in low
+        assert "used" in low
+        assert "freed" not in low
 
     def test_an_upgrade_does_not_claim_the_old_version_as_a_gain(self):
         """The reported case : firefox handed over as a local file,
@@ -179,7 +179,7 @@ class TestTheLine:
         ]), count=1)
         low = line.lower()
         assert "388" not in line
-        assert "used" in low or "occup" in low
+        assert "used" in low
 
 
 class TestTheReplacedVersionsAreFreedToo:

@@ -12,9 +12,11 @@ anyone who fat-fingered the key.  The prompt could not even advertise
 the right letter: printing « [J/n] » would have offered a key that
 meant no.
 
-These tests pin both readers against every shipped locale, and the
-asymmetry that matters: an empty line means the default, and the
-default of a protective prompt is to protect.
+Nothing here asserts on what a catalogue says.  The words are read
+*from* the catalogue and fed back through the readers, so the contract
+under test is « whatever this locale calls yes is accepted as yes »,
+which stays true when a translator reworks the wording.  Pinning « oui »
+would turn a translation review into a broken build.
 """
 
 from __future__ import annotations
@@ -29,15 +31,9 @@ from urpm.i18n import confirm_no, confirm_yes
 
 LOCALE_DIR = Path(__file__).resolve().parents[2] / "po" / "locale"
 
-#: The shipped locales, with their affirmative and negative words.
-ANSWERS = {
-    "fr": ("o", "oui", "n", "non"),
-    "de": ("j", "ja", "n", "nein"),
-    "es": ("s", "sí", "n", "no"),
-    "it": ("s", "sì", "n", "no"),
-    "nl": ("j", "ja", "n", "nee"),
-    "pt": ("s", "sim", "n", "não"),
-}
+#: Shipped locales.  The list is the deliverable — ``po/LINGUAS`` — not
+#: a property of any translation, so pinning it is safe.
+LANGUAGES = ("de", "es", "fr", "it", "nl", "pt")
 
 
 @pytest.fixture
@@ -45,8 +41,8 @@ def in_locale(monkeypatch):
     """Switch the process translation, undoing it afterwards.
 
     ``conftest`` installs a null translation for the whole suite so
-    assertions can be written against the English msgid.  These tests
-    are precisely about what the catalogues say, so they opt out.
+    assertions elsewhere can be written against the English msgid.
+    These tests are about the catalogues, so they opt out.
     """
     def _switch(lang: str):
         if not (LOCALE_DIR / lang).is_dir():
@@ -58,41 +54,52 @@ def in_locale(monkeypatch):
     return _switch
 
 
-@pytest.mark.parametrize("lang", sorted(ANSWERS))
+@pytest.mark.parametrize("lang", LANGUAGES)
 class TestEveryShippedLocale:
 
     def test_its_yes_is_read_as_yes(self, lang, in_locale):
         in_locale(lang)
-        letter, word, _n, _no = ANSWERS[lang]
-        assert confirm_yes(letter) is True
-        assert confirm_yes(word) is True
+        assert confirm_yes(i18n._("y")) is True
+        assert confirm_yes(i18n._("yes")) is True
 
     def test_its_no_is_read_as_no(self, lang, in_locale):
         in_locale(lang)
-        _y, _yes, letter, word = ANSWERS[lang]
-        assert confirm_no(letter) is True
-        assert confirm_no(word) is True
+        assert confirm_no(i18n._("n")) is True
+        assert confirm_no(i18n._("no")) is True
+
+    def test_its_yes_is_not_a_no(self, lang, in_locale):
+        in_locale(lang)
+        assert confirm_no(i18n._("y")) is False
+        assert confirm_no(i18n._("yes")) is False
+
+    def test_its_no_is_not_a_yes(self, lang, in_locale):
+        in_locale(lang)
+        assert confirm_yes(i18n._("n")) is False
+        assert confirm_yes(i18n._("no")) is False
+
+    def test_the_two_do_not_collide(self, lang, in_locale):
+        """A catalogue that gave yes and no the same word would make
+        every prompt in that locale unanswerable.  This is the one
+        translation mistake worth failing a build over, and it does not
+        depend on which words were chosen."""
+        in_locale(lang)
+        yes = {i18n._("y"), i18n._("yes")}
+        no = {i18n._("n"), i18n._("no")}
+        assert not (yes & no)
 
     def test_english_keeps_working(self, lang, in_locale):
-        """Operators who type « y » out of habit, and scripts that
-        were written before the locale existed."""
+        """Operators who type « y » out of habit, and scripts written
+        before the locale existed."""
         in_locale(lang)
         assert confirm_yes("y") is True
         assert confirm_yes("yes") is True
         assert confirm_no("n") is True
         assert confirm_no("no") is True
 
-    def test_a_yes_is_not_a_no(self, lang, in_locale):
-        in_locale(lang)
-        letter, word, _n, _no = ANSWERS[lang]
-        assert confirm_no(letter) is False
-        assert confirm_no(word) is False
-
     def test_surrounding_space_and_case_are_forgiven(self, lang, in_locale):
         in_locale(lang)
-        letter, _word, no_letter, _no = ANSWERS[lang]
-        assert confirm_yes(f"  {letter.upper()}  ") is True
-        assert confirm_no(f"  {no_letter.upper()}  ") is True
+        assert confirm_yes(f"  {i18n._('y').upper()}  ") is True
+        assert confirm_no(f"  {i18n._('n').upper()}  ") is True
 
 
 class TestTheAsymmetryThatMatters:
