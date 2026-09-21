@@ -39,6 +39,26 @@ APPSTREAM_PATH = "media_info/appstream.xml.lzma"
 MEDIA_FILE_MODE = 0o644
 MEDIA_DIR_MODE = 0o755
 
+#: The mode each artefact urpm-ng writes under ``media_info`` is meant
+#: to carry, checked and restored by :func:`enforce_media_info_modes`.
+#:
+#: This table is the contract, and it is deliberately a closed list
+#: rather than "everything in the directory": a file that is not named
+#: here is none of our business, so a future artefact that is meant to
+#: stay root-only can live in the same directory without this pass
+#: flattening it open.  Adding one here is the only edit needed to bring
+#: it under the check.
+#:
+#: The keys come from the path constants above so a filename is spelled
+#: once.
+MEDIA_INFO_MODES = {
+    SYNTHESIS_PATH.rsplit('/', 1)[-1]: MEDIA_FILE_MODE,
+    HDLIST_PATH.rsplit('/', 1)[-1]: MEDIA_FILE_MODE,
+    MD5SUM_PATH.rsplit('/', 1)[-1]: MEDIA_FILE_MODE,
+    FILES_XML_PATH.rsplit('/', 1)[-1]: MEDIA_FILE_MODE,
+    APPSTREAM_PATH.rsplit('/', 1)[-1]: MEDIA_FILE_MODE,
+}
+
 
 # Import from config
 from .config import get_base_dir, get_media_local_path, build_server_url, build_media_url, is_local_server
@@ -908,7 +928,81 @@ def sync_all_media(db: PackageDatabase,
             import logging
             logging.getLogger(__name__).warning(f"AppStream merge failed: {e}")
 
+    enforce_media_info_modes(db, urpm_root=urpm_root)
+
     return results
+
+
+def enforce_media_info_modes(db: PackageDatabase,
+                             urpm_root: str = None) -> int:
+    """Restore the published mode on the files listed in
+    :data:`MEDIA_INFO_MODES`, across every medium.
+
+    The download paths already chmod what they write, but that only
+    ever fixes a file they actually fetch.  A file is fetched when its
+    MD5 changes, so one left with the wrong mode by an older build —
+    ``shutil.move`` from a ``NamedTemporaryFile`` hands over 0600 —
+    keeps it until the mirror happens to republish it.  On
+    ``core/release`` that can be months, and for all that time a
+    non-privileged ``urpm f`` reads nothing and says so to nobody: the
+    caller checks ``exists()``, which succeeds, then the decompressor
+    fails and the match list comes back empty.
+
+    Every medium is visited, including the disabled ones: a medium
+    switched off today is a medium switched on tomorrow, and the check
+    costs one ``stat`` per named file.
+
+    ``file://`` media are skipped.  Their ``media_info`` is not a copy
+    we own but the medium itself, usually mounted or shared, and
+    changing modes there would be a change on the operator's own tree
+    rather than in our cache.
+
+    Args:
+        db: Database instance.
+        urpm_root: Alternate root, as passed to :func:`sync_all_media`.
+
+    Returns:
+        How many files were actually changed.  Zero is the normal
+        answer and callers are expected to stay quiet about it.
+    """
+    base_dir = get_base_dir(urpm_root=urpm_root) if urpm_root else get_base_dir()
+    fixed = 0
+    refused = 0
+
+    for media in db.list_media():
+        try:
+            servers = db.get_servers_for_media(media['id'])
+        except Exception:  # noqa: BLE001 — a media row without servers
+            servers = []
+        if any(is_local_server(s) for s in servers):
+            continue
+
+        media_info = get_media_local_path(media, base_dir) / "media_info"
+        for filename, mode in MEDIA_INFO_MODES.items():
+            path = media_info / filename
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                if (path.stat().st_mode & 0o777) == mode:
+                    continue
+                os.chmod(path, mode)
+                fixed += 1
+                logger.info("Restored %o on %s", mode, path)
+            except OSError as exc:
+                # A read-only chroot, a medium whose tree we do not own,
+                # or a run without the privileges to chmod.  The sync
+                # itself succeeded; this is a tidy-up and must not turn
+                # that into a failure.
+                refused += 1
+                logger.debug("Could not chmod %s: %s", path, exc)
+
+    if refused:
+        logger.warning(
+            "Could not restore the mode on %d media_info file(s); "
+            "a non-privileged `urpm f` may read nothing from them",
+            refused,
+        )
+    return fixed
 
 
 
