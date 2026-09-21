@@ -1,8 +1,9 @@
 """Auto-upgrade policy enforcement for third-party update mechanisms.
 
-When urpm-ng is the system package manager, other tools (gnome-software,
-KDE Discover, PackageKit offline updates, dnf-automatic) must not install
-updates behind the user's back.  This module provides:
+When urpm-ng is the system package manager, the update mechanisms a Mageia
+desktop enables on its own (gnome-software, KDE Discover, PackageKit offline
+updates) must not install updates behind the user's back.  This module
+provides:
 
 - Detection of which mechanisms are present on the system.
 - Per-mechanism enable/disable via GSettings overrides, KConfig overrides,
@@ -11,10 +12,11 @@ updates behind the user's back.  This module provides:
 - Individual ``set_*()`` functions for ``urpm config`` subcommands.
 
 Design rules:
-- ``dnf-automatic`` timers are **always** masked when urpm-ng is installed
-  (no user toggle — it's a direct conflict).
-- gnome-software, Discover, and packagekit-offline-update are user-toggleable
-  (default: disabled).
+- Every mechanism here is user-toggleable, and every one defaults to
+  disabled.
+- The scope is what the distribution turns on by itself.  An updater the
+  administrator installed deliberately is their business, and this module
+  leaves it alone.
 - Operations that target absent software are silently skipped.
 """
 
@@ -92,37 +94,6 @@ def _has_gnome_software() -> bool:
 def _has_discover() -> bool:
     """Check if KDE Discover is installed."""
     return Path("/usr/bin/plasma-discover").exists()
-
-
-# ── dnf-automatic (always killed) ─────────────────────────────────────
-
-
-def kill_dnf_automatic() -> None:
-    """Unconditionally mask and stop dnf-automatic timers.
-
-    dnf-automatic is a direct conflict with urpm-ng — there is no user
-    toggle, it is always disabled when urpm-ng is installed.
-    """
-    timers = [
-        "dnf-automatic.timer",
-        "dnf-automatic-install.timer",
-        "dnf-automatic-download.timer",
-        "dnf-automatic-notifyonly.timer",
-    ]
-    for timer in timers:
-        try:
-            if not _is_unit_present(timer):
-                continue
-            if _is_unit_active(timer):
-                _systemctl("stop", timer)
-                logger.info("Stopped %s", timer)
-            if _is_unit_enabled(timer):
-                _systemctl("disable", timer)
-                logger.info("Disabled %s", timer)
-            _systemctl("mask", timer)
-            logger.info("Masked %s", timer)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
 
 
 # ── gnome-software auto-upgrades ──────────────────────────────────────
@@ -349,17 +320,14 @@ def set_packagekit_auto_upgrades(enabled: bool) -> bool:
 def enforce_all() -> None:
     """Apply all default auto-upgrade policies.
 
-    Called from the RPM ``%post`` scriptlet at install time:
-    1. Kill dnf-automatic (always, unconditional).
-    2. Disable gnome-software auto-downloads (if present).
-    3. Disable Discover auto-updates (if present).
-    4. Disable packagekit-offline-update (if present).
+    Called from the RPM ``%post`` scriptlet at install time, it turns each
+    present mechanism off: gnome-software auto-downloads, Discover
+    auto-updates, packagekit-offline-update.  Each of them can be turned
+    back on afterwards through ``urpm config``.
 
     Writes settings, ends no session.  Every front-end reads the
     overrides the next time it starts.
     """
-    kill_dnf_automatic()
-
     if _has_gnome_software():
         set_gnome_auto_upgrades(False)
     if _has_discover():
