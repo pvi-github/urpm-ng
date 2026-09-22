@@ -712,6 +712,54 @@ def cmd_whatprovides(args, db: 'PackageDatabase') -> int:
     return 0
 
 
+def _report_unsearched_media(unsearched: list, enabled_count: int) -> None:
+    """Name the enabled media whose file index could not be read.
+
+    ``urpm f`` answers from the ``files.xml.lzma`` files already on
+    disk, and never downloads: a medium whose index is missing is
+    simply not looked at.  Left silent, that turns into "no package
+    contains X" when the accurate answer is "not in the media I was
+    able to open", and the two lead the operator to opposite
+    conclusions.
+
+    So the report is unconditional and never truncated.  It is not
+    reserved for the empty-result case: a partial result is precisely
+    where a silent gap misleads, since the matches on screen make the
+    search look complete.
+
+    :param unsearched: ``(media_name, reason)`` pairs, in media order.
+        Empty when every enabled medium was searched, in which case
+        nothing is printed.
+    :param enabled_count: how many enabled media were considered, so
+        the report can distinguish *some* of them from *all* of them.
+    """
+    from .. import colors
+
+    if not enabled_count:
+        print(colors.warning(_("No media are enabled.")))
+        return
+    if not unsearched:
+        return
+
+    if len(unsearched) == enabled_count:
+        print("\n" + colors.warning(_(
+            "None of the {total} enabled media has a file index on disk."
+        ).format(total=enabled_count)))
+    else:
+        print("\n" + colors.warning(ngettext(
+            "{count} medium of {total} could not be searched:",
+            "{count} media of {total} could not be searched:",
+            len(unsearched),
+        ).format(count=len(unsearched), total=enabled_count)))
+        width = max(len(name) for name, _reason in unsearched)
+        for name, reason in unsearched:
+            print(f"  {colors.cyan(name.ljust(width))}  {colors.dim(reason)}")
+
+    print(colors.dim(_(
+        "Run 'urpm media update' to fetch the missing file indexes."
+    )))
+
+
 def cmd_find(args, db: 'PackageDatabase') -> int:
     """Handle find command - find packages containing a file (like urpmf)."""
     from .. import colors
@@ -733,6 +781,12 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
 
     installed_found = []
     available_found = []
+
+    # Filled by the available-media scan below: how many enabled media
+    # were considered, and which ones had to be left out.  Reported to
+    # the operator at every exit of this command.
+    enabled_count = 0
+    unsearched = []
 
     # Search in installed packages via rpm.  Three regimes, each with
     # the cheapest available path:
@@ -819,60 +873,57 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
     # already on disk after a regular ``urpm media update``.
     if search_available or search_both:
         from ...core.config import get_base_dir, get_media_local_path
-        from ...core.files_xml import iter_file_matches
+        from ...core.files_xml import FILES_XML_STUB_SIZE, iter_file_matches
         from ...core.sync import FILES_XML_PATH
+
+        import os
 
         base_dir = get_base_dir()
         media_files = []
-        missing_count = 0
         for media in db.list_media():
             if not media.get('enabled', True):
                 continue
+            enabled_count += 1
             files_xml = get_media_local_path(media, base_dir) / FILES_XML_PATH
-            # genhdlist2 produces ~65-byte stub files.xml.lzma for empty
-            # media (typically the updates tree of an unreleased distro);
-            # treat them as absent rather than parsing the empty payload
-            # on every query.
-            if files_xml.exists() and files_xml.stat().st_size > 200:
-                media_files.append((files_xml, media['name']))
-            else:
-                missing_count += 1
+            # Open rather than stat: that is exactly what the search is
+            # about to do, so a medium classified as searchable here is
+            # one ``iter_file_matches`` can really read.  A stat alone
+            # would call a root-only 0600 index present and usable.
+            try:
+                with open(files_xml, 'rb') as fh:
+                    size = os.fstat(fh.fileno()).st_size
+            except FileNotFoundError:
+                unsearched.append((media['name'], _("file index not downloaded")))
+                continue
+            except OSError as exc:
+                unsearched.append((media['name'], _(
+                    "file index unreadable ({reason})"
+                ).format(reason=exc.strerror)))
+                continue
 
-        if not media_files:
-            if search_available:
-                print(colors.warning(_(
-                    "No files.xml.lzma available on disk. "
-                    "Run 'sudo urpm media update' first."
-                )))
-                return 1
-            # else: searching both — silently skip the available side
-        else:
-            matches = iter_file_matches(
+            if size <= FILES_XML_STUB_SIZE:
+                unsearched.append((media['name'], _("medium carries no files")))
+            else:
+                media_files.append((files_xml, media['name']))
+
+        if media_files:
+            for m in iter_file_matches(
                 media_files,
                 pattern,
                 all_versions=getattr(args, 'all_versions', False),
                 limit=args.limit if getattr(args, 'limit', 0) > 0 else 0,
-            )
-            for m in matches:
+            ):
                 available_found.append({
                     'nevra': m.nevra,
                     'file': m.path,
                     'media': m.media_name,
                 })
 
-            # If the user explicitly asked for the available side and got
-            # nothing while some media lack their files.xml.lzma, hint
-            # that the missing data may explain the empty result.  We
-            # stay quiet otherwise: empty stubs are normal during RCs.
-            if (search_available and not matches and missing_count):
-                print(colors.dim(_(
-                    "Note: {count} enabled media have no files.xml.lzma "
-                    "on disk (run 'urpm media update' to fetch)."
-                ).format(count=missing_count)))
-
     # Display results
     if not installed_found and not available_found:
         print(_("No package contains '{pattern}'").format(pattern=pattern))
+        if search_available or search_both:
+            _report_unsearched_media(unsearched, enabled_count)
         return 1
 
     # Helper to highlight pattern in file path (green)
@@ -957,6 +1008,9 @@ def cmd_find(args, db: 'PackageDatabase') -> int:
     # Summary if some files were hidden
     if total_hidden > 0:
         print("\n" + colors.dim(_("{count} files hidden (use --show-all to see all)").format(count=total_hidden)))
+
+    if search_available or search_both:
+        _report_unsearched_media(unsearched, enabled_count)
 
     return 0
 

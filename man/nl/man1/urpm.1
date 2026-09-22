@@ -322,6 +322,10 @@ Standaard wordt gezocht in zowel geïnstalleerde als beschikbare pakketten.
 Zoeken in beschikbare pakketten vereist het inschakelen van files.xml-synchronisatie via
 \fBurpm media set \-\-all \-\-sync-files\fR gevolgd door
 \fBurpm media update \-\-files\fR.
+.PP
+Ingeschakelde media waarvan de bestandsindex ontbreekt, onleesbaar of
+leeg is, worden na de resultaten met de reden vermeld: een leeg
+antwoord wordt zo niet aangezien voor een volledige zoekopdracht.
 .RE
 .TP
 .B depends \fIpakket\fR

@@ -396,6 +396,10 @@ quelli disponibili. La ricerca tra i pacchetti disponibili richiede di
 abilitare la sincronizzazione di files.xml tramite
 \fBurpm media set \-\-all \-\-sync-files\fR seguito da
 \fBurpm media update \-\-files\fR.
+.PP
+I media abilitati il cui indice dei file è assente, illeggibile o vuoto
+vengono elencati dopo i risultati, con il motivo: una risposta vuota
+non viene così scambiata per una ricerca estesa a tutti i media.
 .RE
 .TP
 .B depends \fIpacchetto\fR

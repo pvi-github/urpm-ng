@@ -319,6 +319,10 @@ Standardmäßig wird in installierten und verfügbaren Paketen gesucht.
 Die Suche in verfügbaren Paketen erfordert die Aktivierung der files.xml-Synchronisation über
 \fBurpm media set \-\-all \-\-sync-files\fR gefolgt von
 \fBurpm media update \-\-files\fR.
+.PP
+Aktivierte Medien, deren Dateiindex fehlt, nicht lesbar oder leer ist,
+werden nach den Ergebnissen mit dem jeweiligen Grund aufgeführt: ein
+leeres Ergebnis wird so nicht für eine vollständige Suche gehalten.
 .RE
 .TP
 .B depends \fIPaket\fR

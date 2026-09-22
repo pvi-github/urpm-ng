@@ -319,6 +319,10 @@ Por omissão, pesquisa nos pacotes instalados e disponíveis.
 A pesquisa nos pacotes disponíveis requer a activação da sincronização de files.xml via
 \fBurpm media set \-\-all \-\-sync-files\fR seguido de
 \fBurpm media update \-\-files\fR.
+.PP
+Os meios ativados cujo índice de arquivos está ausente, ilegível ou
+vazio são listados após os resultados, com o motivo: uma resposta
+vazia não é assim confundida com uma pesquisa em todos os meios.
 .RE
 .TP
 .B depends \fIpacote\fR

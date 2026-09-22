@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.9.12\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-09-21 23:46+0200\n"
+"POT-Creation-Date: 2026-09-22 23:31+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -4115,7 +4115,7 @@ msgstr ""
 msgid "No package provides '{capability}'"
 msgstr ""
 
-#: urpm/cli/commands/query.py:693 urpm/cli/commands/query.py:937
+#: urpm/cli/commands/query.py:693 urpm/cli/commands/query.py:988
 msgid "Installed:"
 msgstr ""
 
@@ -4123,33 +4123,54 @@ msgstr ""
 msgid "Available:"
 msgstr ""
 
-#: urpm/cli/commands/query.py:844
-msgid ""
-"No files.xml.lzma available on disk. Run 'sudo urpm media update' first."
+#: urpm/cli/commands/query.py:739
+msgid "No media are enabled."
 msgstr ""
 
-#: urpm/cli/commands/query.py:869
+#: urpm/cli/commands/query.py:746
 #, python-brace-format
-msgid ""
-"Note: {count} enabled media have no files.xml.lzma on disk (run 'urpm media "
-"update' to fetch)."
+msgid "None of the {total} enabled media has a file index on disk."
 msgstr ""
 
-#: urpm/cli/commands/query.py:875
+#: urpm/cli/commands/query.py:750
+#, python-brace-format
+msgid "{count} medium of {total} could not be searched:"
+msgid_plural "{count} media of {total} could not be searched:"
+msgstr[0] ""
+msgstr[1] ""
+
+#: urpm/cli/commands/query.py:759
+msgid "Run 'urpm media update' to fetch the missing file indexes."
+msgstr ""
+
+#: urpm/cli/commands/query.py:896
+msgid "file index not downloaded"
+msgstr ""
+
+#: urpm/cli/commands/query.py:900
+#, python-brace-format
+msgid "file index unreadable ({reason})"
+msgstr ""
+
+#: urpm/cli/commands/query.py:905
+msgid "medium carries no files"
+msgstr ""
+
+#: urpm/cli/commands/query.py:924
 #, python-brace-format
 msgid "No package contains '{pattern}'"
 msgstr ""
 
-#: urpm/cli/commands/query.py:928
+#: urpm/cli/commands/query.py:979
 #, python-brace-format
 msgid "({count} more)"
 msgstr ""
 
-#: urpm/cli/commands/query.py:951
+#: urpm/cli/commands/query.py:1002
 msgid "Available (not installed):"
 msgstr ""
 
-#: urpm/cli/commands/query.py:959
+#: urpm/cli/commands/query.py:1010
 #, python-brace-format
 msgid "{count} files hidden (use --show-all to see all)"
 msgstr ""

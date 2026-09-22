@@ -320,6 +320,10 @@ Por defecto, busca en paquetes instalados y disponibles.
 La búsqueda en paquetes disponibles requiere activar la sincronización de files.xml mediante
 \fBurpm media set \-\-all \-\-sync-files\fR seguido de
 \fBurpm media update \-\-files\fR.
+.PP
+Los medios activados cuyo índice de archivos falta, es ilegible o está
+vacío se enumeran tras los resultados, con el motivo: así una respuesta
+vacía no se confunde con una búsqueda que cubrió todos los medios.
 .RE
 .TP
 .B depends \fIpaquete\fR

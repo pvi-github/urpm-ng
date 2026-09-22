@@ -387,6 +387,10 @@ By default, searches both installed and available packages.
 Available package search requires enabling files.xml sync via
 \fBurpm media set \-\-all \-\-sync-files\fR followed by
 \fBurpm media update \-\-files\fR.
+.PP
+Enabled media whose file index is absent, unreadable or empty are
+listed after the results, with the reason: an empty answer is then
+never mistaken for a search that covered every medium.
 .RE
 .TP
 .B depends \fIpackage\fR

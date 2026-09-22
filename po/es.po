@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.4.1\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-09-21 23:46+0200\n"
+"POT-Creation-Date: 2026-09-22 23:31+0200\n"
 "PO-Revision-Date: 2026-02-28 16:49+0100\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -4746,7 +4746,7 @@ msgstr "El paquete {name} provee ({count}):"
 msgid "No package provides '{capability}'"
 msgstr "Ningún paquete provee '{capability}'"
 
-#: urpm/cli/commands/query.py:693 urpm/cli/commands/query.py:937
+#: urpm/cli/commands/query.py:693 urpm/cli/commands/query.py:988
 msgid "Installed:"
 msgstr "Instalado:"
 
@@ -4754,37 +4754,56 @@ msgstr "Instalado:"
 msgid "Available:"
 msgstr "Disponible:"
 
-#: urpm/cli/commands/query.py:844
-msgid ""
-"No files.xml.lzma available on disk. Run 'sudo urpm media update' first."
-msgstr ""
-"No hay files.xml.lzma disponible en disco. Ejecuta primero 'sudo urpm media "
-"update'."
+#: urpm/cli/commands/query.py:739
+msgid "No media are enabled."
+msgstr "No hay ningún medio activado."
 
-#: urpm/cli/commands/query.py:869
+#: urpm/cli/commands/query.py:746
 #, python-brace-format
-msgid ""
-"Note: {count} enabled media have no files.xml.lzma on disk (run 'urpm media "
-"update' to fetch)."
+msgid "None of the {total} enabled media has a file index on disk."
 msgstr ""
-"Nota: {count} medios activados no tienen files.xml.lzma en disco (ejecuta "
-"'urpm media update' para obtenerlo)."
+"Ninguno de los {total} medios activados tiene un índice de archivos en "
+"disco."
 
-#: urpm/cli/commands/query.py:875
+#: urpm/cli/commands/query.py:750
+#, python-brace-format
+msgid "{count} medium of {total} could not be searched:"
+msgid_plural "{count} media of {total} could not be searched:"
+msgstr[0] "{count} medio de {total} no se ha podido explorar:"
+msgstr[1] "{count} medios de {total} no se han podido explorar:"
+
+#: urpm/cli/commands/query.py:759
+msgid "Run 'urpm media update' to fetch the missing file indexes."
+msgstr "Ejecuta 'urpm media update' para obtener los índices que faltan."
+
+#: urpm/cli/commands/query.py:896
+msgid "file index not downloaded"
+msgstr "índice de archivos no descargado"
+
+#: urpm/cli/commands/query.py:900
+#, python-brace-format
+msgid "file index unreadable ({reason})"
+msgstr "índice de archivos ilegible ({reason})"
+
+#: urpm/cli/commands/query.py:905
+msgid "medium carries no files"
+msgstr "el medio no contiene ningún archivo"
+
+#: urpm/cli/commands/query.py:924
 #, python-brace-format
 msgid "No package contains '{pattern}'"
 msgstr "Ningún paquete contiene '{pattern}'"
 
-#: urpm/cli/commands/query.py:928
+#: urpm/cli/commands/query.py:979
 #, python-brace-format
 msgid "({count} more)"
 msgstr "({count} más)"
 
-#: urpm/cli/commands/query.py:951
+#: urpm/cli/commands/query.py:1002
 msgid "Available (not installed):"
 msgstr "Disponible (no instalado):"
 
-#: urpm/cli/commands/query.py:959
+#: urpm/cli/commands/query.py:1010
 #, python-brace-format
 msgid "{count} files hidden (use --show-all to see all)"
 msgstr "{count} archivos ocultos (usa --show-all para ver todos)"
@@ -10431,6 +10450,20 @@ msgstr "Ejecuta: {cmd}"
 #: urpm/auth/privileges.py:113
 msgid "Try one of:"
 msgstr "Prueba con uno de:"
+
+#~ msgid ""
+#~ "No files.xml.lzma available on disk. Run 'sudo urpm media update' first."
+#~ msgstr ""
+#~ "No hay files.xml.lzma disponible en disco. Ejecuta primero 'sudo urpm media "
+#~ "update'."
+
+#, python-brace-format
+#~ msgid ""
+#~ "Note: {count} enabled media have no files.xml.lzma on disk (run 'urpm media "
+#~ "update' to fetch)."
+#~ msgstr ""
+#~ "Nota: {count} medios activados no tienen files.xml.lzma en disco (ejecuta "
+#~ "'urpm media update' para obtenerlo)."
 
 #, python-brace-format
 #~ msgid ""

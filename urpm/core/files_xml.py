@@ -33,6 +33,14 @@ from xml.etree.ElementTree import iterparse
 
 logger = logging.getLogger(__name__)
 
+#: A ``files.xml.lzma`` at or below this size carries no file list.
+#: genhdlist2 emits a ~65-byte well-formed stub for a medium with no
+#: package, typically the updates tree of a distribution not yet
+#: released.  Callers use it to tell "this medium has nothing to
+#: search" from "this medium was never synced", which are the same
+#: absence of results but very different things to tell the operator.
+FILES_XML_STUB_SIZE = 200
+
 
 @dataclass(frozen=True)
 class FileMatch:

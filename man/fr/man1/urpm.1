@@ -389,6 +389,11 @@ Par défaut, recherche dans les paquets installés et disponibles.
 La recherche dans les paquets disponibles nécessite d'activer la sync files.xml via
 \fBurpm media set \-\-all \-\-sync-files\fR puis
 \fBurpm media update \-\-files\fR.
+.PP
+Les médias activés dont l'index de fichiers est absent, illisible ou
+vide sont listés après les résultats, avec le motif : une réponse
+vide ne peut ainsi pas être prise pour une recherche ayant couvert
+tous les médias.
 .RE
 .TP
 .B depends \fIpaquet\fR

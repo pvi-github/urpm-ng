@@ -1134,7 +1134,7 @@ class PackageOperations:
             ``files.xml.lzma`` on disk yet.
         """
         from .config import get_base_dir, get_media_local_path
-        from .files_xml import iter_file_matches
+        from .files_xml import FILES_XML_STUB_SIZE, iter_file_matches
         from .sync import FILES_XML_PATH
 
         base_dir = get_base_dir()
@@ -1143,7 +1143,8 @@ class PackageOperations:
             if not media.get('enabled', True):
                 continue
             files_xml = get_media_local_path(media, base_dir) / FILES_XML_PATH
-            if files_xml.exists() and files_xml.stat().st_size > 200:
+            if (files_xml.exists()
+                    and files_xml.stat().st_size > FILES_XML_STUB_SIZE):
                 media_files.append((files_xml, media['name']))
 
         if not media_files:
@@ -1189,7 +1190,7 @@ class PackageOperations:
         """
         import subprocess
         from .config import get_base_dir, get_media_local_path
-        from .files_xml import parse_files_xml
+        from .files_xml import FILES_XML_STUB_SIZE, parse_files_xml
         from .sync import FILES_XML_PATH
 
         # rpmdb path: ``rpm -ql <name>`` is the fast, authoritative
@@ -1227,7 +1228,8 @@ class PackageOperations:
             if not media.get('enabled', True):
                 continue
             files_xml = get_media_local_path(media, base_dir) / FILES_XML_PATH
-            if not files_xml.exists() or files_xml.stat().st_size <= 200:
+            if (not files_xml.exists()
+                    or files_xml.stat().st_size <= FILES_XML_STUB_SIZE):
                 continue
 
             try:
