@@ -1348,6 +1348,51 @@ def cmd_media_update(args, db: 'PackageDatabase') -> int:
         sync_lock.release()
 
 
+def _finish_media_tail(db, results, skip_appstream, args) -> None:
+    """Get the deferred half done, by whoever can.
+
+    ``urpmd`` first: it is already running, it is off the operator's
+    clock, and the endpoint answers as soon as it has queued the work.
+    If nothing answers — not installed, not started, stopped on purpose
+    — we do it here rather than leave the file index rotting, because
+    the fetch is conditional on its own MD5 and nobody else will come
+    back for it.  ``urpm f`` reading a stale index does not fail, it
+    answers « nothing found », which is worse.
+
+    Only the media that were actually re-synced are listed: one whose
+    synthesis did not move has a file index that did not move either.
+    """
+    from .. import colors
+    from ...core.operations import PackageOperations
+    from ...core.sync import sync_media_tail
+
+    names = [name for name, result in results
+             if result.success and not result.skipped]
+    if not names:
+        return
+
+    by_name = {m['name']: m['id'] for m in db.list_media()}
+    media_ids = [by_name[n] for n in names if n in by_name]
+    if not media_ids:
+        return
+
+    if PackageOperations.notify_urpmd_media_tail(media_ids):
+        print(colors.dim("  " + _(
+            "File index and application catalogue refreshing in the "
+            "background.")))
+        return
+
+    print(colors.dim("  " + _("Refreshing the file index...")))
+    base_dir = None
+    urpm_root = getattr(args, 'urpm_root', None)
+    if urpm_root:
+        from ...core.config import get_base_dir
+        base_dir = get_base_dir(urpm_root=urpm_root)
+    for media_id in media_ids:
+        sync_media_tail(db, media_id, base_dir=base_dir,
+                        skip_appstream=skip_appstream)
+
+
 def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
     """Execute media update (called with sync lock held)."""
     from .. import colors
@@ -1431,11 +1476,22 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
 
                 num_lines = len(media_list)
 
+        # The file index and the AppStream catalogue built from it are
+        # nine tenths of the bytes a refresh moves and nothing a
+        # resolution reads, so they do not belong on the critical path
+        # of a bare ``urpm media update`` — which three times out of
+        # four is the prelude to an install.  Naming a medium is a
+        # targeted intent and stays fully synchronous; so does a chroot
+        # run, where returning before the tree is complete would make a
+        # container build non-deterministic.
+        defer_tail = not getattr(args, 'allow_no_root', False)
+
         sync_start = time.time()
         results = sync_all_media(db, parallel_progress,
                                  force=getattr(args, 'force', False),
                                  urpm_root=getattr(args, 'urpm_root', None),
-                                 skip_appstream=skip_appstream)
+                                 skip_appstream=skip_appstream,
+                                 defer_tail=defer_tail)
         sync_elapsed = time.time() - sync_start
 
         # Clear progress lines
@@ -1476,6 +1532,9 @@ def _do_media_update(args, db: 'PackageDatabase', sync_lock) -> int:
             print("  " + colors.info(name) + ": " + count_str + " "
                   + ngettext("package", "packages", count) + host_suffix)
             total_packages += count
+
+        if defer_tail:
+            _finish_media_tail(db, results, skip_appstream, args)
 
         # Summary: only show the package total when something was
         # actually re-parsed.  Pure-skip runs get the compact form.

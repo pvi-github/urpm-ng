@@ -374,6 +374,120 @@ def head_synthesis(synthesis_url: str, server: dict = None,
         return None
 
 
+def sync_media_tail(db: PackageDatabase, media_id: int,
+                    base_dir: Path = None,
+                    skip_appstream: bool = False) -> bool:
+    """Refresh what ``install`` and ``upgrade`` never read.
+
+    A media sync splits cleanly in two.  The head — synthesis, parse,
+    import — is what a resolution needs, and weighs a few megabytes.
+    The tail is ``files.xml.lzma`` and the AppStream catalogue built
+    from it: nine tenths of the bytes, read only later by ``urpm f``,
+    ``urpm show --files`` and the distupgrade file-provides injection.
+
+    Putting that tail behind its own entry point is what lets a manual
+    ``urpm media update`` hand the terminal back after the head.  It
+    cannot simply be "the same sync, run again later": ``sync_media``
+    returns early once the freshness check reports nothing changed, and
+    the tail sits past that return, so a re-run right after a sync
+    would skip every medium and the tail would never happen at all.
+
+    Standing on its own costs one ``MD5SUM`` per medium — 576 bytes —
+    re-fetched rather than handed over from the sync that preceded it.
+    That is cheaper than carrying state between two processes, and it
+    keeps the function callable from anywhere: the CLI when no daemon
+    answers, ``urpmd`` when one does.
+
+    The freshness condition is the file's own: ``files.xml.lzma`` is
+    fetched when ``media.files_xml_md5`` differs from what ``MD5SUM``
+    advertises, whatever the synthesis did.  AppStream then keys on the
+    file's ``(mtime, size)``, so it follows by itself.
+
+    Args:
+        db: Database instance.
+        media_id: Which medium to complete.
+        base_dir: Base urpm directory; auto-detected when ``None``.
+        skip_appstream: Fetch the file index but leave the AppStream
+            catalogue alone.
+
+    Returns:
+        True when the medium was processed, False when no server could
+        be reached.  Never raises: it runs after a sync that already
+        succeeded, and a stale file index must not turn that into a
+        failure.
+    """
+    if base_dir is None:
+        base_dir = get_base_dir()
+
+    media = db.get_media_by_id(media_id)
+    if not media:
+        return False
+    media_name = media['name']
+
+    linked_servers = db.get_servers_for_media(media_id, enabled_only=True)
+    if linked_servers:
+        candidates = [(s, build_media_url(s, media)) for s in linked_servers]
+    elif media.get('url'):
+        candidates = [(None, media['url'])]
+    else:
+        return False
+
+    cache_media_info = get_media_local_path(media, base_dir) / "media_info"
+
+    # MD5SUM first: it carries the condition for everything below.  Try
+    # the candidates in the order the pool ranked them, exactly as the
+    # synthesis fetch does, so a dead mirror does not strand the tail.
+    md5sums = {}
+    server = None
+    media_url = None
+    for candidate, candidate_url in candidates:
+        url = (build_md5sum_url_v8(candidate, media) if candidate
+               else build_md5sum_url(candidate_url))
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            result = (download_from_server(url, tmp_path, candidate)
+                      if candidate else download_file(url, tmp_path))
+            if not result.success:
+                continue
+            md5sums = parse_md5sum_file(tmp_path.read_text())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("MD5SUM unreadable for %s: %s", media_name, exc)
+            continue
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        server, media_url = candidate, candidate_url
+        break
+
+    if media_url is None:
+        logger.warning("No mirror answered for the file index of %s",
+                       media_name)
+        return False
+
+    try:
+        _fetch_files_xml_if_changed(
+            db, media_id, media, server, media_url,
+            cache_media_info, md5sums,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("files.xml.lzma refresh failed for %s: %s",
+                       media_name, exc)
+
+    if not skip_appstream:
+        try:
+            from .appstream import AppStreamManager
+            AppStreamManager(db, base_dir).sync_media_appstream(
+                media_id=media_id,
+                media_name=media_name,
+                media_url=media_url,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AppStream sync failed for %s: %s",
+                           media_name, exc)
+
+    return True
+
+
 def _fetch_files_xml_if_changed(db: PackageDatabase, media_id: int,
                                 media: dict, server: Optional[dict],
                                 media_url: str, cache_media_info: Path,
@@ -546,7 +660,8 @@ def sync_media(db: PackageDatabase, media_name: str,
                force: bool = False,
                download_hdlist: bool = False,
                urpm_root: str = None,
-               skip_appstream: bool = False) -> SyncResult:
+               skip_appstream: bool = False,
+               defer_tail: bool = False) -> SyncResult:
     """Synchronize a media source.
 
     Downloads synthesis (and optionally hdlist), parses and imports into DB.
@@ -790,16 +905,21 @@ def sync_media(db: PackageDatabase, media_name: str,
         # logged but never fail the whole sync — having a slightly
         # stale (or missing) files.xml.lzma is much better than
         # blocking a synthesis update on a flaky files.xml mirror.
-        try:
-            _fetch_files_xml_if_changed(
-                db, media_id, media, server, media_url,
-                cache_media_info, md5sums,
-            )
-        except Exception as exc:
-            logger.warning(
-                "files.xml.lzma refresh failed for %s: %s",
-                media_name, exc,
-            )
+        #
+        # ``defer_tail`` leaves it, and the AppStream catalogue built
+        # from it, to :func:`sync_media_tail`.  That is nine tenths of
+        # the bytes a sync moves, and nothing a resolution reads.
+        if not defer_tail:
+            try:
+                _fetch_files_xml_if_changed(
+                    db, media_id, media, server, media_url,
+                    cache_media_info, md5sums,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "files.xml.lzma refresh failed for %s: %s",
+                    media_name, exc,
+                )
 
         # Feed adaptive scheduling model with this content change
         try:
@@ -808,9 +928,11 @@ def sync_media(db: PackageDatabase, media_name: str,
         except Exception:
             pass  # Adaptive scheduling is optional
 
-        # Sync AppStream metadata
+        # Sync AppStream metadata.  Deferred with the file index it
+        # reads: its freshness key is that file's (mtime, size), so
+        # running it here while the index waits would be a no-op.
         appstream_synced = False
-        if not skip_appstream:
+        if not skip_appstream and not defer_tail:
             if progress_callback:
                 progress_callback("syncing appstream", 0, 0)
             try:
@@ -845,7 +967,8 @@ def sync_all_media(db: PackageDatabase,
                    force: bool = False,
                    max_workers: int = 4,
                    urpm_root: str = None,
-                   skip_appstream: bool = False) -> List[Tuple[str, SyncResult]]:
+                   skip_appstream: bool = False,
+                   defer_tail: bool = False) -> List[Tuple[str, SyncResult]]:
     """Synchronize all enabled media in parallel.
 
     Args:
@@ -882,7 +1005,8 @@ def sync_all_media(db: PackageDatabase,
             thread_safe_progress(media_name, stage, current, total)
 
         result = sync_media(db, media_name, media_progress, force=force,
-                           urpm_root=urpm_root, skip_appstream=skip_appstream)
+                           urpm_root=urpm_root, skip_appstream=skip_appstream,
+                           defer_tail=defer_tail)
         return (media_name, result)
 
     # Use parallel execution

@@ -531,6 +531,54 @@ class UrpmDaemon:
         """Invalidate the RPM index so it will be rebuilt on next check."""
         self._rpm_index = None
 
+    def queue_media_tail(self, media_ids: list):
+        """Run the deferred half of a media update, off the caller's clock.
+
+        A manual ``urpm media update`` imports the synthesis, hands the
+        terminal back, and rings us for the rest: the file index and the
+        AppStream catalogue built from it.  That is nine tenths of the
+        bytes and nothing a resolution reads, so it has no business
+        making anyone wait.
+
+        Started on its own thread so the HTTP handler can answer at
+        once.  The caller reads a timeout as "no daemon is listening"
+        and falls back to doing the work itself, which would have us
+        both pulling the same files onto the same paths.
+
+        The sync lock is taken for the duration: this writes into
+        ``media_info`` exactly like a sync does, and a scheduled sync
+        starting underneath would fetch the same files twice.  Failing
+        to get it is not an error — someone else is already busy with
+        these media, and the conditional fetch means whoever runs next
+        picks up whatever is still missing.
+        """
+        def _run():
+            from ..core.sync_lock import SyncLock
+            from ..core.sync import sync_media_tail
+
+            lock = SyncLock()
+            acquired, holder_pid = lock.try_acquire()
+            if not acquired:
+                logger.info(
+                    "Media tail skipped, sync lock held by PID %s",
+                    holder_pid,
+                )
+                return
+            try:
+                for media_id in media_ids:
+                    try:
+                        sync_media_tail(self.db, media_id)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "Media tail failed for media %d: %s",
+                            media_id, exc,
+                        )
+            finally:
+                lock.release()
+
+        threading.Thread(target=_run, daemon=True,
+                         name="media-tail").start()
+
 
 class ColoredFormatter(logging.Formatter):
     """Colored log formatter for terminal output."""

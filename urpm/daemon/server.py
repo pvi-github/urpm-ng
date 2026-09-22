@@ -101,6 +101,8 @@ class UrpmdHandler(BaseHTTPRequestHandler):
             self.handle_have(data)
         elif path == '/api/invalidate-cache':
             self.handle_invalidate_cache()
+        elif path == '/api/media-tail':
+            self.handle_media_tail(data)
         else:
             self.send_error_json(404, f"Unknown endpoint: {path}")
 
@@ -471,6 +473,32 @@ class UrpmdHandler(BaseHTTPRequestHandler):
 
         self.daemon.invalidate_rpm_index()
         self.send_json({'status': 'ok', 'message': 'Cache index invalidated'})
+
+    def handle_media_tail(self, data: Dict[str, Any]):
+        """Finish a deferred media update: file index, then AppStream.
+
+        A manual ``urpm media update`` hands the terminal back once the
+        synthesis is imported, which is all a resolution needs, and
+        rings this bell for the rest.  The rest is nine tenths of the
+        bytes.
+
+        Answers as soon as the job is queued.  Waiting for a 36 MB
+        fetch would blow past the caller's timeout, and a timeout reads
+        as "no daemon is listening" — the caller would then do the work
+        itself, in parallel with us, on the same files.
+        """
+        if not self.daemon:
+            self.send_error_json(500, "Daemon not initialized")
+            return
+
+        media_ids = data.get('media_ids') or []
+        if not isinstance(media_ids, list) or not all(
+                isinstance(i, int) for i in media_ids):
+            self.send_error_json(400, "media_ids must be a list of integers")
+            return
+
+        self.daemon.queue_media_tail(media_ids)
+        self.send_json({'status': 'ok', 'queued': len(media_ids)})
 
     def handle_peers(self):
         """List known peers."""

@@ -13,6 +13,7 @@ Auth integration:
 - When absent (CLI as root), no checks are performed.
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -35,6 +36,36 @@ if TYPE_CHECKING:  # hooks are imported lazily: they cost nothing per operation
     from .hooks import Hook, OperationOutcome, TriggeredHook
 
 logger = logging.getLogger(__name__)
+
+
+def _post_to_urpmd(endpoint: str, payload: bytes = b'') -> bool:
+    """POST to the local daemon, and say whether it answered.
+
+    The verdict is the useful part.  ``urpmd`` is optional — not
+    installed, not started, stopped by an operator who dislikes
+    daemons — so every caller needs to know whether the work it just
+    handed over will actually happen, or whether it has to do the job
+    itself.  Swallowing the failure, as the cache-invalidation notifier
+    used to, is fine for a hint and wrong for a hand-off.
+
+    The timeout is short on purpose: this is a doorbell, not the work.
+    An endpoint that does anything lengthy before answering would time
+    out here and be read as "no daemon", and the job would be done
+    twice.
+    """
+    try:
+        import urllib.request
+        from .config import get_port
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{get_port()}{endpoint}",
+            method='POST', data=payload,
+            headers={'Content-Type': 'application/json'} if payload else {},
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return 200 <= resp.status < 300
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("urpmd did not answer on %s: %s", endpoint, exc)
+        return False
 
 # Optional auth imports - available when urpm.auth is installed
 try:
@@ -1395,15 +1426,26 @@ class PackageOperations:
     @staticmethod
     def notify_urpmd_cache_invalidate():
         """Notify urpmd that cache has changed (for P2P sharing)."""
-        try:
-            import urllib.request
-            from .config import get_port
-            port = get_port()
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/api/invalidate-cache",
-                method='POST',
-                data=b''
-            )
-            urllib.request.urlopen(req, timeout=2)
-        except Exception:
-            pass  # urpmd may not be running
+        _post_to_urpmd("/api/invalidate-cache")
+
+    @staticmethod
+    def notify_urpmd_media_tail(media_ids: List[int]) -> bool:
+        """Ask urpmd to finish what a deferred media update left behind.
+
+        Returns whether the daemon took the job.  That answer is the
+        whole point: the caller has just handed the terminal back after
+        syncing the synthesis, and something still has to fetch the file
+        index.  A ``False`` here means nobody is listening and the
+        caller must do it itself.
+
+        The endpoint returns as soon as the work is queued, not when it
+        is done — a 36 MB fetch would blow through any sane client
+        timeout, and a timeout would read as "no daemon" and get the
+        work done twice.
+        """
+        if not media_ids:
+            return True
+        return _post_to_urpmd(
+            "/api/media-tail",
+            json.dumps({"media_ids": list(media_ids)}).encode(),
+        )
