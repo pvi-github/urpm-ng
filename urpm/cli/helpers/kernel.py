@@ -114,8 +114,13 @@ def write_config(config: dict) -> bool:
         CONFIG_FILE.write_text('\n'.join(lines) + '\n')
         return True
     except PermissionError:
+        import shlex
+        import sys
+        from ...auth.privileges import privileged_command
+
         print(_("Error: Permission denied writing to {path}").format(path=CONFIG_FILE))
-        print(_("Try running with sudo"))
+        print(_("Try again as root: {cmd}").format(
+            cmd=privileged_command(shlex.join(sys.argv))))
         return False
     except Exception as e:
         print(_("Error writing config: {error}").format(error=e))

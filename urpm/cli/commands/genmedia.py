@@ -20,7 +20,7 @@ def cmd_genmedia(args, db=None):
         from urpm.genmedia import MediaGenerator
     except ImportError:
         print(_("Error: urpm-ng-genmedia is not installed."), file=sys.stderr)
-        print(_("Install it with: sudo urpm install urpm-ng-genmedia"), file=sys.stderr)
+        print(_("Install it with: urpm install urpm-ng-genmedia"), file=sys.stderr)
         return 1
 
     rpms_dir = Path(args.rpms_dir)

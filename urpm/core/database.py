@@ -1462,8 +1462,9 @@ class PackageDatabase(
                 logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
                 if "locked" in str(e):
                     raise RuntimeError(
-                        f"Database migration failed: database is locked.\n"
-                        f"Try: sudo systemctl stop urpmd && urpm --version && sudo systemctl start urpmd"
+                        "Database migration failed: database is locked.\n"
+                        "Try, in a root shell: systemctl stop urpmd && "
+                        "urpm --version && systemctl start urpmd"
                     )
                 raise RuntimeError(f"Database migration failed: {e}")
 

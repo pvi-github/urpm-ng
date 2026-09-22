@@ -206,10 +206,17 @@ def print_missing_dependencies(missing: list):
 
 
 def print_quickstart_guide():
-    """Print a quick start guide for new users with no media configured."""
-    from . import colors
+    """Print a quick start guide for new users with no media configured.
 
-    media_add_cmd = 'sudo urpm media add Core <mirror_url>'
+    Every step needs root.  Rather than hard-coding ``sudo``, which
+    Mageia neither installs by default nor grants to the first user,
+    each command is rendered with the escalation this machine can
+    actually offer: ``sudo`` for a member of a sudoer group, ``su -c``
+    otherwise.  A first-run guide that hands out a command which fails
+    is worse than no guide.
+    """
+    from . import colors
+    from ..auth.privileges import privileged_command
 
     print("""
 {title}
@@ -240,13 +247,14 @@ def print_quickstart_guide():
         no_media=colors.warning(_('No media configured yet!')),
         quickstart=colors.bold(_('Quick Start:')),
         step1=_('Import media from existing urpmi configuration:'),
-        cmd1=colors.success('sudo urpm media import'),
+        cmd1=colors.success(privileged_command('urpm media import')),
         step2=_('Or add media manually:'),
-        cmd2=colors.success(media_add_cmd),
+        cmd2=colors.success(
+            privileged_command('urpm media add Core <mirror_url>')),
         step3=_('Start the daemon for P2P sharing and background sync:'),
-        cmd3=colors.success('sudo systemctl start urpmd'),
+        cmd3=colors.success(privileged_command('systemctl start urpmd')),
         step4=_('Install packages:'),
-        cmd4=colors.success('sudo urpm install <package>'),
+        cmd4=colors.success(privileged_command('urpm install <package>')),
         docs=colors.bold(_('Documentation:')),
         more_help=colors.bold(_('More help:')),
     ))
@@ -3200,10 +3208,12 @@ def main(argv=None) -> int:
                 print(_colors.error(_(
                     "urpm genmedia is not installed on this system."
                 )), file=sys.stderr)
+                from ..auth.privileges import privileged_command
                 print(_(
                     "Install the urpm-ng-genmedia subpackage:"
                 ), file=sys.stderr)
-                print("  su -c \"urpm i urpm-ng-genmedia\"", file=sys.stderr)
+                print("  " + privileged_command(
+                    'urpm install urpm-ng-genmedia'), file=sys.stderr)
                 return 1
             return cmd_genmedia(args, db)
 

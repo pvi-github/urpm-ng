@@ -59,6 +59,56 @@ def _polkit_policy_installed() -> bool:
     )
 
 
+def privileged_command_options(cmdline: str) -> list[str]:
+    """Ways to run ``cmdline`` as root on *this* machine, best first.
+
+    Never assume ``sudo``.  Mageia does not install it by default and
+    does not add the first user to a sudoer group, so a message that
+    says "sudo ..." hands a third of our users a command that fails,
+    while hiding ``su -``, which works everywhere.  The order below is
+    what the machine can actually offer, not a habit:
+
+    1. ``sudo`` when it is installed **and** the caller belongs to a
+       sudoer-conventional group: most likely to just work.
+    2. ``su -c``: the universal fallback, ``su`` ships in coreutils.
+    3. ``sudo`` when installed but membership was not detected: the
+       caller may know a configuration we cannot see.
+    4. ``pkexec``, only when our polkit policy file is installed.
+
+    Args:
+        cmdline: the command to elevate, already shell-quoted if it
+            needs to be (use :func:`shlex.join` on an argv list).
+
+    Returns:
+        Non-empty list of ready-to-paste command lines.
+    """
+    options: list[str] = []
+
+    have_sudo = bool(shutil.which('sudo'))
+    have_pkexec = bool(shutil.which('pkexec')) and _polkit_policy_installed()
+    likely_sudoer = _is_likely_sudoer()
+
+    if likely_sudoer and have_sudo:
+        options.append(f"sudo {cmdline}")
+    options.append(f"su -c {shlex.quote(cmdline)}")
+    if have_sudo and not likely_sudoer:
+        options.append(f"sudo {cmdline}")
+    if have_pkexec:
+        options.append(f"pkexec {cmdline}")
+
+    return options
+
+
+def privileged_command(cmdline: str) -> str:
+    """The single best way to run ``cmdline`` as root on this machine.
+
+    For messages that show one command rather than a menu, such as the
+    quick-start guide.  See :func:`privileged_command_options` for how
+    "best" is decided.
+    """
+    return privileged_command_options(cmdline)[0]
+
+
 def require_privileges(action_id: str | None = None,
                        *,
                        allow_skip: bool = False) -> None:
@@ -83,28 +133,7 @@ def require_privileges(action_id: str | None = None,
     if allow_skip:
         return
 
-    cmdline = shlex.join(sys.argv)
-    options: list[str] = []
-
-    have_sudo = bool(shutil.which('sudo'))
-    have_pkexec = bool(shutil.which('pkexec')) and _polkit_policy_installed()
-    likely_sudoer = _is_likely_sudoer()
-
-    # Order of presentation:
-    # 1. sudo if the user is a member of a sudoer-conventional group AND
-    #    sudo is installed — most likely to succeed without surprise.
-    # 2. su -c — always available (su is in coreutils), the universal
-    #    fallback.
-    # 3. sudo (when installed but membership not detected) — last resort,
-    #    the user knows their own configuration.
-    # 4. pkexec — listed only when the polkit policy file is installed.
-    if likely_sudoer and have_sudo:
-        options.append(f"sudo {cmdline}")
-    options.append(f"su -c {shlex.quote(cmdline)}")
-    if have_sudo and not likely_sudoer:
-        options.append(f"sudo {cmdline}")
-    if have_pkexec:
-        options.append(f"pkexec {cmdline}")
+    options = privileged_command_options(shlex.join(sys.argv))
 
     sys.stderr.write(_("This operation requires root privileges.") + "\n")
     if len(options) == 1:

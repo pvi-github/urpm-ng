@@ -75,8 +75,8 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
             print(colors.ok(_("Merged {total} components from {count} media").format(total=total_merged, count=media_count)))
             print(_("Output: {path}").format(path=appstream_mgr.catalog_path))
 
-            print(_("\nTo refresh the AppStream cache, run:"))
-            print(_("  sudo appstreamcli refresh-cache --force"))
+            print(_("\nTo refresh the AppStream cache, run as root:"))
+            print("  appstreamcli refresh-cache --force")
             return 0
 
     elif args.appstream_command == 'status':
@@ -196,7 +196,14 @@ def cmd_appstream(args, db: 'PackageDatabase') -> int:
             print(colors.ok(_("OS metainfo file created: {path}").format(path=metainfo_file)))
             return 0
         except PermissionError:
-            print(colors.error(_("Permission denied. Run with sudo.")))
+            import shlex
+            import sys
+            from ...auth.privileges import privileged_command
+
+            print(colors.error(_("Permission denied writing to {path}").format(
+                path=metainfo_file)))
+            print(_("Try again as root: {cmd}").format(
+                cmd=privileged_command(shlex.join(sys.argv))))
             return 1
         except Exception as e:
             print(colors.error(_("Failed to create metainfo: {error}").format(error=e)))
