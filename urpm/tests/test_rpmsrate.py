@@ -2,7 +2,12 @@
 
 import pytest
 from pathlib import Path
-from urpm.core.rpmsrate import RpmsrateParser, PackageEntry, Section
+from urpm.core.rpmsrate import (
+    DEFAULT_RPMSRATE_PATH,
+    PackageEntry,
+    RpmsrateParser,
+    Section,
+)
 
 
 # Sample rpmsrate content for testing
@@ -153,18 +158,39 @@ class TestRpmsrateParser:
 
 
 class TestRpmsrateWithRealFile:
-    """Tests with the real rpmsrate-raw file if available."""
+    """Tests against the rpmsrate-raw the distribution ships.
+
+    The sample above exercises the grammar; these exercise the real
+    file, which is what ``urpm mirror`` and ``urpm media`` actually
+    parse and which changes under us at every meta-task release.
+    """
 
     @pytest.fixture
     def real_parser(self):
-        """Try to load real rpmsrate-raw file."""
-        # Try local test file first
-        test_path = Path(__file__).parent.parent.parent.parent / 'essais' / 'rpmsrate-raw'
-        if test_path.exists():
-            p = RpmsrateParser(test_path)
-            p.parse()
-            return p
-        pytest.skip("Real rpmsrate-raw file not found")
+        """Load rpmsrate-raw from where the product itself reads it.
+
+        :data:`~urpm.core.rpmsrate.DEFAULT_RPMSRATE_PATH` is the single
+        home for that location, so the test cannot drift from the code
+        it covers.  A copy under ``essais/`` still wins when present,
+        which is how one tries a modified file without touching the
+        installed one.
+
+        This used to look only at a hand-placed copy, four directory
+        levels up, i.e. *beside* the repository rather than inside it.
+        That directory has never existed in this layout, so three
+        tests had been quietly skipping while meta-task sat installed
+        all along.
+        """
+        scratch = Path(__file__).parent.parent.parent / 'essais' / 'rpmsrate-raw'
+        for path in (scratch, DEFAULT_RPMSRATE_PATH):
+            if path.exists():
+                p = RpmsrateParser(path)
+                p.parse()
+                return p
+        pytest.skip(
+            f"no rpmsrate-raw: neither {scratch} nor "
+            f"{DEFAULT_RPMSRATE_PATH} (install meta-task)"
+        )
 
     def test_real_file_has_install_section(self, real_parser):
         """Test that real file has INSTALL section."""

@@ -136,10 +136,13 @@ print(result.unpack()[0])  # JSON string
 
 ## Running
 
+Both forms need root.  Mageia does not configure `sudo` for the first
+user, so `su -c` is used here, which works everywhere:
+
 ```bash
 # Via systemd (production)
-sudo systemctl start urpm-dbus
+su -c "systemctl start urpm-dbus"
 
 # Direct (debug)
-sudo urpm-dbus-service --debug
+su -c "urpm-dbus-service --debug"
 ```

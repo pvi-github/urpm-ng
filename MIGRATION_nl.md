@@ -102,19 +102,23 @@ Opmerkingen :
 
 ## Snelstart na installatie (indien niet als RPM geïnstalleerd)
 
+Deze stappen vereisen root.  Mageia configureert ``sudo`` niet voor
+de eerste gebruiker, dus de onderstaande opdrachten gebruiken
+``su -c``, wat overal werkt:
+
 ```sh
 # De media importeren die je al onder urpmi had
-sudo urpm m import
+su -c "urpm m import"
 
 # Mirrors koppelen aan de zonet geïmporteerde mirrorlist-gebaseerde media
-sudo urpm srv autoconfig
+su -c "urpm srv autoconfig"
 
 # Pakketlijsten verversen
-sudo urpm m u
+su -c "urpm m u"
 
 # Je bent klaar
 urpm q firefox
-sudo urpm i firefox
+su -c "urpm i firefox"
 ```
 
 ## Volledige documentatie

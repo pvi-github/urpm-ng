@@ -100,19 +100,23 @@ Notes :
 
 ## Quick start after installation (if not installed as a RPM)
 
+These steps need root.  Mageia does not configure ``sudo`` for the
+first user, so the commands below use ``su -c``, which works
+everywhere:
+
 ```sh
 # Import the media you already had under urpmi
-sudo urpm m import
+su -c "urpm m import"
 
 # Attach mirrors to the mirrorlist-based media that just came in
-sudo urpm srv autoconfig
+su -c "urpm srv autoconfig"
 
 # Refresh package lists
-sudo urpm m u
+su -c "urpm m u"
 
 # You are ready
 urpm q firefox
-sudo urpm i firefox
+su -c "urpm i firefox"
 ```
 
 ## Full documentation
