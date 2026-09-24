@@ -331,7 +331,7 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
 
         if not queue_result.success:
             print(colors.error("\n" + _("Erase failed:")))
-            print_errors(queue_result.collect_errors(), limit=3)
+            print_errors(queue_result.collect_errors(), limit=0)
             if not erase_opts.force:
                 print(colors.dim(_("  Use --force to ignore dependency problems")))
             ops.abort_transaction(transaction_id)

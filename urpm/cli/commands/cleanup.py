@@ -16,6 +16,54 @@ from ..helpers.package import extract_pkg_name as _extract_pkg_name
 from ..helpers.failure_report import print_errors
 
 
+def _split_by_protection(names):
+    """Sort package names into (blocked, warned, safe).
+
+    The blacklist and the redlist used to be read in exactly one place,
+    ``cmd_autoremove``.  Every other path that removes orphans, the
+    interactive triage and ``cleandeps``, was free to offer a package
+    the classic path refuses to touch, which is how a blacklist meant
+    to keep a system bootable stopped applying to the flow most likely
+    to be used after a distupgrade.
+
+    Args:
+        names: iterable of package names.
+
+    Returns:
+        ``(blocked, warned, safe)``, three lists in the input order.
+    """
+    blacklist = _get_blacklist()
+    redlist = _get_redlist()
+    blocked, warned, safe = [], [], []
+    for name in names:
+        if name in blacklist:
+            blocked.append(name)
+        elif name in redlist:
+            warned.append(name)
+        else:
+            safe.append(name)
+    return blocked, warned, safe
+
+
+def _report_rescued(resolver, to_remove, kept_names, colors):
+    """Pull back from *to_remove* whatever the survivors still need.
+
+    Returns the filtered removal list.  Prints what was rescued, and
+    why, so it reaches the operator before the confirmation rather than
+    as an rpm rejection after it.
+    """
+    rescued = resolver.needed_by_kept(set(to_remove), kept_names)
+    if not rescued:
+        return to_remove
+    print("\n  " + colors.info(ngettext(
+        "{count} package kept as well, needed by the packages above:",
+        "{count} packages kept as well, needed by the packages above:",
+        len(rescued)).format(count=len(rescued))))
+    for name in sorted(rescued):
+        print(f"    {colors.info(name)}")
+    return [n for n in to_remove if n not in rescued]
+
+
 def cmd_autoremove(args, db: 'PackageDatabase') -> int:
     """Handle autoremove command - unified cleanup."""
     import platform
@@ -151,21 +199,11 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         return 0
 
     # Apply blacklist and redlist protection
-    blacklist = _get_blacklist()
-    redlist = _get_redlist()
-
-    blocked = []
-    warned = []
-    safe = []
-
-    for pkg in packages_to_remove:
-        name = pkg[0]
-        if name in blacklist:
-            blocked.append(pkg)
-        elif name in redlist:
-            warned.append(pkg)
-        else:
-            safe.append(pkg)
+    by_name = {pkg[0]: pkg for pkg in packages_to_remove}
+    blocked_n, warned_n, safe_n = _split_by_protection(by_name)
+    blocked = [by_name[n] for n in blocked_n]
+    warned = [by_name[n] for n in warned_n]
+    safe = [by_name[n] for n in safe_n]
 
     # Report blocked packages
     if blocked:
@@ -200,15 +238,9 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
     kept_names = {pkg[0] for pkg in blocked}
     if warned_kept:
         kept_names.update(pkg[0] for pkg in warned)
-    rescued = resolver.needed_by_kept({pkg[0] for pkg in safe}, kept_names)
-    if rescued:
-        safe = [pkg for pkg in safe if pkg[0] not in rescued]
-        print("\n  " + colors.info(ngettext(
-            "{count} package kept as well, needed by the packages above:",
-            "{count} packages kept as well, needed by the packages above:",
-            len(rescued)).format(count=len(rescued))))
-        for name in sorted(rescued):
-            print(f"    {colors.info(name)}")
+    kept_safe = _report_rescued(
+        resolver, [pkg[0] for pkg in safe], kept_names, colors)
+    safe = [pkg for pkg in safe if pkg[0] in set(kept_safe)]
 
     packages_to_remove = safe
 
@@ -345,7 +377,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
 
         if not queue_result.success:
             print(colors.error("\n" + _("Removal failed:")))
-            print_errors(queue_result.collect_errors(), limit=3)
+            print_errors(queue_result.collect_errors(), limit=0)
             db.abort_transaction(transaction_id)
             return 1
 
@@ -432,9 +464,40 @@ def _cmd_autoremove_interactive(
         print(colors.success(_("No orphaned packages found.")))
         return 0
 
+    # Apply the protection lists before the triage sees anything: a
+    # blacklisted package must never be offered, and a redlisted one
+    # needs the same confirmation the classic path asks for.
+    blocked, warned, safe_names = _split_by_protection(
+        [a.name for a in orphan_actions])
+    if blocked:
+        print("\n  " + colors.error(_("BLOCKED ({count})").format(
+            count=len(blocked))) + " - " + _("critical system packages:"))
+        for name in blocked:
+            print(f"    {colors.error(name)}")
+        print(colors.error(_(
+            "  These packages cannot be removed (system would be unusable)")))
+    if warned:
+        print("\n  " + colors.warning(_("WARNING ({count})").format(
+            count=len(warned))) + " - " + _("generally useful packages:"))
+        for name in warned:
+            print(f"    {colors.warning(name)}")
+        try:
+            if confirm_yes(input(_(
+                    "\n  Triage these warned packages too? [y/N] "))):
+                safe_names.extend(warned)
+                warned = []
+            else:
+                print(_("  Warned packages will be kept"))
+        except (KeyboardInterrupt, EOFError):
+            print(_("\n  Warned packages will be kept"))
+
+    if not safe_names:
+        print(colors.success(_("\nNothing safe to triage.")))
+        return 0
+
     print(_("  Enriching metadata for {n} orphans...").format(
-        n=len(orphan_actions)))
-    names = [a.name for a in orphan_actions]
+        n=len(safe_names)))
+    names = safe_names
     infos = resolver.enrich_orphans(names)
     if not infos:
         print(colors.error(_("Could not enrich orphan metadata.")))
@@ -461,6 +524,23 @@ def _cmd_autoremove_interactive(
                 n=len(result.to_keep))))
 
     if not result.to_remove:
+        return 0
+
+    # Everything that stays installed and still needs something we are
+    # about to remove has to pull it back.  Keeping part of the set is
+    # the whole point of a triage, so this is the normal case here, not
+    # an edge one: the run that surfaced it kept 40 packages and queued
+    # the three pcre libraries one of them requires.
+    #
+    # Only orphans need to be considered as survivors: a non-orphan
+    # requiring one of these would have kept it out of the orphan list
+    # in the first place.
+    kept_names = ({p.name for p in infos} - set(result.to_remove)
+                  | set(blocked) | set(warned))
+    result.to_remove = _report_rescued(
+        resolver, result.to_remove, kept_names, colors)
+    if not result.to_remove:
+        print(colors.success(_("\nNothing left to remove.")))
         return 0
 
     # Phase 3b — erase pipeline.  Mirrors the classic --orphans branch
@@ -543,7 +623,7 @@ def _cmd_autoremove_interactive(
 
         if not queue_result.success:
             print(colors.error("\n" + _("Removal failed:")))
-            print_errors(queue_result.collect_errors(), limit=3)
+            print_errors(queue_result.collect_errors(), limit=0)
             db.abort_transaction(transaction_id)
             return 1
 
@@ -855,13 +935,44 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
 
     try:
         # Extract package names from NEVRAs for removal
-        packages_to_erase = []
+        # Same protection lists as every other removal path.  This one
+        # used to have none, so an interrupted transaction could take a
+        # blacklisted package down with it.
+        by_name = {}
         for nevra in all_orphans:
-            # Extract name from nevra (e.g., "foo-1.0-1.mga9.x86_64" -> "foo")
-            name = _extract_pkg_name(nevra)
+            by_name.setdefault(_extract_pkg_name(nevra), nevra)
+        blocked, warned, safe_names = _split_by_protection(by_name)
+        if blocked:
+            print("\n  " + colors.error(_("BLOCKED ({count})").format(
+                count=len(blocked))) + " - " + _("critical system packages:"))
+            for name in blocked:
+                print(f"    {colors.error(name)}")
+        if warned:
+            print("\n  " + colors.warning(_("WARNING ({count})").format(
+                count=len(warned))) + " - " + _("generally useful packages:"))
+            for name in warned:
+                print(f"    {colors.warning(name)}")
+            try:
+                if confirm_yes(input(_(
+                        "\n  Remove these warned packages anyway? [y/N] "))):
+                    safe_names.extend(warned)
+                    warned = []
+                else:
+                    print(_("  Warned packages will be kept"))
+            except (KeyboardInterrupt, EOFError):
+                print(_("\n  Warned packages will be kept"))
+
+        safe_names = _report_rescued(
+            resolver, safe_names, set(blocked) | set(warned), colors)
+        if not safe_names:
+            print(colors.success(_("\nNothing safe to remove.")))
+            return 0
+
+        packages_to_erase = []
+        for name in safe_names:
             packages_to_erase.append(name)
-            # Record in transaction
-            db.record_package(transaction_id, nevra, name, 'remove', 'cleandeps')
+            db.record_package(transaction_id, by_name[name], name,
+                              'remove', 'cleandeps')
 
         # Check if another operation is in progress
         install_root = getattr(args, 'root', None) or getattr(args, 'urpm_root', None)
@@ -909,7 +1020,7 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
 
         if not queue_result.success:
             print(colors.error("\n" + _("Erase failed:")))
-            print_errors(queue_result.collect_errors(), limit=5)
+            print_errors(queue_result.collect_errors(), limit=0)
             db.abort_transaction(transaction_id)
             return 1
 

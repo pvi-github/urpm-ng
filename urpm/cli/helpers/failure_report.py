@@ -46,6 +46,11 @@ def print_errors(
 ) -> int:
     """Print up to *limit* errors, then say how many were withheld.
 
+    ``limit=0`` prints them all.  A removal rejected by rpm lists one
+    line per unsatisfied dependency, and every one of them names a
+    package the operator has to keep; cutting that at three turned a
+    complete answer into a puzzle.
+
     Returns the number withheld, so a caller can react to a large tail
     (none does today; it keeps the function honest about the fact that
     something was dropped).
@@ -57,10 +62,11 @@ def print_errors(
     if not errors:
         return 0
 
-    for error in errors[:limit]:
+    shown = errors if limit <= 0 else errors[:limit]
+    for error in shown:
         print(f"{indent}{colors.error(str(error))}")
 
-    withheld = len(errors) - limit
+    withheld = len(errors) - len(shown)
     if withheld > 0:
         print(indent + colors.dim(
             _("... and {count} more").format(count=withheld)))
