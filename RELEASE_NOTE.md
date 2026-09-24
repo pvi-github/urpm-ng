@@ -1,4 +1,4 @@
-URPM & Rpmdrake-NG <Testing> 0.9.12:
+URPM & Rpmdrake-NG <Testing> 0.9.13:
 
 
 > ** WARNING - the `distupgrade` feature is still young.**  Only
@@ -6,107 +6,113 @@ URPM & Rpmdrake-NG <Testing> 0.9.12:
 > machine you can snapshot and restore (VM, Clonezilla, btrfs/LVM
 > snapshot…).  Every failure report makes the next version safer.
 
-`urpm install` now takes a URL.  And building got unblocked: `urpm build`
-could not compile python, whose `%prep` died restoring file ownership and
-whose test suite could not run rootless, while `urpm image make` stalled on
-a key confirmation nobody could answer.
+A release about waiting less and removing less.  `urpm media update`
+hands the terminal back once the synthesis is in, instead of holding it
+for two minutes over a file the next install will never open.  And
+`urpm autoremove` stopped offering to remove packages that are still in
+use.  It did so on any machine carrying two versions of a same name,
+which is what a distupgrade leaves behind.
 
 ## What's Changed
 
 ### Major Features
 
-- **`urpm install` accepts a URL.**
-  - `urpm i https://host/path/pkg.rpm`, mixed freely with package names
-    and local files.
-  - The package is fetched first, then treated exactly like a file
-    already on disk: header read, signature verified unless
-    `--nosignature`, dependencies resolved from the configured media.
-  - `file:///path/pkg.rpm` works too; it used to fail the same way,
-    the scheme never being stripped.
-  - The file lands in `/var/lib/urpm/downloads/`, beside `medias/` and
-    never inside it: that tree mirrors a remote one medium by medium,
-    and a package named by a URL belongs to no medium.
-  - It is cache all the same, so `urpm cache flush` sweeps it and
-    `urpm cache clean` counts it as an orphan.
+- **`urpm media update` returns once the synthesis is in.**
+  - A refresh moves two very different piles: 4.8 MB of synthesis
+    across a typical fifteen media, which a resolution reads, and
+    36.3 MB of `files.xml.lzma` plus the AppStream catalogue built from
+    it, which only `urpm f`, `urpm show --files` and the distupgrade
+    file-provides injection read, later.
+  - The tail is one file: 23 MB for core/release, on a four-worker pool
+    where the other three finish early and wait.  At 300 kB/s, ordinary
+    for a busy mirror, that is two minutes of waiting.
+  - A bare `urpm media update` now returns after the head and hands the
+    tail to urpmd.  Without urpmd it runs synchronously, as before, and
+    a named medium is always synchronous.
+
+- **Sizes now say what is left to fetch.**
+  - The download total was summed over the whole plan and shown before
+    anything looked at the cache, so a resumed distupgrade announced it
+    would download everything again.
+  - The summary now splits what is already on disk from what will
+    really cross the network, at all four confirmation sites.
+
+- **`urpm f` says which media it could not search.**
+  - It answers from the indexes already on disk and never downloads, so
+    a medium whose index is absent, unreadable or an empty stub was
+    skipped in silence, and "no package contains X" read as a complete
+    search.
+  - Skipped media are now listed after the results, with the reason,
+    in full, whatever the outcome.
 
 ### Bug Fixes
 
-- **Network isolation made non-root file ownership unrestorable.**
-  - Every `rpmbuild` ran under `unshare --user --map-root-user --net`,
-    a detour taken because `unshare --net` needs `CAP_SYS_ADMIN` and
-    the container had none.
-  - `--map-root-user` writes a one-line `uid_map`, so uid 0 became the
-    only translatable identity.  Any `chown` towards another uid
-    answered `EINVAL`.
-  - python's `%prep` died unpacking its documentation tarball, whose
-    files belong to uid 1000, with `tar: Cannot change ownership to
-    uid 1000, gid 1000: Invalid argument`.  Every spec restoring
-    archive ownership, or chowning to a system user in `%install`, hit
-    the same wall.
-  - The capabilities now come from the container itself, `SYS_ADMIN`
-    and `NET_ADMIN` for the namespace, `NET_RAW` in every mode so a
-    `%check` can still ping the loopback.  No user namespace is
-    created and the identity map stays whole.
-  - `--net-isolation auto|strict|off` exposes the choice;
-    `--with-network` is kept as an alias for `off`.  On a runtime that
-    cannot isolate, `auto` builds with the network open and says so,
-    `strict` refuses.
+- **`urpm autoremove` offered to remove packages that were still in
+  use.**  rpm refused the transaction after the operator had confirmed
+  it.  Two independent causes.
+  - The dependency maps were keyed on the package name with a plain
+    assignment, so a name installed twice lost one of the two sets of
+    requires, and the packages it needed looked unreferenced.  The
+    verdict even depended on the order rpm happened to enumerate the
+    rpmdb in.
+  - Taking a package out of the removal list did not take out what it
+    depends on.  Declining to remove `dhcp-client` still queued
+    `dhcp-common`, which it requires exactly.
 
-- **`urpm image make --import-key` asked a question nobody could answer.**
-  - The confirmation ran inside the container, through `podman exec`,
-    which gets a pseudo-terminal for its output and no stdin.
-  - So the key's id and fingerprint appeared, the prompt waited, and
-    the media add aborted on end-of-file, failing the image build.
-  - `--import-key` on the host command line is the consent; the second
-    question is gone.  The key's identity is still printed.
+- **The protection lists applied to one removal path out of three.**
+  - The blacklist and the redlist were read in exactly one place, so
+    `autoremove --interactive` and `cleandeps` were free to offer a
+    package the classic path refuses to touch.
+  - A list whose purpose is to keep a system bootable did not apply to
+    the flow most likely to be used right after a distupgrade, which
+    is when the orphans appear.
+  - The three paths now share one reading of both lists, and the
+    triage says what it pulls back before asking for confirmation
+    rather than leaving rpm to reject the transaction afterwards.
+
+- **A rejected removal truncated its own diagnosis** after three
+  lines, each of which names a package that has to be kept.
+
+- **Install sizes were wrong in three ways.**  A local `.rpm` announced
+  a 0 B footprint and 390.9 MB freed on an upgrade that in fact left
+  the disk 2 MB heavier: the compressed payload was read as the space
+  the root filesystem would hold, a local package had no file size at
+  all, and the freed volume was gross rather than net.
+
+- **Commands the machine cannot run were handed out.**  Mageia installs
+  neither `sudo` by default nor the first user into a sudoer group, yet
+  eight messages spelled out `sudo …`, the quick-start guide being four
+  of them in a row.  Each command is now rendered with the escalation
+  this machine can actually offer, or named bare.
+
+- **A `media_info` file left at 0600 by an older build stayed that
+  way.**  `urpm f` then answered "nothing found" instead of "I cannot
+  read this index".  A sync now restores the published mode on a named,
+  closed list of artefacts.
+
+- **Yes/no prompts only understood English and French.**  A prompt that
+  defaults to yes needs its own reader; a German or Dutch "no" was
+  taken for a "yes".
+
+- **A failed removal claimed it had succeeded.**  Six call sites
+  printed `[N/N] done` unconditionally, one line before reporting the
+  failure, and rpm rejects a transaction before touching a single
+  package.  The dependency error itself was a raw rpmlib tuple.
+
+- **`urpm distupgrade --help` was half French in English.**
+
+- **`media add --import-key` announced a URL it would not fetch**, a
+  doubled slash when one was typed.
 
 ### Improvements
 
-- **`urpm build` checks the id delegation before it starts.**
-  - A rootless container can only name the uids its user namespace
-    translates, and `/etc/subuid` delegates 65536 by default.  Plenty
-    for system users, short for a `%check`: python's `test_posix`
-    chowns to 2³¹ on purpose, to exercise large values.
-  - Past that range the kernel answers `EINVAL` and the build dies
-    eleven thousand log lines in, on an error that never mentions
-    delegation.
-  - The check names the exact `/etc/subuid` line to replace, gives the
-    commands for a root shell, and asks whether to build anyway.
-    `--auto` prints the same recommendation without asking, and so
-    does a run with no terminal.
-  - Widening keeps the range start, so images already on disk stay
-    valid.  The change takes effect through `podman system migrate`,
-    which needs no container running: until then the pause process
-    holds the old map alive, which is why the edit can look ignored.
-  - With the delegation widened, python 2.7.18 builds with its full
-    test suite passing, spec untouched.
-
-- **`--nocheck` skips a spec's `%check` section.**
-  - Handed to `rpmbuild`, so it is all or nothing: rpm has no notion
-    of an individual test.
-  - For a suite that cannot pass in a rootless container, or simply to
-    shorten a development iteration.
-  - The packages produced are untested, and the build line says so.
-
-### Packaging & Distribution
-
-- **The spec review is applied**, seven points of eight, each checked
-  against the packages on a Mageia 10 machine rather than taken on
-  trust.
-  - `Requires: python3` is redundant in both specs: rpm generates
-    `python(abi) = 3.13` from the `.py` files and only python3
-    satisfies it.
-  - rpmdrake-ng's `%post` and `%postun` are gone entirely.
-    desktop-file-utils and hicolor-icon-theme ship file triggers that
-    already do the work, which also drops two generated `Requires` on
-    `/bin/sh`.
-  - `%setup` gives way to `%autosetup -p1`, and to `-a 1` for urpm-ng's
-    second source.
-  - `python3-setuptools` and `python3-wheel` are hard requirements of
-    pyproject-rpm-macros, so they go.
-  - Two points were not applied: pyproject-rpm-macros stays, since on
-    Mageia nothing else pulls it in, and `python3dist()` fits only
-    four dependencies out of seven.
+- **The translation backlog is cleared**, six languages complete, zero
+  fuzzy.  `urpm/core/resolution/diagnose.py` was the only module
+  calling `_()` that was missing from `POTFILES.in`, and its msgids
+  were written in French, so every user in every locale read French
+  there.
+- **One home for `@System` and `@LocalRPMs`**, the two libsolv
+  pseudo-repositories, instead of thirty-six literals.
 
 
 **Full Changelog**: https://gitweb.mageia.org/software/rpm/urpm-ng/log/?h=release/0.9.x
