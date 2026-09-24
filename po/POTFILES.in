@@ -71,6 +71,7 @@ urpm/core/audit.py
 urpm/core/distupgrade/checks.py
 urpm/core/distupgrade/root_space.py
 urpm/core/image_urpm_ng.py
+urpm/core/resolution/diagnose.py
 urpm/auth/audit.py
 urpm/auth/context.py
 urpm/auth/polkit.py

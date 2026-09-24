@@ -2360,7 +2360,24 @@ class TransactionQueue:
         if not op.force:
             unresolved = ts.check()
             if unresolved:
-                errors = [f"Dependency: {prob}" for prob in unresolved]
+                # Render through the shared formatter the install path
+                # already uses, instead of letting the raw rpmlib tuple
+                # reach the screen:
+                #   (('dhcp-client', '3:4.4.3P1', '7.mga10'),
+                #    ('dhcp-common', '3:4.4.3P1-7.mga10'), 8, None, 0)
+                # Falls back to the tuple if a future rpm changes its
+                # shape: an ugly message beats losing the diagnosis.
+                from .resolution.diagnose import (
+                    format_dependency_issue,
+                    from_rpmlib_erase_tuple,
+                )
+                errors = []
+                for prob in unresolved:
+                    try:
+                        errors.append(format_dependency_issue(
+                            from_rpmlib_erase_tuple(prob)))
+                    except Exception:
+                        errors.append(f"Dependency: {prob}")
                 return False, 0, errors
 
         ts.order()

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.9.12\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-09-23 00:15+0200\n"
+"POT-Creation-Date: 2026-09-24 14:13+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2131,7 +2131,7 @@ msgstr ""
 
 #: urpm/cli/main.py:3444 urpm/cli/commands/install.py:257
 #: urpm/cli/commands/install.py:260 urpm/cli/commands/install.py:1235
-#: urpm/cli/commands/install.py:1238 urpm/cli/commands/history.py:632
+#: urpm/cli/commands/install.py:1238 urpm/cli/commands/history.py:640
 #: urpm/cli/commands/config.py:425 urpm/cli/commands/build.py:2165
 #, python-brace-format
 msgid "Error: {error}"
@@ -2260,7 +2260,7 @@ msgstr ""
 #: urpm/cli/commands/distupgrade.py:806 urpm/cli/commands/distupgrade.py:830
 #: urpm/cli/commands/system.py:720 urpm/cli/commands/system.py:776
 #: urpm/cli/commands/system.py:811 urpm/cli/commands/media.py:1830
-#: urpm/cli/commands/cleanup.py:234
+#: urpm/cli/commands/cleanup.py:256
 msgid ""
 "\n"
 "Aborted."
@@ -2328,7 +2328,7 @@ msgstr ""
 #: urpm/cli/commands/distupgrade.py:809 urpm/cli/commands/distupgrade.py:833
 #: urpm/cli/commands/system.py:723 urpm/cli/commands/system.py:779
 #: urpm/cli/commands/media.py:1827 urpm/cli/commands/server.py:873
-#: urpm/cli/commands/cleanup.py:231
+#: urpm/cli/commands/cleanup.py:253
 msgid "Aborted."
 msgstr ""
 
@@ -2378,8 +2378,8 @@ msgstr ""
 #: urpm/cli/commands/media.py:985 urpm/cli/commands/media.py:1168
 #: urpm/cli/commands/media.py:1200 urpm/cli/commands/media.py:2723
 #: urpm/cli/commands/cache.py:104 urpm/cli/commands/history.py:297
-#: urpm/cli/commands/history.py:754 urpm/cli/commands/config.py:480
-#: urpm/cli/commands/peer.py:207 urpm/cli/commands/cleanup.py:801
+#: urpm/cli/commands/history.py:762 urpm/cli/commands/config.py:480
+#: urpm/cli/commands/peer.py:207 urpm/cli/commands/cleanup.py:830
 #: urpm/cli/commands/build.py:1187 urpm/cli/helpers/suggests.py:141
 #: urpm/cli/helpers/suggests.py:158
 msgid ""
@@ -2456,9 +2456,9 @@ msgstr ""
 #: urpm/cli/commands/media.py:982 urpm/cli/commands/media.py:1171
 #: urpm/cli/commands/media.py:1203 urpm/cli/commands/media.py:2720
 #: urpm/cli/commands/cache.py:101 urpm/cli/commands/cache.py:314
-#: urpm/cli/commands/history.py:294 urpm/cli/commands/history.py:751
+#: urpm/cli/commands/history.py:294 urpm/cli/commands/history.py:759
 #: urpm/cli/commands/config.py:477 urpm/cli/commands/peer.py:204
-#: urpm/cli/commands/depends.py:111 urpm/cli/commands/cleanup.py:798
+#: urpm/cli/commands/depends.py:111 urpm/cli/commands/cleanup.py:827
 #: urpm/cli/commands/build.py:1191 urpm/cli/helpers/alternatives.py:424
 #: urpm/cli/helpers/alternatives.py:564 urpm/cli/helpers/alternatives.py:949
 #: urpm/cli/helpers/alternatives.py:1048 urpm/cli/helpers/alternatives.py:1117
@@ -2536,7 +2536,7 @@ msgid ""
 "System restart required ({packages}) — triggers will run in synchronous mode."
 msgstr ""
 
-#: urpm/cli/commands/install.py:1095 urpm/cli/commands/history.py:509
+#: urpm/cli/commands/install.py:1095 urpm/cli/commands/history.py:513
 #, python-brace-format
 msgid "Installing {count} package..."
 msgid_plural "Installing {count} packages..."
@@ -2774,27 +2774,27 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: urpm/cli/commands/remove.py:240 urpm/cli/commands/history.py:318
-#: urpm/cli/commands/history.py:775 urpm/cli/commands/cleanup.py:289
-#: urpm/cli/commands/cleanup.py:485 urpm/cli/commands/cleanup.py:841
+#: urpm/cli/commands/history.py:783 urpm/cli/commands/cleanup.py:311
+#: urpm/cli/commands/cleanup.py:511 urpm/cli/commands/cleanup.py:870
 #: urpm/cli/commands/_install_pipeline.py:162
 msgid "  RPM database is locked by another process."
 msgstr ""
 
 #: urpm/cli/commands/remove.py:241 urpm/cli/commands/history.py:319
-#: urpm/cli/commands/history.py:776 urpm/cli/commands/cleanup.py:290
-#: urpm/cli/commands/cleanup.py:486 urpm/cli/commands/cleanup.py:842
+#: urpm/cli/commands/history.py:784 urpm/cli/commands/cleanup.py:312
+#: urpm/cli/commands/cleanup.py:512 urpm/cli/commands/cleanup.py:871
 #: urpm/cli/commands/_install_pipeline.py:164
 msgid "  Waiting for lock... (Ctrl+C to cancel)"
 msgstr ""
 
-#: urpm/cli/commands/remove.py:330 urpm/cli/commands/history.py:349
-#: urpm/cli/commands/history.py:537 urpm/cli/commands/history.py:806
-#: urpm/cli/commands/cleanup.py:318 urpm/cli/commands/cleanup.py:513
-#: urpm/cli/commands/cleanup.py:875 urpm/cli/commands/_install_pipeline.py:202
+#: urpm/cli/commands/remove.py:330 urpm/cli/commands/history.py:353
+#: urpm/cli/commands/history.py:545 urpm/cli/commands/history.py:818
+#: urpm/cli/commands/cleanup.py:344 urpm/cli/commands/cleanup.py:542
+#: urpm/cli/commands/cleanup.py:908 urpm/cli/commands/_install_pipeline.py:202
 msgid "done"
 msgstr ""
 
-#: urpm/cli/commands/remove.py:333 urpm/cli/commands/cleanup.py:878
+#: urpm/cli/commands/remove.py:333 urpm/cli/commands/cleanup.py:911
 msgid "Erase failed:"
 msgstr ""
 
@@ -2806,7 +2806,7 @@ msgstr ""
 msgid "Erase interrupted"
 msgstr ""
 
-#: urpm/cli/commands/remove.py:347 urpm/cli/commands/cleanup.py:891
+#: urpm/cli/commands/remove.py:347 urpm/cli/commands/cleanup.py:924
 #, python-brace-format
 msgid "{count} package erased"
 msgid_plural "{count} packages erased"
@@ -4073,8 +4073,8 @@ msgid_plural "{count} packages installed"
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/query.py:442 urpm/cli/commands/cleanup.py:575
-#: urpm/cli/commands/cleanup.py:615 urpm/cli/commands/cleanup.py:653
+#: urpm/cli/commands/query.py:442 urpm/cli/commands/cleanup.py:604
+#: urpm/cli/commands/cleanup.py:644 urpm/cli/commands/cleanup.py:682
 msgid "Error: rpm module not available"
 msgstr ""
 
@@ -5843,7 +5843,7 @@ msgid "  --dry-run : nothing removed."
 msgstr ""
 
 #: urpm/cli/commands/cache.py:309 urpm/cli/commands/history.py:292
-#: urpm/cli/commands/history.py:749
+#: urpm/cli/commands/history.py:757
 msgid ""
 "\n"
 "Proceed? [y/N] "
@@ -5956,12 +5956,12 @@ msgstr ""
 msgid "Undo transaction #{tid}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:277 urpm/cli/commands/history.py:734
+#: urpm/cli/commands/history.py:277 urpm/cli/commands/history.py:742
 #, python-brace-format
 msgid "Packages to remove ({count}):"
 msgstr ""
 
-#: urpm/cli/commands/history.py:282 urpm/cli/commands/history.py:739
+#: urpm/cli/commands/history.py:282 urpm/cli/commands/history.py:747
 #, python-brace-format
 msgid "Packages to reinstall ({count}):"
 msgstr ""
@@ -5970,212 +5970,212 @@ msgstr ""
 msgid "Nothing to undo"
 msgstr ""
 
-#: urpm/cli/commands/history.py:305 urpm/cli/commands/history.py:762
+#: urpm/cli/commands/history.py:305 urpm/cli/commands/history.py:770
 msgid ""
 "\n"
 "Interrupted! Finishing current operation..."
 msgstr ""
 
-#: urpm/cli/commands/history.py:324 urpm/cli/commands/history.py:781
-#: urpm/cli/commands/cleanup.py:280
+#: urpm/cli/commands/history.py:324 urpm/cli/commands/history.py:789
+#: urpm/cli/commands/cleanup.py:302
 #, python-brace-format
 msgid "Removing {count} package..."
 msgid_plural "Removing {count} packages..."
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/history.py:338 urpm/cli/commands/history.py:529
-#: urpm/cli/commands/history.py:795
+#: urpm/cli/commands/history.py:338 urpm/cli/commands/history.py:533
+#: urpm/cli/commands/history.py:803
 #, python-brace-format
 msgid "Running: {script_name}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:352 urpm/cli/commands/history.py:809
+#: urpm/cli/commands/history.py:356 urpm/cli/commands/history.py:821
 msgid ""
 "\n"
 "Erase failed:"
 msgstr ""
 
-#: urpm/cli/commands/history.py:361
+#: urpm/cli/commands/history.py:365
 #, python-brace-format
 msgid "Undo interrupted after {count} package"
 msgid_plural "Undo interrupted after {count} packages"
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/history.py:372 urpm/cli/commands/history.py:829
-#: urpm/cli/commands/cleanup.py:333 urpm/cli/commands/cleanup.py:529
+#: urpm/cli/commands/history.py:376 urpm/cli/commands/history.py:841
+#: urpm/cli/commands/cleanup.py:359 urpm/cli/commands/cleanup.py:558
 #, python-brace-format
 msgid "{count} package removed"
 msgid_plural "{count} packages removed"
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/history.py:379 urpm/cli/commands/history.py:836
+#: urpm/cli/commands/history.py:383 urpm/cli/commands/history.py:848
 #, python-brace-format
 msgid "Reinstalling {count} package..."
 msgid_plural "Reinstalling {count} packages..."
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/history.py:415 urpm/cli/commands/history.py:428
-#: urpm/cli/commands/history.py:439 urpm/cli/commands/history.py:479
+#: urpm/cli/commands/history.py:419 urpm/cli/commands/history.py:432
+#: urpm/cli/commands/history.py:443 urpm/cli/commands/history.py:483
 msgid "Warning:"
 msgstr ""
 
-#: urpm/cli/commands/history.py:415
+#: urpm/cli/commands/history.py:419
 #, python-brace-format
 msgid "cannot parse NEVRA: {nevra}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:428
+#: urpm/cli/commands/history.py:432
 #, python-brace-format
 msgid "{nevra} not found in repositories"
 msgstr ""
 
-#: urpm/cli/commands/history.py:439
+#: urpm/cli/commands/history.py:443
 #, python-brace-format
 msgid "media not found for {nevra}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:479
+#: urpm/cli/commands/history.py:483
 #, python-brace-format
 msgid "no URL or servers for {nevra}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:494
+#: urpm/cli/commands/history.py:498
 msgid "Downloading"
 msgstr ""
 
-#: urpm/cli/commands/history.py:497
+#: urpm/cli/commands/history.py:501
 #, python-brace-format
 msgid "{downloaded} downloaded, {cached} from cache"
 msgstr ""
 
-#: urpm/cli/commands/history.py:504
+#: urpm/cli/commands/history.py:508
 msgid "Failed:"
 msgstr ""
 
-#: urpm/cli/commands/history.py:516
+#: urpm/cli/commands/history.py:520
 msgid "  Waiting for RPM lock..."
 msgstr ""
 
-#: urpm/cli/commands/history.py:540
+#: urpm/cli/commands/history.py:548
 msgid "  Reinstall failed:"
 msgstr ""
 
-#: urpm/cli/commands/history.py:552
+#: urpm/cli/commands/history.py:560
 #, python-brace-format
 msgid "{count} package reinstalled"
 msgid_plural "{count} packages reinstalled"
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/history.py:557
+#: urpm/cli/commands/history.py:565
 msgid "Could not reinstall: packages not found in repositories"
 msgstr ""
 
-#: urpm/cli/commands/history.py:561
+#: urpm/cli/commands/history.py:569
 msgid ""
 "\n"
 "Undo interrupted"
 msgstr ""
 
-#: urpm/cli/commands/history.py:575
+#: urpm/cli/commands/history.py:583
 #, python-brace-format
 msgid "Undo complete (transaction #{tid})"
 msgstr ""
 
-#: urpm/cli/commands/history.py:580
+#: urpm/cli/commands/history.py:588
 #, python-brace-format
 msgid "Undo failed: {error}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:621 urpm/cli/commands/history.py:633
+#: urpm/cli/commands/history.py:629 urpm/cli/commands/history.py:641
 msgid "Usage: rollback to <transaction_id|date>"
 msgstr ""
 
-#: urpm/cli/commands/history.py:634
+#: urpm/cli/commands/history.py:642
 msgid "Date formats: DD/MM/YYYY, DD/MM/YYYY HH:MM, YYYY-MM-DD"
 msgstr ""
 
-#: urpm/cli/commands/history.py:641
+#: urpm/cli/commands/history.py:649
 msgid "Count must be at least 1"
 msgstr ""
 
-#: urpm/cli/commands/history.py:644
+#: urpm/cli/commands/history.py:652
 #, python-brace-format
 msgid "Invalid argument: {argument}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:645
+#: urpm/cli/commands/history.py:653
 msgid "Usage: rollback [N] | rollback to <id|date>"
 msgstr ""
 
-#: urpm/cli/commands/history.py:651
+#: urpm/cli/commands/history.py:659
 msgid "No transactions in history"
 msgstr ""
 
-#: urpm/cli/commands/history.py:659
+#: urpm/cli/commands/history.py:667
 msgid "No completed transactions to rollback"
 msgstr ""
 
-#: urpm/cli/commands/history.py:669
+#: urpm/cli/commands/history.py:677
 #, python-brace-format
 msgid "Already at or before transaction #{tid}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:678
+#: urpm/cli/commands/history.py:686
 #, python-brace-format
 msgid "No transactions after {date}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:721
+#: urpm/cli/commands/history.py:729
 #, python-brace-format
 msgid "Rollback to {target}"
 msgstr ""
 
-#: urpm/cli/commands/history.py:723
+#: urpm/cli/commands/history.py:731
 #, python-brace-format
 msgid "Undoing {count} transaction:"
 msgid_plural "Undoing {count} transactions:"
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/history.py:744
+#: urpm/cli/commands/history.py:752
 msgid ""
 "\n"
 "Nothing to do"
 msgstr ""
 
-#: urpm/cli/commands/history.py:818
+#: urpm/cli/commands/history.py:830
 #, python-brace-format
 msgid "Rollback interrupted after {count} package"
 msgid_plural "Rollback interrupted after {count} packages"
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/history.py:842
+#: urpm/cli/commands/history.py:854
 msgid "Note:"
 msgstr ""
 
-#: urpm/cli/commands/history.py:842
+#: urpm/cli/commands/history.py:854
 #, python-brace-format
 msgid "{nevra} needs to be downloaded/installed"
 msgstr ""
 
-#: urpm/cli/commands/history.py:847
+#: urpm/cli/commands/history.py:859
 msgid ""
 "\n"
 "Rollback interrupted"
 msgstr ""
 
-#: urpm/cli/commands/history.py:862
+#: urpm/cli/commands/history.py:874
 #, python-brace-format
 msgid "Rollback complete (transaction #{tid})"
 msgstr ""
 
-#: urpm/cli/commands/history.py:867
+#: urpm/cli/commands/history.py:879
 #, python-brace-format
 msgid "Rollback failed: {error}"
 msgstr ""
@@ -7220,7 +7220,7 @@ msgid ""
 "buildrequires / --all."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:86 urpm/cli/commands/cleanup.py:403
+#: urpm/cli/commands/cleanup.py:86 urpm/cli/commands/cleanup.py:429
 msgid "Searching for orphaned packages..."
 msgstr ""
 
@@ -7299,247 +7299,254 @@ msgstr ""
 msgid "  These packages cannot be removed (system would be unusable)"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:179
+#: urpm/cli/commands/cleanup.py:180
 #, python-brace-format
 msgid "WARNING ({count})"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:179
+#: urpm/cli/commands/cleanup.py:180
 msgid "generally useful packages:"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:183
+#: urpm/cli/commands/cleanup.py:184
 msgid ""
 "\n"
 "  Remove these warned packages anyway? [y/N] "
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:187
+#: urpm/cli/commands/cleanup.py:189
 msgid "  Warned packages will be kept"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:189
+#: urpm/cli/commands/cleanup.py:191
 msgid ""
 "\n"
 "  Warned packages will be kept"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:194
+#: urpm/cli/commands/cleanup.py:207
+#, python-brace-format
+msgid "{count} package kept as well, needed by the packages above:"
+msgid_plural "{count} packages kept as well, needed by the packages above:"
+msgstr[0] ""
+msgstr[1] ""
+
+#: urpm/cli/commands/cleanup.py:216
 msgid ""
 "\n"
 "Nothing safe to remove."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:200 urpm/cli/commands/cleanup.py:449
+#: urpm/cli/commands/cleanup.py:222 urpm/cli/commands/cleanup.py:475
 #, python-brace-format
 msgid "The following package will be removed:"
 msgid_plural "The following {count} packages will be removed:"
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/cleanup.py:213
+#: urpm/cli/commands/cleanup.py:235
 msgid "Orphaned packages"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:214
+#: urpm/cli/commands/cleanup.py:236
 msgid "Old kernels"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:215
+#: urpm/cli/commands/cleanup.py:237
 msgid "Failed dependencies"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:216
+#: urpm/cli/commands/cleanup.py:238
 msgid "Build dependencies"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:221
+#: urpm/cli/commands/cleanup.py:243
 #, python-brace-format
 msgid "{label} ({count}):"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:224 urpm/cli/commands/cleanup.py:454
+#: urpm/cli/commands/cleanup.py:246 urpm/cli/commands/cleanup.py:480
 #, python-brace-format
 msgid "Disk space to free: {size}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:229 urpm/cli/commands/cleanup.py:796
+#: urpm/cli/commands/cleanup.py:251 urpm/cli/commands/cleanup.py:825
 msgid ""
 "\n"
 "Remove these packages? [y/N] "
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:268 urpm/cli/commands/cleanup.py:471
-#: urpm/cli/commands/cleanup.py:817 urpm/cli/commands/_install_pipeline.py:144
+#: urpm/cli/commands/cleanup.py:290 urpm/cli/commands/cleanup.py:497
+#: urpm/cli/commands/cleanup.py:846 urpm/cli/commands/_install_pipeline.py:144
 msgid ""
 "\n"
 "\n"
 "Force abort!"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:274 urpm/cli/commands/cleanup.py:477
-#: urpm/cli/commands/cleanup.py:823 urpm/cli/commands/_install_pipeline.py:149
+#: urpm/cli/commands/cleanup.py:296 urpm/cli/commands/cleanup.py:503
+#: urpm/cli/commands/cleanup.py:852 urpm/cli/commands/_install_pipeline.py:149
 msgid ""
 "\n"
 "\n"
 "Interrupt requested - finishing current package..."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:321 urpm/cli/commands/cleanup.py:516
+#: urpm/cli/commands/cleanup.py:347 urpm/cli/commands/cleanup.py:545
 msgid "Removal failed:"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:327 urpm/cli/commands/cleanup.py:522
+#: urpm/cli/commands/cleanup.py:353 urpm/cli/commands/cleanup.py:551
 msgid "Autoremove interrupted"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:399
+#: urpm/cli/commands/cleanup.py:425
 msgid ""
 "--interactive requires a TTY on stdin. Use 'urpm autoremove --orphans' for "
 "non-interactive mode."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:406
+#: urpm/cli/commands/cleanup.py:432
 msgid "No orphaned packages found."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:409
+#: urpm/cli/commands/cleanup.py:435
 #, python-brace-format
 msgid "  Enriching metadata for {n} orphans..."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:414
+#: urpm/cli/commands/cleanup.py:440
 msgid "Could not enrich orphan metadata."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:425
+#: urpm/cli/commands/cleanup.py:451
 msgid "No decisions made ; nothing applied."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:434
+#: urpm/cli/commands/cleanup.py:460
 #, python-brace-format
 msgid "Marked {n} packages as kept (explicit)."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:588 urpm/cli/commands/cleanup.py:628
+#: urpm/cli/commands/cleanup.py:617 urpm/cli/commands/cleanup.py:657
 #, python-brace-format
 msgid "Not installed: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:591
+#: urpm/cli/commands/cleanup.py:620
 #, python-brace-format
 msgid "Already manual: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:595
+#: urpm/cli/commands/cleanup.py:624
 #, python-brace-format
 msgid "Marked as manual: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:596
+#: urpm/cli/commands/cleanup.py:625
 msgid "These packages are now protected from autoremove."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:631
+#: urpm/cli/commands/cleanup.py:660
 #, python-brace-format
 msgid "Already auto: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:635
+#: urpm/cli/commands/cleanup.py:664
 #, python-brace-format
 msgid "Marked as auto: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:636
+#: urpm/cli/commands/cleanup.py:665
 msgid "These packages can now be autoremoved if no longer needed."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:664
+#: urpm/cli/commands/cleanup.py:693
 msgid "not installed"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:666
+#: urpm/cli/commands/cleanup.py:695
 msgid "auto"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:669
+#: urpm/cli/commands/cleanup.py:698
 msgid "manual"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:673
+#: urpm/cli/commands/cleanup.py:702
 #, python-brace-format
 msgid "Total: {manual} manual, {auto} auto"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:678
+#: urpm/cli/commands/cleanup.py:707
 msgid "Usage: urpm mark <manual|auto|show> [packages...]"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:692
+#: urpm/cli/commands/cleanup.py:721
 msgid "No packages are held."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:695
+#: urpm/cli/commands/cleanup.py:724
 #, python-brace-format
 msgid "Held packages ({count}):"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:700
+#: urpm/cli/commands/cleanup.py:729
 #, python-brace-format
 msgid "(held since {date})"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:716
+#: urpm/cli/commands/cleanup.py:745
 #, python-brace-format
 msgid "Already held: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:719
+#: urpm/cli/commands/cleanup.py:748
 #, python-brace-format
 msgid "Held: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:720
+#: urpm/cli/commands/cleanup.py:749
 msgid ""
 "These packages will be protected from upgrades and obsoletes replacement."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:742
+#: urpm/cli/commands/cleanup.py:771
 #, python-brace-format
 msgid "Not held: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:745
+#: urpm/cli/commands/cleanup.py:774
 #, python-brace-format
 msgid "Unheld: {packages}"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:746
+#: urpm/cli/commands/cleanup.py:775
 msgid "These packages can now be upgraded and replaced by obsoletes."
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:764
+#: urpm/cli/commands/cleanup.py:793
 msgid "No interrupted transactions found"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:777
+#: urpm/cli/commands/cleanup.py:806
 msgid "No orphan dependencies to clean"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:789
+#: urpm/cli/commands/cleanup.py:818
 #, python-brace-format
 msgid ""
 "Found {count} orphan dependencies from {trans} interrupted transaction(s):"
 msgstr ""
 
-#: urpm/cli/commands/cleanup.py:848
+#: urpm/cli/commands/cleanup.py:877
 #, python-brace-format
 msgid "Erasing {count} orphan dependency..."
 msgid_plural "Erasing {count} orphan dependencies..."
 msgstr[0] ""
 msgstr[1] ""
 
-#: urpm/cli/commands/cleanup.py:885
+#: urpm/cli/commands/cleanup.py:918
 #, python-brace-format
 msgid "Erase interrupted after {count} packages"
 msgstr ""
@@ -9518,6 +9525,47 @@ msgstr ""
 msgid ""
 "  Host has no media providing urpm-ng-core for this target.\n"
 "  Fall back to GitHub latest release?  [y/N] "
+msgstr ""
+
+#: urpm/core/resolution/diagnose.py:203
+#, python-brace-format
+msgid "conflicts with {clause}"
+msgstr ""
+
+#: urpm/core/resolution/diagnose.py:205
+#, python-brace-format
+msgid "requires {clause}, which no enabled medium carries"
+msgstr ""
+
+#: urpm/core/resolution/diagnose.py:211
+#, python-brace-format
+msgid "requires {clause}, but only version {avail} is available"
+msgid_plural "requires {clause}, but only versions {avail} are available"
+msgstr[0] ""
+msgstr[1] ""
+
+#: urpm/core/resolution/diagnose.py:217
+#, python-brace-format
+msgid "requires {clause}, and no available version satisfies it"
+msgstr ""
+
+#: urpm/core/resolution/diagnose.py:220
+#, python-brace-format
+msgid "requires {clause}, which this operation would remove"
+msgstr ""
+
+#: urpm/core/resolution/diagnose.py:223
+msgid "filtered out by the media configuration"
+msgstr ""
+
+#: urpm/core/resolution/diagnose.py:224
+#, python-brace-format
+msgid "requires {clause}, whose provider is present but {reason}"
+msgstr ""
+
+#: urpm/core/resolution/diagnose.py:227
+#, python-brace-format
+msgid "requires {clause}, for a reason we could not determine"
 msgstr ""
 
 #: urpm/auth/privileges.py:138

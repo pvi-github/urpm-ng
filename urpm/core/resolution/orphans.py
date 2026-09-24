@@ -325,11 +325,19 @@ class OrphansMixin:
                         continue
                     requires.add(req)
 
-                installed_pkgs[name] = {
-                    'provides': provides,
-                    'requires': requires,
-                    'hdr': hdr,
-                }
+                # Merge, never replace.  A name can be installed more
+                # than once (a distupgrade that failed to drop the old
+                # same-name package leaves mga9 and mga10 side by side),
+                # and a plain assignment would keep only the last header
+                # rpm happened to hand us.  The requires of the other one
+                # would vanish, its dependencies would look unreferenced,
+                # and we would offer to remove packages that are still in
+                # use.  Note the asymmetry this repairs: ``provides_map``
+                # above already accumulates with ``setdefault``.
+                entry = installed_pkgs.setdefault(
+                    name, {'provides': set(), 'requires': set(), 'hdr': hdr})
+                entry['provides'].update(provides)
+                entry['requires'].update(requires)
 
             # Step 1: Find all dependencies of packages being removed
             to_remove = set(initial_removes)
@@ -651,6 +659,83 @@ class OrphansMixin:
             o.name.lower() == target for o in self.find_all_orphans()
         )
 
+    def needed_by_kept(self, candidate_names, kept_names) -> set:
+        """Which candidates a kept package still needs, transitively.
+
+        ``urpm autoremove`` sorts its orphans into three piles: blocked
+        by the blacklist, warned by the redlist, and safe.  Only the
+        safe pile is removed.  Taking a package out of the removal list
+        does not take out what it depends on, though, and rpm then
+        refuses the whole transaction:
+
+            Dependency: dhcp-client-3:4.4.3P1-7.mga10 requires
+                        dhcp-common = 3:4.4.3P1-7.mga10
+
+        Both piles have the exposure, and the blacklist one is silent:
+        the operator never even saw a question.
+
+        Transitive because a rescued package can itself depend on
+        another candidate: keeping ``dhcp-common`` is pointless if the
+        library it needs goes out in the same transaction.
+
+        rpmdb access via urpm.core.rpmdb.open_ts context manager — never
+        open a librpm handle in the parent (module contract, see
+        :mod:`urpm.core.rpmdb`).
+
+        Args:
+            candidate_names: names queued for removal.
+            kept_names: names that will stay installed.
+
+        Returns:
+            The subset of *candidate_names* that must be rescued.  Empty
+            when nothing is kept, which is the common case and costs no
+            rpmdb walk.
+        """
+        candidates = {n for n in candidate_names}
+        kept = {n for n in kept_names}
+        if not candidates or not kept:
+            return set()
+
+        if not HAS_RPM:
+            return set()
+
+        from .. import rpmdb
+
+        with rpmdb.open_ts(self.root or '/') as ts:
+            provides_map = {}   # capability -> set of provider names
+            pkg_requires = {}   # name -> set of required capabilities
+
+            for hdr in ts.dbMatch():
+                name = hdr[rpm.RPMTAG_NAME]
+                if name == 'gpg-pubkey':
+                    continue
+                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
+                    provides_map.setdefault(prov, set()).add(name)
+                # Union, not assignment: a name can be installed twice.
+                # See the note in ``_find_orphans_iterative``.
+                pkg_requires.setdefault(name, set()).update(
+                    r for r in (hdr[rpm.RPMTAG_REQUIRENAME] or [])
+                    if not r.startswith('rpmlib(') and not r.startswith('/')
+                )
+
+        rescued = set()
+        # Breadth-first over the kept set: whatever a kept package needs
+        # and we were about to remove is rescued, and is then itself
+        # treated as kept so its own needs are followed.
+        frontier = list(kept)
+        seen = set(kept)
+        while frontier:
+            name = frontier.pop()
+            for cap in pkg_requires.get(name, ()):
+                for provider in provides_map.get(cap, ()):
+                    if provider in candidates and provider not in rescued:
+                        rescued.add(provider)
+                    if provider not in seen:
+                        seen.add(provider)
+                        frontier.append(provider)
+
+        return rescued
+
     def find_all_orphans(self) -> list:
         """rpmdb access via urpm.core.rpmdb.open_ts context manager — never open a librpm handle in the parent (module contract, see urpm.core.rpmdb).
 
@@ -679,33 +764,43 @@ class OrphansMixin:
         with rpmdb.open_ts(self.root or '/') as ts:
 
             # Single-pass: build provides map, reverse deps, and collect headers
-            installed_pkgs = {}   # name -> hdr
+            installed_pkgs = {}   # name -> hdr (first one seen)
             provides_map = {}     # capability -> set of package names
             reverse_deps = {}     # name -> set of names that require/recommend/
                                   #         suggest it, plus its supplement triggers
-            pkg_requires = {}     # name -> list of capability names
-            pkg_recommends = {}   # name -> list of capability names
-            pkg_suggests = {}     # name -> list of capability names (weak forward dep)
-            pkg_supplements = {}  # name -> list of capability names (reverse weak dep)
+            # The four maps below are unions over *every* installed header
+            # carrying that name, not the last one seen.
+            pkg_requires = {}     # name -> set of capability names
+            pkg_recommends = {}   # name -> set of capability names
+            pkg_suggests = {}     # name -> set of capability names (weak forward dep)
+            pkg_supplements = {}  # name -> set of capability names (reverse weak dep)
 
             for hdr in ts.dbMatch():
                 name = hdr[rpm.RPMTAG_NAME]
                 if name == 'gpg-pubkey':
                     continue
 
-                installed_pkgs[name] = hdr
-                reverse_deps[name] = set()
+                installed_pkgs.setdefault(name, hdr)
+                reverse_deps.setdefault(name, set())
 
                 for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
                     provides_map.setdefault(prov, set()).add(name)
 
-                pkg_requires[name] = [
+                # Union, never replace — see the note in
+                # ``_find_orphans_iterative``.  A same-name duplicate left
+                # by a distupgrade otherwise erases the dependency edges of
+                # whichever header rpm enumerated first, and the packages
+                # it needs are then reported as orphans.
+                pkg_requires.setdefault(name, set()).update(
                     r for r in (hdr[rpm.RPMTAG_REQUIRENAME] or [])
                     if not r.startswith('rpmlib(') and not r.startswith('/')
-                ]
-                pkg_recommends[name] = list(hdr[rpm.RPMTAG_RECOMMENDNAME] or [])
-                pkg_suggests[name] = list(hdr[rpm.RPMTAG_SUGGESTNAME] or [])
-                pkg_supplements[name] = list(hdr[rpm.RPMTAG_SUPPLEMENTNAME] or [])
+                )
+                pkg_recommends.setdefault(name, set()).update(
+                    hdr[rpm.RPMTAG_RECOMMENDNAME] or [])
+                pkg_suggests.setdefault(name, set()).update(
+                    hdr[rpm.RPMTAG_SUGGESTNAME] or [])
+                pkg_supplements.setdefault(name, set()).update(
+                    hdr[rpm.RPMTAG_SUPPLEMENTNAME] or [])
 
             # Build the reverse-dep graph used for orphan DFS.  ``reverse_deps[X]``
             # is the set of packages whose presence protects ``X`` from being
@@ -1722,7 +1817,11 @@ class OrphansMixin:
 
                 all_installed.add(name)
                 name_to_original[name.lower()] = name
-                pkg_headers[name] = hdr
+                # Union across same-name duplicates, never replace — see
+                # the note in ``_find_orphans_iterative``.  Erase-driven
+                # orphan detection has the same exposure: a leftover
+                # mga9 package still needs its libraries.
+                pkg_headers.setdefault(name, hdr)
 
                 provides = set()
                 for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
@@ -1731,27 +1830,27 @@ class OrphansMixin:
                     if cap not in cap_to_pkg:
                         cap_to_pkg[cap] = set()
                     cap_to_pkg[cap].add(name)
-                pkg_provides[name] = provides
+                pkg_provides.setdefault(name, set()).update(provides)
 
                 requires = set()
                 for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
                     if not req.startswith('rpmlib(') and not req.startswith('/'):
                         requires.add(self._extract_cap_name(req))
-                pkg_requires[name] = requires
+                pkg_requires.setdefault(name, set()).update(requires)
 
                 # Also collect RECOMMENDS for dep_tree building
                 recommends = set()
                 for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
                     if not rec.startswith('rpmlib(') and not rec.startswith('/'):
                         recommends.add(self._extract_cap_name(rec))
-                pkg_recommends[name] = recommends
+                pkg_recommends.setdefault(name, set()).update(recommends)
 
                 # Also collect SUGGESTS for dep_tree building
                 suggests = set()
                 for sug in (hdr[rpm.RPMTAG_SUGGESTNAME] or []):
                     if not sug.startswith('rpmlib(') and not sug.startswith('/'):
                         suggests.add(self._extract_cap_name(sug))
-                pkg_suggests[name] = suggests
+                pkg_suggests.setdefault(name, set()).update(suggests)
 
                 # Collect SUPPLEMENTS — reverse weak-dep: ``name`` is pulled
                 # in by the presence of any installed package providing one
@@ -1764,7 +1863,7 @@ class OrphansMixin:
                 for supp in (hdr[rpm.RPMTAG_SUPPLEMENTNAME] or []):
                     if not supp.startswith('rpmlib(') and not supp.startswith('/'):
                         supplements.add(self._extract_cap_name(supp))
-                pkg_supplements[name] = supplements
+                pkg_supplements.setdefault(name, set()).update(supplements)
 
             # Helper: resolve a capability to the installed package that provides it
             def resolve_cap_to_pkg(cap: str) -> Optional[str]:

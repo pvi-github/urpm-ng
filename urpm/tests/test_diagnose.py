@@ -121,7 +121,13 @@ class TestFormatDependencyIssue:
         msg = format_dependency_issue(issue)
         assert "kwin-5.27.10-1.4" in msg
         assert "kwin-x11 = 5.27.10-1.4.mga9" in msg
-        assert "n'existe" in msg
+        # The kind must reach the wording, but the wording itself is
+        # not pinned: comparing against a literal ties the test to one
+        # phrasing, and this file already broke once when the msgids
+        # were rewritten.  Compare kinds against each other instead.
+        other = format_dependency_issue(
+            DepIssue(**{**issue.__dict__, "kind": "unknown"}))
+        assert msg != other
 
     def test_version_mismatch_singular(self):
         issue = DepIssue(
@@ -164,7 +170,12 @@ class TestFormatDependencyIssue:
             requester="foo-1.0",
         )
         msg = format_dependency_issue(issue)
-        assert "conflit" in msg.lower()
+        # A conflict must not be phrased as a requirement; checked by
+        # contrast rather than by keyword, for the reason above.
+        as_requirement = format_dependency_issue(
+            DepIssue(**{**issue.__dict__, "sense_label": "requires"}))
+        assert msg != as_requirement
+        assert "bar" in msg and "foo-1.0" in msg
 
 
 class TestFromRpmlibTuple:

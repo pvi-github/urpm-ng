@@ -175,6 +175,7 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         print(colors.error(_("  These packages cannot be removed (system would be unusable)")))
 
     # Handle warned packages
+    warned_kept = bool(warned)
     if warned and not getattr(args, 'auto', False):
         print("\n  " + colors.warning(_("WARNING ({count})").format(count=len(warned))) + " - " + _("generally useful packages:"))
         for name, nevra, _s, _r in warned:
@@ -183,10 +184,31 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
             response = input(_("\n  Remove these warned packages anyway? [y/N] "))
             if confirm_yes(response):
                 safe.extend(warned)
+                warned_kept = False
             else:
                 print(_("  Warned packages will be kept"))
         except (KeyboardInterrupt, EOFError):
             print(_("\n  Warned packages will be kept"))
+    elif warned:
+        # ``--auto``: no prompt, so the redlist keeps them silently.
+        pass
+
+    # Everything we just took out of the list stays installed, and what
+    # it depends on must stay too.  Without this, keeping dhcp-client
+    # while removing dhcp-common hands rpm a transaction it can only
+    # refuse, after the operator has already confirmed it.
+    kept_names = {pkg[0] for pkg in blocked}
+    if warned_kept:
+        kept_names.update(pkg[0] for pkg in warned)
+    rescued = resolver.needed_by_kept({pkg[0] for pkg in safe}, kept_names)
+    if rescued:
+        safe = [pkg for pkg in safe if pkg[0] not in rescued]
+        print("\n  " + colors.info(ngettext(
+            "{count} package kept as well, needed by the packages above:",
+            "{count} packages kept as well, needed by the packages above:",
+            len(rescued)).format(count=len(rescued))))
+        for name in sorted(rescued):
+            print(f"    {colors.info(name)}")
 
     packages_to_remove = safe
 
@@ -315,7 +337,11 @@ def cmd_autoremove(args, db: 'PackageDatabase') -> int:
         queue_result = queue.execute(progress_callback=queue_progress, full_sync=sync_mode)
 
         # Print done
-        print(f"\r\033[K  [{len(package_names)}/{len(package_names)}] " + _("done"))
+        # Claim completion only when the transaction actually ran:
+        # rpm can reject at ts.check(), before touching a package.
+        print("\r\033[K", end='')
+        if queue_result.success:
+            print(f"  [{len(package_names)}/{len(package_names)}] " + _("done"))
 
         if not queue_result.success:
             print(colors.error("\n" + _("Removal failed:")))
@@ -509,8 +535,11 @@ def _cmd_autoremove_interactive(
         queue_result = queue.execute(
             progress_callback=queue_progress, full_sync=sync_mode)
 
-        print(f"\r\033[K  [{len(result.to_remove)}/{len(result.to_remove)}] "
-              + _("done"))
+        # Claim completion only when the transaction actually ran:
+        # rpm can reject at ts.check(), before touching a package.
+        print("\r\033[K", end='')
+        if queue_result.success:
+            print(f"  [{len(result.to_remove)}/{len(result.to_remove)}] " + _("done"))
 
         if not queue_result.success:
             print(colors.error("\n" + _("Removal failed:")))
@@ -872,7 +901,11 @@ def cmd_cleandeps(args, db: 'PackageDatabase') -> int:
         queue_result = queue.execute(progress_callback=queue_progress, full_sync=sync_mode)
 
         # Print done
-        print(f"\r\033[K  [{len(packages_to_erase)}/{len(packages_to_erase)}] " + _("done"))
+        # Claim completion only when the transaction actually ran:
+        # rpm can reject at ts.check(), before touching a package.
+        print("\r\033[K", end='')
+        if queue_result.success:
+            print(f"  [{len(packages_to_erase)}/{len(packages_to_erase)}] " + _("done"))
 
         if not queue_result.success:
             print(colors.error("\n" + _("Erase failed:")))

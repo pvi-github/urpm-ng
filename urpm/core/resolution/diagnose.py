@@ -36,7 +36,12 @@ class DepIssue:
 
     Attributes:
         kind: One of ``"missing"``, ``"version_mismatch"``,
-            ``"excluded"``, ``"unknown"``.
+            ``"excluded"``, ``"being_removed"``, ``"unknown"``.
+            ``being_removed`` is the erase-side case: the capability
+            exists and is installed, we are simply about to delete its
+            provider.  The media-facing kinds do not apply there, and
+            classifying it ``unknown`` would answer "for a reason we
+            could not determine" about a reason we know exactly.
         dep_name: Capability name that could not be satisfied.
         dep_op: Comparison operator (``""``, ``"<"``, ``"<="``, ``"="``,
             ``">="``, ``">"``); empty for an unversioned require.
@@ -195,28 +200,69 @@ def format_dependency_issue(issue: DepIssue) -> str:
     is_conflict = issue.sense_label == "conflicts"
 
     if is_conflict:
-        body = _("conflits avec {clause}").format(clause=clause)
+        body = _("conflicts with {clause}").format(clause=clause)
     elif issue.kind == "missing":
-        body = _("requiert {clause} ; ce paquet n'existe dans aucun media activé").format(clause=clause)
+        body = _("requires {clause}, which no enabled medium carries").format(
+            clause=clause)
     elif issue.kind == "version_mismatch":
         if issue.available_versions:
             avail = ", ".join(issue.available_versions)
             body = ngettext(
-                "requiert {clause} ; seule la version {avail} est disponible",
-                "requiert {clause} ; seules les versions {avail} sont disponibles",
+                "requires {clause}, but only version {avail} is available",
+                "requires {clause}, but only versions {avail} are available",
                 len(issue.available_versions),
             ).format(clause=clause, avail=avail)
         else:
-            body = _("requiert {clause} ; aucune version disponible ne satisfait la contrainte").format(clause=clause)
+            body = _(
+                "requires {clause}, and no available version satisfies it"
+            ).format(clause=clause)
+    elif issue.kind == "being_removed":
+        body = _("requires {clause}, which this operation would remove").format(
+            clause=clause)
     elif issue.kind == "excluded":
-        reason = issue.reason or _("filtré par la configuration des media")
-        body = _("requiert {clause} ; provider présent mais {reason}").format(clause=clause, reason=reason)
+        reason = issue.reason or _("filtered out by the media configuration")
+        body = _("requires {clause}, whose provider is present but {reason}").format(
+            clause=clause, reason=reason)
     else:
-        body = _("requiert {clause} ; raison non déterminée").format(clause=clause)
+        body = _("requires {clause}, for a reason we could not determine").format(
+            clause=clause)
 
     if issue.requester:
         return f"{issue.requester} {body}"
     return body
+
+
+def from_rpmlib_erase_tuple(t) -> DepIssue:
+    """Classify an ``rpm.ts.check()`` tuple raised by an *erase*.
+
+    ``from_rpmlib_tuple`` classifies against the media, which is the
+    right question for an install and the wrong one for a removal:
+    nothing is missing from a mirror here, we are simply about to
+    delete a provider something still needs.  Without a database it
+    would fall back to ``unknown`` and print "for a reason we could
+    not determine" about the one case where the reason is certain.
+
+    Args:
+        t: The tuple as produced by ``rpm.TransactionSet.check()``.
+
+    Returns:
+        A :class:`DepIssue` of kind ``being_removed``, or kind
+        ``unknown`` carrying the raw tuple when the shape is not the
+        one we know.
+    """
+    try:
+        (n, v, r), (dep_name, dep_version), flags, _suggest, sense = t
+    except (TypeError, ValueError):
+        return DepIssue(kind="unknown", dep_name=str(t))
+
+    return DepIssue(
+        kind="being_removed",
+        dep_name=dep_name or "",
+        dep_op=decode_rpmsense_flags(flags) if flags else "",
+        dep_version=dep_version or "",
+        sense_label=decode_rpmdep_sense(sense),
+        requester=f"{n}-{v}-{r}" if n else "",
+    )
 
 
 def from_rpmlib_tuple(t, db=None, pool=None) -> DepIssue:

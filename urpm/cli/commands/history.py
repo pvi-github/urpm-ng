@@ -346,7 +346,11 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
             queue_result = queue.execute(progress_callback=queue_progress)
 
             # Print done
-            print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] " + _("done"))
+            # Claim completion only when the transaction actually ran:
+            # rpm can reject at ts.check(), before touching a package.
+            print("\r\033[K", end='')
+            if queue_result.success:
+                print(f"  [{len(to_remove)}/{len(to_remove)}] " + _("done"))
 
             if not queue_result.success:
                 print(colors.error(_("\nErase failed:")))
@@ -534,7 +538,11 @@ def cmd_undo(args, db: 'PackageDatabase') -> int:
                         last_install_shown[0] = label
 
                 install_result = install_queue.execute(progress_callback=install_progress)
-                print(f"\r\033[K  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done"))
+                # Claim completion only when the transaction actually ran:
+                # rpm can reject at ts.check(), before touching a package.
+                print("\r\033[K", end='')
+                if install_result.success:
+                    print(f"  [{len(rpm_paths)}/{len(rpm_paths)}] " + _("done"))
 
                 if not install_result.success:
                     print(colors.error(_("  Reinstall failed:")))
@@ -803,7 +811,11 @@ def cmd_rollback(args, db: 'PackageDatabase') -> int:
             queue_result = queue.execute(progress_callback=queue_progress)
 
             # Print done
-            print(f"\r\033[K  [{len(to_remove)}/{len(to_remove)}] " + _("done"))
+            # Claim completion only when the transaction actually ran:
+            # rpm can reject at ts.check(), before touching a package.
+            print("\r\033[K", end='')
+            if queue_result.success:
+                print(f"  [{len(to_remove)}/{len(to_remove)}] " + _("done"))
 
             if not queue_result.success:
                 print(colors.error(_("\nErase failed:")))
