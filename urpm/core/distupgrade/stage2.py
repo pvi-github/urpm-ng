@@ -153,6 +153,14 @@ def download_plan(
     dict summary with ``nevra_to_path`` mapping the successful
     downloads to their on-disk RPM paths (consumed by Stage 3).
 
+    ``nevra_to_name`` travels beside it, for the same reason and with
+    the same lifetime.  The plan crosses the execvp as bare NEVRA
+    strings, and Stage 3 needs each package's name to record its row
+    in the history.  The solver has both in hand here; recovering the
+    name later would mean re-reading 2400 RPM headers, or picking it
+    out of the NEVRA with a pattern, which is the kind of guessing
+    this project does not do.
+
     ``progress_callback`` : forwarded verbatim to
     :meth:`PackageOperations.download_packages`.  See the signature
     documented in :meth:`Downloader.download_all` — same one
@@ -166,6 +174,7 @@ def download_plan(
         "already_present": 0,
         "failed": [],
         "nevra_to_path": {},
+        "nevra_to_name": {},
     }
     if not result.actions:
         return summary
@@ -175,6 +184,13 @@ def download_plan(
         raise Stage2Error(
             "download_plan received a Resolution without an attached "
             "resolver ; call solve_distupgrade() to obtain one.")
+
+    # Built from the solver's own actions rather than from the download
+    # results: a package already in cache never produces a download
+    # result, and its row still has to be recorded.  Filled after the
+    # guard above so a malformed ``Resolution`` still gets the clear
+    # Stage2Error rather than an attribute error from here.
+    summary["nevra_to_name"] = {a.nevra: a.name for a in result.actions}
 
     ops = PackageOperations(db)
     download_items, local_paths = ops.build_download_items(
@@ -358,5 +374,6 @@ def run_stage2(
         "plan_head": plan_head,
         "download": download_summary,
         "nevra_to_path": download_summary["nevra_to_path"],
+        "nevra_to_name": download_summary.get("nevra_to_name") or {},
         "resolver": getattr(result, "_resolver", None),
     }

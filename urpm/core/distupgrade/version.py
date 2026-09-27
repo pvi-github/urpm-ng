@@ -41,6 +41,21 @@ class ReleaseIdentity:
         return self.identity
 
 
+def identity_of(display_value: str) -> str:
+    """Recover the identity from what :meth:`ReleaseIdentity.display` wrote.
+
+    ``display()`` joins identity and numeric with a colon when the two
+    differ (``"cauldron:11"``), and the distupgrade state persists that
+    string verbatim.  Anything that has to build or match a URL wants
+    the identity back : mirrors publish under ``/cauldron/``, never
+    under ``/cauldron:11/``.
+
+    A plain identity passes through unchanged, so a caller never has to
+    know which of the two forms the state happens to hold.
+    """
+    return (display_value or "").split(":", 1)[0].strip()
+
+
 class VersionDetectionError(Exception):
     """No target release could be determined."""
 

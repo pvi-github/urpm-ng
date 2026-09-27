@@ -43,7 +43,7 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from .background_install import (
     InstallLock,
@@ -402,6 +402,13 @@ class OperationResult:
     errors: List[str] = field(default_factory=list)
     rpmnew_files: List[str] = field(default_factory=list)  # Config files saved as .rpmnew
     readme_messages: list = field(default_factory=list)  # README.urpmi [{package, content}]
+    # What rpm was actually asked to do, so the caller can judge each
+    # package against the rpmdb afterwards and write the verdict to the
+    # history.  Empty on a dry run, which is what keeps a ``--test``
+    # from marking every planned row failed.
+    attempted: List[str] = field(default_factory=list)
+    attempted_erases: List[str] = field(default_factory=list)
+    callback_reasons: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -480,6 +487,18 @@ class QueueProgressMessage:
     script_type: int = 0     # RPMTAG_* of the current scriptlet (0 = none)
     scriptlet_output: str = ""  # Captured stdout from RPM scriptlets
     script_errors: List[str] = field(default_factory=list)  # Packages with scriptlet errors
+    # Per-package outcome, for the history.  ``attempted`` lists the
+    # NEVRAs actually handed to rpm and ``attempted_erases`` the names,
+    # so the parent knows what to judge; a dry run hands over nothing
+    # and therefore leaves every history row untouched.  The verdict
+    # itself is not here: rpm fires INST_STOP even when extraction
+    # failed, so only the rpmdb can say what landed, and only the
+    # parent reads it.  ``callback_reasons`` maps a NEVRA to why rpm
+    # looks unhappy about it, which turns a bare « absent » into
+    # something an operator can act on.
+    attempted: List[str] = field(default_factory=list)
+    attempted_erases: List[str] = field(default_factory=list)
+    callback_reasons: dict = field(default_factory=dict)
 
     def to_json(self) -> str:
         d = {
@@ -504,6 +523,15 @@ class QueueProgressMessage:
             d['scriptlet_output'] = self.scriptlet_output
         if self.script_errors:
             d['script_errors'] = self.script_errors
+        # Only when there is something to say: these travel on the two
+        # end-of-operation messages and would otherwise weigh on every
+        # progress line, of which there are thousands.
+        if self.attempted:
+            d['attempted'] = self.attempted
+        if self.attempted_erases:
+            d['attempted_erases'] = self.attempted_erases
+        if self.callback_reasons:
+            d['callback_reasons'] = self.callback_reasons
         return json.dumps(d)
 
     @classmethod
@@ -528,6 +556,9 @@ class QueueProgressMessage:
             script_type=d.get('script_type', 0),
             scriptlet_output=d.get('scriptlet_output', ''),
             script_errors=d.get('script_errors', []),
+            attempted=d.get('attempted', []),
+            attempted_erases=d.get('attempted_erases', []),
+            callback_reasons=d.get('callback_reasons', {}),
         )
 
 
@@ -540,6 +571,43 @@ _PHASE_MAP = {
     'script_done': TransactionPhase.SCRIPT,
     'erase': TransactionPhase.ERASE,
 }
+
+
+def _header_name(hdr) -> str:
+    """The package name from an rpm header, as text.
+
+    RPM hands back bytes or str depending on the binding's build, and
+    the value ends up as a dictionary key compared against what the
+    planner recorded, so it is normalised once here.
+    """
+    raw = hdr['name']
+    if isinstance(raw, bytes):
+        return raw.decode('utf-8', 'replace')
+    return str(raw) if raw is not None else ""
+
+
+def _carry_attempts(result: 'OperationResult',
+                    msg: QueueProgressMessage) -> None:
+    """Move the per-package outcome fields from a message onto a result.
+
+    Called from more than one message type on purpose.  Under smart
+    sync the parent releases as soon as extraction is over and never
+    reads ``op_done``, so what rpm was asked to do has to reach it on
+    the progress message that marks that release, exactly like the
+    README messages next to it.  The callback reasons only exist once
+    the run is over, so they arrive later or not at all; a missing
+    reason costs the operator a ``skipped`` refined into ``failed``,
+    never a wrong verdict, since the verdict comes from the rpmdb.
+
+    Assignments are guarded so a later message carrying nothing cannot
+    erase what an earlier one already delivered.
+    """
+    if msg.attempted:
+        result.attempted = list(msg.attempted)
+    if msg.attempted_erases:
+        result.attempted_erases = list(msg.attempted_erases)
+    if msg.callback_reasons:
+        result.callback_reasons = dict(msg.callback_reasons)
 
 
 def _msg_to_progress(msg: QueueProgressMessage) -> TransactionProgress:
@@ -592,6 +660,14 @@ class TransactionQueue:
         # (not only in _child_process) so callbacks that fire on a path
         # where the child hasn't overwritten it still find the attribute.
         self._script_error_packages: set[str] = set()
+        # What rpm was actually asked to do, reported to the parent so
+        # it can judge each package against the rpmdb and write the
+        # history.  Reset at the start of every operation, so a path
+        # that runs no transaction leaves them empty and the parent
+        # touches nothing.
+        self._name_by_path: Dict[str, str] = {}
+        self._erased_names: List[str] = []
+        self._callback_reasons: Dict[str, str] = {}
 
     @staticmethod
     def _userns_available() -> tuple[bool, str]:
@@ -903,6 +979,7 @@ class TransactionQueue:
                         current_op_result.count = msg.count or 0
                         current_op_result.rpmnew_files = msg.rpmnew_files or []
                         current_op_result.readme_messages = msg.readme_messages or []
+                        _carry_attempts(current_op_result, msg)
                         results.append(current_op_result)
                         current_op_result = None
                 elif msg.msg_type == 'op_error':
@@ -917,6 +994,10 @@ class TransactionQueue:
                             current_op_result.errors = [msg.error]
                         else:
                             current_op_result.errors = []
+                        # Carried on the failure path too: a transaction
+                        # that went wrong is the one whose per-package
+                        # verdict the operator most needs.
+                        _carry_attempts(current_op_result, msg)
                         results.append(current_op_result)
                         current_op_result = None
                 elif msg.msg_type == 'queue_error':
@@ -1070,6 +1151,14 @@ class TransactionQueue:
                 op_type=op.op_type.value,
             ))
 
+            # What rpm was asked to do is per-operation, so it is wiped
+            # here rather than inside the helpers: an operation that
+            # bails out before building its transaction must not report
+            # the previous one's packages.
+            self._name_by_path = {}
+            self._erased_names = []
+            self._callback_reasons = {}
+
             if op.op_type == OperationType.INSTALL:
                 success, count, errors, rpmnew_files = self._execute_install(
                     op, pipe_state,
@@ -1083,21 +1172,34 @@ class TransactionQueue:
                 rpmnew_files = []
 
             if success:
+                # For an install this is the *second* ``op_done``: the
+                # helper already sent one and the parent keeps the
+                # first.  For an erase it is the only one, which is why
+                # the per-package outcome has to be on it too.
                 self._send_msg(pipe_state, QueueProgressMessage(
                     msg_type='op_done',
                     operation_id=op.operation_id,
                     count=count,
                     rpmnew_files=rpmnew_files,
+                    attempted=sorted(self._name_by_path.values()),
+                    attempted_erases=sorted(self._erased_names),
+                    callback_reasons=dict(self._callback_reasons),
                 ))
                 if store_readmes and op.op_type == OperationType.INSTALL:
                     self._store_readmes_in_db(op)
             else:
                 error_msg = errors[0] if errors else "Unknown error"
+                # A failed operation is the one whose per-package
+                # verdict matters most, and no helper sent anything on
+                # this path.
                 self._send_msg(pipe_state, QueueProgressMessage(
                     msg_type='op_error',
                     operation_id=op.operation_id,
                     error=error_msg,
                     errors=errors,
+                    attempted=sorted(self._name_by_path.values()),
+                    attempted_erases=sorted(self._erased_names),
+                    callback_reasons=dict(self._callback_reasons),
                 ))
                 return False, error_msg
 
@@ -1215,6 +1317,13 @@ class TransactionQueue:
                     if msg.readme_messages and current_op_result:
                         current_op_result.readme_messages = msg.readme_messages
 
+                    # Same message, same reason: what rpm was asked to
+                    # do must reach the parent before the smart-sync
+                    # release point below, which breaks out of this loop
+                    # without ever reading ``op_done``.
+                    if current_op_result:
+                        _carry_attempts(current_op_result, msg)
+
                     # ── Smart sync release point ──
                     # When all packages are extracted and we enter script
                     # phase, the parent can release.  The child continues
@@ -1236,6 +1345,7 @@ class TransactionQueue:
                         current_op_result.count = msg.count
                         current_op_result.rpmnew_files = msg.rpmnew_files or []
                         current_op_result.readme_messages = msg.readme_messages or []
+                        _carry_attempts(current_op_result, msg)
                         results.append(current_op_result)
                     current_op_result = None
 
@@ -1243,6 +1353,7 @@ class TransactionQueue:
                     if current_op_result:
                         current_op_result.success = False
                         current_op_result.errors = msg.errors or [msg.error]
+                        _carry_attempts(current_op_result, msg)
                         results.append(current_op_result)
                     current_op_result = None
                     break
@@ -1584,10 +1695,19 @@ class TransactionQueue:
 
         Returns ``(ts, [])`` on success or ``(None, errors)`` if a
         header could not be read from one of the RPMs.
+
+        Fills ``self._name_by_path`` on the way.  The rpm callback
+        identifies packages by the path handed to ``addInstall``, and
+        the header read here is the only place where that path and the
+        package's name are both in hand.  The name, not the NEVRA, is
+        what travels: it needs no agreement on how to spell an epoch
+        between the planner and rpm, and it is enough to attach a
+        reason to a history row.
         """
         import rpm
         import sys
 
+        self._name_by_path = {}
         ts = rpm.TransactionSet(self.root or '/')
         if op.verify_signatures:
             ts.setVSFlags(0)
@@ -1601,6 +1721,7 @@ class TransactionQueue:
                 try:
                     hdr = ts.hdrFromFdno(fd)
                     ts.addInstall(hdr, str(path), 'u')
+                    self._name_by_path[str(path)] = _header_name(hdr)
                     if DEBUG_EXECINSTALL:
                         _debug_write(f"[install] added: {Path(path).name}")
                 finally:
@@ -1742,6 +1863,11 @@ class TransactionQueue:
         (upgrade-only-already-installed, needed-by-installed only,
         clean success) so those three branches no longer duplicate
         the ``pipe_state['file'].write(...); flush()`` dance.
+
+        ``attempted`` and the callback reasons ride along: this message
+        is the first ``op_done`` the parent sees for an install, and on
+        the paths that never ran a transaction both are empty, which is
+        what tells the parent to leave the history alone.
         """
         readme_data = self._collect_readme_messages(op)
         if pipe_state['closed']:
@@ -1753,6 +1879,8 @@ class TransactionQueue:
                 count=total,
                 rpmnew_files=new_rpmnew_files,
                 readme_messages=readme_data,
+                attempted=sorted(self._name_by_path.values()),
+                callback_reasons=dict(self._callback_reasons),
             ).to_json() + "\n")
             pipe_state['file'].flush()
         except (BrokenPipeError, OSError):
@@ -1821,6 +1949,12 @@ class TransactionQueue:
             pass
 
         if op.test:
+            # Nothing was committed, so nothing may be judged.  The
+            # map was filled while building the transaction; clearing
+            # it is what stops the parent from reading the rpmdb,
+            # finding none of these packages, and marking every
+            # planned row failed after a dry run.
+            self._name_by_path = {}
             return True, len(rpm_paths), [], []
 
         # RPM callback state machine
@@ -2238,6 +2372,25 @@ class TransactionQueue:
         rpmnew_after = _list_rpmnew_files(self.root or "/")
         new_rpmnew_files = list(rpmnew_after - rpmnew_before)
 
+        # Why rpm looks unhappy about a package, by name, for the
+        # parent to attach to a history row.  This is not the verdict:
+        # rpm fires INST_STOP even when the payload failed to extract,
+        # so only the rpmdb can say what landed.  It is the reason that
+        # turns a bare « absent » into something actionable, and the
+        # order below is from most to least specific.
+        self._callback_reasons = {}
+        for phase, reason in (("inst_start", "never-started"),
+                              ("inst_stop", "started-without-finishing")):
+            missing = {str(p) for p in rpm_paths} - pkg_callback_seen[phase]
+            for path in missing:
+                self._callback_reasons.setdefault(
+                    self._name_by_path.get(path, path), reason)
+        for phase in ("cpio_error", "unpack_error"):
+            for path in pkg_callback_seen[phase]:
+                self._callback_reasons[
+                    self._name_by_path.get(str(path), str(path))] = \
+                    phase.replace("_", "-")
+
         try:
             if _sampler is not None:
                 _sampler.stop()
@@ -2384,6 +2537,11 @@ class TransactionQueue:
 
         if op.test:
             return True, len(found), []
+
+        # Past the dry-run gate: rpm is about to be asked to remove
+        # these, so the parent may judge the matching history rows.
+        # Announced here rather than above for exactly that reason.
+        self._erased_names = [name for name, _hdr in found]
 
         total = len(found)
         completed = [0]

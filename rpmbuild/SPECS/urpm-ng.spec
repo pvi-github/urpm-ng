@@ -358,8 +358,10 @@ fi
 # hardcoded library path.  Never %%{_libdir}, which is /usr/lib64 here:
 # these rules are arch-independent and the code reads /usr/lib.
 install -dm755 %{buildroot}%{_sysconfdir}/urpm/hooks.d
-install -Dm644 data/usr/lib/urpm/hooks.d/50-declared-restarts.cfg \
-    %{buildroot}%{_exec_prefix}/lib/urpm/hooks.d/50-declared-restarts.cfg
+for _rule in data/usr/lib/urpm/hooks.d/*.cfg; do
+    install -Dm644 "$_rule" \
+        %{buildroot}%{_exec_prefix}/lib/urpm/hooks.d/"$(basename "$_rule")"
+done
 
 # Install PolicyKit policy
 install -Dm644 data/org.mageia.urpm.policy %{buildroot}%{_datadir}/polkit-1/actions/org.mageia.urpm.policy

@@ -352,6 +352,11 @@ def cmd_erase(args, db: 'PackageDatabase') -> int:
         # reference was captured at module load (see top-of-file) so a
         # self-removal of urpm-ng-core does not break this post-tx step.
         ops.record_scriptlet_output(transaction_id, queue_result)
+        # Give each planned removal its verdict: a package is ``done``
+        # when it is gone from the rpm database, which is the mirror of
+        # the test an install gets.
+        ops.record_action_outcomes(transaction_id, queue_result,
+                                   root=rpm_root or "/")
         _display_scriptlet_output(
             queue_result,
             verbose=getattr(args, 'verbose', False),

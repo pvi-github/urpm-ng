@@ -95,3 +95,55 @@ def bump_stage(stage: str, db: "PackageDatabase") -> None:
 def delete_state(db: "PackageDatabase") -> None:
     """Clear the state row.  No-op when absent."""
     db.set_config(STATE_CONFIG_KEY, None)
+
+
+#: Set once, at the first transaction a distupgrade opens.  Marks where
+#: the operation begins in the history; everything tagged
+#: ``distupgrade`` from there on belongs to it.
+FIRST_TRANSACTION_KEY = "first_transaction_id"
+
+
+def note_first_transaction(db: "PackageDatabase", transaction_id: int) -> None:
+    """Record where this distupgrade starts in the history, once.
+
+    Called by every distupgrade transaction as it opens, and writes
+    only the first time.  A resume reopens transactions with higher
+    ids, so the boundary set on the original run still holds and must
+    not move.
+    """
+    state = read_state(db) or {}
+    if state.get(FIRST_TRANSACTION_KEY) is not None:
+        return
+    state[FIRST_TRANSACTION_KEY] = int(transaction_id)
+    write_state(state, db)
+
+
+def transaction_ids(db: "PackageDatabase") -> list:
+    """Every transaction the current distupgrade is made of.
+
+    Tx B commits in batches — 22 of them on a real mga9 to mga10 — and
+    the retry pass opens one more.  Each is a transaction of its own,
+    so anything reasoning about « what this distupgrade did » has to
+    span them all.  Keeping a list in the state meant maintaining it:
+    appending per batch, avoiding duplicates on a resume, holding an
+    order.  The history already knows: these transactions carry the
+    ``distupgrade`` action, and the boundary above says where the
+    operation starts.
+
+    Batching therefore stops leaking into what Stage 4 has to know.
+    Twenty-four batches tomorrow changes nothing here.
+
+    Returns:
+        Transaction ids in chronological order, empty when no
+        distupgrade is under way.
+    """
+    state = read_state(db)
+    if not state:
+        return []
+    first = state.get(FIRST_TRANSACTION_KEY)
+    if first is None:
+        return []
+    rows = db.conn.execute(
+        "SELECT id FROM history WHERE action = 'distupgrade' AND id >= ? "
+        "ORDER BY id", (int(first),)).fetchall()
+    return [int(row[0]) for row in rows]

@@ -195,10 +195,14 @@ class TestRunStage3TxA:
         ops.complete_transaction.assert_called_once_with(100)
         smoke.assert_called_once()
 
-        # rpmnew + transaction_id persisted for Stage 4.
+        # rpmnew persisted for Stage 4, and the boundary that tells it
+        # where this distupgrade starts in the history.  The per-side
+        # transaction id is gone: Tx B commits in batches, so a single
+        # id could only ever name the last one.
         state = read_state(state_db)
         assert state["stage"] == "tx_a_done"
-        assert state["tx_a_transaction_id"] == 100
+        assert state["first_transaction_id"] == 100
+        assert "tx_a_transaction_id" not in state
         assert state["rpmnew_files_tx_a"] == ["/etc/foo.rpmnew"]
 
     def test_missing_rpm_path_raises(self, state_db):
@@ -315,7 +319,8 @@ class TestRunStage3TxB:
 
         state = read_state(state_db)
         assert state["stage"] == "transactions_done"
-        assert state["tx_b_transaction_id"] == 200
+        assert state["first_transaction_id"] == 200
+        assert "tx_b_transaction_id" not in state
         assert state["rpmnew_files_tx_b"] == ["/etc/bar.rpmnew"]
 
 

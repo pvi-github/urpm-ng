@@ -34,6 +34,8 @@ import subprocess
 import time
 from typing import TYPE_CHECKING, List, Optional
 
+from .state import note_first_transaction
+
 if TYPE_CHECKING:
     from ..database import PackageDatabase
 
@@ -168,6 +170,53 @@ def split_entries(plan) -> "tuple[list, list]":
     return installs, erases
 
 
+def _record_plan_rows(db: "PackageDatabase", tx_id: int,
+                      install_nevras: List[str],
+                      erase_names: List[str]) -> None:
+    """Write the planned package rows of a distupgrade transaction.
+
+    Every other command hands its resolver actions to
+    ``begin_transaction`` and gets these rows for free.  A distupgrade
+    cannot: its plan crosses the execvp as bare strings, so the rows
+    are written here from the two things that did survive, the plan
+    itself and the ``nevra_to_name`` map Stage 2 persisted beside it.
+
+    Without them the transaction has no package rows at all, and the
+    post-operation rules evaluate over nothing.
+
+    A removal is recorded with the NEVRA of the build actually
+    installed, not with the bare name.  The verdict on a removal is
+    « this build is gone from the rpm database », which needs the
+    exact build to ask about; the lookup costs a fraction of a
+    millisecond per name and buys an unambiguous row.
+
+    Nothing here raises: a distupgrade must not fail over its own
+    bookkeeping.
+    """
+    from .state import read_state
+
+    try:
+        state = read_state(db) or {}
+        names = state.get("nevra_to_name") or {}
+        for nevra in install_nevras:
+            name = names.get(nevra) or names.get(_strip_epoch(nevra))
+            if not name:
+                # A plan entry the solver did not produce.  Recording
+                # a row we cannot identify would be worse than none.
+                continue
+            db.record_package(tx_id, nevra, name, 'install', 'dependency')
+
+        if erase_names:
+            from ..rpmdb import query_by_name
+            for name in erase_names:
+                for pkg in query_by_name(name):
+                    db.record_package(tx_id, pkg.nevra, name,
+                                      'remove', 'dependency')
+                    break
+    except Exception:  # noqa: BLE001 — bookkeeping, never fatal
+        logger.exception("could not record the planned rows of tx %s", tx_id)
+
+
 def _strip_epoch(nevra: str) -> str:
     """Return ``nevra`` with the ``epoch:`` segment removed.
 
@@ -193,16 +242,34 @@ def _persist_tx_result(db: "PackageDatabase",
     """Record post-Tx-* artefacts into ``.state`` for Stage 4.
 
     Stage 4 reads ``.state.rpmnew_files_tx_{a,b}`` (Q5 : replaces the
-    old sentinel + `find -newer` scan) and
-    ``.state.tx_{a,b}_transaction_id`` (Q6 : lets Stage 4 read
-    scriptlet outcomes via ``db.get_scriptlet_output(tx_id)``).
+    old sentinel + `find -newer` scan).
+
+    The list **accumulates**.  Tx B commits in batches and this runs
+    once per batch; assigning would keep only the last one's files,
+    which is what made Stage 4 report the ``.rpmnew`` of the 22nd
+    batch and silently drop the other 21.  Duplicates are dropped
+    because two batches can rewrite the same config file.
+
+    The transaction id is no longer stored here: which transactions
+    make up the distupgrade is answered by the history, through
+    :func:`urpm.core.distupgrade.state.transaction_ids`.
+
+    Nothing here raises.  It is bookkeeping running between two
+    committed batches, and an upgrade must not stop because its
+    report lost a filename.
     """
     from .state import read_state, write_state
 
-    prior = read_state(db) or {}
-    prior[f"rpmnew_files_tx_{side}"] = list(rpmnew_files)
-    prior[f"tx_{side}_transaction_id"] = int(transaction_id)
-    write_state(prior, db)
+    try:
+        prior = read_state(db) or {}
+        key = f"rpmnew_files_tx_{side}"
+        merged = list(prior.get(key) or [])
+        merged += [f for f in rpmnew_files if f not in merged]
+        prior[key] = merged
+        write_state(prior, db)
+    except Exception:  # noqa: BLE001 — bookkeeping, never fatal
+        logger.exception("could not persist the artefacts of tx %s",
+                         transaction_id)
 
 
 # ── Smoke test (§4.3 F3) ──────────────────────────────────────────
@@ -351,6 +418,14 @@ def _run_one_side(
 
     ops = PackageOperations(db)
     tx_id = ops.begin_transaction('distupgrade', cmdline, [])
+    # Where this distupgrade starts in the history.  Written once, by
+    # whichever transaction opens first, and read back by Stage 4 to
+    # know which transactions the operation is made of.
+    note_first_transaction(db, tx_id)
+    # The actions list above is empty because the plan reaches us as
+    # strings, not as resolver objects.  The rows are written here
+    # instead, from the plan and the name map Stage 2 persisted.
+    _record_plan_rows(db, tx_id, plan_installs, erase_names)
     logger.info("Stage 3 Tx %s : begin_transaction id=%d, %d package(s)",
                 side.upper(), tx_id, len(ordered_paths))
 
@@ -405,6 +480,9 @@ def _run_one_side(
 
     # Capture scriptlet outputs + rpmnew list from the queue result.
     ops.record_scriptlet_output(tx_id, queue_result)
+    # And the per-package verdict, read back from the rpm database.
+    # Stage 4 evaluates the post-operation rules on these statuses.
+    ops.record_action_outcomes(tx_id, queue_result)
     rpmnew_files: List[str] = []
     ops_list = getattr(queue_result, "operations", None) or []
     if ops_list:
@@ -786,6 +864,8 @@ def _retry_missing_installs(
         'distupgrade',
         f"urpm distupgrade tx-b retry {version_from}->{version_to}",
         [])
+    note_first_transaction(db, tx_id)
+    _record_plan_rows(db, tx_id, missing_nevras, [])
     options = InstallOptions(
         verify_signatures=True, force=True, nodeps=True,
     )
@@ -807,6 +887,7 @@ def _retry_missing_installs(
         ops.abort_transaction(tx_id)
     else:
         ops.record_scriptlet_output(tx_id, queue_result)
+        ops.record_action_outcomes(tx_id, queue_result)
         ops.complete_transaction(tx_id)
 
     # Re-probe rpmdb to see what actually recovered.

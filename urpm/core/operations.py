@@ -107,6 +107,19 @@ class InstallOptions:
     config_policy: str = "keep"  # keep, replace, or ask
 
 
+def _as_transaction_ids(value) -> Tuple[int, ...]:
+    """Read one transaction id, or several, as a tuple.
+
+    Most callers hold a single id.  A distupgrade holds one per Tx B
+    batch plus Tx A and the retry pass, and they are one operation as
+    far as a rule is concerned.  Accepting either shape keeps a single
+    entry point, which is what the wiring tests enumerate.
+    """
+    if isinstance(value, int):
+        return (value,)
+    return tuple(value)
+
+
 class PackageOperations:
     """Core package operations - transport agnostic.
 
@@ -881,6 +894,74 @@ class PackageOperations:
                 is_error=(pkg_name in errors),
             )
 
+    def record_action_outcomes(self, transaction_id: int, queue_result,
+                               root: str = "/") -> None:
+        """Give every planned package of a transaction its verdict.
+
+        Rows are created at ``planned`` when the transaction opens and
+        stay there until something says how each one ended.  Nothing
+        did, which is why every condition evaluated on ``done`` was
+        false and no post-operation rule could ever fire.
+
+        The verdict comes from the rpm database, not from rpm's
+        callback.  The callback reports ``INST_STOP`` even when the
+        cpio payload failed to extract, so a package can be announced
+        installed and be absent; asking the database afterwards is the
+        only answer that cannot lie.  The callback still supplies the
+        *reason* a package is missing, which is what makes a failure
+        actionable.
+
+        Nothing is written when the child reports no attempt.  That is
+        what a ``--test`` looks like from here: a transaction was built
+        and never committed, so judging it against the database would
+        mark every planned row failed.
+
+        Args:
+            transaction_id: The transaction, as recorded when it began.
+            queue_result: What the transaction queue answered.
+            root: Install root, so a chroot transaction is judged
+                against its own database rather than the host's.
+        """
+        from .rpmdb import installed_nevras
+
+        operations = getattr(queue_result, 'operations', None) or []
+        attempted_installs, attempted_erases = set(), set()
+        reasons: Dict[str, str] = {}
+        for op in operations:
+            attempted_installs.update(getattr(op, 'attempted', None) or [])
+            attempted_erases.update(getattr(op, 'attempted_erases', None) or [])
+            reasons.update(getattr(op, 'callback_reasons', None) or {})
+
+        if not attempted_installs and not attempted_erases:
+            return
+
+        transaction = self.db.get_transaction(transaction_id) or {}
+        rows = transaction.get('packages', [])
+        if not rows:
+            return
+
+        pairs = tuple((row.get('pkg_name') or '', row.get('pkg_nevra') or '')
+                      for row in rows)
+        present = installed_nevras(pairs, root=root)
+
+        for row in rows:
+            nevra = row.get('pkg_nevra') or ''
+            name = row.get('pkg_name') or ''
+            is_removal = row.get('action') == 'remove'
+            # A removal succeeded when the build is gone, an install
+            # when it is there.  Same question, opposite answer.
+            if is_removal ^ (nevra in present):
+                self.db.record_action_end(transaction_id, nevra, 'done')
+                continue
+            reason = reasons.get(name, '')
+            # ``skipped`` is for what rpm never touched, ``failed`` for
+            # what it touched and lost.  Without a reason we cannot
+            # tell the two apart, and claiming the gentler one would
+            # hide a failure.
+            status = 'skipped' if reason == 'never-started' else 'failed'
+            self.db.record_action_end(transaction_id, nevra, status,
+                                      error_message=reason or None)
+
     def complete_transaction(self, transaction_id: int):
         """Mark a transaction as successfully completed."""
         self.db.complete_transaction(transaction_id)
@@ -901,8 +982,8 @@ class PackageOperations:
     # ``doc/SPEC_POST_TRANSACTION_HOOKS.md``).
     # =========================================================================
 
-    def hooks_triggered_by(self,
-                           transaction_id: int) -> List["TriggeredHook"]:
+    def hooks_triggered_by(self, transaction_id,
+                           operation: str = "") -> List["TriggeredHook"]:
         """Which rules a finished transaction satisfies. Decides, does nothing.
 
         The condition is matched against what the transaction **really**
@@ -926,7 +1007,7 @@ class PackageOperations:
         if not report.hooks:
             return []
 
-        outcome = self._operation_outcome(transaction_id)
+        outcome = self._operation_outcome(transaction_id, operation)
         return hooks_for(outcome, report.hooks)
 
     def run_hooks(self, triggered: Iterable["TriggeredHook"]
@@ -951,17 +1032,71 @@ class PackageOperations:
         from . import init_system
         from .hooks import Action
 
+        from .hooks import Operation
+
         results: List[Tuple["TriggeredHook", List[Any]]] = []
         for entry in triggered:
             outcomes: List[Any] = []
-            if entry.hook.action == Action.RESTART_SERVICE:
+            declined = (entry.operation == Operation.DISTUPGRADE
+                        and entry.hook.action in Action.NOT_DURING_DISTUPGRADE)
+            if declined:
+                # The rule is not at fault and is not refused: it is out
+                # of context.  Restarting a service under a session that
+                # still runs the previous release is the incident this
+                # mechanism was written for, and a distupgrade ends in a
+                # reboot anyway.  Say so rather than act, and rather
+                # than stay silent.
+                for service in sorted(entry.subjects):
+                    outcomes.append(init_system.ServiceOutcome(
+                        service, init_system.Result.DECLINED))
+            elif entry.hook.action == Action.RESTART_SERVICE:
                 # Sorted so a rule covering several services behaves the
                 # same way twice in a row, in the logs as on screen.
                 for service in sorted(entry.subjects):
                     outcomes.append(self._restart_for_hook(entry.hook,
                                                            service))
+            elif entry.hook.action == Action.SYNC_URPMI_CONFIG:
+                outcomes.append(self._sync_urpmi_config_for_hook(entry.hook))
             results.append((entry, outcomes))
         return results
+
+    def _sync_urpmi_config_for_hook(self, hook: "Hook") -> Any:
+        """Move urpmi's media to the release the machine now runs.
+
+        The release pair comes from the distupgrade state rather than
+        from the rule or from the URLs: the state is written by Stage 1
+        and says exactly which release we left and which we reached,
+        where guessing from a URL would have to decide whether a bare
+        number in a path is a release or someone's directory.
+
+        A rule asking for this outside a distupgrade therefore finds no
+        state and does nothing, which is the right answer: there is no
+        release change to follow.
+
+        Nothing here raises.  Like every other action, it runs after the
+        operation is committed and answered.
+        """
+        from .distupgrade.state import read_state
+        from .distupgrade.version import identity_of
+        from .urpmi_config import sync_urpmi_config
+
+        try:
+            state = read_state(self.db) or {}
+            # ``version_to`` holds what ``ReleaseIdentity.display()``
+            # produced, which is ``cauldron:11`` during a freeze.  URLs
+            # carry the identity alone, so both ends go through the
+            # inverse before they reach a path.
+            report = sync_urpmi_config(
+                identity_of(str(state.get("version_from") or "")),
+                identity_of(str(state.get("version_to") or "")),
+            )
+        except Exception as exc:  # noqa: BLE001 — never undo a done operation
+            logger.exception("hook %s could not sync urpmi.cfg",
+                             hook.identifier)
+            from .urpmi_config import SyncReport, URPMI_CFG
+            report = SyncReport(path=URPMI_CFG,
+                                errors=[f"the action raised: {exc}"])
+        return report
 
     @staticmethod
     def _restart_for_hook(hook: "Hook", service: str) -> Any:
@@ -981,7 +1116,7 @@ class PackageOperations:
                 service, init_system.Result.FAILED,
                 "the action raised; see the log")
 
-    def packages_behind_hooks(self, transaction_id: int,
+    def packages_behind_hooks(self, transaction_id,
                               triggered: Iterable["TriggeredHook"]
                               ) -> List[str]:
         """The installed packages that declared what those rules watch.
@@ -1012,18 +1147,26 @@ class PackageOperations:
             requesters |= packages_providing(capability, landed)
         return sorted(requesters)
 
-    def _landed_packages(self, transaction_id: int) -> Tuple[set, bool]:
-        """What a finished transaction really put on the machine.
+    def _landed_packages(self, transaction_id) -> Tuple[set, bool]:
+        """What a finished operation really put on the machine.
 
         Only packages recorded as ``done`` count, and only those that
         came *in*: a removal takes capabilities away rather than bringing
         them, and no rule vocabulary exists for that yet.
 
+        Args:
+            transaction_id: One transaction, or several.  A distupgrade
+                is made of many — Tx A, one per Tx B batch, the retry
+                pass — and a rule reasons about the whole operation, so
+                the union is what it must see.
+
         Returns:
             The package names, and whether every recorded row succeeded.
         """
-        transaction = self.db.get_transaction(transaction_id) or {}
-        rows = transaction.get('packages', [])
+        rows = []
+        for one in _as_transaction_ids(transaction_id):
+            transaction = self.db.get_transaction(one) or {}
+            rows += transaction.get('packages', [])
         landed = {row['pkg_name'] for row in rows
                   if row.get('status') == 'done'
                   and row.get('action') != 'remove'}
@@ -1031,8 +1174,15 @@ class PackageOperations:
             row.get('status') == 'done' for row in rows)
         return landed, every_row_done
 
-    def _operation_outcome(self, transaction_id: int) -> "OperationOutcome":
-        """Describe what a finished transaction actually did."""
+    def _operation_outcome(self, transaction_id,
+                           operation: str = "") -> "OperationOutcome":
+        """Describe what a finished transaction actually did.
+
+        ``operation`` is what the caller knows and the transaction row
+        does not: a distupgrade reaches rpm through the same
+        ``execute_install`` an upgrade uses, so only the caller can
+        tell the two apart.
+        """
         from .hooks import OperationOutcome
         from .rpmdb import provides_of
 
@@ -1042,6 +1192,7 @@ class PackageOperations:
             provides={name: frozenset(values)
                       for name, values in brought.items()},
             fully_successful=every_row_done,
+            operation=operation,
         )
 
     def mark_dependencies(self, resolver, actions: list):

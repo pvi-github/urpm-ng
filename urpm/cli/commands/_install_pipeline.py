@@ -261,6 +261,12 @@ def run_install_transaction(
                 _apply_config_policy(rpmnew_files, install_opts.config_policy)
         if qr is not None:
             ops.record_scriptlet_output(transaction_id, qr)
+            # Give each planned package its verdict before the
+            # transaction is closed: the post-operation rules read
+            # those statuses, and a row left at ``planned`` matches
+            # nothing.
+            ops.record_action_outcomes(transaction_id, qr,
+                                       root=install_opts.root or "/")
 
         # ── Commit the transaction ──
         ops.complete_transaction(transaction_id)
@@ -287,8 +293,11 @@ def run_install_transaction(
         # After the commit on purpose : a rule may target the very
         # process running the operation, which is exactly what rpm's own
         # scriptlets cannot do.  See ``urpm.core.hooks``.
+        from ...core.hooks import Operation
         from ..helpers.hook_report import run_post_operation_hooks
-        run_post_operation_hooks(ops, transaction_id)
+        run_post_operation_hooks(
+            ops, transaction_id,
+            Operation.UPGRADE if mode == "upgrade" else Operation.INSTALL)
 
         # ── Update installed-through-deps.list for urpmi compat ──
         ops.mark_dependencies(resolver, result.actions)

@@ -228,6 +228,23 @@ def run_phase_a_upgrade(
             f"Phase A upgrade did not complete: {detail}.  "
             f"Fix it with `urpm upgrade` before retrying "
             f"`urpm distupgrade`.")
+    # Phase A is an upgrade like any other, and gets the same
+    # post-transaction treatment.  It had none: its scriptlet output
+    # was captured by the queue and dropped, and its packages kept the
+    # ``planned`` status they were recorded with.  A scriptlet failing
+    # here — on the step that upgrades urpm-ng itself, right before the
+    # release switch — reached nobody.
+    ops.record_scriptlet_output(tx_id, queue_result)
+    ops.record_action_outcomes(tx_id, queue_result)
     ops.mark_dependencies(resolver, result.actions)
     ops.complete_transaction(tx_id)
+
+    # Its own perimeter, and its own rules: an upgrade, not a
+    # distupgrade.  A restart asked for here is carried out, unlike
+    # during Tx B, because the machine is coherent at this point —
+    # still on the source release, with an up-to-date urpm-ng — where
+    # Tx B leaves the release half swapped.
+    from ..hooks import Operation
+    from ...cli.helpers.hook_report import run_post_operation_hooks
+    run_post_operation_hooks(ops, tx_id, Operation.UPGRADE)
     return 0

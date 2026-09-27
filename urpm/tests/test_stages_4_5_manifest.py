@@ -130,23 +130,35 @@ class TestRunStage4:
     def test_aggregates_rpmnew_from_state_and_scriptlets_from_history(
             self, state_db, tmp_path):
         from urpm.core.distupgrade.state import write_state
+
+        # Three real transactions in the history, as Tx A and two Tx B
+        # batches would leave: Stage 4 finds them from the boundary
+        # rather than from one id per side, which could only ever name
+        # the last batch.
+        tx_a = state_db.begin_transaction("distupgrade",
+                                          "urpm distupgrade tx-a 10->11")
+        batch_1 = state_db.begin_transaction(
+            "distupgrade", "urpm distupgrade tx-b batch 1/2 10->11")
+        batch_2 = state_db.begin_transaction(
+            "distupgrade", "urpm distupgrade tx-b batch 2/2 10->11")
+
         write_state({
             "version_from": "10", "version_to": "11",
             "stage": "tx_b_running",
             "rpmnew_files_tx_a": ["/etc/foo.rpmnew"],
             "rpmnew_files_tx_b": ["/etc/bar.rpmnew"],
-            "tx_a_transaction_id": 100,
-            "tx_b_transaction_id": 200,
+            "first_transaction_id": tx_a,
         }, state_db)
 
-        # Stub get_scriptlet_output to return one failed row per tx.
+        # The failure sits in the *first* batch, not the last: that is
+        # the case the single-id read used to drop on the floor.
         def fake_get_scriptlet(tx_id):
-            if tx_id == 100:
+            if tx_id == batch_1:
                 return [{"pkg_name": "foo",
                          "script_type": "pre",
                          "status": "failed",
                          "output": "boom"}]
-            if tx_id == 200:
+            if tx_id == batch_2:
                 return [{"pkg_name": "bar",
                          "script_type": "post",
                          "status": "ok",

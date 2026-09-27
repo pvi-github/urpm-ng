@@ -91,6 +91,41 @@ COMPLETION_PREFIX = "on-completion:"
 _SUFFIX = ".cfg"
 
 
+class Operation:
+    """The closed vocabulary of what an operation is.
+
+    A rule may narrow itself to some of these with ``on``.  The names
+    are the ones the transaction layer already records as
+    ``operation_id``, with one addition: a distupgrade goes through
+    ``execute_install`` like an upgrade does, so nothing distinguished
+    the two until this vocabulary existed.
+
+    The unit is the whole urpm operation, not the rpm transaction: a
+    distupgrade runs several (Phase A, Tx A, Tx B) and a rule reasons
+    about the release change, not about its internal steps.
+
+    Not every name is reachable yet.  Rules are evaluated after an
+    install, an upgrade and a distupgrade; the removal verbs are in the
+    vocabulary because the operation type has to name them the day
+    those paths evaluate rules too, and freezing the spelling now
+    matters more than the wait: third-party packages will write these
+    in their own rule files.  A rule narrowed to a verb nothing
+    produces simply never fires.
+    """
+
+    INSTALL = "install"
+    UPGRADE = "upgrade"
+    DISTUPGRADE = "distupgrade"
+    ERASE = "erase"
+    AUTOREMOVE = "autoremove"
+    CLEANDEPS = "cleandeps"
+    UNDO = "undo"
+    ROLLBACK = "rollback"
+
+    ALL = (INSTALL, UPGRADE, DISTUPGRADE, ERASE, AUTOREMOVE, CLEANDEPS,
+           UNDO, ROLLBACK)
+
+
 class Action:
     """The closed vocabulary of things a rule may ask for.
 
@@ -101,8 +136,17 @@ class Action:
 
     REPORT = "report"
     RESTART_SERVICE = "restart-service"
+    SYNC_URPMI_CONFIG = "sync-urpmi-config"
 
-    ALL = (REPORT, RESTART_SERVICE)
+    ALL = (REPORT, RESTART_SERVICE, SYNC_URPMI_CONFIG)
+
+    #: Verbs that must not be carried out while a release change is
+    #: only half in place.  Restarting a service under a session that
+    #: still runs the previous release is the incident this module was
+    #: written for; a distupgrade ends in a reboot anyway.  The rule
+    #: still fires and still reports, so the operator reads that
+    #: something wanted a restart and why it did not happen.
+    NOT_DURING_DISTUPGRADE = (RESTART_SERVICE,)
 
 
 @dataclass(frozen=True)
@@ -126,11 +170,21 @@ class Hook:
     action: str = Action.REPORT
     service: str = ""
     only_on_full_success: bool = False
+    on: FrozenSet[str] = frozenset()
     source: Optional[Path] = None
 
     def matches(self, outcome: "OperationOutcome") -> bool:
-        """Does this rule fire for that finished operation?"""
+        """Does this rule fire for that finished operation?
+
+        ``on`` is a restriction a rule puts on itself, not a whitelist
+        it has to be on: an empty one matches every operation.  Safety
+        during a release change comes from declining the restart, not
+        from hiding the rule, so that the operator still reads that
+        something wanted one.
+        """
         if self.only_on_full_success and not outcome.fully_successful:
+            return False
+        if self.on and outcome.operation and outcome.operation not in self.on:
             return False
         return self.watch in outcome.provides
 
@@ -140,6 +194,7 @@ class Hook:
         Empty when the rule names no service and the capability was
         declared without a value: the rule fired but says nothing about
         what to act on. The caller reports that rather than guessing.
+
         """
         if self.service:
             return frozenset({self.service})
@@ -166,10 +221,17 @@ class OperationOutcome:
     only makes sense if the whole operation went through.  APT draws the
     same line with ``DPkg::Post-Invoke`` against
     ``DPkg::Post-Invoke-Success``.
+
+    ``operation`` names the whole urpm command, from :class:`Operation`.
+    A rule narrows itself to some of them with ``on``; the acting side
+    reads it too, to decline a service restart while a release change
+    is only half in place.  Empty when the caller did not say, which
+    every rule then matches.
     """
 
     provides: Dict[str, FrozenSet[str]] = field(default_factory=dict)
     fully_successful: bool = True
+    operation: str = ""
 
 
 @dataclass(frozen=True)
@@ -184,10 +246,15 @@ class TriggeredHook:
     ``subjects`` is empty when the rule named no service and the watched
     capability carried no value.  The rule fired but says nothing to act
     on, and that is reported rather than guessed.
+
+    ``operation`` travels along for the same reason: whoever acts needs
+    to know a release change is under way, and asking the outcome again
+    would restore the coupling this class exists to remove.
     """
 
     hook: Hook
     subjects: FrozenSet[str] = frozenset()
+    operation: str = ""
 
 
 @dataclass
@@ -234,7 +301,7 @@ def hooks_for(outcome: OperationOutcome,
     Each one comes back with its subjects already resolved, so nothing
     downstream has to hold on to the outcome.
     """
-    return [TriggeredHook(hook, hook.subjects(outcome))
+    return [TriggeredHook(hook, hook.subjects(outcome), outcome.operation)
             for hook in hooks if hook.matches(outcome)]
 
 
@@ -335,6 +402,15 @@ def _build_hook(identifier: str, values, source: Path
         return None, (f"unknown action {action!r}, expected one of "
                       + ", ".join(Action.ALL))
 
+    raw_on = values.get("on", "").replace(",", " ").split()
+    unknown = [o for o in raw_on if o not in Operation.ALL]
+    if unknown:
+        # Same reasoning as an unknown action: a rule meant for
+        # something we do not know must not silently widen to
+        # everything, which is what an empty ``on`` means.
+        return None, (f"unknown operation {unknown[0]!r} in on, expected "
+                      "one of " + ", ".join(Operation.ALL))
+
     # ``service`` stays optional even for a restart: the usual case takes
     # the subject from the watched capability's value.  A rule that ends
     # up with no subject at all is reported at run time, not refused
@@ -345,6 +421,7 @@ def _build_hook(identifier: str, values, source: Path
         action=action,
         service=values.get("service", "").strip(),
         only_on_full_success=_as_bool(values.get("only-on-full-success")),
+        on=frozenset(raw_on),
         source=source,
     ), ""
 

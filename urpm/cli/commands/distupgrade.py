@@ -243,6 +243,10 @@ def _resume_from_stage4(db) -> int:
         "{n_failed} failed scriptlet(s).").format(
             n_rpmnew=len(summary["rpmnew_files"]),
             n_failed=len(summary["failed_scriptlets"]))))
+    # Stage 4 evaluates the post-operation rules whichever way it is
+    # reached, so the retry path has to show them too.
+    for line in summary.get("hook_lines") or []:
+        print(line)
     print(colors.info(_(
         "Reboot recommended so Stage 5 post-boot fixups run.")))
     return 0
@@ -1168,6 +1172,7 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         db,
         plan=stage2_summary["plan"],
         nevra_to_path=stage2_summary["nevra_to_path"],
+        nevra_to_name=stage2_summary.get("nevra_to_name") or {},
         resolver=stage2_summary.get("resolver"),
         version_from=stage0.current or "unknown",
         version_to=stage0.target.display(),
@@ -1180,6 +1185,7 @@ def _cmd_run_stage3_tx_a_and_execvp(
     *,
     plan,
     nevra_to_path,
+    nevra_to_name,
     resolver,
     version_from: str,
     version_to: str,
@@ -1274,6 +1280,10 @@ def _cmd_run_stage3_tx_a_and_execvp(
         "version_to": version_to,
         "tx_b_plan_ordered": list(tx_b_plan),
         "nevra_to_path": {k: str(v) for k, v in nevra_to_path.items()},
+        # Same lifetime and same reason as the map above: the plan
+        # crosses the execvp as bare NEVRA strings, and Stage 3 needs
+        # each package's name to record its history row.
+        "nevra_to_name": dict(nevra_to_name or {}),
         "erase_names": list(remove_names),
     })
     write_state(prior, db)
@@ -1545,6 +1555,13 @@ def _render_stage4_report(summary: dict, *, db=None, auto: bool = False) -> None
     from ..helpers.audit_report import render_if_findings
     check_outcomes = summary.get("check_outcomes") or []
     check_findings = render_if_findings(check_outcomes)
+
+    # ── Post-operation rules ─────────────────────────────────────
+    # What the rules in hooks.d asked for and what came of it,
+    # already rendered by Stage 4.  Empty when no rule matched,
+    # which is the common case.
+    for line in summary.get("hook_lines") or []:
+        print(line)
 
     # ── All-clear line ────────────────────────────────────────────
     if not (failed or rpmnew or residuals or orphan_media

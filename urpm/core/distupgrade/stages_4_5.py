@@ -142,12 +142,17 @@ def run_stage4(
     rpmnew_files.extend(state.get("rpmnew_files_tx_a") or [])
     rpmnew_files.extend(state.get("rpmnew_files_tx_b") or [])
 
+    # Every transaction the operation is made of: Tx A, each Tx B
+    # batch, and the retry pass.  Reading a single id per side only
+    # ever showed the last batch, so a scriptlet that failed in batch 5
+    # of 22 was never reported to anyone.
+    from .state import transaction_ids
+
+    tx_ids = transaction_ids(db)
+
     failed_scriptlets: List[dict] = []
-    for side in ("a", "b"):
-        tx_id = state.get(f"tx_{side}_transaction_id")
-        if tx_id is None:
-            continue
-        for row in db.get_scriptlet_output(int(tx_id)):
+    for tx_id in tx_ids:
+        for row in db.get_scriptlet_output(tx_id):
             if row.get("status") == "failed":
                 failed_scriptlets.append(row)
 
@@ -173,6 +178,35 @@ def run_stage4(
     # and needs no persisted state.  Clear ``.state`` here so the
     # distupgrade mesh reopens between Stage 4 and reboot — the
     # marker file alone signals « Stage 5 pending ».
+    # Post-operation rules, before the state goes: the urpmi-config
+    # action reads the release pair from it, and ``delete_state`` is
+    # two lines away.
+    #
+    # Over every transaction of the operation, not one of them.  Tx B
+    # commits in batches — 22 on a real mga9 to mga10 — and asking
+    # about a single one meant asking about the last: on the test VM
+    # urpmi landed in batch 16, so the rule that keeps its media on
+    # the installed release never fired.
+    #
+    # This is also where a distupgrade joins the mechanism at all: until
+    # now only the install pipeline and the D-Bus service evaluated
+    # rules, so nothing declared in ``hooks.d`` ever applied to a
+    # release change.  Restarts stay declined here, by
+    # ``Action.NOT_DURING_DISTUPGRADE``.
+    hook_lines: List[str] = []
+    try:
+        from ..hooks import Operation
+        from ..operations import PackageOperations
+        from ...cli.helpers.hook_report import render_hooks
+
+        if tx_ids:
+            ops = PackageOperations(db)
+            triggered = ops.hooks_triggered_by(tx_ids, Operation.DISTUPGRADE)
+            if triggered:
+                hook_lines = render_hooks(triggered, ops.run_hooks(triggered))
+    except Exception:  # noqa: BLE001 — never fail a finished upgrade
+        logger.exception("post-operation rules went wrong in stage 4")
+
     write_postboot_marker(postboot_scripts or [], path=marker_path)
     delete_state(db)
 
@@ -202,6 +236,7 @@ def run_stage4(
         "check_outcomes": check_outcomes,
         "version_from": version_from,
         "version_to": version_to,
+        "hook_lines": hook_lines,
     }
 
 

@@ -74,6 +74,13 @@ class Result:
     NO_SERVICE_TOOL = "no-service-tool"
     #: It was asked, and it refused or timed out.
     FAILED = "failed"
+    #: Never asked, because the context forbids it.  A release change
+    #: leaves the running session on the previous release, so a restart
+    #: there is the incident the hook mechanism exists to avoid, and a
+    #: distupgrade ends in a reboot anyway.  Distinct from
+    #: ``NOT_RUNNING``: the service may well be running, and from
+    #: ``FAILED``: nothing went wrong.
+    DECLINED = "declined"
 
 
 @dataclass(frozen=True)

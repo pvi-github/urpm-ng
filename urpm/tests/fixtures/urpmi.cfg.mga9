@@ -1,0 +1,42 @@
+{
+}
+
+MLO_core https://repository.mageialinux-online.org/distrib/9/x86_64/media/core {
+  key-ids: c186ac23
+}
+
+MLO_nonfree https://repository.mageialinux-online.org/distrib/9/x86_64/media/nonfree {
+  key-ids: c186ac23
+}
+
+Core\ Release  {
+  key-ids: 80420f66
+  mirrorlist: http://mirrors.mageia.org/api/mageia.9.x86_64.list
+  with-dir: media/core/release
+}
+
+Core\ Updates  {
+  key-ids: 80420f66
+  mirrorlist: http://mirrors.mageia.org/api/mageia.9.x86_64.list
+  update
+  with-dir: media/core/updates
+}
+
+Core\ 32bit\ Release  {
+  ignore
+  mirrorlist: http://mirrors.mageia.org/api/mageia.9.x86_64.list
+  with-dir: media/../../i586/media/core/release
+}
+
+Auto\ Mirror  {
+  mirrorlist: $MIRRORLIST
+  with-dir: media/core/release
+}
+
+Exotique https://exemple.org/mageia-9-rpms/x86_64/ {
+  key-ids: deadbeef
+}
+
+mgabiz https://www.mageia.biz/repo/Mageia/mgabiz/9/x86_64/media/urpm/release {
+  key-ids: 2d902a73
+}

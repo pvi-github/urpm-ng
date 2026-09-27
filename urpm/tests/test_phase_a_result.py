@@ -48,6 +48,12 @@ class FakeOps:
         self.completed = False
         self.aborted = False
         self.marked = False
+        # Phase A is an upgrade like any other and gets the same
+        # post-commit treatment: its scriptlet output recorded, its
+        # packages given a verdict, its rules evaluated.
+        self.scriptlets_recorded = False
+        self.outcomes_recorded = False
+        self.rules_asked_for = None
         FakeOps.last = self
 
     #: Set by each test before calling.
@@ -63,6 +69,18 @@ class FakeOps:
 
     def execute_upgrade(self, **kw):
         return self.queue_result
+
+    def record_scriptlet_output(self, *a, **kw):
+        self.scriptlets_recorded = True
+
+    def record_action_outcomes(self, *a, **kw):
+        self.outcomes_recorded = True
+
+    def hooks_triggered_by(self, transaction_id, operation=""):
+        # No rule file on a test machine; what matters is which
+        # operation Phase A declares itself to be.
+        self.rules_asked_for = operation
+        return []
 
     def mark_dependencies(self, *a, **kw):
         self.marked = True
@@ -167,3 +185,25 @@ class TestSuccessfulCommitIsUntouched:
         assert FakeOps.last.completed
         assert FakeOps.last.marked
         assert not FakeOps.last.aborted
+
+    def test_it_records_and_evaluates_like_any_upgrade(self, run):
+        from urpm.core.hooks import Operation
+
+        run(QueueResult(success=True, operations=[_op(True)]))
+
+        # It waits for its scriptlets with ``full_sync=True`` because
+        # Stage 1 needs a settled state, and used to drop what they
+        # said.  Its packages kept the ``planned`` status they were
+        # recorded with, so no rule could match them either.
+        assert FakeOps.last.scriptlets_recorded
+        assert FakeOps.last.outcomes_recorded
+        assert FakeOps.last.rules_asked_for == Operation.UPGRADE
+
+    def test_a_failed_commit_records_nothing(self, run):
+        # Phase A raises before the post-commit block on failure, and
+        # the history row is aborted rather than given verdicts.
+        with pytest.raises(PhaseAError):
+            run(QueueResult(success=False, operations=[_op(False)]))
+
+        assert FakeOps.last.aborted
+        assert not FakeOps.last.outcomes_recorded

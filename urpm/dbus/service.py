@@ -27,6 +27,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from ..core.hooks import Operation
 from ..core.progress_scale import (
     PERCENTAGE_UNKNOWN, ProgressScale, item_percentage,
 )
@@ -198,7 +199,7 @@ class UrpmDBusService:
             })
         return entries
 
-    def _hook_advice(self, transaction_id):
+    def _hook_advice(self, transaction_id, operation):
         """Which post-operation rules fired, and which packages asked.
 
         Split from the acting half because the two belong on either side
@@ -206,6 +207,14 @@ class UrpmDBusService:
         so PackageKit can raise ``RequireRestart`` while the job is still
         alive, and the machine is only *touched* afterwards, which is
         what lets a rule target this very process.
+
+        Args:
+            transaction_id: The transaction, as recorded when it began.
+            operation: What the whole operation was, from
+                :class:`~urpm.core.hooks.Operation`.  Rules may narrow
+                themselves to some of them, and a caller that says
+                nothing matches them all, so this is named rather than
+                left out.
 
         Returns:
             The triggered rules, and the names of the packages that
@@ -215,7 +224,8 @@ class UrpmDBusService:
             recorded must not be reported as failed over a hook.
         """
         try:
-            triggered = self._ops.hooks_triggered_by(transaction_id)
+            triggered = self._ops.hooks_triggered_by(transaction_id,
+                                                      operation)
             if not triggered:
                 return [], []
             return triggered, self._ops.packages_behind_hooks(
@@ -942,7 +952,8 @@ class UrpmDBusService:
 
             # Post-operation rules: said before the reply, acted on after
             # it.  See ``_hook_advice`` and ``urpm.core.hooks``.
-            triggered, requesters = self._hook_advice(transaction_id)
+            triggered, requesters = self._hook_advice(
+                transaction_id, Operation.INSTALL)
 
             msg = json.dumps({
                 'message': f"Installed {len(rpm_paths)} package(s)",
@@ -1159,7 +1170,8 @@ class UrpmDBusService:
 
             # Post-operation rules: said before the reply, acted on after
             # it.  See ``_hook_advice`` and ``urpm.core.hooks``.
-            triggered, requesters = self._hook_advice(transaction_id)
+            triggered, requesters = self._hook_advice(
+                transaction_id, Operation.UPGRADE)
 
             summary = f"Upgraded {len(rpm_paths)} package(s)"
             if remove_names:
