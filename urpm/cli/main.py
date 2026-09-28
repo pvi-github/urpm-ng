@@ -120,10 +120,6 @@ from .commands.depends import (
     cmd_depends, cmd_rdepends, cmd_recommends, cmd_whatrecommends,
     cmd_suggests, cmd_whatsuggests, cmd_why,
 )
-from .commands.build import (
-    cmd_cleanup, cmd_mkimage, cmd_build,
-    cmd_image_list, cmd_image_delete, cmd_image_update,
-)
 from .commands.appstream import (
     cmd_appstream,
 )
@@ -139,6 +135,32 @@ DEBUG_PREFERENCES = False
 DEBUG_MKIMAGE = False
 DEBUG_BUILD = True
 DEBUG_INSTALL = False
+
+
+def _build_command(name: str):
+    """Fetch a container verb from ``urpm-ng-build``, or say it is absent.
+
+    The build side is a separate subpackage: it needs a container
+    runtime an ordinary install has no use for.  The verbs stay listed
+    in ``urpm --help`` either way, so the answer to « why does nothing
+    happen » is a sentence naming the package rather than a traceback
+    or a missing subcommand.
+
+    Returns the callable, or ``None`` once the reason has been printed.
+    """
+    try:
+        from .commands import build as _build
+    except ImportError:
+        from . import colors as _colors
+        from ..auth.privileges import privileged_command
+        print(_colors.error(_(
+            "The container build tools are not installed on this system."
+        )), file=sys.stderr)
+        print(_("Install the urpm-ng-build subpackage:"), file=sys.stderr)
+        print("  " + privileged_command('urpm install urpm-ng-build'),
+              file=sys.stderr)
+        return None
+    return getattr(_build, name)
 
 
 def check_dependencies() -> list:
@@ -3173,7 +3195,16 @@ def main(argv=None) -> int:
             return cmd_init(args, db)
 
         elif args.command == 'cleanup':
-            return cmd_cleanup(args, db)
+            # One verb, two unrelated jobs.  The history migration is
+            # core's and must stay reachable without the container
+            # tools; the chroot unmount belongs to the build side.
+            # Separating them at the level of the verb belongs to the
+            # history rework (doc/SPEC_REWORK_HISTORY.md).
+            if getattr(args, 'legacy_scriptlets', False):
+                from .commands.history import cmd_cleanup_legacy_scriptlets
+                return cmd_cleanup_legacy_scriptlets(args, db)
+            handler = _build_command('cmd_cleanup_chroot')
+            return handler(args, db) if handler else 1
 
         elif args.command in ('install', 'i'):
             return cmd_install(args, db)
@@ -3183,22 +3214,26 @@ def main(argv=None) -> int:
 
         elif args.command in ('image', 'img'):
             if args.image_command in ('make', 'm'):
-                return cmd_mkimage(args, db)
+                name = 'cmd_mkimage'
             elif args.image_command in ('update', 'u'):
-                return cmd_image_update(args, db)
+                name = 'cmd_image_update'
             elif args.image_command in ('list', 'l', 'ls', None):
-                return cmd_image_list(args, db)
+                name = 'cmd_image_list'
             elif args.image_command in ('delete', 'd', 'rm'):
-                return cmd_image_delete(args, db)
+                name = 'cmd_image_delete'
             else:
                 return cmd_not_implemented(args, db)
+            handler = _build_command(name)
+            return handler(args, db) if handler else 1
 
         elif args.command == 'mkimage':
             # Backward compatibility alias for 'image make'
-            return cmd_mkimage(args, db)
+            handler = _build_command('cmd_mkimage')
+            return handler(args, db) if handler else 1
 
         elif args.command == 'build':
-            return cmd_build(args, db)
+            handler = _build_command('cmd_build')
+            return handler(args, db) if handler else 1
 
         elif args.command == 'genmedia':
             try:

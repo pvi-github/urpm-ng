@@ -3,7 +3,10 @@
 - TC.1 sanitize_scriptlet_output — 5 layers.
 - TC.2 record_scriptlet_event — output sanitized before INSERT.
 - TC.3 get_scriptlet_output — union of legacy + v34, sorted.
-- TC.4 cmd_cleanup --legacy-scriptlets — atomic migration + drop.
+- TC.4 `urpm cleanup --legacy-scriptlets` — atomic migration +
+  drop.  The code lives in ``cli/commands/history.py``: it only
+  touches history tables, and a machine without the container
+  tools must still be able to run it.
 - TC.5 SanitisingFilter — 4 fields mutated.
 """
 
@@ -13,6 +16,8 @@ import logging
 from io import StringIO
 
 import pytest
+
+from types import SimpleNamespace
 
 from urpm.core.database import PackageDatabase
 from urpm.core.security import (
@@ -184,17 +189,70 @@ class TestGetScriptletOutputUnion:
 # ── TC.4 ─────────────────────────────────────────────────────────────
 
 
+class TestItIsReachableWithoutTheContainerTools:
+    """The whole point of moving it out of ``build.py``.
+
+    The migration only ever touches history tables.  It sat in the
+    build command module because it was hung on ``urpm cleanup``,
+    whose other half unmounts a build chroot, and it would have left
+    with ``urpm-ng-build`` the day that subpackage carries the
+    container tooling.
+    """
+
+    def test_the_history_module_is_enough(self):
+        """Reachable with the container tools out of the picture.
+
+        Moving the code was not enough: ``cli/commands/__init__.py``
+        imported ``build`` at module scope, so importing anything
+        under ``urpm.cli`` pulled it in.  The day ``urpm-ng-build``
+        carries that module, this migration would have left with it.
+        """
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parents[2]
+        done = subprocess.run(
+            [sys.executable, "-c",
+             "import sys\n"
+             "class _Absent:\n"
+             "    def find_spec(self, name, path=None, target=None):\n"
+             "        if name == 'urpm.cli.commands.build':\n"
+             "            raise ImportError(name)\n"
+             "        return None\n"
+             "sys.meta_path.insert(0, _Absent())\n"
+             "from urpm.cli.commands.history import "
+             "cmd_cleanup_legacy_scriptlets\n"
+             "import urpm.cli.main\n"
+             "print('ok')\n"],
+            cwd=repo, capture_output=True, text=True)
+
+        assert done.returncode == 0, done.stderr
+        assert "ok" in done.stdout
+
+    def test_the_chroot_half_stayed_on_the_build_side(self):
+        from urpm.cli.commands.build import cmd_cleanup_chroot
+
+        assert callable(cmd_cleanup_chroot)
+
+
 class TestLegacyScriptletsMigration:
     def test_idempotent_after_drop(self, db):
-        from urpm.cli.commands.build import _cleanup_legacy_scriptlets
+        from urpm.cli.commands.history import (
+            cmd_cleanup_legacy_scriptlets,
+        )
         db.conn.execute("DROP TABLE history_scriptlet_output")
         db.conn.commit()
-        assert _cleanup_legacy_scriptlets(db, dry_run=False) == 0
+        assert cmd_cleanup_legacy_scriptlets(
+            SimpleNamespace(dry_run=False), db) == 0
 
     def test_empty_source_drops_table(self, db):
-        from urpm.cli.commands.build import _cleanup_legacy_scriptlets
+        from urpm.cli.commands.history import (
+            cmd_cleanup_legacy_scriptlets,
+        )
         # Table exists (v34 schema keeps it) but empty.
-        assert _cleanup_legacy_scriptlets(db, dry_run=False) == 0
+        assert cmd_cleanup_legacy_scriptlets(
+            SimpleNamespace(dry_run=False), db) == 0
         exists = db.conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name='history_scriptlet_output'"
@@ -202,11 +260,14 @@ class TestLegacyScriptletsMigration:
         assert exists is None
 
     def test_dry_run_leaves_table(self, db):
-        from urpm.cli.commands.build import _cleanup_legacy_scriptlets
+        from urpm.cli.commands.history import (
+            cmd_cleanup_legacy_scriptlets,
+        )
         tx = db.begin_transaction("install")
         db.record_scriptlet_output(tx, "foo", "old", is_error=True)
         db.conn.commit()
-        assert _cleanup_legacy_scriptlets(db, dry_run=True) == 0
+        assert cmd_cleanup_legacy_scriptlets(
+            SimpleNamespace(dry_run=True), db) == 0
         exists = db.conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name='history_scriptlet_output'"
@@ -218,13 +279,16 @@ class TestLegacyScriptletsMigration:
         assert n == 0
 
     def test_migration_sanitizes_output(self, db):
-        from urpm.cli.commands.build import _cleanup_legacy_scriptlets
+        from urpm.cli.commands.history import (
+            cmd_cleanup_legacy_scriptlets,
+        )
         tx = db.begin_transaction("install")
         db.record_scriptlet_output(tx, "foo",
                                    "prompt\x1b]0;pwn\x07",
                                    is_error=True)
         db.conn.commit()
-        assert _cleanup_legacy_scriptlets(db, dry_run=False) == 0
+        assert cmd_cleanup_legacy_scriptlets(
+            SimpleNamespace(dry_run=False), db) == 0
         row = db.conn.execute(
             "SELECT status, output FROM history_scriptlets "
             "WHERE history_id = ?", (tx,)).fetchone()
@@ -232,11 +296,14 @@ class TestLegacyScriptletsMigration:
         assert "\x1b" not in row["output"]
 
     def test_migration_drops_source_table(self, db):
-        from urpm.cli.commands.build import _cleanup_legacy_scriptlets
+        from urpm.cli.commands.history import (
+            cmd_cleanup_legacy_scriptlets,
+        )
         tx = db.begin_transaction("install")
         db.record_scriptlet_output(tx, "foo", "clean", is_error=False)
         db.conn.commit()
-        _cleanup_legacy_scriptlets(db, dry_run=False)
+        cmd_cleanup_legacy_scriptlets(
+            SimpleNamespace(dry_run=False), db)
         exists = db.conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name='history_scriptlet_output'"

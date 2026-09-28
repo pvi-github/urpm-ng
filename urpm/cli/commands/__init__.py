@@ -89,14 +89,28 @@ from .depends import (
     cmd_whatsuggests,
     cmd_why,
 )
-from .build import (
-    cmd_cleanup,
-    cmd_mkimage,
-    cmd_build,
-    cmd_image_list,
-    cmd_image_delete,
-    cmd_image_update,
-)
+# The container verbs live in ``urpm-ng-build``, for the same reason
+# ``cmd_genmedia`` lives in ``urpm-ng-genmedia`` just below: the module
+# is physically absent on an install without the container tooling, and
+# importing it hard here would take down every other command.  The
+# names stay real attributes so ``__all__`` holds, and ``main.py``
+# resolves them at dispatch time.
+try:
+    from .build import (
+        cmd_cleanup_chroot,
+        cmd_mkimage,
+        cmd_build,
+        cmd_image_list,
+        cmd_image_delete,
+        cmd_image_update,
+    )
+except ImportError:
+    cmd_cleanup_chroot = None
+    cmd_mkimage = None
+    cmd_build = None
+    cmd_image_list = None
+    cmd_image_delete = None
+    cmd_image_update = None
 from .appstream import (
     cmd_appstream,
 )
@@ -189,7 +203,7 @@ __all__ = [
     'cmd_whatsuggests',
     'cmd_why',
     # Build commands
-    'cmd_cleanup',
+    'cmd_cleanup_chroot',
     'cmd_mkimage',
     'cmd_build',
     # Image management commands

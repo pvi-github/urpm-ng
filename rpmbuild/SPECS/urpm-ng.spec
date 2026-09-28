@@ -619,9 +619,6 @@ fi
 %{_exec_prefix}/lib/urpm/hooks.d/*.cfg
 %{_mandir}/man1/urpm.1*
 %{_mandir}/*/man1/urpm.1*
-%dir %{_datadir}/urpm
-%dir %{_datadir}/urpm/profiles
-%{_datadir}/urpm/profiles/*.yaml
 # Locale files
 %{_datadir}/locale/*/LC_MESSAGES/urpm.mo
 # AppStream metainfo (console-application) + shared urpm-ng icon.
@@ -643,6 +640,19 @@ fi
 %exclude %{python3_sitelib}/urpm/dbus
 %exclude %{python3_sitelib}/urpm/auth/polkit.py
 %exclude %{python3_sitelib}/urpm/auth/__pycache__/polkit.*.pyc
+# Shipped by -build.  They drive a container runtime an ordinary
+# install has no use for, and the CLI loads them only when one of the
+# container verbs is called.
+%exclude %{python3_sitelib}/urpm/cli/commands/build.py
+%exclude %{python3_sitelib}/urpm/cli/commands/__pycache__/build.*.pyc
+%exclude %{python3_sitelib}/urpm/cli/helpers/build_chain.py
+%exclude %{python3_sitelib}/urpm/cli/helpers/__pycache__/build_chain.*.pyc
+%exclude %{python3_sitelib}/urpm/cli/helpers/build_limits.py
+%exclude %{python3_sitelib}/urpm/cli/helpers/__pycache__/build_limits.*.pyc
+%exclude %{python3_sitelib}/urpm/core/container.py
+%exclude %{python3_sitelib}/urpm/core/__pycache__/container.*.pyc
+%exclude %{python3_sitelib}/urpm/core/image_urpm_ng.py
+%exclude %{python3_sitelib}/urpm/core/__pycache__/image_urpm_ng.*.pyc
 
 # ============================================================================
 # Files for urpm-ng-daemon
@@ -688,11 +698,24 @@ fi
 # Meta-package, no files
 
 # ============================================================================
-# Files for urpm-ng-build (meta-package for now, tools are in core)
+# Files for urpm-ng-build
 # ============================================================================
 %files build
-# Build commands (mkimage, build) are part of the CLI in urpm-ng-core
-# This package just pulls in urpm-ng-core for users who only need build tools
+%{python3_sitelib}/urpm/cli/commands/build.py
+%{python3_sitelib}/urpm/cli/commands/__pycache__/build.*.pyc
+%{python3_sitelib}/urpm/cli/helpers/build_chain.py
+%{python3_sitelib}/urpm/cli/helpers/__pycache__/build_chain.*.pyc
+%{python3_sitelib}/urpm/cli/helpers/build_limits.py
+%{python3_sitelib}/urpm/cli/helpers/__pycache__/build_limits.*.pyc
+%{python3_sitelib}/urpm/core/container.py
+%{python3_sitelib}/urpm/core/__pycache__/container.*.pyc
+%{python3_sitelib}/urpm/core/image_urpm_ng.py
+%{python3_sitelib}/urpm/core/__pycache__/image_urpm_ng.*.pyc
+# The image profiles: read by ``urpm image make`` alone, so they
+# travel with the tools rather than with -core.
+%dir %{_datadir}/urpm
+%dir %{_datadir}/urpm/profiles
+%{_datadir}/urpm/profiles/*.yaml
 
 # ============================================================================
 # Files for urpm-ng-genmedia
