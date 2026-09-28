@@ -11,6 +11,11 @@ try:
 except ImportError:
     HAS_RPM = False
 
+from .depmatch import (
+    SENSE_MASK, ProvidesIndex, header_rows, parse_capability,
+    provider_satisfies,
+)
+
 
 # Per-process debug flag for orphan-graph diagnostics.  Activated by
 # ``urpm upgrade --debug orphans`` (or ``--debug all``); see
@@ -32,30 +37,6 @@ def set_orphan_debug(enabled: bool = False) -> None:
     """
     global DEBUG_ORPHANS
     DEBUG_ORPHANS = enabled
-
-
-# --- Module-level constants for versioned capability handling ---------------
-#
-# A "sense" is an RPMSENSE_* bitmask describing a dependency comparison
-# operator (e.g. ``>=`` is ``RPMSENSE_GREATER | RPMSENSE_EQUAL``).  The
-# mask below isolates the three comparison bits from the other RPMSENSE
-# flags (PREREQ, SCRIPT_PRE, …) which do not affect satisfiability.
-
-if HAS_RPM:
-    _SENSE_MASK = (
-        rpm.RPMSENSE_LESS | rpm.RPMSENSE_EQUAL | rpm.RPMSENSE_GREATER
-    )
-    _SYNTHESIS_SENSE_MAP = {
-        '<':  rpm.RPMSENSE_LESS,
-        '<=': rpm.RPMSENSE_LESS | rpm.RPMSENSE_EQUAL,
-        '=':  rpm.RPMSENSE_EQUAL,
-        '==': rpm.RPMSENSE_EQUAL,
-        '>=': rpm.RPMSENSE_GREATER | rpm.RPMSENSE_EQUAL,
-        '>':  rpm.RPMSENSE_GREATER,
-    }
-else:  # pragma: no cover - rpm is always available in production
-    _SENSE_MASK = 0
-    _SYNTHESIS_SENSE_MAP = {}
 
 
 @dataclass
@@ -99,123 +80,6 @@ class UpgradeOrphanPlan:
 
     def __bool__(self) -> bool:
         return bool(self.removes or self.cancelled_new_versions)
-
-
-def _parse_synthesis_cap(cap: str) -> Tuple[str, int, str]:
-    """Parse a synthesis capability string into ``(name, sense, evr)``.
-
-    Mageia's synthesis encodes a capability as a bare name followed by
-    zero or more **trailing** bracket groups::
-
-        NAME               perl(Foo::Bar), libfoo.so.1()(64bit)
-        NAME[*]            /bin/sh[*]
-        NAME[op evr]       libpng[>= 1.6.0]
-        NAME[*][op evr]    apache[*][>= 2.0.54]
-
-    ``[*]`` is a qualifier carrying no version information; ``[op evr]``
-    is the version constraint.
-
-    Groups are peeled **from the right**, and only while they are
-    recognised, because brackets also occur *inside* capability names:
-    a Python extras capability such as ``python3.13dist(coverage[toml])``
-    is an ordinary name that happens to contain a bracket pair.  A
-    leading ``find('[')`` would truncate it to
-    ``python3.13dist(coverage`` and silently break every dependency
-    edge that goes through it.  Anything not recognised as a trailing
-    group is therefore part of the name.
-
-    Shapes measured on the mga10 ``core/release`` synthesis (716 763
-    capabilities): 253 493 ``[op evr]``, 4 685 ``[*]``, 752
-    ``[*][op evr]``, 7 names carrying inner brackets.  The only
-    operators present are those of :data:`_SYNTHESIS_SENSE_MAP` plus
-    the ``*`` marker.
-
-    Args:
-        cap: Raw capability string from ``synthesis.hdlist.cz``.
-
-    Returns:
-        A tuple ``(name, sense, evr)`` where ``sense`` is an RPMSENSE
-        bitmask (``0`` for an unversioned capability) and ``evr`` is the
-        version string (empty for an unversioned capability).
-    """
-    name = cap
-    sense = 0
-    evr = ''
-    while name.endswith(']'):
-        start = name.rfind('[')
-        if start < 0:
-            break
-        inside = name[start + 1:-1]
-        if inside == '*':
-            name = name[:start]
-            continue
-        parts = inside.split(None, 1)
-        if len(parts) == 2 and parts[0] in _SYNTHESIS_SENSE_MAP:
-            # Peeling right-to-left, so the first constraint met is the
-            # right-most one; keep it and ignore any further constraint
-            # group (genhdlist2 and genmedia never emit two).
-            if not evr:
-                sense = _SYNTHESIS_SENSE_MAP[parts[0]]
-                evr = parts[1]
-            name = name[:start]
-            continue
-        break
-    return name, sense, evr
-
-
-def _evr_tuple(evr: str) -> Tuple[str, str, str]:
-    """Split an ``epoch:version-release`` string for :func:`rpm.labelCompare`.
-
-    Missing epoch defaults to ``'0'``; missing release to ``''``.
-    """
-    if ':' in evr:
-        epoch, rest = evr.split(':', 1)
-    else:
-        epoch, rest = '0', evr
-    if '-' in rest:
-        version, release = rest.split('-', 1)
-    else:
-        version, release = rest, ''
-    return (epoch, version, release)
-
-
-def _provider_satisfies(prov_evr: str, req_sense: int, req_evr: str) -> bool:
-    """Return ``True`` iff a provider's EVR satisfies a versioned require.
-
-    The check mirrors rpm's own ``rpmdsCompare`` semantics:
-
-    * An unversioned require (no comparison bit set) is satisfied by
-      any provider — the same answer ``_SENSE_MASK``-masking would
-      give.
-    * A versioned require against an unversioned provider fails.
-      RPM's auto-generated ``Provides: NAME = EVR`` covers almost every
-      real package, so an unversioned provider here typically means an
-      explicit ``Provides: foo`` without a version, which cannot be
-      compared against a version constraint.
-    * Otherwise the two EVRs are compared with :func:`rpm.labelCompare`
-      and the result cross-referenced against the require's sense
-      bits.  Granularity matches rpm: if the require omits the release
-      component (``Requires: foo = 1`` instead of ``= 1-1``), the
-      provider's release is ignored so the comparison degenerates to
-      version-only equality.  This is how rpm accepts ``foo-1-5`` as a
-      valid provider for ``Requires: foo = 1``.
-    """
-    if not HAS_RPM:  # pragma: no cover - rpm is always available in production
-        return True
-    if not (req_sense & _SENSE_MASK):
-        return True
-    if not prov_evr:
-        return False
-    p_epoch, p_ver, p_rel = _evr_tuple(prov_evr)
-    r_epoch, r_ver, r_rel = _evr_tuple(req_evr)
-    if not r_rel:
-        p_rel = ''
-    result = rpm.labelCompare((p_epoch, p_ver, p_rel), (r_epoch, r_ver, r_rel))
-    if result == 0:
-        return bool(req_sense & rpm.RPMSENSE_EQUAL)
-    if result < 0:
-        return bool(req_sense & rpm.RPMSENSE_LESS)
-    return bool(req_sense & rpm.RPMSENSE_GREATER)
 
 
 class OrphansMixin:
@@ -301,29 +165,27 @@ class OrphansMixin:
 
         with rpmdb.open_ts(self.root or '/') as ts:
 
-            # Build complete picture of installed packages
+            # Build complete picture of installed packages.  Capabilities
+            # are ``(name, sense, evr)`` rows and providers are resolved
+            # through :class:`ProvidesIndex`: the parentheses are part of
+            # a capability name (devel(libeconf(64bit))), the version is
+            # not, and dropping it makes a package providing
+            # ``typelib(Foo) = 3.0`` answer for a require of ``= 4.0``.
             installed_pkgs = {}  # name -> {provides: set, requires: set, hdr: header}
-            provides_map = {}    # capability -> set of package names that provide it
+            provides_index = ProvidesIndex()  # capability -> providers
+            requirers = {}       # capability name -> [(pkg, sense, evr)]
 
             for hdr in ts.dbMatch():
                 name = hdr[rpm.RPMTAG_NAME]
                 if name == 'gpg-pubkey':
                     continue
 
-                # Collect provides — use the full capability name including
-                # parenthesised qualifiers like devel(libeconf(64bit)).
-                # The parentheses are part of the capability name, NOT version
-                # info (versions are tracked separately via PROVIDEVERSION).
-                provides = set()
-                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                    provides.add(prov)
-                    provides_map.setdefault(prov, set()).add(name)
+                provides = set(header_rows(hdr, 'provides'))
+                provides_index.add_header(hdr, name)
 
-                requires = set()
-                for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                    if req.startswith('rpmlib(') or req.startswith('/'):
-                        continue
-                    requires.add(req)
+                requires = set(header_rows(hdr, 'requires', skip_files=True))
+                for cap, sense, evr in requires:
+                    requirers.setdefault(cap, []).append((name, sense, evr))
 
                 # Merge, never replace.  A name can be installed more
                 # than once (a distupgrade that failed to drop the old
@@ -332,8 +194,8 @@ class OrphansMixin:
                 # rpm happened to hand us.  The requires of the other one
                 # would vanish, its dependencies would look unreferenced,
                 # and we would offer to remove packages that are still in
-                # use.  Note the asymmetry this repairs: ``provides_map``
-                # above already accumulates with ``setdefault``.
+                # use.  Note the asymmetry this repairs: the provides
+                # index above already accumulates.
                 entry = installed_pkgs.setdefault(
                     name, {'provides': set(), 'requires': set(), 'hdr': hdr})
                 entry['provides'].update(provides)
@@ -347,9 +209,9 @@ class OrphansMixin:
             # Only consider packages that were installed as dependencies (in unrequested)
             for name in list(to_remove):
                 if name in installed_pkgs:
-                    for req in installed_pkgs[name]['requires']:
+                    for row in installed_pkgs[name]['requires']:
                         # Find what provides this requirement
-                        providers = provides_map.get(req, set())
+                        providers = provides_index.providers_of(row)
                         for provider in providers:
                             # Only consider as orphan candidate if:
                             # - Not already being removed
@@ -377,15 +239,16 @@ class OrphansMixin:
 
                     pkg = installed_pkgs[name]
 
-                    # Check if any remaining package requires this one
+                    # Check if any remaining package requires this one, at
+                    # the version it provides.  ``requirers`` is the same
+                    # data read from the other end, which also spares a
+                    # full scan of the rpmdb per candidate.
                     is_required = False
-                    for prov in pkg['provides']:
-                        for other_name, other_pkg in installed_pkgs.items():
-                            if other_name == name:
+                    for prov, _sense, prov_evr in pkg['provides']:
+                        for other, req_sense, req_evr in requirers.get(prov, ()):
+                            if other == name or other in to_remove:
                                 continue
-                            if other_name in to_remove:
-                                continue
-                            if prov in other_pkg['requires']:
+                            if provider_satisfies(prov_evr, req_sense, req_evr):
                                 is_required = True
                                 break
                         if is_required:
@@ -418,8 +281,8 @@ class OrphansMixin:
 
                         # Add this orphan's dependencies as new candidates
                         # (only if they were installed as dependencies)
-                        for req in pkg['requires']:
-                            providers = provides_map.get(req, set())
+                        for row in pkg['requires']:
+                            providers = provides_index.providers_of(row)
                             for provider in providers:
                                 if (provider not in to_remove and
                                     provider not in base_packages and
@@ -702,21 +565,18 @@ class OrphansMixin:
         from .. import rpmdb
 
         with rpmdb.open_ts(self.root or '/') as ts:
-            provides_map = {}   # capability -> set of provider names
-            pkg_requires = {}   # name -> set of required capabilities
+            provides_index = ProvidesIndex()  # capability -> providers
+            pkg_requires = {}   # name -> set of required capability rows
 
             for hdr in ts.dbMatch():
                 name = hdr[rpm.RPMTAG_NAME]
                 if name == 'gpg-pubkey':
                     continue
-                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                    provides_map.setdefault(prov, set()).add(name)
+                provides_index.add_header(hdr, name)
                 # Union, not assignment: a name can be installed twice.
                 # See the note in ``_find_orphans_iterative``.
                 pkg_requires.setdefault(name, set()).update(
-                    r for r in (hdr[rpm.RPMTAG_REQUIRENAME] or [])
-                    if not r.startswith('rpmlib(') and not r.startswith('/')
-                )
+                    header_rows(hdr, 'requires', skip_files=True))
 
         rescued = set()
         # Breadth-first over the kept set: whatever a kept package needs
@@ -726,8 +586,8 @@ class OrphansMixin:
         seen = set(kept)
         while frontier:
             name = frontier.pop()
-            for cap in pkg_requires.get(name, ()):
-                for provider in provides_map.get(cap, ()):
+            for row in pkg_requires.get(name, ()):
+                for provider in provides_index.providers_of(row):
                     if provider in candidates and provider not in rescued:
                         rescued.add(provider)
                     if provider not in seen:
@@ -763,17 +623,21 @@ class OrphansMixin:
 
         with rpmdb.open_ts(self.root or '/') as ts:
 
-            # Single-pass: build provides map, reverse deps, and collect headers
+            # Single-pass: build provides index, reverse deps, and collect
+            # headers.  Capabilities travel as ``(name, sense, evr)`` rows
+            # and are resolved through :class:`ProvidesIndex`, so a package
+            # providing ``typelib(Foo) = 3.0`` is not taken for a
+            # dependency of whoever asked for ``= 4.0``.
             installed_pkgs = {}   # name -> hdr (first one seen)
-            provides_map = {}     # capability -> set of package names
+            provides_index = ProvidesIndex()   # capability -> providers
             reverse_deps = {}     # name -> set of names that require/recommend/
                                   #         suggest it, plus its supplement triggers
             # The four maps below are unions over *every* installed header
             # carrying that name, not the last one seen.
-            pkg_requires = {}     # name -> set of capability names
-            pkg_recommends = {}   # name -> set of capability names
-            pkg_suggests = {}     # name -> set of capability names (weak forward dep)
-            pkg_supplements = {}  # name -> set of capability names (reverse weak dep)
+            pkg_requires = {}     # name -> set of capability rows
+            pkg_recommends = {}   # name -> set of capability rows
+            pkg_suggests = {}     # name -> set of capability rows (weak forward dep)
+            pkg_supplements = {}  # name -> set of capability rows (reverse weak dep)
 
             for hdr in ts.dbMatch():
                 name = hdr[rpm.RPMTAG_NAME]
@@ -783,8 +647,7 @@ class OrphansMixin:
                 installed_pkgs.setdefault(name, hdr)
                 reverse_deps.setdefault(name, set())
 
-                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                    provides_map.setdefault(prov, set()).add(name)
+                provides_index.add_header(hdr, name)
 
                 # Union, never replace — see the note in
                 # ``_find_orphans_iterative``.  A same-name duplicate left
@@ -792,15 +655,13 @@ class OrphansMixin:
                 # whichever header rpm enumerated first, and the packages
                 # it needs are then reported as orphans.
                 pkg_requires.setdefault(name, set()).update(
-                    r for r in (hdr[rpm.RPMTAG_REQUIRENAME] or [])
-                    if not r.startswith('rpmlib(') and not r.startswith('/')
-                )
+                    header_rows(hdr, 'requires', skip_files=True))
                 pkg_recommends.setdefault(name, set()).update(
-                    hdr[rpm.RPMTAG_RECOMMENDNAME] or [])
+                    header_rows(hdr, 'recommends', skip_rpmlib=False))
                 pkg_suggests.setdefault(name, set()).update(
-                    hdr[rpm.RPMTAG_SUGGESTNAME] or [])
+                    header_rows(hdr, 'suggests', skip_rpmlib=False))
                 pkg_supplements.setdefault(name, set()).update(
-                    hdr[rpm.RPMTAG_SUPPLEMENTNAME] or [])
+                    header_rows(hdr, 'supplements', skip_rpmlib=False))
 
             # Build the reverse-dep graph used for orphan DFS.  ``reverse_deps[X]``
             # is the set of packages whose presence protects ``X`` from being
@@ -829,20 +690,20 @@ class OrphansMixin:
             # (``urpm autoremove --erase-recommends`` etc.), never the default
             # behaviour of any orphan-classification verb.
             for name in installed_pkgs:
-                for req in pkg_requires[name]:
-                    for provider in provides_map.get(req, set()):
+                for row in pkg_requires[name]:
+                    for provider in provides_index.providers_of(row):
                         if provider != name:
                             reverse_deps[provider].add(name)
-                for rec in pkg_recommends[name]:
-                    for provider in provides_map.get(rec, set()):
+                for row in pkg_recommends[name]:
+                    for provider in provides_index.providers_of(row):
                         if provider != name:
                             reverse_deps[provider].add(name)
-                for sug in pkg_suggests[name]:
-                    for provider in provides_map.get(sug, set()):
+                for row in pkg_suggests[name]:
+                    for provider in provides_index.providers_of(row):
                         if provider != name:
                             reverse_deps[provider].add(name)
-                for supp in pkg_supplements[name]:
-                    for provider in provides_map.get(supp, set()):
+                for row in pkg_supplements[name]:
+                    for provider in provides_index.providers_of(row):
                         if provider != name:
                             reverse_deps[name].add(provider)
 
@@ -938,7 +799,7 @@ class OrphansMixin:
 
             # Build package info and reverse dependency map
             installed_pkgs = {}
-            provides_map = {}
+            provides_index = ProvidesIndex()
             reverse_deps = {}
 
             for hdr in ts.dbMatch():
@@ -946,10 +807,8 @@ class OrphansMixin:
                 if name == 'gpg-pubkey':
                     continue
 
-                provides = set()
-                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                    provides.add(prov)
-                    provides_map.setdefault(prov, set()).add(name)
+                provides = set(header_rows(hdr, 'provides'))
+                provides_index.add_header(hdr, name)
 
                 installed_pkgs[name] = {
                     'provides': provides,
@@ -962,15 +821,13 @@ class OrphansMixin:
                 if name == 'gpg-pubkey':
                     continue
 
-                for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                    if req.startswith('rpmlib(') or req.startswith('/'):
-                        continue
-                    for provider in provides_map.get(req, set()):
+                for row in header_rows(hdr, 'requires', skip_files=True):
+                    for provider in provides_index.providers_of(row):
                         if provider != name:
                             reverse_deps[provider].add(name)
 
-                for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
-                    for provider in provides_map.get(rec, set()):
+                for row in header_rows(hdr, 'recommends', skip_rpmlib=False):
+                    for provider in provides_index.providers_of(row):
                         if provider != name:
                             reverse_deps[provider].add(name)
 
@@ -1047,20 +904,20 @@ class OrphansMixin:
 
         with rpmdb.open_ts(self.root or '/') as ts:
 
-            # Build a map of what each package requires
-            required_by = {}  # package_name -> set of packages that need it
+            # Build a map of what each package requires.  The constraint
+            # travels with the requirer: a package providing a capability
+            # at another version does not answer for it.
+            required_by = {}  # capability name -> [(requirer, sense, evr)]
 
             for hdr in ts.dbMatch():
                 name = hdr[rpm.RPMTAG_NAME]
-                requires = hdr[rpm.RPMTAG_REQUIRENAME] or []
 
-                for req in requires:
-                    # Skip rpmlib, file deps, and self-requires
-                    if req.startswith("rpmlib(") or req.startswith("/"):
-                        continue
-                    # Use the full capability name — parentheses are part of
-                    # the name (e.g. devel(libeconf(64bit))), not version info.
-                    required_by.setdefault(req, set()).add(name)
+                for cap, sense, evr in header_rows(hdr, 'requires',
+                                                   skip_files=True):
+                    # The full capability name is the key: parentheses are
+                    # part of it (e.g. devel(libeconf(64bit))), only the
+                    # bracketed EVR is version information.
+                    required_by.setdefault(cap, []).append((name, sense, evr))
 
             # Find packages that nothing requires (potential orphans)
             for hdr in ts.dbMatch():
@@ -1074,17 +931,19 @@ class OrphansMixin:
                 if name in ('glibc', 'bash', 'coreutils', 'filesystem', 'setup', 'basesystem'):
                     continue
 
-                # Check if any installed package requires this one
-                provides = hdr[rpm.RPMTAG_PROVIDENAME] or []
+                # Check if any installed package requires this one, at the
+                # version this one actually provides.
                 is_required = False
 
-                for prov in provides:
-                    if prov in required_by:
-                        # Check if any requirer is still installed (not in exclude list)
-                        for req in required_by[prov]:
-                            if req.lower() not in exclude and req != name:
-                                is_required = True
-                                break
+                for prov, _sense, prov_evr in header_rows(hdr, 'provides'):
+                    for requirer, req_sense, req_evr in required_by.get(prov, ()):
+                        # The requirer must still be installed (not in the
+                        # exclude list) and must not be the package itself.
+                        if requirer.lower() in exclude or requirer == name:
+                            continue
+                        if provider_satisfies(prov_evr, req_sense, req_evr):
+                            is_required = True
+                            break
                     if is_required:
                         break
 
@@ -1111,19 +970,6 @@ class OrphansMixin:
                     ))
 
             return orphans
-
-    def _extract_cap_name(self, cap: str) -> str:
-        """Extract base capability name from a versioned capability string.
-
-        Examples:
-            "libpng[>= 1.6.0]" -> "libpng"
-            "perl(Foo::Bar)" -> "perl(Foo::Bar)"
-            "libfoo.so.1()(64bit)" -> "libfoo.so.1()(64bit)"
-        """
-        # Handle [version] suffix
-        if '[' in cap:
-            cap = cap.split('[')[0]
-        return cap
 
     def find_upgrade_orphans(self, all_actions: list,
                              obsoleted_names: set = None) -> "UpgradeOrphanPlan":
@@ -1280,7 +1126,7 @@ class OrphansMixin:
                         continue
                     ver = req_vers[i] if i < len(req_vers) else ''
                     flag_raw = req_flags[i] if i < len(req_flags) else 0
-                    reqs.append((req_name, flag_raw & _SENSE_MASK, ver or ''))
+                    reqs.append((req_name, flag_raw & SENSE_MASK, ver or ''))
 
                 rec_names = hdr[rpm.RPMTAG_RECOMMENDNAME] or []
                 rec_vers = hdr[rpm.RPMTAG_RECOMMENDVERSION] or []
@@ -1288,7 +1134,7 @@ class OrphansMixin:
                 for i, rec_name in enumerate(rec_names):
                     ver = rec_vers[i] if i < len(rec_vers) else ''
                     flag_raw = rec_flags[i] if i < len(rec_flags) else 0
-                    reqs.append((rec_name, flag_raw & _SENSE_MASK, ver or ''))
+                    reqs.append((rec_name, flag_raw & SENSE_MASK, ver or ''))
 
                 # Suggests count as protective edges by default (project policy:
                 # anything you installed via --suggests or accepted at install
@@ -1299,7 +1145,7 @@ class OrphansMixin:
                 for i, sug_name in enumerate(sug_names):
                     ver = sug_vers[i] if i < len(sug_vers) else ''
                     flag_raw = sug_flags[i] if i < len(sug_flags) else 0
-                    reqs.append((sug_name, flag_raw & _SENSE_MASK, ver or ''))
+                    reqs.append((sug_name, flag_raw & SENSE_MASK, ver or ''))
 
                 provs: List[Tuple[str, str]] = []
                 prov_names = hdr[rpm.RPMTAG_PROVIDENAME] or []
@@ -1315,7 +1161,7 @@ class OrphansMixin:
                 for i, supp_name in enumerate(supp_names):
                     ver = supp_vers[i] if i < len(supp_vers) else ''
                     flag_raw = supp_flags[i] if i < len(supp_flags) else 0
-                    supps.append((supp_name, flag_raw & _SENSE_MASK, ver or ''))
+                    supps.append((supp_name, flag_raw & SENSE_MASK, ver or ''))
 
                 return reqs, provs, supps
 
@@ -1334,12 +1180,12 @@ class OrphansMixin:
                     return reqs, provs, supps
 
                 for r in pkg.get('requires', []):
-                    name, sense, evr = _parse_synthesis_cap(r)
+                    name, sense, evr = parse_capability(r)
                     if name.startswith('rpmlib('):
                         continue
                     reqs.append((name, sense, evr))
                 for r in pkg.get('recommends', []):
-                    name, sense, evr = _parse_synthesis_cap(r)
+                    name, sense, evr = parse_capability(r)
                     reqs.append((name, sense, evr))
                 # ``@suggests@`` always counts as a protective edge in the
                 # orphan-detection graph, regardless of the resolver's
@@ -1352,13 +1198,13 @@ class OrphansMixin:
                 #     genmedia-built media it carries real Suggests.  Both
                 #     readings count as protection per (1).
                 for r in pkg.get('suggests', []):
-                    name, sense, evr = _parse_synthesis_cap(r)
+                    name, sense, evr = parse_capability(r)
                     reqs.append((name, sense, evr))
                 for p in pkg.get('provides', []):
-                    name, _sense, evr = _parse_synthesis_cap(p)
+                    name, _sense, evr = parse_capability(p)
                     provs.append((name, evr))
                 for r in pkg.get('supplements', []):
-                    name, sense, evr = _parse_synthesis_cap(r)
+                    name, sense, evr = parse_capability(r)
                     supps.append((name, sense, evr))
 
                 return reqs, provs, supps
@@ -1514,13 +1360,13 @@ class OrphansMixin:
                         for provider, prov_evr in cap_providers.get(req_name, ()):
                             if provider == name:
                                 continue
-                            if _provider_satisfies(prov_evr, req_sense, req_evr):
+                            if provider_satisfies(prov_evr, req_sense, req_evr):
                                 rev[provider].add(name)
                     for supp_name, supp_sense, supp_evr in info.get('supplements', ()):
                         for provider, prov_evr in cap_providers.get(supp_name, ()):
                             if provider == name:
                                 continue
-                            if _provider_satisfies(prov_evr, supp_sense, supp_evr):
+                            if provider_satisfies(prov_evr, supp_sense, supp_evr):
                                 rev[name].add(provider)
                 return rev
 
@@ -1799,13 +1645,17 @@ class OrphansMixin:
 
         with rpmdb.open_ts(self.root or '/') as ts:
 
-            # Build maps for all installed packages
-            pkg_provides = {}  # name -> set of capability names
-            pkg_requires = {}  # name -> set of capability names (raw, not resolved)
-            pkg_recommends = {}  # name -> set of recommended capability names
-            pkg_suggests = {}  # name -> set of suggested capability names
-            pkg_supplements = {}  # name -> set of supplemented capability names
-            cap_to_pkg = {}    # capability -> set of package names providing it
+            # Build maps for all installed packages.  Every capability is
+            # a ``(name, sense, evr)`` row and providers are resolved
+            # through :class:`ProvidesIndex`, so a package providing a
+            # capability at another version is not mistaken for a
+            # provider of it.
+            pkg_provides = {}  # name -> set of provided capability rows
+            pkg_requires = {}  # name -> set of required capability rows
+            pkg_recommends = {}  # name -> set of recommended capability rows
+            pkg_suggests = {}  # name -> set of suggested capability rows
+            pkg_supplements = {}  # name -> set of supplemented capability rows
+            provides_index = ProvidesIndex()  # capability -> providers
             name_to_original = {}  # lowercase name -> original case name
             pkg_headers = {}   # name -> rpm header
             all_installed = set()
@@ -1823,34 +1673,20 @@ class OrphansMixin:
                 # mga9 package still needs its libraries.
                 pkg_headers.setdefault(name, hdr)
 
-                provides = set()
-                for prov in (hdr[rpm.RPMTAG_PROVIDENAME] or []):
-                    cap = self._extract_cap_name(prov)
-                    provides.add(cap)
-                    if cap not in cap_to_pkg:
-                        cap_to_pkg[cap] = set()
-                    cap_to_pkg[cap].add(name)
-                pkg_provides.setdefault(name, set()).update(provides)
+                provides_index.add_header(hdr, name)
+                pkg_provides.setdefault(name, set()).update(
+                    header_rows(hdr, 'provides'))
 
-                requires = set()
-                for req in (hdr[rpm.RPMTAG_REQUIRENAME] or []):
-                    if not req.startswith('rpmlib(') and not req.startswith('/'):
-                        requires.add(self._extract_cap_name(req))
-                pkg_requires.setdefault(name, set()).update(requires)
+                pkg_requires.setdefault(name, set()).update(
+                    header_rows(hdr, 'requires', skip_files=True))
 
                 # Also collect RECOMMENDS for dep_tree building
-                recommends = set()
-                for rec in (hdr[rpm.RPMTAG_RECOMMENDNAME] or []):
-                    if not rec.startswith('rpmlib(') and not rec.startswith('/'):
-                        recommends.add(self._extract_cap_name(rec))
-                pkg_recommends.setdefault(name, set()).update(recommends)
+                pkg_recommends.setdefault(name, set()).update(
+                    header_rows(hdr, 'recommends', skip_files=True))
 
                 # Also collect SUGGESTS for dep_tree building
-                suggests = set()
-                for sug in (hdr[rpm.RPMTAG_SUGGESTNAME] or []):
-                    if not sug.startswith('rpmlib(') and not sug.startswith('/'):
-                        suggests.add(self._extract_cap_name(sug))
-                pkg_suggests.setdefault(name, set()).update(suggests)
+                pkg_suggests.setdefault(name, set()).update(
+                    header_rows(hdr, 'suggests', skip_files=True))
 
                 # Collect SUPPLEMENTS — reverse weak-dep: ``name`` is pulled
                 # in by the presence of any installed package providing one
@@ -1859,20 +1695,16 @@ class OrphansMixin:
                 # target must be considered for removal) and to protect a
                 # candidate at iteration time (Supplements target still
                 # installed ⇒ keep the plugin).
-                supplements = set()
-                for supp in (hdr[rpm.RPMTAG_SUPPLEMENTNAME] or []):
-                    if not supp.startswith('rpmlib(') and not supp.startswith('/'):
-                        supplements.add(self._extract_cap_name(supp))
-                pkg_supplements.setdefault(name, set()).update(supplements)
+                pkg_supplements.setdefault(name, set()).update(
+                    header_rows(hdr, 'supplements', skip_files=True))
 
-            # Helper: resolve a capability to the installed package that provides it
-            def resolve_cap_to_pkg(cap: str) -> Optional[str]:
-                """Find which installed package provides this capability."""
-                providers = cap_to_pkg.get(cap, set())
-                if len(providers) == 1:
-                    return next(iter(providers))
-                elif len(providers) > 1:
-                    # Multiple providers - return the first one (all are installed)
+            # Helper: resolve a capability row to an installed provider
+            def resolve_cap_to_pkg(row) -> Optional[str]:
+                """Find which installed package satisfies this capability."""
+                providers = provides_index.providers_of(row)
+                if providers:
+                    # Several providers are all installed; any of them
+                    # anchors the dependency, so the first will do.
                     return next(iter(providers))
                 return None
 
@@ -1881,8 +1713,8 @@ class OrphansMixin:
             def get_direct_deps(pkg_name: str) -> set:
                 """Get packages that pkg_name directly depends on (REQUIRES only)."""
                 deps = set()
-                for cap in pkg_requires.get(pkg_name, set()):
-                    provider = resolve_cap_to_pkg(cap)
+                for row in pkg_requires.get(pkg_name, set()):
+                    provider = resolve_cap_to_pkg(row)
                     if provider and provider != pkg_name:  # Skip self-deps
                         deps.add(provider)
                 return deps
@@ -1893,13 +1725,13 @@ class OrphansMixin:
                 """Get packages that pkg_name depends on or recommends (not suggests)."""
                 deps = set()
                 # REQUIRES
-                for cap in pkg_requires.get(pkg_name, set()):
-                    provider = resolve_cap_to_pkg(cap)
+                for row in pkg_requires.get(pkg_name, set()):
+                    provider = resolve_cap_to_pkg(row)
                     if provider and provider != pkg_name:
                         deps.add(provider)
                 # RECOMMENDS (installed by default)
-                for cap in pkg_recommends.get(pkg_name, set()):
-                    provider = resolve_cap_to_pkg(cap)
+                for row in pkg_recommends.get(pkg_name, set()):
+                    provider = resolve_cap_to_pkg(row)
                     if provider and provider != pkg_name:
                         deps.add(provider)
                 # SUGGESTS are NOT followed - they are not installed by default
@@ -1907,30 +1739,28 @@ class OrphansMixin:
 
             # Build reverse index: capability -> list of (pkg_that_needs_it, dep_type)
             # This is much faster than iterating all packages for each candidate
-            cap_needed_by = {}  # cap -> [(pkg, dep_type), ...]
+            cap_needed_by = {}  # cap name -> [(pkg, dep_type, sense, evr), ...]
             for pkg_name in all_installed:
-                for cap in pkg_requires.get(pkg_name, set()):
-                    if cap not in cap_needed_by:
-                        cap_needed_by[cap] = []
-                    cap_needed_by[cap].append((pkg_name, 'R'))
+                for cap, sense, evr in pkg_requires.get(pkg_name, set()):
+                    cap_needed_by.setdefault(cap, []).append(
+                        (pkg_name, 'R', sense, evr))
                 if not erase_recommends:
-                    for cap in pkg_recommends.get(pkg_name, set()):
-                        if cap not in cap_needed_by:
-                            cap_needed_by[cap] = []
-                        cap_needed_by[cap].append((pkg_name, 'M'))
+                    for cap, sense, evr in pkg_recommends.get(pkg_name, set()):
+                        cap_needed_by.setdefault(cap, []).append(
+                            (pkg_name, 'M', sense, evr))
                 if keep_suggests:
-                    for cap in pkg_suggests.get(pkg_name, set()):
-                        if cap not in cap_needed_by:
-                            cap_needed_by[cap] = []
-                        cap_needed_by[cap].append((pkg_name, 'S'))
+                    for cap, sense, evr in pkg_suggests.get(pkg_name, set()):
+                        cap_needed_by.setdefault(cap, []).append(
+                            (pkg_name, 'S', sense, evr))
 
             # Reverse index for Supplements: capability -> packages that declare
             # ``Supplements: <cap>``.  Walking this index from an erased package's
             # provides yields the plugins that would be losing their anchor.
-            cap_supplemented_by = {}  # cap -> [pkg1, pkg2, ...]
+            cap_supplemented_by = {}  # cap name -> [(pkg, sense, evr), ...]
             for pkg_name, supps in pkg_supplements.items():
-                for cap in supps:
-                    cap_supplemented_by.setdefault(cap, []).append(pkg_name)
+                for cap, sense, evr in supps:
+                    cap_supplemented_by.setdefault(cap, []).append(
+                        (pkg_name, sense, evr))
 
             # Normalize erase_names to original case
             erase_set_original = set()
@@ -1956,8 +1786,12 @@ class OrphansMixin:
                 # once ``pkg`` is being erased.  The iteration loop below
                 # still gets the last word (a remaining Supplements target
                 # will protect the plugin).
-                for cap in pkg_provides.get(pkg, set()):
-                    for supp_pkg in cap_supplemented_by.get(cap, ()):
+                for cap, _sense, prov_evr in pkg_provides.get(pkg, set()):
+                    for supp_pkg, supp_sense, supp_evr in cap_supplemented_by.get(
+                            cap, ()):
+                        if not provider_satisfies(prov_evr, supp_sense,
+                                                  supp_evr):
+                            continue
                         if supp_pkg not in dep_tree:
                             dep_tree.add(supp_pkg)
                             to_process.append(supp_pkg)
@@ -1985,15 +1819,17 @@ class OrphansMixin:
                         f.write(f"unrequested size: {len(unrequested)}\n")
                         f.write(f"initial to_remove size: {len(to_remove)}\n")
                         f.write(f"all_installed size: {len(all_installed)}\n")
-                        f.write(f"cap_to_pkg size: {len(cap_to_pkg)}\n\n")
+                        f.write(f"provides index size: {len(provides_index)}\n\n")
 
                         # Check .so capability resolution
                         test_cap = "libKF6CoreAddons.so.6()(64bit)"
-                        if test_cap in cap_to_pkg:
-                            f.write(f"'{test_cap}' -> {cap_to_pkg[test_cap]}\n")
+                        test_providers = provides_index.providers(test_cap)
+                        if test_providers:
+                            f.write(f"'{test_cap}' -> {test_providers}\n")
                         else:
-                            f.write(f"'{test_cap}' NOT in cap_to_pkg\n")
-                            similar = [c for c in cap_to_pkg.keys() if 'KF6CoreAddons' in c]
+                            f.write(f"'{test_cap}' has no provider\n")
+                            similar = [c for c in provides_index.names()
+                                       if 'KF6CoreAddons' in c]
                             f.write(f"Similar caps: {similar[:10]}\n")
                         f.write("\n")
 
@@ -2038,9 +1874,16 @@ class OrphansMixin:
                     # and we are the only remaining provider
                     dominated = False
                     blocker_info = None
-                    for cap in pkg_provides.get(pkg_name, set()):
-                        for dependent, dep_type in cap_needed_by.get(cap, []):
+                    for cap, _sense, prov_evr in pkg_provides.get(pkg_name,
+                                                                  set()):
+                        for dependent, dep_type, req_sense, req_evr in \
+                                cap_needed_by.get(cap, []):
                             if dependent == pkg_name:
+                                continue
+                            # Our provide must actually answer what the
+                            # dependent asked for, version included.
+                            if not provider_satisfies(prov_evr, req_sense,
+                                                      req_evr):
                                 continue
                             dep_lower = dependent.lower()
                             # Skip if dependent is also being removed
@@ -2048,7 +1891,8 @@ class OrphansMixin:
                                 continue
                             # dependent needs cap and is NOT being removed
                             # Check if there are other providers that remain
-                            providers = cap_to_pkg.get(cap, set())
+                            providers = provides_index.providers(cap, req_sense,
+                                                                 req_evr)
                             remaining = [p for p in providers
                                          if p != pkg_name and p.lower() not in candidates_lower]
                             if not remaining:
@@ -2065,8 +1909,9 @@ class OrphansMixin:
                     # is stored as two independent caps — any surviving one is
                     # enough to keep ``pkg_name`` (conservative OR).
                     if not dominated:
-                        for cap in pkg_supplements.get(pkg_name, set()):
-                            providers = cap_to_pkg.get(cap, set())
+                        for cap, sense, evr in pkg_supplements.get(pkg_name,
+                                                                    set()):
+                            providers = provides_index.providers(cap, sense, evr)
                             remaining = [p for p in providers
                                          if p.lower() not in candidates_lower]
                             if remaining:

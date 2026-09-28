@@ -360,8 +360,12 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
     # the parent (module contract, see :mod:`urpm.core.rpmdb`).
     from ...core import rpmdb
 
-    # Get what this package provides - from both RPM and database
-    provides = [pkg_name]
+    # What this package provides, with the version of each capability,
+    # so a package providing ``typelib(Foo) = 3.0`` is not taken for an
+    # answer to somebody asking for ``= 4.0``.
+    from ...core.resolution.depmatch import ProvidesIndex
+    provides = ProvidesIndex()
+    provides.add(pkg_name, '', pkg_name)
 
     # Architecture honoured by the urpmi DB lookup below. When the package
     # is installed, the rpmdb header tells us the truth; otherwise we fall
@@ -385,9 +389,9 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
             if pkg_deps is not None:
                 # ``.name`` on a :class:`rpmdb.PkgDep` — display path,
                 # constraint version irrelevant here.
-                for prov in (p.name for p in pkg_deps.provides):
-                    if prov not in provides and not _is_virtual_provide(prov):
-                        provides.append(prov)
+                for prov in pkg_deps.provides:
+                    if not _is_virtual_provide(prov.name):
+                        provides.add(prov.name, prov.version, pkg_name)
     except Exception:
         pass
 
@@ -395,9 +399,8 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
     pkg = db.get_package(pkg_name, arch=inst_arch or system_arch())
     if pkg and pkg.get('provides'):
         for prov in pkg['provides']:
-            cap = prov.split('[')[0].strip()
-            if cap not in provides and not _is_virtual_provide(cap):
-                provides.append(cap)
+            if not _is_virtual_provide(prov.split('[')[0].strip()):
+                provides.add_capability(prov.strip(), pkg_name)
 
     rdeps = {}  # {name: dep_type}
     priority = {'R': 3, 'r': 2, 's': 1}
@@ -413,10 +416,24 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
         if current is None or priority[dep_type] > priority[current]:
             rdeps[name] = dep_type
 
-    def matches_provides(req: str) -> bool:
-        """Check if a requirement matches any of our provides."""
-        req_base = req.split('(')[0]
-        return req_base in provides or req in provides
+    def matches_provides(dep) -> bool:
+        """Does this dependency land on one of our provides?
+
+        The version travels with the dependency: half the reverse-dep
+        answers used to be wrong because only the capability name was
+        compared, and two packages installable side by side provide the
+        same name at two versions.
+
+        The fall-back on the part before the parenthesis is kept from
+        the original: a soname is spelled ``libfoo.so.1()(64bit)`` in
+        one index and ``libfoo.so.1`` in the other, and dropping the
+        bridge would lose those edges.
+        """
+        if provides.providers(dep.name, dep.flags, dep.version):
+            return True
+        base = dep.name.split('(')[0]
+        return base != dep.name and bool(
+            provides.providers(base, dep.flags, dep.version))
 
     # Check installed packages (like cmd_rdepends does).  Uses the
     # typed rpmdb helper which returns one PkgDeps per installed name;
@@ -436,21 +453,21 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
             # matches_provides() takes a string.  Version constraints
             # on the require are irrelevant for reverse-dep enumeration.
             if 'R' in dep_types:
-                for req in (r.name for r in pkg_deps.requires):
+                for req in pkg_deps.requires:
                     if matches_provides(req):
                         add_rdep(name, 'R')
                         break
 
             # Check Recommends
             if 'r' in dep_types:
-                for rec in (r.name for r in pkg_deps.recommends):
+                for rec in pkg_deps.recommends:
                     if matches_provides(rec):
                         add_rdep(name, 'r')
                         break
 
             # Check Suggests
             if 's' in dep_types:
-                for sug in (s.name for s in pkg_deps.suggests):
+                for sug in pkg_deps.suggests:
                     if matches_provides(sug):
                         add_rdep(name, 's')
                         break
@@ -459,7 +476,7 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
 
     # Also query urpmi database for non-installed packages
     if not installed_only:
-        for cap in provides:
+        for cap in provides.names():
             if 'R' in dep_types:
                 for r in db.whatrequires(cap, limit=500):
                     add_rdep(r['name'], 'R')
@@ -479,49 +496,31 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
 def _build_rdeps_map_from_pool(pool) -> dict:
     """Build a full reverse-dependency map from the libsolv pool in one scan.
 
-    Instead of scanning the pool once per package (as
-    ``_get_rdeps_from_pool`` does), this walks every solvable twice:
-    first to index provides -> pkg names, then to invert each solvable's
-    requires into that index.  The resulting ``{pkg_name: {rdeps}}``
-    supports O(1) lookups for the BFS in ``rdepends --all`` and the
-    recursive walk in ``rdepends --tree``.
+    The pool is asked who satisfies each dependency, rather than an
+    index being rebuilt by hand: ``whatprovides`` compares the version
+    constraint too, where a capability-name index answers that
+    ``typelib(Foo) = 3.0`` covers a require of ``= 4.0``.
 
-    Ignores ``rpmlib(...)`` and other virtual provides that would create
-    spurious edges to unrelated packages.
+    Ignores ``rpmlib(...)`` and other virtual capabilities that would
+    create spurious edges to unrelated packages.
 
     Returns:
         dict mapping ``pkg_name`` to the set of package names that
         require any capability it provides.  Packages with no rdeps are
         absent from the map.
     """
-    import solv
     from ...core.resolution.pool import lookup_all_requires
 
-    # Pass 1: capability string -> providers.  Names count as their own
-    # provides (a Requires: foo matches a solvable named 'foo').
-    provides_index = {}
-    for s in pool.solvables:
-        if not s.repo or s.name == 'gpg-pubkey':
-            continue
-        provides_index.setdefault(s.name, set()).add(s.name)
-        for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
-            cap = str(dep).split()[0]
-            if not _is_virtual_provide(cap):
-                provides_index.setdefault(cap, set()).add(s.name)
-
-    # Pass 2: invert each solvable's requires into the rdeps map.
     rdeps_map = {}
     for s in pool.solvables:
         if not s.repo or s.name == 'gpg-pubkey':
             continue
         for dep in lookup_all_requires(s):
-            cap = str(dep).split()[0]
-            providers = provides_index.get(cap)
-            if not providers:
+            if _is_virtual_provide(str(dep).split()[0]):
                 continue
-            for p in providers:
-                if p != s.name:
-                    rdeps_map.setdefault(p, set()).add(s.name)
+            for provider in pool.whatprovides(dep):
+                if provider.name != s.name:
+                    rdeps_map.setdefault(provider.name, set()).add(s.name)
 
     return rdeps_map
 
@@ -546,17 +545,7 @@ def _get_rdeps_from_pool(pool, pkg_name: str, installed_only: bool = True,
     if cache is not None and pkg_name in cache:
         return cache[pkg_name]
 
-    import solv
     from ...core.resolution.pool import lookup_all_requires
-
-    # Get all capabilities provided by the target package
-    provides = {pkg_name}
-    sel = pool.select(pkg_name, solv.Selection.SELECTION_NAME)
-    for s in sel.solvables():
-        for dep in s.lookup_deparray(solv.SOLVABLE_PROVIDES):
-            cap = str(dep).split()[0]
-            if not _is_virtual_provide(cap):
-                provides.add(cap)
 
     # Choose which solvables to scan
     if installed_only and pool.installed:
@@ -570,14 +559,20 @@ def _get_rdeps_from_pool(pool, pkg_name: str, installed_only: bool = True,
     else:
         solvables = pool.solvables
 
-    # Find packages whose requires match our provides
+    # Find the packages whose requires land on the target.  The pool
+    # answers who satisfies a dependency, version constraint included:
+    # matching capability names alone would report every consumer of
+    # ``typelib(Foo) = 4.0`` as a consumer of the package providing
+    # ``= 3.0``.
     rdeps = set()
     for s in solvables:
         if not s.repo or s.name == pkg_name or s.name == 'gpg-pubkey':
             continue
         for dep in lookup_all_requires(s):
-            req_cap = str(dep).split()[0]
-            if req_cap in provides:
+            if _is_virtual_provide(str(dep).split()[0]):
+                continue
+            if any(provider.name == pkg_name
+                   for provider in pool.whatprovides(dep)):
                 rdeps.add(s.name)
                 break
 

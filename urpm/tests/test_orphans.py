@@ -65,10 +65,6 @@ class FakeResolver:
         from urpm.core.resolution.orphans import OrphansMixin
         return OrphansMixin.mark_as_explicit(self, package_names)
 
-    def _extract_cap_name(self, cap):
-        from urpm.core.resolution.orphans import OrphansMixin
-        return OrphansMixin._extract_cap_name(self, cap)
-
     def find_upgrade_orphans(self, all_actions, obsoleted_names=None):
         from urpm.core.resolution.orphans import OrphansMixin
         return OrphansMixin.find_upgrade_orphans(self, all_actions, obsoleted_names=obsoleted_names)

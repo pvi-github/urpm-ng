@@ -27,7 +27,7 @@ from typing import List, Optional
 
 from ...i18n import _, ngettext
 from ..rpm import decode_rpmdep_sense, decode_rpmsense_flags
-from .orphans import _SYNTHESIS_SENSE_MAP, _provider_satisfies
+from .depmatch import SYNTHESIS_SENSE_MAP, provider_satisfies
 
 
 @dataclass
@@ -72,7 +72,7 @@ def _evr_of(provider: dict) -> str:
 
     The DB rows returned by :meth:`PackageDatabase.whatprovides` carry
     ``version`` and ``release`` but no separate ``epoch`` column; epoch
-    defaults to ``0`` and is normalised by :func:`_provider_satisfies`.
+    defaults to ``0`` and is normalised by :func:`provider_satisfies`.
     """
     version = provider.get("version", "") or ""
     release = provider.get("release", "") or ""
@@ -125,12 +125,12 @@ def classify_unsatisfied_dep(
             requester=requester,
         )
 
-    sense = _SYNTHESIS_SENSE_MAP.get(dep_op, 0) if dep_op else 0
+    sense = SYNTHESIS_SENSE_MAP.get(dep_op, 0) if dep_op else 0
     if sense:
         satisfied_evrs = [
             _evr_of(p)
             for p in raw
-            if _provider_satisfies(_evr_of(p), sense, dep_version)
+            if provider_satisfies(_evr_of(p), sense, dep_version)
         ]
         if not satisfied_evrs:
             seen = []

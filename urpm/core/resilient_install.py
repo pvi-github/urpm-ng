@@ -284,10 +284,12 @@ def find_dependents(
     import rpm
 
     # ── Read headers and build maps ──
-    # pkg_requires:  name → set of required capability names
-    # cap_providers: capability → set of package names that provide it
-    pkg_requires: Dict[str, Set[str]] = {}
-    cap_providers: Dict[str, Set[str]] = {}
+    # pkg_requires:  name → set of ``(capability, sense, evr)`` rows
+    # providers:     capability → the packages that satisfy it, version
+    #                constraint included (see :mod:`depmatch`)
+    from .resolution.depmatch import ProvidesIndex, header_rows
+    pkg_requires: Dict[str, Set[tuple]] = {}
+    providers = ProvidesIndex()
 
     # ``rpm.TransactionSet(root)`` opens rpmdb env even though we
     # only need it to route ``hdrFromFdno`` for on-disk RPMs.  Close
@@ -311,19 +313,14 @@ def find_dependents(
             name = hdr[rpm.RPMTAG_NAME]
 
             # Collect meaningful requires (skip rpmlib/config internals)
-            requires: Set[str] = set()
-            for req in hdr[rpm.RPMTAG_REQUIRENAME] or []:
-                if not req.startswith(("rpmlib(", "config(")):
-                    requires.add(req)
-            pkg_requires[name] = requires
+            pkg_requires[name] = {
+                row for row in header_rows(hdr, 'requires')
+                if not row[0].startswith("config(")
+            }
 
             # Collect provides (the package name is an implicit provide)
-            provides: Set[str] = {name}
-            for prov in hdr[rpm.RPMTAG_PROVIDENAME] or []:
-                provides.add(prov)
-
-            for cap in provides:
-                cap_providers.setdefault(cap, set()).add(name)
+            providers.add(name, '', name)
+            providers.add_header(hdr, name)
     finally:
         try:
             ts.closeDB()
@@ -334,8 +331,8 @@ def find_dependents(
     # reverse_deps: provider_name → set of names that need it
     reverse_deps: Dict[str, Set[str]] = {}
     for name, requires in pkg_requires.items():
-        for req_cap in requires:
-            for provider in cap_providers.get(req_cap, set()):
+        for row in requires:
+            for provider in providers.providers_of(row):
                 if provider != name:
                     reverse_deps.setdefault(provider, set()).add(name)
 
