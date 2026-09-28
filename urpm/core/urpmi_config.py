@@ -80,6 +80,10 @@ class SyncReport:
     #: shapes a release can take in a URL are not enumerable, so the
     #: honest answer to an unknown one is to say so.
     unhandled: List[str] = field(default_factory=list)
+    #: Media we moved and whose new target answered 404.  Marked
+    #: ``ignore`` so urpmi stops failing on them, and named because
+    #: putting them back is a manual job.
+    disabled: List[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
@@ -263,8 +267,56 @@ def _medium_name(header: str) -> str:
         "\\", "")
 
 
+#: Appended to a medium's URL to ask whether it exists at all.
+_SYNTHESIS = "media_info/synthesis.hdlist.cz"
+
+#: What urpmi writes to switch a medium off.  Indented like the rest of
+#: a block's body, which is what ``urpmi.addmedia`` produces.
+_IGNORE_LINE = "  ignore"
+
+
+def _http_status(url: str, timeout: float = 5.0) -> Optional[int]:
+    """Ask whether a URL exists, and return the status code.
+
+    A ``HEAD`` is enough: the question is existence, not content.
+
+    Returns:
+        The HTTP status, or ``None`` when the server could not be
+        reached at all.  The distinction is the whole point — a 404
+        means the medium was never published for this release, an
+        unreachable host means nothing about it.
+    """
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    try:
+        request = Request(url, method="HEAD")
+        request.add_header("User-Agent", "urpm-ng")
+        with urlopen(request, timeout=timeout) as response:
+            return int(response.status)
+    except HTTPError as exc:
+        return int(exc.code)
+    except (URLError, OSError, ValueError) as exc:
+        logger.debug("urpmi.cfg: %s unreachable: %s", url, exc)
+        return None
+
+
+def _direct_urls(line: str) -> List[str]:
+    """The URL tokens a line carries, mirror lists excluded.
+
+    Only a medium pinned to one server can go missing on its own: the
+    official media travel by mirror list and are cloned from the same
+    reference, so an absent one is absent everywhere and there is
+    nothing to discover by asking.
+    """
+    if line.strip().startswith(_MIRRORLIST_KEY):
+        return []
+    return [token for token in line.split(" ") if "://" in token]
+
+
 def sync_urpmi_config(source_release: str, target_release: str,
-                      path: Path = URPMI_CFG) -> SyncReport:
+                      path: Path = URPMI_CFG,
+                      probe=None) -> SyncReport:
     """Move urpmi's URL-direct media from one release to the next.
 
     Args:
@@ -274,6 +326,9 @@ def sync_urpmi_config(source_release: str, target_release: str,
             :func:`urpm.core.distupgrade.version.identity_of`.
         target_release: The release now installed, e.g. ``"10"``.
         path: Override, for tests.
+        probe: ``url -> status | None``, used to check that what we
+            just wrote exists.  Injected so tests never touch the
+            network; defaults to a ``HEAD``.
 
     Returns:
         A :class:`SyncReport`.  Nothing here raises: this runs after a
@@ -306,7 +361,11 @@ def sync_urpmi_config(source_release: str, target_release: str,
     # than line by line, so an entry no rule could move can be reported
     # under the name its operator knows it by.
     lines, rewritten = [], 0
-    name, moved_here, stale_here = "", 0, False
+    name, moved_here, stale_here, ignored_here = "", 0, False, False
+    header_at, moved_urls = 0, []
+    # ``(header line index, medium name, URLs we rewrote)`` for the
+    # blocks worth checking afterwards.
+    to_check = []
     for line in original.splitlines(keepends=True):
         body = line.rstrip("\n")
         newline = line[len(body):]
@@ -314,6 +373,11 @@ def sync_urpmi_config(source_release: str, target_release: str,
 
         if stripped.endswith("{"):
             name, moved_here, stale_here = _medium_name(body), 0, False
+            ignored_here, header_at, moved_urls = False, len(lines), []
+        elif stripped == "ignore":
+            # Already switched off by the operator: nothing to move,
+            # nothing to check, nothing to say.
+            ignored_here = True
 
         new_body, moved = _move_line(body, source_release, target_release)
         new_body, moved_list = _move_mirrorlist_line(
@@ -321,6 +385,8 @@ def sync_urpmi_config(source_release: str, target_release: str,
         moved += moved_list
         if not moved and _mentions_release(body, source_release):
             stale_here = True
+        if moved:
+            moved_urls += _direct_urls(new_body)
         rewritten += moved
         moved_here += moved
         lines.append(new_body + newline)
@@ -333,12 +399,33 @@ def sync_urpmi_config(source_release: str, target_release: str,
             # the message.
             if name and stale_here and not moved_here:
                 report.unhandled.append(name)
-            name, moved_here, stale_here = "", 0, False
+            if name and moved_urls and not ignored_here:
+                to_check.append((header_at, name, moved_urls))
+            name, moved_here, stale_here, ignored_here = "", 0, False, False
+            moved_urls = []
 
     if not rewritten:
         report.left_alone = len(original.splitlines())
         report.skipped_reason = "nothing named the previous release"
         return report
+
+    # What we just wrote, checked.  Only the media pinned to one
+    # server: a third-party repository can lag behind a release, or
+    # change its URL scheme between two of them, and the operator then
+    # meets a 404 on every urpmi run.  The official media travel by
+    # mirror list, cloned from the same reference, so there is nothing
+    # to learn by asking about them.
+    check = probe if probe is not None else _http_status
+    for header_at, medium, urls in reversed(to_check):
+        missing = any(
+            check(url.rstrip("/") + "/" + _SYNTHESIS) == 404 for url in urls)
+        if not missing:
+            continue
+        # Switched off rather than left to fail, and named because
+        # putting it back means finding the new URL by hand.
+        lines.insert(header_at + 1, _IGNORE_LINE + "\n")
+        report.disabled.append(medium)
+    report.disabled.reverse()
 
     try:
         backup = path.with_suffix(path.suffix + BACKUP_SUFFIX)

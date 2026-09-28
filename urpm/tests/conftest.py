@@ -29,6 +29,22 @@ def _disable_mirror_discovery(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_medium_probing(monkeypatch):
+    """Keep ``sync_urpmi_config`` from asking a real server anything.
+
+    The rewrite checks that what it just wrote exists, with a ``HEAD``
+    per medium.  Left alone, every test that exercises the rewrite
+    would resolve ``mir.example.org`` for real.  Answering ``None``,
+    the value the code already reads as *host unreachable*, disables
+    nothing and leaves those tests exactly as they were.  The tests
+    that are about the check pass their own ``probe``, which wins
+    because it is an argument rather than a default.
+    """
+    from urpm.core import urpmi_config
+    monkeypatch.setattr(urpmi_config, "_http_status", lambda url, **kw: None)
+
+
+@pytest.fixture(autouse=True)
 def _force_null_translations(monkeypatch):
     """Force ``_()`` to return the untranslated msgid in tests.
 

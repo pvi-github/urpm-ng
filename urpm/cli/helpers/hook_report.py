@@ -146,6 +146,20 @@ def _render_urpmi_sync(entry: TriggeredHook,
                                               src=report.source_release)))
             for name in report.unhandled:
                 lines.append("      " + name)
+        # A third-party repository can lag behind a release, or publish
+        # it under another URL scheme.  Switched off so urpmi stops
+        # failing on it, and named because putting it back means
+        # finding the new URL by hand.
+        if report.disabled:
+            lines.append("    " + colors.warning(ngettext(
+                "{n} medium has nothing published for Mageia {tgt} "
+                "and was disabled:",
+                "{n} media have nothing published for Mageia {tgt} "
+                "and were disabled:",
+                len(report.disabled)).format(n=len(report.disabled),
+                                             tgt=report.target_release)))
+            for name in report.disabled:
+                lines.append("      " + name)
     return lines
 
 

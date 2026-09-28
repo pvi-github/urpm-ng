@@ -294,6 +294,229 @@ class TestAnUnknownFormIsNamed:
         assert sync_urpmi_config("9", "10", path=path).unhandled == []
 
 
+class TestAMediumThatWasNeverPublished:
+    """What we moved, checked, and switched off when it is not there.
+
+    A third-party repository is free to lag behind a release, or to
+    publish it under another URL scheme; either way the entry we just
+    rewrote points at nothing and every urpmi run ends on a 404.  The
+    official media travel by mirror list, cloned from one reference,
+    so they are not part of this.
+    """
+
+    @staticmethod
+    def _recorder(status_by_url=None, default=200):
+        """A probe that answers from a table and remembers the asking."""
+        calls = []
+
+        def probe(url, **kwargs):
+            calls.append(url)
+            return (status_by_url or {}).get(url, default)
+
+        return probe, calls
+
+    def test_a_missing_medium_is_switched_off_and_named(self, tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Extras https://tiers.example.org/mga9/x86_64/media/extras {\n"
+            "  key-ids: c186ac23\n}\n", encoding="utf-8")
+        probe, _calls = self._recorder(default=404)
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert report.disabled == ["Extras"]
+        after = path.read_text(encoding="utf-8")
+        assert after == (
+            "Extras https://tiers.example.org/mga10/x86_64/media/extras {\n"
+            "  ignore\n"
+            "  key-ids: c186ac23\n}\n")
+
+    def test_the_url_asked_about_is_the_one_just_written(self, tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Extras https://tiers.example.org/mga9/x86_64/media/extras {\n}\n",
+            encoding="utf-8")
+        probe, calls = self._recorder()
+
+        sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert calls == ["https://tiers.example.org/mga10/x86_64/media/"
+                         "extras/media_info/synthesis.hdlist.cz"]
+
+    def test_a_trailing_slash_does_not_double(self, tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Extras https://tiers.example.org/mga9/x86_64/media/extras/ {\n"
+            "}\n", encoding="utf-8")
+        probe, calls = self._recorder()
+
+        sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert "//media_info" not in calls[0]
+
+    def test_a_server_error_disables_nothing(self, tmp_path):
+        # 500 says the server is unwell, not that the medium is absent.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Extras https://tiers.example.org/mga9/x86_64/media/extras {\n}\n",
+            encoding="utf-8")
+        probe, _calls = self._recorder(default=500)
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert report.disabled == []
+        assert "ignore" not in path.read_text(encoding="utf-8")
+
+    def test_an_unreachable_host_disables_nothing(self, tmp_path):
+        # No network at all, or a dead name: the probe answers None and
+        # we have learnt nothing about the medium.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Extras https://tiers.example.org/mga9/x86_64/media/extras {\n}\n",
+            encoding="utf-8")
+        probe, _calls = self._recorder(default=None)
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert report.disabled == []
+        assert "ignore" not in path.read_text(encoding="utf-8")
+
+    def test_a_forbidden_medium_disables_nothing(self, tmp_path):
+        # A private repository answering 403 to an anonymous HEAD is
+        # still there for the machine that holds the credentials.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Extras https://tiers.example.org/mga9/x86_64/media/extras {\n}\n",
+            encoding="utf-8")
+        probe, _calls = self._recorder(default=403)
+
+        assert sync_urpmi_config("9", "10", path=path,
+                                 probe=probe).disabled == []
+
+    def test_a_mirror_list_is_never_asked_about(self, tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Core\\ Release  {\n"
+            "  mirrorlist: http://mirrors.mageia.org/api/mageia.9.x86_64.list\n"
+            "  with-dir: media/core/release\n}\n", encoding="utf-8")
+        probe, calls = self._recorder(default=404)
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert calls == []
+        assert report.disabled == []
+
+    def test_an_entry_we_could_not_move_is_never_asked_about(self, tmp_path):
+        # Nothing was written there, so there is nothing to check; the
+        # operator is told about it through the other list.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Core https://mir.org/distrib/9/x86_64/media/core/release {\n}\n"
+            "\n"
+            "Exotique https://exemple.org/mageia-9-rpms/x86_64/ {\n}\n",
+            encoding="utf-8")
+        probe, calls = self._recorder(default=404)
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert len(calls) == 1
+        assert "mageia-9-rpms" not in calls[0]
+        assert report.disabled == ["Core"]
+        assert report.unhandled == ["Exotique"]
+
+    def test_a_medium_already_switched_off_is_never_asked_about(self,
+                                                                tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Extras https://tiers.example.org/mga9/x86_64/media/extras {\n"
+            "  ignore\n}\n", encoding="utf-8")
+        probe, calls = self._recorder(default=404)
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert calls == []
+        assert report.disabled == []
+        # The URL still follows, so re-enabling it by hand is enough.
+        assert path.read_text(encoding="utf-8").count("ignore") == 1
+        assert "/mga10/" in path.read_text(encoding="utf-8")
+
+    def test_several_missing_media_come_back_in_file_order(self, tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Un https://a.example.org/mga9/x86_64/media/core/release {\n}\n"
+            "\n"
+            "Deux https://b.example.org/mga9/x86_64/media/core/release {\n}\n"
+            "\n"
+            "Trois https://c.example.org/mga9/x86_64/media/core/release {\n"
+            "}\n", encoding="utf-8")
+        statuses = {
+            "https://a.example.org/mga10/x86_64/media/core/release"
+            "/media_info/synthesis.hdlist.cz": 404,
+            "https://c.example.org/mga10/x86_64/media/core/release"
+            "/media_info/synthesis.hdlist.cz": 404,
+        }
+        probe, _calls = self._recorder(statuses)
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert report.disabled == ["Un", "Trois"]
+        after = path.read_text(encoding="utf-8")
+        # Each marker landed in its own block, the middle one untouched.
+        assert after == (
+            "Un https://a.example.org/mga10/x86_64/media/core/release {\n"
+            "  ignore\n}\n"
+            "\n"
+            "Deux https://b.example.org/mga10/x86_64/media/core/release {\n"
+            "}\n"
+            "\n"
+            "Trois https://c.example.org/mga10/x86_64/media/core/release {\n"
+            "  ignore\n}\n")
+
+    def test_the_count_of_moved_urls_is_unchanged(self, tmp_path):
+        # Switching a medium off is not undoing the move: the URL was
+        # rewritten, and the operator gets both facts.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Extras https://tiers.example.org/mga9/x86_64/media/extras {\n}\n",
+            encoding="utf-8")
+        probe, _calls = self._recorder(default=404)
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert report.rewritten == 1
+        assert report.changed
+        assert report.backup is not None
+
+
+class TestTheReportSeparatesItsLists:
+    """An entry we could not move and one we switched off are not the same."""
+
+    @staticmethod
+    def _rendered(report):
+        from urpm.cli.helpers.hook_report import _render_urpmi_sync
+        entry = SimpleNamespace(hook=SimpleNamespace(
+            action=Action.SYNC_URPMI_CONFIG, identifier="test"))
+        return "\n".join(_render_urpmi_sync(entry, [report]))
+
+    def test_a_disabled_medium_is_named_under_its_own_heading(self):
+        text = self._rendered(SyncReport(
+            path=Path("/etc/urpmi/urpmi.cfg"), source_release="9",
+            target_release="10", rewritten=2, disabled=["Extras"],
+            unhandled=["Exotique"]))
+
+        extras = text.index("Extras")
+        exotique = text.index("Exotique")
+        assert text.index("was left alone:") < exotique < extras
+        assert text.index("was disabled:") < extras
+
+    def test_nothing_is_said_when_nothing_was_disabled(self):
+        text = self._rendered(SyncReport(
+            path=Path("/etc/urpmi/urpmi.cfg"), source_release="9",
+            target_release="10", rewritten=2))
+
+        assert "disabled" not in text
+
+
 class TestTheRealConfigurationOfATestMachine:
     """The mga9 file that exposed the gap, kept as a fixture."""
 
