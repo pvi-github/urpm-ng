@@ -1,4 +1,4 @@
-URPM & Rpmdrake-NG <Testing> 0.9.13:
+URPM & Rpmdrake-NG <Testing> 0.9.14:
 
 
 > ** WARNING - the `distupgrade` feature is still young.**  Only
@@ -6,113 +6,112 @@ URPM & Rpmdrake-NG <Testing> 0.9.13:
 > machine you can snapshot and restore (VM, Clonezilla, btrfs/LVM
 > snapshot…).  Every failure report makes the next version safer.
 
-A release about waiting less and removing less.  `urpm media update`
-hands the terminal back once the synthesis is in, instead of holding it
-for two minutes over a file the next install will never open.  And
-`urpm autoremove` stopped offering to remove packages that are still in
-use.  It did so on any machine carrying two versions of a same name,
-which is what a distupgrade leaves behind.
+A release about a mechanism that had never run.  The post-operation
+rules shipped in the 0.9 cycle were inert on every machine: the
+per-package verdicts they are conditioned on were never written, so
+every condition keyed on a finished package was false.  They fire now,
+and the first rule to use them keeps urpmi's own configuration on the
+release you have just upgraded to.
 
 ## What's Changed
 
 ### Major Features
 
-- **`urpm media update` returns once the synthesis is in.**
-  - A refresh moves two very different piles: 4.8 MB of synthesis
-    across a typical fifteen media, which a resolution reads, and
-    36.3 MB of `files.xml.lzma` plus the AppStream catalogue built from
-    it, which only `urpm f`, `urpm show --files` and the distupgrade
-    file-provides injection read, later.
-  - The tail is one file: 23 MB for core/release, on a four-worker pool
-    where the other three finish early and wait.  At 300 kB/s, ordinary
-    for a busy mirror, that is two minutes of waiting.
-  - A bare `urpm media update` now returns after the head and hands the
-    tail to urpmd.  Without urpmd it runs synchronously, as before, and
-    a named medium is always synchronous.
+- **Post-operation rules actually fire.**
+  - The method that closes a package's history row had no caller.
+    Every row stayed `planned`, and a distupgrade recorded no package
+    rows at all, so a rule waiting for a package to be installed waited
+    forever.
+  - The verdict is now read from the rpmdb once the transaction is
+    over, rather than from rpm's callback, which reports the end of an
+    installation even when the payload failed to extract.  Install,
+    upgrade, erase, distupgrade and the Tx B retry all write it.  A
+    `--test` runs no transaction and leaves the history untouched.
+  - Rules are read from `/usr/lib/urpm/hooks.d/` and can be masked by a
+    file of the same name in `/etc/urpm/hooks.d/`.
 
-- **Sizes now say what is left to fetch.**
-  - The download total was summed over the whole plan and shown before
-    anything looked at the cache, so a resumed distupgrade announced it
-    would download everything again.
-  - The summary now splits what is already on disk from what will
-    really cross the network, at all four confirmation sites.
+- **urpmi's media follow the release.**
+  - A distupgrade left urpmi pointing at the release you came from, so
+    the two package managers disagreed about the machine they share.
+  - The shipped rule moves the URL-direct media in the two shapes
+    measured in the field: the release as a path segment
+    (`/distrib/9/x86_64/media/…`, including the `mageia9` and `mga9`
+    spellings community mirrors use) and the release inside the mirror
+    API file name (`mageia.9.x86_64.list`), which is what
+    `urpmi.addmedia --distrib` leaves behind for every official medium.
+  - A number that only looks like a release is left alone: a mirror
+    publishing Mageia under its own numbered directory keeps it.  An
+    entry no rule could move is named to the operator rather than
+    silently skipped, because the shapes a release can take in a URL
+    are not enumerable.
+  - The previous file is kept as `urpmi.cfg.urpm-ng.bak`.
 
-- **`urpm f` says which media it could not search.**
-  - It answers from the indexes already on disk and never downloads, so
-    a medium whose index is absent, unreadable or an empty stub was
-    skipped in silence, and "no package contains X" read as a complete
-    search.
-  - Skipped media are now listed after the results, with the reason,
-    in full, whatever the outcome.
+- **A medium with nothing published for the new release is switched
+  off.**
+  - A third-party repository is free to lag behind a release, or to
+    publish it under another URL scheme, and the entry we just rewrote
+    then answers 404 on every urpmi run.
+  - Each URL that was rewritten is checked with a single `HEAD` on its
+    `media_info/synthesis.hdlist.cz`.  A 404 adds `ignore` to the
+    block and names the medium, because putting it back means finding
+    the new URL by hand.  Any other answer, and an unreachable server,
+    change nothing.
+  - The official media travel by mirror list and are cloned from one
+    reference, so they are not checked: an absent one is absent
+    everywhere.
+
+- **The end-of-distupgrade report covers the whole distupgrade.**  Tx B
+  does not commit once, it commits in batches, twenty-two of them on
+  the machine this was measured on.  A single transaction id named only
+  the last, so the scriptlet output and the `.rpmnew` list dropped the
+  other twenty-one.  The perimeter is now read from the history, from a
+  boundary kept in the distupgrade state.
+
+- **Phase A is treated as the upgrade it is.**  The preparatory upgrade
+  runs its own post-upgrade rules, and keeps the scriptlet output it
+  used to discard.
 
 ### Bug Fixes
 
-- **`urpm autoremove` offered to remove packages that were still in
-  use.**  rpm refused the transaction after the operator had confirmed
-  it.  Two independent causes.
-  - The dependency maps were keyed on the package name with a plain
-    assignment, so a name installed twice lost one of the two sets of
-    requires, and the packages it needed looked unreferenced.  The
-    verdict even depended on the order rpm happened to enumerate the
-    rpmdb in.
-  - Taking a package out of the removal list did not take out what it
-    depends on.  Declining to remove `dhcp-client` still queued
-    `dhcp-common`, which it requires exactly.
-
-- **The protection lists applied to one removal path out of three.**
-  - The blacklist and the redlist were read in exactly one place, so
-    `autoremove --interactive` and `cleandeps` were free to offer a
-    package the classic path refuses to touch.
-  - A list whose purpose is to keep a system bootable did not apply to
-    the flow most likely to be used right after a distupgrade, which
-    is when the orphans appear.
-  - The three paths now share one reading of both lists, and the
-    triage says what it pulls back before asking for confirmation
-    rather than leaving rpm to reject the transaction afterwards.
-
-- **A rejected removal truncated its own diagnosis** after three
-  lines, each of which names a package that has to be kept.
-
-- **Install sizes were wrong in three ways.**  A local `.rpm` announced
-  a 0 B footprint and 390.9 MB freed on an upgrade that in fact left
-  the disk 2 MB heavier: the compressed payload was read as the space
-  the root filesystem would hold, a local package had no file size at
-  all, and the freed volume was gross rather than net.
-
-- **Commands the machine cannot run were handed out.**  Mageia installs
-  neither `sudo` by default nor the first user into a sudoer group, yet
-  eight messages spelled out `sudo …`, the quick-start guide being four
-  of them in a row.  Each command is now rendered with the escalation
-  this machine can actually offer, or named bare.
-
-- **A `media_info` file left at 0600 by an older build stayed that
-  way.**  `urpm f` then answered "nothing found" instead of "I cannot
-  read this index".  A sync now restores the published mode on a named,
-  closed list of artefacts.
-
-- **Yes/no prompts only understood English and French.**  A prompt that
-  defaults to yes needs its own reader; a German or Dutch "no" was
-  taken for a "yes".
-
-- **A failed removal claimed it had succeeded.**  Six call sites
-  printed `[N/N] done` unconditionally, one line before reporting the
-  failure, and rpm rejects a transaction before touching a single
-  package.  The dependency error itself was a raw rpmlib tuple.
-
-- **`urpm distupgrade --help` was half French in English.**
-
-- **`media add --import-key` announced a URL it would not fetch**, a
-  doubled slash when one was typed.
+- **A dependency was matched on its name, and its version dropped.**
+  - Two packages installable side by side provide the same capability
+    at two versions: `lib64gnome-desktop-gir3.0` provides
+    `typelib(GnomeDesktop) = 3.0`, `lib64gnome-desktop-gir4.0` the same
+    name at `4.0`, and each consumer asks for one of them precisely.
+  - Every reverse-dependency walk compared capability names alone.  The
+    dead package looked required by every consumer of the live one, so
+    `urpm autoremove` never proposed it, `urpm rdepends` named a
+    package as its own predecessor's dependent, and `urpm e` could
+    offer to remove the version that was still in use.  On a machine
+    fresh out of a distupgrade, `urpme --auto-orphans` found two
+    leftovers that `urpm autoremove` could not see.
+  - One module now answers the question, with rpm's own comparison
+    rules, for the six orphan detectors, the reverse-dependency verbs
+    and the install-ordering graph.  The two paths that already held a
+    libsolv pool ask it rather than rebuilding an index by hand.
+  - Measured on a full pool: 10 652 of 225 628 dependency edges were
+    imaginary.  The orphan list of a 3 116-package system is
+    unchanged, which is the expected outcome where no two versions of
+    a capability coexist.
+  - The database-side query is not covered yet: on the media half,
+    `urpm rdepends` still misses the requirements that carry a version.
 
 ### Improvements
 
-- **The translation backlog is cleared**, six languages complete, zero
-  fuzzy.  `urpm/core/resolution/diagnose.py` was the only module
-  calling `_()` that was missing from `POTFILES.in`, and its msgids
-  were written in French, so every user in every locale read French
-  there.
-- **One home for `@System` and `@LocalRPMs`**, the two libsolv
-  pseudo-repositories, instead of thirty-six literals.
+- **A lighter core.**  The container tools (`urpm build`,
+  `urpm image`, `urpm mkimage`), the image profiles and the modules
+  behind them move to `urpm-ng-build`.  The verbs stay in
+  `urpm --help` on a machine without it, and answer with the name of
+  the package to install instead of a traceback.
+- **`urpm cleanup` was two unrelated jobs behind one verb**, a chroot
+  unmount that belongs to the build side and a history migration that
+  belongs to core.  They no longer share a code path.  Splitting them
+  at the level of the public verb belongs to the history rework.
+- **A service restart asked for during a distupgrade is declined**, and
+  said so as a notice: the running session is still on the previous
+  release, so restarting is a policy decision rather than a failure.
+- **First-pass translations in the six languages** for every new
+  message.
 
 
 **Full Changelog**: https://gitweb.mageia.org/software/rpm/urpm-ng/log/?h=release/0.9.x
