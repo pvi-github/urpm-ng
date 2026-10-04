@@ -3077,47 +3077,91 @@ class PackageDatabase(
 
             return [dict(row) for row in cursor]
 
-    def whatrequires(self, capability: str, limit: int = 50) -> List[Dict]:
-        """Find packages that require a capability."""
+    def _requirers_of(self, table: str, capability: str,
+                      provider_evr, limit: int) -> List[Dict]:
+        """Who needs *capability*, at a version this provider satisfies.
+
+        The synthesis stores a dependency as one string, constraint
+        included : ``typelib(GnomeDesktop)[== 4.0]``.  An equality on
+        the bare name therefore never matches a versioned entry, and
+        that is 22.7 % of the ``requires`` rows on a full install.
+
+        Two steps, and the second decides.  SQL brings back the
+        candidates, the bare name and every ``name[...]`` form, which
+        the index on ``capability`` serves as a prefix scan.  Then
+        :mod:`urpm.core.resolution.depmatch` parses each one and keeps
+        those the provider really satisfies, with rpm's own comparison
+        rules : a version comparison is not expressible in SQL, and a
+        second set of rules written here is how the two halves start
+        disagreeing.
+
+        Args:
+            table: ``requires``, ``recommends`` or ``suggests``.
+            capability: The bare capability name, no bracket.
+            provider_evr: What the provider offers for it, ``''`` when
+                it offers it without a version.  ``None`` means the
+                caller has no package in hand and only the name is
+                matched, which is the pre-0.9.15 behaviour.
+            limit: Applied **after** filtering.  In SQL it would
+                truncate before the version is looked at, keeping rows
+                the filter was about to drop.
+        """
+        from .resolution.depmatch import parse_capability, provider_satisfies
+
         with self._conn_read() as conn:
-            cursor = conn.execute("""
-                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
+            cursor = conn.execute(f"""
+                SELECT p.id, p.name, p.version, p.release, p.arch,
+                       p.nevra, d.capability AS required
                 FROM packages p
-                JOIN requires r ON r.pkg_id = p.id
-                WHERE r.capability = ?
+                JOIN {table} d ON d.pkg_id = p.id
+                WHERE d.capability = ? OR d.capability LIKE ?
                 ORDER BY p.name_lower
-                LIMIT ?
-            """, (capability, limit))
+            """, (capability, capability + '[%'))
+            rows = [dict(row) for row in cursor]
 
-            return [dict(row) for row in cursor]
+        kept = []
+        for row in rows:
+            name, sense, evr = parse_capability(row.pop("required"))
+            # The prefix scan is deliberately generous : a capability
+            # name may itself carry brackets, as
+            # ``python3.13dist(coverage[toml])`` does.  The parser
+            # decides, never the LIKE.
+            if name != capability:
+                continue
+            if provider_evr is not None and not provider_satisfies(
+                    provider_evr, sense, evr):
+                continue
+            kept.append(row)
+            if len(kept) >= limit:
+                break
+        return kept
 
-    def whatrecommends(self, capability: str, limit: int = 50) -> List[Dict]:
-        """Find packages that recommend a capability."""
-        with self._conn_read() as conn:
-            cursor = conn.execute("""
-                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
-                FROM packages p
-                JOIN recommends r ON r.pkg_id = p.id
-                WHERE r.capability = ?
-                ORDER BY p.name_lower
-                LIMIT ?
-            """, (capability, limit))
+    def whatrequires(self, capability: str, provider_evr=None,
+                     limit: int = 50) -> List[Dict]:
+        """Find packages that require a capability.
 
-            return [dict(row) for row in cursor]
+        See :meth:`_requirers_of` for ``provider_evr``.
+        """
+        return self._requirers_of("requires", capability,
+                                  provider_evr, limit)
 
-    def whatsuggests(self, capability: str, limit: int = 50) -> List[Dict]:
-        """Find packages that suggest a capability."""
-        with self._conn_read() as conn:
-            cursor = conn.execute("""
-                SELECT p.id, p.name, p.version, p.release, p.arch, p.nevra
-                FROM packages p
-                JOIN suggests s ON s.pkg_id = p.id
-                WHERE s.capability = ?
-                ORDER BY p.name_lower
-                LIMIT ?
-            """, (capability, limit))
+    def whatrecommends(self, capability: str, provider_evr=None,
+                       limit: int = 50) -> List[Dict]:
+        """Find packages that recommend a capability.
 
-            return [dict(row) for row in cursor]
+        See :meth:`_requirers_of` for ``provider_evr``.
+        """
+        return self._requirers_of("recommends", capability,
+                                  provider_evr, limit)
+
+    def whatsuggests(self, capability: str, provider_evr=None,
+                     limit: int = 50) -> List[Dict]:
+        """Find packages that suggest a capability.
+
+        See :meth:`_requirers_of` for ``provider_evr``.
+        """
+        return self._requirers_of("suggests", capability,
+                                  provider_evr, limit)
 
     def get_packages_for_media(self, media_id: int, with_filename: bool = True,
                                 order_by: str = 'name') -> List[Dict]:

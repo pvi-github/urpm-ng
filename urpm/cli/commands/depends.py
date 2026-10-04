@@ -476,15 +476,18 @@ def _get_rdeps(pkg_name: str, db: 'PackageDatabase', dep_types: str = 'R',
 
     # Also query urpmi database for non-installed packages
     if not installed_only:
-        for cap in provides.names():
+        # La version du provide part avec la requête : un consommateur
+        # qui demande ``typelib(Foo) = 4.0`` n'est pas un consommateur
+        # du paquet qui fournit la 3.0.
+        for cap, evr in provides.items():
             if 'R' in dep_types:
-                for r in db.whatrequires(cap, limit=500):
+                for r in db.whatrequires(cap, evr, limit=500):
                     add_rdep(r['name'], 'R')
             if 'r' in dep_types:
-                for r in db.whatrecommends(cap, limit=500):
+                for r in db.whatrecommends(cap, evr, limit=500):
                     add_rdep(r['name'], 'r')
             if 's' in dep_types:
-                for r in db.whatsuggests(cap, limit=500):
+                for r in db.whatsuggests(cap, evr, limit=500):
                     add_rdep(r['name'], 's')
 
     if cache is not None:
@@ -778,16 +781,17 @@ def _build_installed_reachable_set(rdeps: list, rdeps_graph: dict, installed_pkg
         # Not in RPM graph - query urpmi database. Pin to the host arch so
         # SQLite does not pick a foreign-arch row whose suffix-less sonames
         # would silently miss every consumer using the ``(64bit)`` form.
+        from ...core.resolution.depmatch import ProvidesIndex
         result = set()
         pkg = db.get_package(pkg_name, arch=system_arch())
-        provides = [pkg_name]
+        provides = ProvidesIndex()
+        provides.add(pkg_name, '', pkg_name)
         if pkg and pkg.get('provides'):
             for prov in pkg['provides']:
-                cap = prov.split('[')[0].strip()
-                if cap not in provides and not _is_virtual_provide(cap):
-                    provides.append(cap)
-        for cap in provides:
-            for r in db.whatrequires(cap, limit=200):
+                if not _is_virtual_provide(prov.split('[')[0].strip()):
+                    provides.add_capability(prov.strip(), pkg_name)
+        for cap, evr in provides.items():
+            for r in db.whatrequires(cap, evr, limit=200):
                 if r['name'] != pkg_name:
                     result.add(r['name'])
         extended_cache[pkg_name] = result
@@ -908,19 +912,21 @@ def cmd_whatrecommends(args, db: 'PackageDatabase') -> int:
     arch = pick_arch_for_lookup(package, resolve_target_arch(args))
 
     # Get what this package provides
+    from ...core.resolution.depmatch import ProvidesIndex
     pkg = db.get_package(pkg_name, arch=arch)
-    provides = [pkg_name]
+    provides = ProvidesIndex()
+    provides.add(pkg_name, '', pkg_name)
     if pkg and pkg.get('provides'):
         for prov in pkg['provides']:
-            cap = prov.split('[')[0].strip()
-            if cap not in provides:
-                provides.append(cap)
+            provides.add_capability(prov.strip(), pkg_name)
 
     results = set()
 
-    # Check database for each provide
-    for cap in provides:
-        for r in db.whatrecommends(cap, limit=200):
+    # Check database for each provide, version included : the bare
+    # name would answer for a capability this package offers at
+    # another version.
+    for cap, evr in provides.items():
+        for r in db.whatrecommends(cap, evr, limit=200):
             results.add(r['name'])
 
     # Also check installed packages via rpm.  rpmdb access via
@@ -988,19 +994,21 @@ def cmd_whatsuggests(args, db: 'PackageDatabase') -> int:
     arch = pick_arch_for_lookup(package, resolve_target_arch(args))
 
     # Get what this package provides
+    from ...core.resolution.depmatch import ProvidesIndex
     pkg = db.get_package(pkg_name, arch=arch)
-    provides = [pkg_name]
+    provides = ProvidesIndex()
+    provides.add(pkg_name, '', pkg_name)
     if pkg and pkg.get('provides'):
         for prov in pkg['provides']:
-            cap = prov.split('[')[0].strip()
-            if cap not in provides:
-                provides.append(cap)
+            provides.add_capability(prov.strip(), pkg_name)
 
     results = set()
 
-    # Check database for each provide
-    for cap in provides:
-        for r in db.whatsuggests(cap, limit=200):
+    # Check database for each provide, version included : the bare
+    # name would answer for a capability this package offers at
+    # another version.
+    for cap, evr in provides.items():
+        for r in db.whatsuggests(cap, evr, limit=200):
             results.add(r['name'])
 
     # Also check installed packages via rpm.  rpmdb access via

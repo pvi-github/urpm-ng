@@ -285,5 +285,16 @@ class ProvidesIndex:
         """Every capability name in the index."""
         return self._by_name.keys()
 
+    def items(self) -> Iterable[Tuple[str, str]]:
+        """Every ``(capability name, provider evr)`` pair recorded.
+
+        What a caller needs to ask a second index, or a database, who
+        consumes what this package provides: the name alone cannot
+        answer, since the consumer's requirement may carry a version.
+        """
+        for name, entries in self._by_name.items():
+            for _owner, evr in entries:
+                yield name, evr
+
     def __len__(self) -> int:
         return len(self._by_name)
