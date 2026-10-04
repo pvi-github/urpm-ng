@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.4.1\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-09-28 07:40+0200\n"
+"POT-Creation-Date: 2026-10-04 00:27+0200\n"
 "PO-Revision-Date: 2026-07-10 14:30-0300\n"
 "Last-Translator: Grok (assistente de tradução)\n"
 "Language-Team: Brazilian Portuguese <i18n@mageia.org>\n"
@@ -37,8 +37,7 @@ msgstr "não"
 #: urpm/cli/main.py:157
 msgid "The container build tools are not installed on this system."
 msgstr ""
-"As ferramentas de compilação em contentor não estão instaladas neste "
-"sistema."
+"As ferramentas de compilação em contentor não estão instaladas neste sistema."
 
 #: urpm/cli/main.py:159
 msgid "Install the urpm-ng-build subpackage:"
@@ -2542,7 +2541,7 @@ msgstr "Interrompido"
 msgid "Error: {error}"
 msgstr "Erro: {error}"
 
-#: urpm/cli/display.py:168 urpm/cli/commands/depends.py:1239
+#: urpm/cli/display.py:168 urpm/cli/commands/depends.py:1234
 #, python-brace-format
 msgid "and {count} more"
 msgstr "e mais {count}"
@@ -3216,21 +3215,21 @@ msgstr[1] "A apagar {count} pacotes..."
 #: urpm/cli/commands/remove.py:240 urpm/cli/commands/history.py:318
 #: urpm/cli/commands/history.py:783 urpm/cli/commands/cleanup.py:343
 #: urpm/cli/commands/cleanup.py:591 urpm/cli/commands/cleanup.py:981
-#: urpm/cli/commands/_install_pipeline.py:162
+#: urpm/cli/commands/_install_pipeline.py:169
 msgid "  RPM database is locked by another process."
 msgstr " A base de dados RPM está bloqueada por outro processo."
 
 #: urpm/cli/commands/remove.py:241 urpm/cli/commands/history.py:319
 #: urpm/cli/commands/history.py:784 urpm/cli/commands/cleanup.py:344
 #: urpm/cli/commands/cleanup.py:592 urpm/cli/commands/cleanup.py:982
-#: urpm/cli/commands/_install_pipeline.py:164
+#: urpm/cli/commands/_install_pipeline.py:171
 msgid "  Waiting for lock... (Ctrl+C to cancel)"
 msgstr " À espera do bloqueio... (Ctrl+C para cancelar)"
 
 #: urpm/cli/commands/remove.py:330 urpm/cli/commands/history.py:353
 #: urpm/cli/commands/history.py:545 urpm/cli/commands/history.py:818
 #: urpm/cli/commands/cleanup.py:376 urpm/cli/commands/cleanup.py:622
-#: urpm/cli/commands/cleanup.py:1019 urpm/cli/commands/_install_pipeline.py:202
+#: urpm/cli/commands/cleanup.py:1019 urpm/cli/commands/_install_pipeline.py:209
 msgid "done"
 msgstr "concluído"
 
@@ -4666,7 +4665,7 @@ msgstr "Registo de alterações: a consulta rpm falhou"
 msgid "Changelog:"
 msgstr "Registo de alterações:"
 
-#: urpm/cli/commands/query.py:438 urpm/cli/commands/_install_pipeline.py:245
+#: urpm/cli/commands/query.py:438 urpm/cli/commands/_install_pipeline.py:252
 #, python-brace-format
 msgid "{count} package installed"
 msgid_plural "{count} packages installed"
@@ -7783,11 +7782,11 @@ msgstr "{package}: sem dependências"
 msgid "Dependencies of {package} ({count}):"
 msgstr "Dependências de {package} ({count}):"
 
-#: urpm/cli/commands/depends.py:133 urpm/cli/commands/depends.py:654
+#: urpm/cli/commands/depends.py:133 urpm/cli/commands/depends.py:649
 msgid "Depth: unlimited (--all)"
 msgstr "Profundidade: ilimitada (--all)"
 
-#: urpm/cli/commands/depends.py:137 urpm/cli/commands/depends.py:658
+#: urpm/cli/commands/depends.py:137 urpm/cli/commands/depends.py:653
 #, python-brace-format
 msgid "Depth: {n} levels (use --depth N or --all for more)"
 msgstr "Profundidade: {n} níveis (use --depth N ou --all para mais)"
@@ -7840,154 +7839,154 @@ msgstr "Mostrar dependências inversas"
 msgid "already expanded above (truncated)"
 msgstr "já expandido acima (truncado)"
 
-#: urpm/cli/commands/depends.py:637
+#: urpm/cli/commands/depends.py:632
 #, python-brace-format
 msgid "No package depends on '{package}'"
 msgstr "Nenhum pacote depende de '{package}'"
 
-#: urpm/cli/commands/depends.py:702
+#: urpm/cli/commands/depends.py:697
 #, python-brace-format
 msgid "All packages that depend on {package}: {count}"
 msgstr "Todos os pacotes que dependem de {package}: {count}"
 
-#: urpm/cli/commands/depends.py:710
+#: urpm/cli/commands/depends.py:705
 #, python-brace-format
 msgid "Packages that depend on {package}: {count}"
 msgstr "Pacotes que dependem de {package}: {count}"
 
-#: urpm/cli/commands/depends.py:850
+#: urpm/cli/commands/depends.py:845
 #, python-brace-format
 msgid "({count} packages, max depth reached)"
 msgstr "({count} pacotes, profundidade máxima atingida)"
 
-#: urpm/cli/commands/depends.py:888
+#: urpm/cli/commands/depends.py:883
 #, python-brace-format
 msgid "{package}: no recommends"
 msgstr "{package}: sem recomendações"
 
-#: urpm/cli/commands/depends.py:891
+#: urpm/cli/commands/depends.py:886
 #, python-brace-format
 msgid "Packages recommended by {package}: {count}"
 msgstr "Pacotes recomendados por {package}: {count}"
 
-#: urpm/cli/commands/depends.py:949
+#: urpm/cli/commands/depends.py:944
 #, python-brace-format
 msgid "No package recommends '{package}'"
 msgstr "Nenhum pacote recomenda '{package}'"
 
-#: urpm/cli/commands/depends.py:952
+#: urpm/cli/commands/depends.py:947
 #, python-brace-format
 msgid "Packages that recommend {package}: {count}"
 msgstr "Pacotes que recomendam {package}: {count}"
 
-#: urpm/cli/commands/depends.py:970
+#: urpm/cli/commands/depends.py:965
 #, python-brace-format
 msgid "{package}: no suggests"
 msgstr "{package}: sem sugestões"
 
-#: urpm/cli/commands/depends.py:973
+#: urpm/cli/commands/depends.py:968
 #, python-brace-format
 msgid "Packages suggested by {package}: {count}"
 msgstr "Pacotes sugeridos por {package}: {count}"
 
-#: urpm/cli/commands/depends.py:1029
+#: urpm/cli/commands/depends.py:1024
 #, python-brace-format
 msgid "No package suggests '{package}'"
 msgstr "Nenhum pacote sugere '{package}'"
 
-#: urpm/cli/commands/depends.py:1032
+#: urpm/cli/commands/depends.py:1027
 #, python-brace-format
 msgid "Packages that suggest {package}: {count}"
 msgstr "Pacotes que sugerem {package}: {count}"
 
-#: urpm/cli/commands/depends.py:1055
+#: urpm/cli/commands/depends.py:1050
 msgid "rpm module not available"
 msgstr "módulo rpm não disponível"
 
-#: urpm/cli/commands/depends.py:1073
+#: urpm/cli/commands/depends.py:1068
 #, python-brace-format
 msgid "Package '{package}' is not installed"
 msgstr "Pacote '{package}' não está instalado"
 
-#: urpm/cli/commands/depends.py:1084
+#: urpm/cli/commands/depends.py:1079
 #, python-brace-format
 msgid "build dependency of {source}"
 msgstr "Dependências de compilação a partir de: {source}"
 
-#: urpm/cli/commands/depends.py:1086
+#: urpm/cli/commands/depends.py:1081
 msgid "This package can be removed with: urpm autoremove --buildrequires"
 msgstr "Este pacote pode ser removido com: urpm autoremove --orphans"
 
-#: urpm/cli/commands/depends.py:1091
+#: urpm/cli/commands/depends.py:1086
 msgid "explicitly installed"
 msgstr "instalado explicitamente"
 
-#: urpm/cli/commands/depends.py:1101
+#: urpm/cli/commands/depends.py:1096
 msgid "orphan"
 msgstr "órfão"
 
-#: urpm/cli/commands/depends.py:1102
+#: urpm/cli/commands/depends.py:1097
 msgid "(no explicit package requires it)"
 msgstr "(nenhum pacote explícito o requer)"
 
-#: urpm/cli/commands/depends.py:1103
+#: urpm/cli/commands/depends.py:1098
 msgid "This package can be removed with: urpm autoremove --orphans"
 msgstr "Este pacote pode ser removido com: urpm autoremove --orphans"
 
-#: urpm/cli/commands/depends.py:1112
+#: urpm/cli/commands/depends.py:1107
 msgid "R"
 msgstr "R"
 
-#: urpm/cli/commands/depends.py:1112
+#: urpm/cli/commands/depends.py:1107
 msgid "required"
 msgstr "requerido"
 
-#: urpm/cli/commands/depends.py:1114
+#: urpm/cli/commands/depends.py:1109
 msgid "r"
 msgstr "r"
 
-#: urpm/cli/commands/depends.py:1114
+#: urpm/cli/commands/depends.py:1109
 msgid "recommended"
 msgstr "recomendado"
 
-#: urpm/cli/commands/depends.py:1116
+#: urpm/cli/commands/depends.py:1111
 msgid "s"
 msgstr "s"
 
-#: urpm/cli/commands/depends.py:1116
+#: urpm/cli/commands/depends.py:1111
 msgid "suggested"
 msgstr "sugerido"
 
-#: urpm/cli/commands/depends.py:1127
+#: urpm/cli/commands/depends.py:1122
 msgid "kept by Supplements"
 msgstr "mantido por Supplements"
 
-#: urpm/cli/commands/depends.py:1128
+#: urpm/cli/commands/depends.py:1123
 msgid ""
 "This package is triggered by a Supplements relationship from another "
 "installed package."
 msgstr ""
 "Este pacote é activado por uma relação Supplements de outro pacote instalado."
 
-#: urpm/cli/commands/depends.py:1173
+#: urpm/cli/commands/depends.py:1168
 msgid "kept by weak dependency chain"
 msgstr "mantido por cadeia de dependência fraca"
 
-#: urpm/cli/commands/depends.py:1196
+#: urpm/cli/commands/depends.py:1191
 msgid "installed as dependency"
 msgstr "instalado como dependência"
 
-#: urpm/cli/commands/depends.py:1206
+#: urpm/cli/commands/depends.py:1201
 #, python-brace-format
 msgid "By {packages} explicit package(s):"
 msgstr "Por {packages} pacote(s) explícito(s):"
 
-#: urpm/cli/commands/depends.py:1230
+#: urpm/cli/commands/depends.py:1225
 #, python-brace-format
 msgid "(via {chain})"
 msgstr "(via {chain})"
 
-#: urpm/cli/commands/depends.py:1234
+#: urpm/cli/commands/depends.py:1229
 msgid "Also required by (no explicit package in chain):"
 msgstr "Também requerido por (sem pacote explícito na cadeia):"
 
@@ -8173,7 +8172,7 @@ msgstr ""
 "Remover estes pacotes? [s/N] "
 
 #: urpm/cli/commands/cleanup.py:322 urpm/cli/commands/cleanup.py:577
-#: urpm/cli/commands/cleanup.py:926 urpm/cli/commands/_install_pipeline.py:144
+#: urpm/cli/commands/cleanup.py:926 urpm/cli/commands/_install_pipeline.py:151
 msgid ""
 "\n"
 "\n"
@@ -8184,7 +8183,7 @@ msgstr ""
 "Abortar forçado!"
 
 #: urpm/cli/commands/cleanup.py:328 urpm/cli/commands/cleanup.py:583
-#: urpm/cli/commands/cleanup.py:932 urpm/cli/commands/_install_pipeline.py:149
+#: urpm/cli/commands/cleanup.py:932 urpm/cli/commands/_install_pipeline.py:156
 msgid ""
 "\n"
 "\n"
@@ -9208,7 +9207,7 @@ msgstr "Falha ao criar metainfo: {error}"
 msgid "Unknown appstream command: {command}"
 msgstr "Comando appstream desconhecido: {command}"
 
-#: urpm/cli/commands/_install_pipeline.py:211
+#: urpm/cli/commands/_install_pipeline.py:218
 #, python-brace-format
 msgid "{count} package could not be installed due to verification errors:"
 msgid_plural ""
@@ -9218,7 +9217,7 @@ msgstr[0] ""
 msgstr[1] ""
 "{count} pacotes não puderam ser instalados devido a erros de verificação:"
 
-#: urpm/cli/commands/_install_pipeline.py:217
+#: urpm/cli/commands/_install_pipeline.py:224
 #, python-brace-format
 msgid "{count} package could not be upgraded due to verification errors:"
 msgid_plural ""
@@ -9226,30 +9225,35 @@ msgid_plural ""
 msgstr[0] "{count} pacote pode ser atualizado"
 msgstr[1] "{count} pacotes podem ser atualizados"
 
-#: urpm/cli/commands/_install_pipeline.py:225
+#: urpm/cli/commands/_install_pipeline.py:232
 msgid "These packages will be retried on the next update."
 msgstr ""
 "Estes pacotes estarão protegidos de atualizações e substituição por "
 "obsoletos."
 
-#: urpm/cli/commands/_install_pipeline.py:229
+#: urpm/cli/commands/_install_pipeline.py:236
 msgid "Operation interrupted"
 msgstr "Operação interrompida"
 
-#: urpm/cli/commands/_install_pipeline.py:235
+#: urpm/cli/commands/_install_pipeline.py:242
 msgid "Installation failed:"
 msgstr "Instalação falhou:"
 
-#: urpm/cli/commands/_install_pipeline.py:235
+#: urpm/cli/commands/_install_pipeline.py:242
 msgid "Upgrade failed:"
 msgstr "Atualização falhou:"
 
-#: urpm/cli/commands/_install_pipeline.py:251
+#: urpm/cli/commands/_install_pipeline.py:258
 #, python-brace-format
 msgid "{count} package upgraded"
 msgid_plural "{count} packages upgraded"
 msgstr[0] "{count} pacote atualizado"
 msgstr[1] "{count} pacotes atualizados"
+
+#: urpm/cli/commands/_install_pipeline.py:319
+#, python-brace-format
+msgid "Post-operation rules could not be evaluated: {error}"
+msgstr "Não foi possível avaliar as regras pós-operação: {error}"
 
 #: urpm/cli/helpers/audit_report.py:83
 #, python-brace-format
@@ -9951,8 +9955,7 @@ msgid_plural ""
 msgstr[0] ""
 "{n} média não tem nada publicado para Mageia {tgt} e foi desativada:"
 msgstr[1] ""
-"{n} médias não têm nada publicado para Mageia {tgt} e foram "
-"desativadas:"
+"{n} médias não têm nada publicado para Mageia {tgt} e foram desativadas:"
 
 #: urpm/cli/helpers/hook_report.py:174
 #, python-brace-format

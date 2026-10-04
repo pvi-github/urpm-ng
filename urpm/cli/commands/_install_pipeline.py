@@ -53,6 +53,13 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from .. import colors
 from ...i18n import _, ngettext
 from ..helpers.failure_report import print_errors
+# Imported at module load time, not where they are used: what runs
+# after the commit must already be in memory before rpm replaces our
+# own files on disk.  A deferred import there loads the *new* code
+# into a process carrying the *old* objects, and the two disagree.
+# Same reasoning as ``remove.py`` and its ``display_scriptlet_output``.
+from ...core.hooks import Operation
+from ..helpers.hook_report import run_post_operation_hooks
 
 if TYPE_CHECKING:
     from ...core.install import InstallResult
@@ -289,18 +296,28 @@ def run_install_transaction(
             for msg in format_restart_messages(restart_info):
                 print(colors.warning(f"  ⚠ {msg}"))
 
+        # ── Update installed-through-deps.list for urpmi compat ──
+        # Before the rules on purpose : this is part of recording what
+        # the transaction did, and it must not depend on the rules
+        # going well.
+        ops.mark_dependencies(resolver, result.actions)
+
         # ── Post-operation rules (``/usr/lib/urpm/hooks.d``) ──
         # After the commit on purpose : a rule may target the very
         # process running the operation, which is exactly what rpm's own
         # scriptlets cannot do.  See ``urpm.core.hooks``.
-        from ...core.hooks import Operation
-        from ..helpers.hook_report import run_post_operation_hooks
-        run_post_operation_hooks(
-            ops, transaction_id,
-            Operation.UPGRADE if mode == "upgrade" else Operation.INSTALL)
-
-        # ── Update installed-through-deps.list for urpmi compat ──
-        ops.mark_dependencies(resolver, result.actions)
+        try:
+            run_post_operation_hooks(
+                ops, transaction_id,
+                Operation.UPGRADE if mode == "upgrade" else Operation.INSTALL)
+        except Exception as exc:  # noqa: BLE001
+            # Never fail a committed operation, the same rule the D-Bus
+            # path states in its own words.  The packages are installed
+            # and recorded; a rule that cannot be evaluated is reported,
+            # it does not turn a success into a failure.
+            print(colors.warning(_(
+                "Post-operation rules could not be evaluated: {error}"
+            ).format(error=exc)))
 
         # ── Surface any blacklist set during this run ──
         # The detection happened deep in the resilient pipeline

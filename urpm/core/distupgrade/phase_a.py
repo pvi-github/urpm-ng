@@ -22,6 +22,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
 
+# Imported at module load time, not where they are used : Phase A
+# commits a transaction that may replace urpm-ng's own files, and what
+# runs after that commit must already be in memory.  A deferred import
+# there reads the new code into a process carrying the old objects.
+from ..hooks import Operation
+from ...cli.helpers.hook_report import run_post_operation_hooks
+
 if TYPE_CHECKING:
     from ..database import PackageDatabase
 
@@ -244,7 +251,12 @@ def run_phase_a_upgrade(
     # during Tx B, because the machine is coherent at this point —
     # still on the source release, with an up-to-date urpm-ng — where
     # Tx B leaves the release half swapped.
-    from ..hooks import Operation
-    from ...cli.helpers.hook_report import run_post_operation_hooks
-    run_post_operation_hooks(ops, tx_id, Operation.UPGRADE)
+    try:
+        run_post_operation_hooks(ops, tx_id, Operation.UPGRADE)
+    except Exception as exc:  # noqa: BLE001
+        # Never fail a committed operation.  Phase A is the step that
+        # upgrades urpm-ng itself, so it is also the one most exposed
+        # to a mismatch between what is in memory and what rpm just
+        # wrote on disk.
+        logger.warning("post-operation rules could not be evaluated: %s", exc)
     return 0
