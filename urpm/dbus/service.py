@@ -1679,6 +1679,18 @@ class UrpmDBusService:
 
         self._loop = GLib.MainLoop()
 
+        # Collect the transaction children nobody waited for.  Smart
+        # sync hands the parent back before the child is done, and this
+        # process stays up for days : see
+        # ``transaction_queue.reap_finished_children``.
+        from ..core.transaction_queue import reap_finished_children
+
+        def _reap():
+            reap_finished_children()
+            return True  # keep the source alive
+
+        GLib.timeout_add_seconds(60, _reap)
+
         # Handle SIGTERM/SIGINT gracefully
         def _quit(signum, frame):
             logger.info("Received signal, shutting down")

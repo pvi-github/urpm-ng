@@ -40,10 +40,60 @@ Architecture (async)::
 import json
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple, Union
+
+#: Children the parent deliberately did not wait for.
+#:
+#: Smart sync releases the parent at the script-phase boundary and the
+#: child keeps running the triggers : waiting for it there would give
+#: back the two minutes the release was meant to save.  Nobody reaps it
+#: afterwards, which costs nothing in the CLI, where the parent exits
+#: and init adopts the orphan, and leaks one process-table entry per
+#: transaction in a daemon that lives for days.
+#:
+#: Module level on purpose : a ``TransactionQueue`` is built afresh for
+#: every operation, so a per-instance registry would die with the child
+#: still unreaped.
+_UNREAPED_CHILDREN = set()
+_UNREAPED_LOCK = threading.Lock()
+
+
+def reap_finished_children() -> int:
+    """Collect the children nobody waited for, without blocking.
+
+    Called before every fork, so one transaction clears the previous
+    one's child, and from the idle loop of the long-running processes,
+    so a machine that installs nothing for a while does not keep a
+    zombie on display.
+
+    Only our own recorded pids are waited for, never ``-1`` : the same
+    process runs rpm and podman through ``subprocess``, and stealing
+    their exit status would break their own ``wait``.
+
+    Returns:
+        How many were collected, for the tests and the logs.
+    """
+    with _UNREAPED_LOCK:
+        pending = list(_UNREAPED_CHILDREN)
+    collected = 0
+    for pid in pending:
+        try:
+            done, _status = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            # Already reaped, or never ours : either way, drop it.
+            done = pid
+        except OSError:
+            continue
+        if done:
+            with _UNREAPED_LOCK:
+                _UNREAPED_CHILDREN.discard(pid)
+            collected += 1
+    return collected
+
 
 from .background_install import (
     InstallLock,
@@ -866,6 +916,10 @@ class TransactionQueue:
                 overall_error=reason,
             )
 
+        # The previous transaction's child, if it is done, goes here :
+        # one fork cleans up after the last one.
+        reap_finished_children()
+
         # Fork
         pid = os.fork()
 
@@ -1382,7 +1436,12 @@ class TransactionQueue:
                         overall_error = "Child process failed"
             except ChildProcessError:
                 pass
-        # In smart sync, don't waitpid — child runs triggers in background
+        else:
+            # In smart sync, don't waitpid : the child is still running
+            # the triggers.  Record it so the next fork, or an idle
+            # daemon, collects it rather than leaving a zombie behind.
+            with _UNREAPED_LOCK:
+                _UNREAPED_CHILDREN.add(child_pid)
 
         # Detect incomplete transaction (child crashed before sending results)
         if current_op_result is not None and current_op_result not in results:

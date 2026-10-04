@@ -226,6 +226,13 @@ class Scheduler:
                         self._run_metadata_check()
 
                     self._check_tasks()
+
+                    # Collect the transaction children nobody waited
+                    # for.  A daemon lives for days ; without this the
+                    # zombies pile up one per transaction.
+                    from ..core.transaction_queue import (
+                        reap_finished_children)
+                    reap_finished_children()
                 except Exception as e:
                     logger.error(f"Scheduler error: {e}")
 
