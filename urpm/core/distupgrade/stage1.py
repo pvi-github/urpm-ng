@@ -537,8 +537,29 @@ def _mark_third_party_orphans(db: "PackageDatabase",
     return [dict(row) for row in rows]
 
 
-def _collect_source_enabled_short_names(db: "PackageDatabase",
-                                        source_identity: str) -> set:
+def _section_key(relative_path: str, architecture: str):
+    """The part of a media path that survives a release change.
+
+    ``10/x86_64/media/core/release`` and ``9/x86_64/media/core/release``
+    are the same medium one release apart : what identifies it is
+    ``core/release`` plus the architecture, never the version in front.
+
+    Returns ``None`` when the path carries no ``media`` segment, which
+    is the shape of a third-party repository ; those are handled by
+    :func:`_transpose_third_party_media`, not by the inheritance.
+    """
+    if not relative_path:
+        return None
+    marker = "/media/"
+    index = relative_path.find(marker)
+    if index < 0:
+        return None
+    return (relative_path[index + len(marker):].strip("/"),
+            architecture or "")
+
+
+def _collect_source_enabled_sections(db: "PackageDatabase",
+                                     source_identity: str) -> set:
     """Snapshot which official mga N media the user actually had enabled.
 
     Called BEFORE :func:`_disable_source_media` flips the flag, so the
@@ -548,15 +569,27 @@ def _collect_source_enabled_short_names(db: "PackageDatabase",
     the same enable state — otherwise :meth:`upsert_media_tree` would
     honour ``media.noauto=1`` and silently disable Nonfree/Tainted
     on the target release, contradicting the user's mga N config.
+
+    Keyed on the section and the architecture, **not** on the
+    ``short_name``.  A short_name is produced by our own catalogue ;
+    media that entered the database another way, typically imported
+    from urpmi's configuration, carry something else entirely, and the
+    inheritance then matched nothing.  Every target medium was created
+    disabled, Stage 1 reported success, the refresh synced 0/0 and the
+    solver was handed an empty pool.  The path, itself, is canonical
+    whatever the import route.
     """
     conn = db._get_connection()
     rows = conn.execute("""
-        SELECT short_name FROM media
+        SELECT relative_path, architecture FROM media
         WHERE enabled = 1
           AND is_official = 1
           AND mageia_version = ?
     """, (source_identity,)).fetchall()
-    return {r["short_name"] for r in rows if r["short_name"]}
+    keys = {_section_key(r["relative_path"], r["architecture"])
+            for r in rows}
+    keys.discard(None)
+    return keys
 
 
 def _insert_target_media(db: "PackageDatabase",
@@ -564,14 +597,14 @@ def _insert_target_media(db: "PackageDatabase",
                          arch: str,
                          *,
                          source_identity: str,
-                         source_enabled_short_names: set = None,
+                         source_enabled_sections: set = None,
                          undo_journal: dict = None,
                          ) -> Tuple[List[str], List[str]]:
     """Call :func:`upsert_media_tree` for every official server.
 
-    ``source_enabled_short_names`` — set of short_names that were
-    enabled on the source release, as captured by
-    :func:`_collect_source_enabled_short_names` before the disable
+    ``source_enabled_sections`` — set of ``(section, arch)`` keys
+    that were enabled on the source release, as captured by
+    :func:`_collect_source_enabled_sections` before the disable
     pass.  When provided, an ``enabled_policy`` is threaded into
     :func:`upsert_media_tree` so target media inherit the source
     enable state ; when ``None``, the catalogue's ``noauto`` flag
@@ -609,16 +642,24 @@ def _insert_target_media(db: "PackageDatabase",
     def _inherit_source_enable(discovered):
         """enabled_policy honouring the mga N user choice.
 
-        Returns True iff a source-release counterpart with the same
-        ``short_name`` was enabled.  Falls back to the noauto flag
-        when no mapping is available (fresh install case).
+        Returns True iff a source-release counterpart covering the
+        same section and architecture was enabled.
+
+        An **empty** set falls back to the catalogue's own rule, like
+        the absent one.  It used to be taken literally, « the user had
+        nothing enabled », and disabled every target medium without a
+        word ; an empty set means the mapping could not be made, never
+        that the machine had no media.
         """
-        if source_enabled_short_names is None:
+        if not source_enabled_sections:
             return not discovered.noauto
-        return discovered.short_name in source_enabled_short_names
+        return (_section_key(discovered.relative_path,
+                             discovered.architecture)
+                in source_enabled_sections)
 
     created: List[str] = []
     failed: List[str] = []
+    skipped: List[tuple] = []
     for srv in servers:
         srv_dict = dict(srv)
         base_url = build_server_url(srv_dict)
@@ -664,13 +705,15 @@ def _insert_target_media(db: "PackageDatabase",
             # or a manual ``urpm media add``).  Explicitly re-align
             # their enable state with the source-side user choice ;
             # capture the pre-flip snapshot so ``--abort`` restores it.
-            if source_enabled_short_names is not None:
+            if source_enabled_sections:
                 for outcome in result.outcomes:
                     row = db.get_media(outcome.media_name)
                     if not row:
                         continue
                     want_enabled = int(
-                        outcome.short_name in source_enabled_short_names)
+                        _section_key(row.get("relative_path"),
+                                     row.get("architecture"))
+                        in source_enabled_sections)
                     if row.get("enabled") != want_enabled:
                         if undo_journal is not None:
                             # Only snapshot rows that pre-existed —
@@ -693,11 +736,22 @@ def _insert_target_media(db: "PackageDatabase",
                 "(%d created)",
                 catalogue_url, n_out, n_created,
             )
+            # A target medium the primitive could not insert is an
+            # anomaly of this stage, not an internal detail : it
+            # carries the exact reason, and dropping it is how a
+            # distupgrade came to blame the resolver for a medium
+            # whose display name was taken.
+            for outcome in result.outcomes:
+                if outcome.action == "skipped":
+                    skipped.append((outcome.short_name, outcome.reason))
+                    logger.warning(
+                        "stage1 : target media %s not created : %s",
+                        outcome.short_name, outcome.reason)
         except (MediaTreeError, Exception) as exc:  # noqa: BLE001
             logger.warning("target-media upsert failed for %s : %s",
                            srv_dict["name"], exc)
             failed.append(srv_dict["name"])
-    return created, failed
+    return created, failed, skipped
 
 
 def run_stage1(
@@ -740,7 +794,7 @@ def run_stage1(
     # the disable pass touches them — needed so target-release rows
     # inherit the user's Nonfree/Tainted opt-in rather than defaulting
     # to noauto=1.
-    source_enabled = _collect_source_enabled_short_names(
+    source_enabled = _collect_source_enabled_sections(
         db, source_identity)
 
     # Undo journal populated by every mutating helper.  Persisted into
@@ -770,16 +824,24 @@ def run_stage1(
     # sees them with the same treatment.
     disabled_orphan.extend(tp_orphaned)
 
-    created_urls, failed_servers = _insert_target_media(
+    created_urls, failed_servers, skipped_media = _insert_target_media(
         db, target, arch,
         source_identity=source_identity,
-        source_enabled_short_names=source_enabled,
+        source_enabled_sections=source_enabled,
         undo_journal=undo_journal,
     )
     if not created_urls:
         raise Stage1Error(
             "no target-release media could be inserted ; "
             "check network connectivity and mirror configuration.")
+    if skipped_media:
+        # Named, not swallowed : each one carries the reason the
+        # primitive gave, and a target medium missing here is a pool
+        # missing packages two stages later.
+        raise Stage1Error(
+            "target media could not be created: "
+            + "; ".join(f"{name} ({reason})"
+                        for name, reason in skipped_media))
 
     write_state({
         "version_from": source_identity,

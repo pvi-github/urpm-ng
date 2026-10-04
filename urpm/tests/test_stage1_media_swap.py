@@ -198,6 +198,7 @@ class TestRunStage1:
             lambda db, target, arch, **kw: (
                 ["https://mirror/11/x86_64/media/"],
                 [],
+                [],
             ),
         )
 
@@ -219,7 +220,7 @@ class TestRunStage1:
 
         monkeypatch.setattr(
             "urpm.core.distupgrade.stage1._insert_target_media",
-            lambda db, target, arch, **kw: ([], ["mirror.example.org"]),
+            lambda db, target, arch, **kw: ([], ["mirror.example.org"], []),
         )
 
         target = ReleaseIdentity(identity="11", numeric="11")
@@ -319,7 +320,7 @@ class TestInsertTargetMediaUrlVersionRefresh:
             "created_server_ids": [],
         }
         target = ReleaseIdentity(identity="10", numeric="10")
-        created, failed = _insert_target_media(
+        created, failed, _skipped = _insert_target_media(
             db, target, "x86_64",
             source_identity="9",
             undo_journal=undo,

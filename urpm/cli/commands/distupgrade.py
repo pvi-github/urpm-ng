@@ -1037,6 +1037,20 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
         "  synced {n_ok}/{n_total} media ({n_ko} failed)").format(
             n_ok=n_ok, n_total=len(results), n_ko=n_ko)))
 
+    if n_ok == 0:
+        # Stop here rather than hand an empty pool to the solver.  A
+        # resolution with nothing to resolve returns zero actions, and
+        # the message that follows blames libsolv for a cause located
+        # two steps earlier : it sent an operator reporting a resolver
+        # anomaly for a Stage 1 that had created sixty disabled media.
+        print(colors.error(_(
+            "No target-release medium could be synchronised, so there "
+            "is nothing to upgrade from.")))
+        print(colors.dim(_(
+            "  Check `urpm media list --all`: the target-release media "
+            "must be present and enabled.")))
+        return 1
+
     print(colors.info(_(
         "Resolving the target-release package plan...")))
 

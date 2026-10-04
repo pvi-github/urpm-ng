@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.4.1\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-10-04 00:27+0200\n"
+"POT-Creation-Date: 2026-10-04 11:55+0200\n"
 "PO-Revision-Date: 2026-02-28 17:14+0100\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -2547,7 +2547,7 @@ msgstr "Onderbroken"
 msgid "Error: {error}"
 msgstr "Fout: {error}"
 
-#: urpm/cli/display.py:168 urpm/cli/commands/depends.py:1234
+#: urpm/cli/display.py:168 urpm/cli/commands/depends.py:1242
 #, python-brace-format
 msgid "and {count} more"
 msgstr "en {count} meer"
@@ -3455,7 +3455,7 @@ msgstr "Tx A kan niet hervat worden : plan ontbreekt in .state."
 msgid "Tx A retry failed : {err}"
 msgstr "Nieuwe poging voor Tx A mislukt: {err}"
 
-#: urpm/cli/commands/distupgrade.py:212 urpm/cli/commands/distupgrade.py:1323
+#: urpm/cli/commands/distupgrade.py:212 urpm/cli/commands/distupgrade.py:1337
 msgid ""
 "Interrupted at the last failure boundary — run `urpm recover` once the "
 "underlying issue is fixed."
@@ -3508,7 +3508,7 @@ msgstr ""
 "halverwege de migratie achterlaten en het plan wissen dat nodig is om af te "
 "ronden."
 
-#: urpm/cli/commands/distupgrade.py:379 urpm/cli/commands/distupgrade.py:1432
+#: urpm/cli/commands/distupgrade.py:379 urpm/cli/commands/distupgrade.py:1446
 msgid "Finish the migration with :  urpm distupgrade --resume"
 msgstr "Rond de migratie af met :  urpm distupgrade --resume"
 
@@ -3557,7 +3557,7 @@ msgid "  {n} candidate(s) held :"
 msgstr "  {n} kandida(a)t(en) tegengehouden :"
 
 #: urpm/cli/commands/distupgrade.py:439 urpm/cli/commands/distupgrade.py:1010
-#: urpm/cli/commands/distupgrade.py:1531 urpm/cli/commands/distupgrade.py:1547
+#: urpm/cli/commands/distupgrade.py:1545 urpm/cli/commands/distupgrade.py:1561
 #: urpm/cli/commands/system.py:387 urpm/cli/commands/system.py:398
 #: urpm/cli/commands/system.py:924
 #, python-brace-format
@@ -3833,11 +3833,27 @@ msgstr ""
 msgid "  synced {n_ok}/{n_total} media ({n_ko} failed)"
 msgstr "  {n_ok}/{n_total} media gesynchroniseerd ({n_ko} mislukt)"
 
-#: urpm/cli/commands/distupgrade.py:1041
+#: urpm/cli/commands/distupgrade.py:1047
+msgid ""
+"No target-release medium could be synchronised, so there is nothing to "
+"upgrade from."
+msgstr ""
+"Geen enkel medium van de doelrelease kon worden gesynchroniseerd, er "
+"is dus niets om vanaf op te waarderen."
+
+#: urpm/cli/commands/distupgrade.py:1050
+msgid ""
+"  Check `urpm media list --all`: the target-release media must be present "
+"and enabled."
+msgstr ""
+"  Controleer `urpm media list --all`: de media van de doelrelease moeten "
+"aanwezig en ingeschakeld zijn."
+
+#: urpm/cli/commands/distupgrade.py:1055
 msgid "Resolving the target-release package plan..."
 msgstr "Bezig met oplossen van het target-release pakketplan..."
 
-#: urpm/cli/commands/distupgrade.py:1085
+#: urpm/cli/commands/distupgrade.py:1099
 #, python-brace-format
 msgid ""
 "\n"
@@ -3846,7 +3862,7 @@ msgstr ""
 "\n"
 "{count} pakket(ten) worden gedownload..."
 
-#: urpm/cli/commands/distupgrade.py:1104
+#: urpm/cli/commands/distupgrade.py:1118
 msgid ""
 "distupgrade cancelled at the Stage 2 prompt — nothing downloaded, state not "
 "persisted.  Re-run to re-solve."
@@ -3854,7 +3870,7 @@ msgstr ""
 "distupgrade geannuleerd bij de Stage 2-bevestiging — niets gedownload, geen "
 "status opgeslagen.  Voer opnieuw uit om opnieuw op te lossen."
 
-#: urpm/cli/commands/distupgrade.py:1127
+#: urpm/cli/commands/distupgrade.py:1141
 #, python-brace-format
 msgid ""
 "{n} critical package(s) would be missing once the core transaction commits : "
@@ -3863,7 +3879,7 @@ msgstr ""
 "{n} kritiek(e) pakket(ten) zouden ontbreken zodra de kerntransactie is "
 "toegepast : {names}"
 
-#: urpm/cli/commands/distupgrade.py:1131
+#: urpm/cli/commands/distupgrade.py:1145
 #, python-brace-format
 msgid ""
 "urpm restarts under the newly installed rpm and python at that point, and "
@@ -3873,7 +3889,7 @@ msgstr ""
 "kan dat niet zonder hen.  De {target}-repositories moeten ze elk leveren."
 
 # distupgrade i18n restore (idempotent)
-#: urpm/cli/commands/distupgrade.py:1151
+#: urpm/cli/commands/distupgrade.py:1165
 #, python-brace-format
 msgid ""
 "{n_dl} downloaded ({n_peers} from peers, {n_up} from mirrors, {n_cached} "
@@ -3882,12 +3898,12 @@ msgstr ""
 "{n_dl} gedownload ({n_peers} van peers, {n_up} van mirrors, {n_cached} uit "
 "cache) in {time}"
 
-#: urpm/cli/commands/distupgrade.py:1160
+#: urpm/cli/commands/distupgrade.py:1174
 #, python-brace-format
 msgid "All {n_req} package(s) already in cache — no download."
 msgstr "Alle {n_req} pakket(ten) al in cache — geen download."
 
-#: urpm/cli/commands/distupgrade.py:1165
+#: urpm/cli/commands/distupgrade.py:1179
 #, python-brace-format
 msgid ""
 "Cannot proceed to install : {n} package(s) failed to download.  First "
@@ -3896,7 +3912,7 @@ msgstr ""
 "Kan niet doorgaan met installeren : {n} pakket(ten) niet gedownload.  Eerste "
 "fouten : {head}"
 
-#: urpm/cli/commands/distupgrade.py:1251
+#: urpm/cli/commands/distupgrade.py:1265
 #, python-brace-format
 msgid ""
 "Install plan : {n_a} critical system component(s) first, then {n_b} "
@@ -3905,18 +3921,18 @@ msgstr ""
 "Installatieplan : eerst {n_a} kritieke systeemcomponent(en), daarna {n_b} "
 "overige component(en), met {n_rm} te verwijderen pakket(ten)."
 
-#: urpm/cli/commands/distupgrade.py:1297
+#: urpm/cli/commands/distupgrade.py:1311
 #, python-brace-format
 msgid "Installing critical system components ({count} packages)"
 msgstr ""
 "Bezig met installeren van kritieke systeemcomponenten ({count} pakketten)"
 
-#: urpm/cli/commands/distupgrade.py:1320
+#: urpm/cli/commands/distupgrade.py:1334
 #, python-brace-format
 msgid "Installation of critical system components failed : {err}"
 msgstr "Installatie van kritieke systeemcomponenten mislukt : {err}"
 
-#: urpm/cli/commands/distupgrade.py:1330
+#: urpm/cli/commands/distupgrade.py:1344
 msgid ""
 "Critical system components installed — handing off to the new urpm for the "
 "remaining components..."
@@ -3924,7 +3940,7 @@ msgstr ""
 "Kritieke systeemcomponenten geïnstalleerd — overdracht aan de nieuwe urpm "
 "voor de overige componenten..."
 
-#: urpm/cli/commands/distupgrade.py:1342
+#: urpm/cli/commands/distupgrade.py:1356
 #, python-brace-format
 msgid ""
 "Handoff to new urpm failed : {err}.  Critical system components are "
@@ -3933,11 +3949,11 @@ msgstr ""
 "Overdracht aan nieuwe urpm mislukt : {err}.  Kritieke systeemcomponenten "
 "zijn geïnstalleerd ; voer `urpm distupgrade --continue` handmatig uit."
 
-#: urpm/cli/commands/distupgrade.py:1369
+#: urpm/cli/commands/distupgrade.py:1383
 msgid "no distupgrade state on disk : nothing to continue."
 msgstr "Geen opwaarderingsstatus op schijf : niets voort te zetten."
 
-#: urpm/cli/commands/distupgrade.py:1393
+#: urpm/cli/commands/distupgrade.py:1407
 msgid ""
 "no Tx B plan persisted : nothing to install in phase B.  Continuing to Stage "
 "4."
@@ -3945,58 +3961,58 @@ msgstr ""
 "Geen Tx B-plan opgeslagen : niets te installeren in fase B.  Door naar fase "
 "4."
 
-#: urpm/cli/commands/distupgrade.py:1399
+#: urpm/cli/commands/distupgrade.py:1413
 #, python-brace-format
 msgid "Installing remaining components ({count} packages)"
 msgstr "Bezig met installeren van overige componenten ({count} pakketten)"
 
-#: urpm/cli/commands/distupgrade.py:1423
+#: urpm/cli/commands/distupgrade.py:1437
 #, python-brace-format
 msgid "Installation of remaining components failed : {err}"
 msgstr "Installatie van overige componenten mislukt : {err}"
 
-#: urpm/cli/commands/distupgrade.py:1443
+#: urpm/cli/commands/distupgrade.py:1457
 #, python-brace-format
 msgid "Remaining components installed : {n}."
 msgstr "Overige componenten geïnstalleerd : {n}."
 
-#: urpm/cli/commands/distupgrade.py:1450
+#: urpm/cli/commands/distupgrade.py:1464
 #, python-brace-format
 msgid "Post-transaction report failed : {err}"
 msgstr "Post-transactierapport mislukt : {err}"
 
-#: urpm/cli/commands/distupgrade.py:1480
+#: urpm/cli/commands/distupgrade.py:1494
 #, python-brace-format
 msgid "Distupgrade Mageia {src} → {tgt} complete."
 msgstr "Distupgrade Mageia {src} → {tgt} voltooid."
 
-#: urpm/cli/commands/distupgrade.py:1486
+#: urpm/cli/commands/distupgrade.py:1500
 #, python-brace-format
 msgid "Failed scriptlets ({n}) - review carefully:"
 msgstr "Mislukte scriptlets ({n}) - controleer zorgvuldig :"
 
-#: urpm/cli/commands/distupgrade.py:1493
+#: urpm/cli/commands/distupgrade.py:1507
 #, python-brace-format
 msgid "    (+ {n} more — see `urpm history --scriptlets`)"
 msgstr "    (+ {n} meer — zie `urpm history --scriptlets`)"
 
-#: urpm/cli/commands/distupgrade.py:1499
+#: urpm/cli/commands/distupgrade.py:1513
 #, python-brace-format
 msgid ".rpmnew files ({n}) - config files where mga {tgt} ships a new default:"
 msgstr ""
 ".rpmnew-bestanden ({n}) - configuratiebestanden waarvoor mga {tgt} een "
 "nieuwe standaard levert :"
 
-#: urpm/cli/commands/distupgrade.py:1505
+#: urpm/cli/commands/distupgrade.py:1519
 msgid "    Review each with :  vimdiff <file> <file>.rpmnew"
 msgstr "    Bekijk elk met :  vimdiff <bestand> <bestand>.rpmnew"
 
-#: urpm/cli/commands/distupgrade.py:1510
+#: urpm/cli/commands/distupgrade.py:1524
 #, python-brace-format
 msgid "Residual mga{src} packages still installed ({n}):"
 msgstr "Overgebleven mga{src}-pakketten nog geïnstalleerd ({n}) :"
 
-#: urpm/cli/commands/distupgrade.py:1515
+#: urpm/cli/commands/distupgrade.py:1529
 #, python-brace-format
 msgid ""
 "    Most are SONAME-versioned libs waiting for a mga{tgt} rebuild — kept "
@@ -4005,22 +4021,22 @@ msgstr ""
 "    De meeste zijn SONAME-versied libs die wachten op een mga{tgt}-herbouw — "
 "bewust behouden."
 
-#: urpm/cli/commands/distupgrade.py:1518
+#: urpm/cli/commands/distupgrade.py:1532
 msgid "    Review orphan candidates with :  urpm autoremove --show-all"
 msgstr "    Bekijk verweeskandidaten met :  urpm autoremove --show-all"
 
-#: urpm/cli/commands/distupgrade.py:1524
+#: urpm/cli/commands/distupgrade.py:1538
 #, python-brace-format
 msgid "Third-party media without a mga{tgt} equivalent ({n}) - disabled:"
 msgstr "Media van derden zonder mga{tgt}-equivalent ({n}) - uitgeschakeld :"
 
-#: urpm/cli/commands/distupgrade.py:1533
+#: urpm/cli/commands/distupgrade.py:1547
 msgid "    Wait for a maintainer rebuild, or `urpm media remove <short_name>`."
 msgstr ""
 "    Wacht op een herbouw door de onderhouder, of `urpm media remove "
 "<short_name>`."
 
-#: urpm/cli/commands/distupgrade.py:1539
+#: urpm/cli/commands/distupgrade.py:1553
 #, python-brace-format
 msgid ""
 "Old mga{src} repositories replaced by their mga{tgt} counterpart ({n}) - now "
@@ -4029,7 +4045,7 @@ msgstr ""
 "Oude mga{src}-repositories vervangen door hun mga{tgt}-tegenhanger ({n}) - "
 "nu verouderd :"
 
-#: urpm/cli/commands/distupgrade.py:1570
+#: urpm/cli/commands/distupgrade.py:1584
 msgid ""
 "No .rpmnew, no failed scriptlet, no residual, no orphan media, no broken "
 "symlink — clean upgrade."
@@ -4037,18 +4053,18 @@ msgstr ""
 "Geen .rpmnew, geen mislukte scriptlet, geen restanten, geen verweesde media, "
 "geen verbroken link — schone upgrade."
 
-#: urpm/cli/commands/distupgrade.py:1578
+#: urpm/cli/commands/distupgrade.py:1592
 msgid "Next :  reboot so the post-boot adjustments run on next startup."
 msgstr ""
 "Volgende :  herstart om de post-boot-aanpassingen bij volgende opstart uit "
 "te voeren."
 
-#: urpm/cli/commands/distupgrade.py:1613
+#: urpm/cli/commands/distupgrade.py:1627
 #, python-brace-format
 msgid "{n} orphan packages detected after the distupgrade."
 msgstr "{n} verweesde pakketten aangetroffen na het distupgrade."
 
-#: urpm/cli/commands/distupgrade.py:1616
+#: urpm/cli/commands/distupgrade.py:1630
 msgid ""
 "  A mix of previous-release relics (safe to remove), SONAME sublibs (usually "
 "safe), and user-facing packages worth reviewing one by one."
@@ -4057,15 +4073,15 @@ msgstr ""
 "SONAME-subbibliotheken (meestal veilig) en gebruikerspakketten die stuk voor "
 "stuk bekeken horen te worden."
 
-#: urpm/cli/commands/distupgrade.py:1621
+#: urpm/cli/commands/distupgrade.py:1635
 msgid "  Enter interactive triage now ? [y/N] "
 msgstr "  Nu de interactieve triage starten? [j/N] "
 
-#: urpm/cli/commands/distupgrade.py:1627
+#: urpm/cli/commands/distupgrade.py:1641
 msgid "    Skipped ; run later with :  urpm autoremove --interactive"
 msgstr "    Overgeslagen; later uitvoeren met:  urpm autoremove --interactive"
 
-#: urpm/cli/commands/distupgrade.py:1652
+#: urpm/cli/commands/distupgrade.py:1666
 #, python-brace-format
 msgid ""
 "Interactive triage failed : {err}. Run manually with :  urpm autoremove --"
@@ -4074,23 +4090,23 @@ msgstr ""
 "Interactieve triage mislukt : {err}. Voer handmatig uit met :  urpm "
 "autoremove --interactive"
 
-#: urpm/cli/commands/distupgrade.py:1673
+#: urpm/cli/commands/distupgrade.py:1687
 #, python-brace-format
 msgid "  --yes / --auto : dropping the {n} old repositories without prompting."
 msgstr ""
 "  --yes / --auto : de {n} oude repositories worden zonder bevestiging "
 "verwijderd."
 
-#: urpm/cli/commands/distupgrade.py:1679
+#: urpm/cli/commands/distupgrade.py:1693
 msgid "  Drop these old repositories now ? [y/N] "
 msgstr "  Deze oude repositories nu verwijderen ? [j/N] "
 
-#: urpm/cli/commands/distupgrade.py:1685
+#: urpm/cli/commands/distupgrade.py:1699
 msgid "    Kept ; drop later with :  urpm media remove --distupgraded"
 msgstr ""
 "    Behouden ; later verwijderen met :  urpm media remove --distupgraded"
 
-#: urpm/cli/commands/distupgrade.py:1716
+#: urpm/cli/commands/distupgrade.py:1730
 #, python-brace-format
 msgid "Flagged {n} old repository for post-reboot cleanup."
 msgid_plural "Flagged {n} old repositories for post-reboot cleanup."
@@ -7796,11 +7812,11 @@ msgstr "{package}: geen afhankelijkheden"
 msgid "Dependencies of {package} ({count}):"
 msgstr "Afhankelijkheden van {package} ({count}):"
 
-#: urpm/cli/commands/depends.py:133 urpm/cli/commands/depends.py:649
+#: urpm/cli/commands/depends.py:133 urpm/cli/commands/depends.py:652
 msgid "Depth: unlimited (--all)"
 msgstr "Diepte: onbeperkt (--all)"
 
-#: urpm/cli/commands/depends.py:137 urpm/cli/commands/depends.py:653
+#: urpm/cli/commands/depends.py:137 urpm/cli/commands/depends.py:656
 #, python-brace-format
 msgid "Depth: {n} levels (use --depth N or --all for more)"
 msgstr "Diepte: {n} niveaus (gebruik --depth N of --all voor meer)"
@@ -7853,129 +7869,129 @@ msgstr "Omgekeerde afhankelijkheden tonen"
 msgid "already expanded above (truncated)"
 msgstr "hierboven al uitgevouwen (afgekapt)"
 
-#: urpm/cli/commands/depends.py:632
+#: urpm/cli/commands/depends.py:635
 #, python-brace-format
 msgid "No package depends on '{package}'"
 msgstr "Geen pakket hangt af van '{package}'"
 
-#: urpm/cli/commands/depends.py:697
+#: urpm/cli/commands/depends.py:700
 #, python-brace-format
 msgid "All packages that depend on {package}: {count}"
 msgstr "Alle pakketten die afhangen van {package}: {count}"
 
-#: urpm/cli/commands/depends.py:705
+#: urpm/cli/commands/depends.py:708
 #, python-brace-format
 msgid "Packages that depend on {package}: {count}"
 msgstr "Pakketten die afhangen van {package}: {count}"
 
-#: urpm/cli/commands/depends.py:845
+#: urpm/cli/commands/depends.py:849
 #, python-brace-format
 msgid "({count} packages, max depth reached)"
 msgstr "({count} pakketten, max diepte bereikt)"
 
-#: urpm/cli/commands/depends.py:883
+#: urpm/cli/commands/depends.py:887
 #, python-brace-format
 msgid "{package}: no recommends"
 msgstr "{package}: geen aanbevelingen"
 
-#: urpm/cli/commands/depends.py:886
+#: urpm/cli/commands/depends.py:890
 #, python-brace-format
 msgid "Packages recommended by {package}: {count}"
 msgstr "Pakketten aanbevolen door {package}: {count}"
 
-#: urpm/cli/commands/depends.py:944
+#: urpm/cli/commands/depends.py:950
 #, python-brace-format
 msgid "No package recommends '{package}'"
 msgstr "Geen pakket beveelt '{package}' aan"
 
-#: urpm/cli/commands/depends.py:947
+#: urpm/cli/commands/depends.py:953
 #, python-brace-format
 msgid "Packages that recommend {package}: {count}"
 msgstr "Pakketten die {package} aanbevelen: {count}"
 
-#: urpm/cli/commands/depends.py:965
+#: urpm/cli/commands/depends.py:971
 #, python-brace-format
 msgid "{package}: no suggests"
 msgstr "{package}: geen suggesties"
 
-#: urpm/cli/commands/depends.py:968
+#: urpm/cli/commands/depends.py:974
 #, python-brace-format
 msgid "Packages suggested by {package}: {count}"
 msgstr "Pakketten voorgesteld door {package}: {count}"
 
-#: urpm/cli/commands/depends.py:1024
+#: urpm/cli/commands/depends.py:1032
 #, python-brace-format
 msgid "No package suggests '{package}'"
 msgstr "Geen pakket suggereert '{package}'"
 
-#: urpm/cli/commands/depends.py:1027
+#: urpm/cli/commands/depends.py:1035
 #, python-brace-format
 msgid "Packages that suggest {package}: {count}"
 msgstr "Pakketten die {package} suggereren: {count}"
 
-#: urpm/cli/commands/depends.py:1050
+#: urpm/cli/commands/depends.py:1058
 msgid "rpm module not available"
 msgstr "rpm-module niet beschikbaar"
 
-#: urpm/cli/commands/depends.py:1068
+#: urpm/cli/commands/depends.py:1076
 #, python-brace-format
 msgid "Package '{package}' is not installed"
 msgstr "Pakket '{package}' is niet geïnstalleerd"
 
-#: urpm/cli/commands/depends.py:1079
+#: urpm/cli/commands/depends.py:1087
 #, python-brace-format
 msgid "build dependency of {source}"
 msgstr "Bouwafhankelijkheden van: {source}"
 
-#: urpm/cli/commands/depends.py:1081
+#: urpm/cli/commands/depends.py:1089
 msgid "This package can be removed with: urpm autoremove --buildrequires"
 msgstr "Dit pakket kan verwijderd worden met: urpm autoremove --orphans"
 
-#: urpm/cli/commands/depends.py:1086
+#: urpm/cli/commands/depends.py:1094
 msgid "explicitly installed"
 msgstr "expliciet geïnstalleerd"
 
-#: urpm/cli/commands/depends.py:1096
+#: urpm/cli/commands/depends.py:1104
 msgid "orphan"
 msgstr "verweesd"
 
-#: urpm/cli/commands/depends.py:1097
+#: urpm/cli/commands/depends.py:1105
 msgid "(no explicit package requires it)"
 msgstr "(geen expliciet pakket vereist het)"
 
-#: urpm/cli/commands/depends.py:1098
+#: urpm/cli/commands/depends.py:1106
 msgid "This package can be removed with: urpm autoremove --orphans"
 msgstr "Dit pakket kan verwijderd worden met: urpm autoremove --orphans"
 
-#: urpm/cli/commands/depends.py:1107
+#: urpm/cli/commands/depends.py:1115
 msgid "R"
 msgstr "R"
 
-#: urpm/cli/commands/depends.py:1107
+#: urpm/cli/commands/depends.py:1115
 msgid "required"
 msgstr "vereist"
 
-#: urpm/cli/commands/depends.py:1109
+#: urpm/cli/commands/depends.py:1117
 msgid "r"
 msgstr "r"
 
-#: urpm/cli/commands/depends.py:1109
+#: urpm/cli/commands/depends.py:1117
 msgid "recommended"
 msgstr "aanbevolen"
 
-#: urpm/cli/commands/depends.py:1111
+#: urpm/cli/commands/depends.py:1119
 msgid "s"
 msgstr "s"
 
-#: urpm/cli/commands/depends.py:1111
+#: urpm/cli/commands/depends.py:1119
 msgid "suggested"
 msgstr "voorgesteld"
 
-#: urpm/cli/commands/depends.py:1122
+#: urpm/cli/commands/depends.py:1130
 msgid "kept by Supplements"
 msgstr "behouden door Supplements"
 
-#: urpm/cli/commands/depends.py:1123
+#: urpm/cli/commands/depends.py:1131
 msgid ""
 "This package is triggered by a Supplements relationship from another "
 "installed package."
@@ -7983,25 +7999,25 @@ msgstr ""
 "Dit pakket wordt geactiveerd door een Supplements-relatie van een ander "
 "geïnstalleerd pakket."
 
-#: urpm/cli/commands/depends.py:1168
+#: urpm/cli/commands/depends.py:1176
 msgid "kept by weak dependency chain"
 msgstr "behouden door zwakke afhankelijkheidsketen"
 
-#: urpm/cli/commands/depends.py:1191
+#: urpm/cli/commands/depends.py:1199
 msgid "installed as dependency"
 msgstr "geïnstalleerd als afhankelijkheid"
 
-#: urpm/cli/commands/depends.py:1201
+#: urpm/cli/commands/depends.py:1209
 #, python-brace-format
 msgid "By {packages} explicit package(s):"
 msgstr "Door {packages} expliciete pakket(ten):"
 
-#: urpm/cli/commands/depends.py:1225
+#: urpm/cli/commands/depends.py:1233
 #, python-brace-format
 msgid "(via {chain})"
 msgstr "(via {chain})"
 
-#: urpm/cli/commands/depends.py:1229
+#: urpm/cli/commands/depends.py:1237
 msgid "Also required by (no explicit package in chain):"
 msgstr "Ook vereist door (geen expliciet pakket in keten):"
 
@@ -10155,7 +10171,7 @@ msgstr "de URL benoemt geen .rpm-bestand"
 msgid "download failed"
 msgstr "download mislukt"
 
-#: urpm/core/transaction_queue.py:1022
+#: urpm/core/transaction_queue.py:1076
 msgid "Waiting for scriptlets to complete..."
 msgstr "Wachten tot scriptlets voltooid zijn..."
 
