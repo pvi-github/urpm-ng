@@ -526,33 +526,81 @@ urpm mark auto <paket>        # Als automatisch installiert markieren (Abhängig
 urpm mark show <paket>        # Installationsgrund anzeigen
 ```
 
-## Paket-Sperren (Holds)
+## Sperren und Ausblendungen
 
-Pakete sperren, um Updates und den Ersatz durch Obsoletes zu verhindern:
+Zwei Mechanismen, zwei Gegenstände. Eine **Sperre** hält ein
+installiertes Paket auf seiner aktuellen Version. Eine **Ausblendung**
+verbirgt Kandidaten aus den Medien, als wären sie nie veröffentlicht
+worden.
+
+### Sperren
 
 ```bash
-urpm hold <paket>             # Ein Paket sperren
-urpm hold <paket> -r "grund"  # Mit Grund sperren
-urpm hold                     # Gesperrte Pakete auflisten
-urpm unhold <paket>           # Sperre entfernen
+urpm hold add <Paket>              # Ein Paket sperren
+urpm hold add <Paket> -r "Grund"   # Sperren und festhalten, warum
+urpm hold remove <Paket>           # Die Sperre aufheben
+urpm hold list                     # Die Sperren auflisten
 ```
 
-Gesperrte Pakete sind geschützt gegen:
-- Versions-Updates während `urpm upgrade`
-- Ersatz durch Pakete, die sie obsolet machen
+Ein gesperrtes Paket wird von `urpm upgrade` nicht aktualisiert, nicht
+durch ein Paket ersetzt, das es als obsolet erklärt, und kann auch
+nicht als Abhängigkeit eines anderen auf eine neuere Version
+mitgezogen werden. Letzteres macht den Wert einer Sperre aus: ist eine
+Aktualisierung nur möglich, indem ein gesperrtes Paket bewegt wird,
+dann wird die Aktualisierung zurückgestellt, und der Bericht nennt die
+Sperre, die sie verhindert hat.
 
-Beispiel:
 ```bash
-# dhcpcd macht dhcp-client obsolet, aber du willst dhcp-client behalten
-urpm hold dhcp-client -r "Prefer dhcp-client over dhcpcd"
+$ urpm hold add lib64gnome-desktop-gir3.0 -r "ein lokaler Build braucht es"
+$ urpm upgrade
+Nicht aktualisiert (2):
+  Die Sperre auf lib64gnome-desktop-gir3.0 verhindert die Aktualisierung von gnome-shell, mutter.
+  Eine Sperre aufheben mit „urpm hold remove <Paket>“.
 
-# Jetzt überspringt urpm upgrade dhcp-client und warnt:
-#   Gesperrte Pakete (1) übersprungen:
-#     dhcp-client (würde von dhcpcd obsolet gemacht)
-
-# Um den Ersatz später zu erlauben:
-urpm unhold dhcp-client
+  - gnome-shell [Sperre auf lib64gnome-desktop-gir3.0]
+      package gnome-shell-48 requires typelib(GnomeDesktop) = 4.0, ...
 ```
+
+Der Rest des Plans läuft durch, und der Rückgabewert 2 sagt es. Eine
+Sperre verhindert auch, dass ein Obsoletes das Paket ersetzt:
+
+```bash
+# dhcpcd erklärt dhcp-client für obsolet, aber dhcp-client soll bleiben
+urpm hold add dhcp-client -r "Prefer dhcp-client over dhcpcd"
+```
+
+Ein gesperrtes Paket auf der Befehlszeile zu nennen setzt die Sperre
+außer Kraft: `urpm upgrade lib64gnome-desktop-gir3.0` aktualisiert es,
+Sperre oder nicht. `urpm unhold <Paket>` funktioniert weiterhin, als
+Alias für `urpm hold remove`.
+
+### Ausblendungen
+
+```bash
+urpm skip add <Eintrag>      # Einen Eintrag ausblenden
+urpm skip remove <Eintrag>   # Ihn nicht mehr ausblenden
+urpm skip list               # Die ausgeblendeten Einträge auflisten
+```
+
+Ein Eintrag ist ein Paketname oder ein regulärer Ausdruck zwischen
+Schrägstrichen, der mit `name-version-release.arch` verglichen wird:
+
+```bash
+urpm skip add kernel-desktop
+urpm skip add '/^lib64foo-[0-9]/'
+```
+
+Ausblendungen stehen in `/etc/urpmi/skip.list`, urpmis eigener Datei,
+damit beide Werkzeuge eine Liste lesen; `--file` arbeitet auf einem
+anderen Pfad. Ein ausgeblendetes Paket wird behandelt, als hätten die
+Medien es nicht angeboten: es wird nicht als Abhängigkeit
+hereingezogen und nicht zur Aktualisierung angeboten. Es auf der
+Befehlszeile zu nennen setzt die Ausblendung außer Kraft, wie bei
+urpmi.
+
+Dass ein installiertes und ausgeblendetes Paket sich nicht mehr bewegt,
+ist eine Folge, nicht die Absicht. Um ein installiertes Paket
+festzuhalten, dient eine Sperre.
 
 ## Historie und Rückgängig
 

@@ -851,20 +851,61 @@ Remove a GPG key by its short ID (e.g.
 .B mark \fIpackage\fR manual|auto
 Mark packages as manually or automatically installed.
 .TP
-.B hold \fR[\fIpackage\fR ...] [\fB\-r\fR \fIreason\fR]
-Hold packages to prevent upgrades and obsoletes replacement.
-Without arguments, lists held packages.
+.B hold \fIsubcommand\fR
+Keep installed packages at the version they are at.  A held package is
+neither upgraded nor replaced through an
+.IR Obsoletes ,
+and no other package may drag it along: an upgrade that would need a
+newer version of a held package is set aside and reported, naming the
+hold that blocked it.
 .RS
 .TP
-.BR \-r ", " \-\-reason " " \fIreason\fR
-Record a reason for the hold.
+.B add \fIpackage\fR ... [\fB\-r\fR \fIreason\fR]
+Hold the named installed packages.
+.BR \-r ", " \-\-reason
+records why, and
+.B urpm hold list
+shows it.
 .TP
-.BR \-l ", " \-\-list
-List held packages.
+.B remove \fIpackage\fR ...
+Release the named holds.
+.TP
+.B list
+List the holds with their reason and the date they were placed.
 .RE
 .TP
 .B unhold \fIpackage\fR ...
-Remove hold from packages, allowing them to be upgraded or replaced.
+Alias of
+.BR "hold remove" ,
+kept from the previous grammar.
+.TP
+.B skip \fIsubcommand\fR
+Mask candidates from the media, the way urpmi's
+.I skip.list
+does, and in that very file so both tools read one list.  A masked
+package is treated as if the media did not declare it: it is not
+pulled in as a dependency and not offered as an upgrade.  Naming it on
+the command line overrides the mask, as urpmi does.  That an installed
+and masked package stops moving is a consequence, not the intention:
+to pin an installed package, use
+.BR hold .
+.RS
+.TP
+.B add \fIentry\fR ... [\fB\-\-file\fR \fIpath\fR]
+Mask entries.  An entry is a package name, or a regular expression
+between slashes matched against
+.IR name\-version\-release.arch .
+.TP
+.B remove \fIentry\fR ... [\fB\-\-file\fR \fIpath\fR]
+Stop masking entries.
+.TP
+.B list \fR[\fB\-\-file\fR \fIpath\fR]
+List the masked entries.
+.TP
+.B \-\-file \fIpath\fR
+Read and write a list other than
+.IR /etc/urpmi/skip.list .
+.RE
 .SS Initialization and Download
 .TP
 .B init \fR[\fIoptions\fR]

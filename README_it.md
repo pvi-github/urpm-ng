@@ -537,33 +537,79 @@ urpm mark auto <pacchetto>    # Marca come installato automaticamente (dipendenz
 urpm mark show <pacchetto>    # Mostra la ragione dell'installazione
 ```
 
-## Blocchi di pacchetti (holds)
+## Blocchi e mascherature
 
-Blocca i pacchetti per impedire aggiornamenti e sostituzione tramite obsoletes:
+Due meccanismi, due oggetti. Un **blocco** mantiene un pacchetto
+installato alla versione in cui è. Una **mascheratura** nasconde dei
+candidati dai supporti, come se non fossero mai stati pubblicati.
+
+### Blocchi
 
 ```bash
-urpm hold <pacchetto>         # Blocca un pacchetto
-urpm hold <pacchetto> -r "ragione"  # Blocca con una ragione
-urpm hold                     # Elenca i pacchetti bloccati
-urpm unhold <pacchetto>       # Rimuovi il blocco
+urpm hold add <pacchetto>              # Bloccare un pacchetto
+urpm hold add <pacchetto> -r "motivo"  # Bloccare, e annotare il perché
+urpm hold remove <pacchetto>           # Rimuovere il blocco
+urpm hold list                         # Elencare i blocchi
 ```
 
-I pacchetti bloccati sono protetti da:
-- Aggiornamenti di versione durante `urpm upgrade`
-- Sostituzione tramite pacchetti che li obsoletano
+Un pacchetto bloccato non viene aggiornato da `urpm upgrade`, non viene
+sostituito da un pacchetto che lo dichiara obsoleto, e non può essere
+trascinato a una versione più recente come dipendenza di un altro.
+Quest'ultimo punto è ciò che dà valore al blocco: quando un
+aggiornamento è possibile solo spostando un pacchetto bloccato, è
+l'aggiornamento a essere messo da parte, e il rapporto nomina il blocco
+che l'ha impedito.
 
-Esempio:
 ```bash
-# dhcpcd obsoleta dhcp-client, ma vuoi tenere dhcp-client
-urpm hold dhcp-client -r "Prefer dhcp-client over dhcpcd"
+$ urpm hold add lib64gnome-desktop-gir3.0 -r "serve a una compilazione locale"
+$ urpm upgrade
+Non aggiornati (2):
+  Il blocco su lib64gnome-desktop-gir3.0 impedisce l'aggiornamento di gnome-shell, mutter.
+  Per rimuovere un blocco: «urpm hold remove <pacchetto>».
 
-# Ora urpm upgrade salta dhcp-client e avvisa:
-#   Pacchetti bloccati (1) saltati:
-#     dhcp-client (sarebbe obsoletato da dhcpcd)
-
-# Per autorizzare la sostituzione più tardi:
-urpm unhold dhcp-client
+  - gnome-shell [blocco su lib64gnome-desktop-gir3.0]
+      package gnome-shell-48 requires typelib(GnomeDesktop) = 4.0, ...
 ```
+
+Il resto del piano passa, e il codice di uscita 2 lo dice. Un blocco
+impedisce anche a un Obsoletes di sostituire il pacchetto:
+
+```bash
+# dhcpcd dichiara obsoleto dhcp-client, ed è dhcp-client che si vuole tenere
+urpm hold add dhcp-client -r "Prefer dhcp-client over dhcpcd"
+```
+
+Nominare un pacchetto bloccato sulla riga di comando scavalca il
+blocco: `urpm upgrade lib64gnome-desktop-gir3.0` lo aggiorna, blocco o
+no. `urpm unhold <pacchetto>` funziona ancora, come alias di
+`urpm hold remove`.
+
+### Mascherature
+
+```bash
+urpm skip add <voce>      # Mascherare una voce
+urpm skip remove <voce>   # Non mascherarla più
+urpm skip list            # Elencare le voci nascoste
+```
+
+Una voce è un nome di pacchetto, o un'espressione regolare tra barre
+confrontata con `nome-versione-release.arch`:
+
+```bash
+urpm skip add kernel-desktop
+urpm skip add '/^lib64foo-[0-9]/'
+```
+
+Le mascherature stanno in `/etc/urpmi/skip.list`, il file di urpmi
+stesso, perché i due strumenti leggano un solo elenco; `--file` lavora
+su un altro percorso. Un pacchetto nascosto è trattato come se i
+supporti non lo dichiarassero: non viene tirato come dipendenza né
+proposto come aggiornamento. Nominarlo sulla riga di comando scavalca
+la mascheratura, come fa urpmi.
+
+Che un pacchetto installato e nascosto smetta di muoversi è una
+conseguenza, non l'intenzione. Per fissare un pacchetto installato si
+usa un blocco.
 
 ## Storico e annullamento
 

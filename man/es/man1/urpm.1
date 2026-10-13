@@ -638,20 +638,62 @@ Gestióna las claves GPG para la verificación de paquetes.
 .B mark \fIpaquete\fR manual|auto
 Marca paquetes como instalados manualmente o automáticamente.
 .TP
-.B hold \fR[\fIpaquete\fR ...] [\fB\-r\fR \fIrazón\fR]
-Bloquea paquetes para impedir actualizaciónes y reemplazo por obsoletos.
-Sin argumentos, lista los paquetes bloqueados.
+.B hold \fIsubcomando\fR
+Mantiene paquetes instalados en la versión en que están.  Un paquete
+bloqueado no se actualiza ni se sustituye mediante un
+.IR Obsoletes ,
+y ningún otro paquete puede arrastrarlo: una actualización que
+necesitara una versión más reciente de un paquete bloqueado se aparta
+y se informa, nombrando el bloqueo que la impidió.
 .RS
 .TP
-.BR \-r ", " \-\-reason " " \fIrazón\fR
-Registra una razón para el bloqueo.
+.B add \fIpaquete\fR ... [\fB\-r\fR \fIrazón\fR]
+Bloquea los paquetes instalados nombrados.
+.BR \-r ", " \-\-reason
+registra por qué, y
+.B urpm hold list
+lo muestra.
 .TP
-.BR \-l ", " \-\-list
-Lista los paquetes bloqueados.
+.B remove \fIpaquete\fR ...
+Libera los bloqueos nombrados.
+.TP
+.B list
+Lista los bloqueos con su razón y la fecha en que se pusieron.
 .RE
 .TP
 .B unhold \fIpaquete\fR ...
-Elimina el bloqueo de paquetes, permitiendo su actualización o reemplazo.
+Alias de
+.BR "hold remove" ,
+conservado de la sintaxis anterior.
+.TP
+.B skip \fIsubcomando\fR
+Oculta candidatos de los medios, como hace el
+.I skip.list
+de urpmi, y en ese mismo archivo para que ambas herramientas lean una
+sola lista.  Un paquete ocultado se trata como si los medios no lo
+declararan: no se arrastra como dependencia ni se ofrece como
+actualización.  Nombrarlo en la línea de órdenes anula la ocultación,
+igual que en urpmi.  Que un paquete instalado y ocultado deje de
+moverse es una consecuencia, no la intención: para fijar un paquete
+instalado, usar
+.BR hold .
+.RS
+.TP
+.B add \fIentrada\fR ... [\fB\-\-file\fR \fIruta\fR]
+Oculta entradas.  Una entrada es un nombre de paquete, o una expresión
+regular entre barras comparada con
+.IR nombre\-versión\-release.arch .
+.TP
+.B remove \fIentrada\fR ... [\fB\-\-file\fR \fIruta\fR]
+Deja de ocultar las entradas.
+.TP
+.B list \fR[\fB\-\-file\fR \fIruta\fR]
+Lista las entradas ocultadas.
+.TP
+.B \-\-file \fIruta\fR
+Lee y escribe una lista distinta de
+.IR /etc/urpmi/skip.list .
+.RE
 .SS Inicialización y descarga
 .TP
 .B init \fR[\fB\-\-release\fR \fIversión\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]

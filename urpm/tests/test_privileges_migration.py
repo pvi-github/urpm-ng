@@ -445,7 +445,11 @@ class TestSilentCrashSitesNowGuarded:
          'org.mageia.urpm.media-manage'),
         ('urpm.cli.commands.media:cmd_media_discover',
          'org.mageia.urpm.media-manage'),
-        ('urpm.cli.commands.cleanup:cmd_hold',
+        # ``cmd_hold`` n'est plus qu'un aiguillage depuis que le verbe
+        # a des sous-commandes ; le garde est descendu avec le travail.
+        ('urpm.cli.commands.cleanup:_hold_add',
+         'org.mageia.urpm.media-manage'),
+        ('urpm.cli.commands.cleanup:_hold_remove',
          'org.mageia.urpm.media-manage'),
         ('urpm.cli.commands.cleanup:cmd_mark',
          'org.mageia.urpm.media-manage'),

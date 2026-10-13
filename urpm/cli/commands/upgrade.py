@@ -6,6 +6,7 @@ from ...i18n import _, ngettext, confirm_yes
 if TYPE_CHECKING:
     from ...core.database import PackageDatabase
 
+from ..helpers.hold import confirm_hold_override
 from ..helpers.resolver import create_resolver as _create_resolver
 from ..helpers.alternatives import (
     PreferencesMatcher,
@@ -134,6 +135,15 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         for info in local_rpm_infos:
             package_names.append(info['name'])
 
+    # Naming a held package overrides its hold, which the resolver
+    # implements by leaving it out of the locks.  Ask first: the hold
+    # may be months old and its reason forgotten, and this is the one
+    # command that can undo it without saying so.
+    if package_names and not confirm_hold_override(
+            db, package_names, auto=getattr(args, 'auto', False),
+            operation="upgrade"):
+        return 1
+
     atomic = bool(getattr(args, 'atomic', False))
     if upgrade_all:
         print(_("Resolving system upgrade..."))
@@ -166,7 +176,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         if hasattr(resolver, '_held_obsolete_warnings') and resolver._held_obsolete_warnings:
             for held_pkg, obsoleting_pkg in resolver._held_obsolete_warnings:
                 print("  " + colors.warning(held_pkg) + " " + _("(would be obsoleted by {pkg})").format(pkg=obsoleting_pkg))
-        print("\n  " + _("Use '{cmd}' to allow changes.").format(cmd=colors.dim('urpm unhold <package>')))
+        print("\n  " + _("Use '{cmd}' to allow changes.").format(cmd=colors.dim('urpm hold remove <package>')))
 
     # Render skipped-jobs report (best-effort partial transactions).
     # Exit code 2 is reserved for "transaction completed but at least
@@ -176,6 +186,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
         list(result.skipped or []),
         show_all=getattr(args, 'show_all', False),
         command_hint="urpm upgrade",
+        operation="upgrade",
     )
     partial_exit = 2 if result.skipped else 0
 

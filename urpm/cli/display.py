@@ -501,8 +501,32 @@ class DownloadProgressDisplay:
         self.last_lines_count = 0
 
 
+def _group_by_hold(skipped: list) -> list:
+    """Group the entries a hold blocked, keyed by the responsible holds.
+
+    One hold normally blocks several packages at once, since the thing
+    it freezes is needed by a whole family, so the readable unit is the
+    hold and not the package.  Entries no hold blocked are left out.
+
+    Args:
+        skipped: ``Resolution.skipped``.
+
+    Returns:
+        ``[(holds, package names)]`` in order of first appearance, so
+        two runs of the same command print the same order.
+    """
+    groups: dict = {}
+    for sj in skipped:
+        holds = tuple(getattr(sj, "blocked_by", ()) or ())
+        if not holds:
+            continue
+        groups.setdefault(holds, []).append(sj.name)
+    return [(holds, sorted(set(names))) for holds, names in groups.items()]
+
+
 def print_skipped_jobs(skipped: list, *, show_all: bool = False,
-                       command_hint: str = "urpm upgrade") -> None:
+                       command_hint: str = "urpm upgrade",
+                       operation: str = "upgrade") -> None:
     """Print the ``Non mis à jour`` block from a partial transaction.
 
     Each :class:`urpm.core.resolver.SkippedJob` is rendered with its
@@ -524,6 +548,12 @@ def print_skipped_jobs(skipped: list, *, show_all: bool = False,
         command_hint: Verb to mention in the rerun-tip footer.
             Defaults to ``"urpm upgrade"``; pass ``"urpm install"``
             for the install path.
+        operation: ``"upgrade"`` or ``"install"``, selecting the wording
+            of the hold sentences.  A hold blocks *the upgrade of* some
+            packages when the user ran ``urpm upgrade``, and *the
+            installation of* some packages when they ran
+            ``urpm install``, and saying the wrong one sends them
+            looking for an operation they never asked for.
     """
     if not skipped:
         return
@@ -540,6 +570,35 @@ def print_skipped_jobs(skipped: list, *, show_all: bool = False,
     print()
     print(colors.warning(title))
 
+    # What a hold blocked comes first, grouped by hold: it is the one
+    # cause in this list the user can act on directly, and it is their
+    # own earlier decision coming back.
+    held_groups = _group_by_hold(skipped)
+    if held_groups:
+        for holds, targets in held_groups:
+            if operation == "install":
+                sentence = ngettext(
+                    "The hold on {holds} blocks the installation of {targets}.",
+                    "The holds on {holds} block the installation of {targets}.",
+                    len(holds),
+                )
+            else:
+                sentence = ngettext(
+                    "The hold on {holds} blocks the upgrade of {targets}.",
+                    "The holds on {holds} block the upgrade of {targets}.",
+                    len(holds),
+                )
+            print("  " + colors.warning(sentence.format(
+                holds=", ".join(holds), targets=", ".join(targets))))
+        # The metavariable travels inside the translatable string, the
+        # way the rerun footer below does it, so a translator can write
+        # ``<paquet>`` rather than leaving an English word in the
+        # middle of their sentence.
+        print("  " + colors.dim(
+            _("Release a hold with '{cmd} <package>'.").format(
+                cmd="urpm hold remove")))
+        print()
+
     for sj in skipped:
         head = sj.name
         if sj.evr:
@@ -551,6 +610,9 @@ def print_skipped_jobs(skipped: list, *, show_all: bool = False,
             kind_tag = _(" [silently held]")
         elif sj.kind == "hint":
             kind_tag = _(" [preference overridden]")
+        if getattr(sj, "blocked_by", ()):
+            kind_tag += _(" [hold on {holds}]").format(
+                holds=", ".join(sj.blocked_by))
         print(f"  - {colors.warning(head)}{colors.dim(kind_tag)}")
 
         reason_lines = (sj.reason or "").splitlines() or [""]

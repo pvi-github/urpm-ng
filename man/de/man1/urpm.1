@@ -634,20 +634,65 @@ Verwaltet GPG-Schlüssel für die Paketverifizierung.
 .B mark \fIPaket\fR manual|auto
 Markiert Pakete als manuell oder automatisch installiert.
 .TP
-.B hold \fR[\fIPaket\fR ...] [\fB\-r\fR \fIGrund\fR]
-Sperrt Pakete, um Aktualisierungen und Ersetzung durch Obsoletes zu verhindern.
-Ohne Argumente werden gesperrte Pakete aufgelistet.
+.B hold \fIUnterbefehl\fR
+Hält installierte Pakete auf ihrer aktuellen Version.  Ein gesperrtes
+Paket wird weder aktualisiert noch über ein
+.I Obsoletes
+ersetzt, und kein anderes Paket kann es mitziehen: eine
+Aktualisierung, die eine neuere Version eines gesperrten Pakets
+benötigte, wird zurückgestellt und gemeldet, unter Nennung der Sperre,
+die sie verhindert hat.
 .RS
 .TP
-.BR \-r ", " \-\-reason " " \fIGrund\fR
-Zeichnet einen Grund für die Sperre auf.
+.B add \fIPaket\fR ... [\fB\-r\fR \fIGrund\fR]
+Sperrt die genannten installierten Pakete.
+.BR \-r ", " \-\-reason
+hält fest, warum, und
+.B urpm hold list
+zeigt es an.
 .TP
-.BR \-l ", " \-\-list
-Listet gesperrte Pakete auf.
+.B remove \fIPaket\fR ...
+Hebt die genannten Sperren auf.
+.TP
+.B list
+Listet die Sperren mit Grund und Datum ihrer Setzung auf.
 .RE
 .TP
 .B unhold \fIPaket\fR ...
-Hebt die Sperre von Paketen auf, sodass sie aktualisiert oder ersetzt werden können.
+Alias für
+.BR "hold remove" ,
+aus der früheren Syntax beibehalten.
+.TP
+.B skip \fIUnterbefehl\fR
+Blendet Kandidaten aus den Medien aus, so wie urpmis
+.I skip.list
+es tut, und in genau dieser Datei, damit beide Werkzeuge eine Liste
+lesen.  Ein ausgeblendetes Paket wird behandelt, als hätten die Medien
+es nicht angeboten: es wird nicht als Abhängigkeit hereingezogen und
+nicht zur Aktualisierung angeboten.  Es auf der Befehlszeile zu nennen
+setzt die Ausblendung außer Kraft, wie bei urpmi.  Dass ein
+installiertes und ausgeblendetes Paket sich nicht mehr bewegt, ist
+eine Folge, nicht die Absicht: um ein installiertes Paket
+festzuhalten, dient
+.BR hold .
+.RS
+.TP
+.B add \fIEintrag\fR ... [\fB\-\-file\fR \fIPfad\fR]
+Blendet Einträge aus.  Ein Eintrag ist ein Paketname oder ein
+regulärer Ausdruck zwischen Schrägstrichen, der mit
+.I name\-version\-release.arch
+verglichen wird.
+.TP
+.B remove \fIEintrag\fR ... [\fB\-\-file\fR \fIPfad\fR]
+Blendet Einträge nicht mehr aus.
+.TP
+.B list \fR[\fB\-\-file\fR \fIPfad\fR]
+Listet die ausgeblendeten Einträge auf.
+.TP
+.B \-\-file \fIPfad\fR
+Liest und schreibt eine andere Liste als
+.IR /etc/urpmi/skip.list .
+.RE
 .SS Initialisierung und Download
 .TP
 .B init \fR[\fB\-\-release\fR \fIVersion\fR] [\fB\-\-mirrorlist\fR \fIURL\fR]

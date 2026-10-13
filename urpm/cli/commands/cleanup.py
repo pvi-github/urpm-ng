@@ -789,50 +789,71 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
 
 
 def cmd_hold(args, db: 'PackageDatabase') -> int:
-    """Handle hold command - hold packages to prevent upgrades and obsoletes."""
+    """``urpm hold`` : freeze installed packages.
+
+    A hold freezes a package **installed** in the state it is in. It
+    is not a skip: masking candidates from the media is what
+    ``urpm skip`` does, and the two answer different questions, « does
+    it move » against « do we offer it ».
+    """
+    action = getattr(args, "hold_command", None)
+    if action == "list":
+        return _hold_list(args, db)
+    if action == "add":
+        return _hold_add(args, db)
+    if action == "remove":
+        return _hold_remove(args, db)
+    return 1
+
+
+def _hold_list(args, db: 'PackageDatabase') -> int:
     from .. import colors
-    from ...auth.privileges import require_privileges
     from datetime import datetime
 
-    # List holds if no packages or --list
-    if args.list_holds or not args.packages:
-        holds = db.list_holds()
-        if not holds:
-            print(_("No packages are held."))
-            return 0
-
-        print(_("Held packages ({count}):").format(count=len(holds)) + "\n")
-        for hold in holds:
-            ts = datetime.fromtimestamp(hold['added_timestamp'])
-            reason = f" - {hold['reason']}" if hold['reason'] else ""
-            print(f"  {colors.warning(hold['package_name'])}{reason}")
-            print("    " + _("(held since {date})").format(date=ts.strftime('%Y-%m-%d %H:%M')))
+    holds = db.list_holds()
+    if not holds:
+        print(_("No packages are held."))
         return 0
 
-    # Hold packages
+    print(_("Held packages ({count}):").format(count=len(holds)) + "\n")
+    for hold in holds:
+        ts = datetime.fromtimestamp(hold['added_timestamp'])
+        reason = f" - {hold['reason']}" if hold['reason'] else ""
+        print(f"  {colors.warning(hold['package_name'])}{reason}")
+        print("    " + _("(held since {date})").format(
+            date=ts.strftime('%Y-%m-%d %H:%M')))
+    return 0
+
+
+def _hold_add(args, db: 'PackageDatabase') -> int:
+    from .. import colors
+    from ...auth.privileges import require_privileges
+
     require_privileges(action_id="org.mageia.urpm.media-manage")
 
     added = []
     already_held = []
 
     for pkg in args.packages:
-        if db.add_hold(pkg, args.reason):
+        if db.add_hold(pkg, getattr(args, "reason", None)):
             added.append(pkg)
         else:
             already_held.append(pkg)
 
     if already_held:
-        print(_("Already held: {packages}").format(packages=', '.join(already_held)))
+        print(_("Already held: {packages}").format(
+            packages=', '.join(already_held)))
 
     if added:
-        print(colors.success(_("Held: {packages}").format(packages=', '.join(added))))
-        print(_("These packages will be protected from upgrades and obsoletes replacement."))
+        print(colors.success(_("Held: {packages}").format(
+            packages=', '.join(added))))
+        print(_("These packages will be protected from upgrades and "
+                "obsoletes replacement."))
 
     return 0 if added or already_held else 1
 
 
-def cmd_unhold(args, db: 'PackageDatabase') -> int:
-    """Handle unhold command - remove hold from packages."""
+def _hold_remove(args, db: 'PackageDatabase') -> int:
     from .. import colors
     from ...auth.privileges import require_privileges
 
@@ -851,10 +872,26 @@ def cmd_unhold(args, db: 'PackageDatabase') -> int:
         print(_("Not held: {packages}").format(packages=', '.join(not_held)))
 
     if removed:
-        print(colors.success(_("Unheld: {packages}").format(packages=', '.join(removed))))
-        print(_("These packages can now be upgraded and replaced by obsoletes."))
+        print(colors.success(_("Unheld: {packages}").format(
+            packages=', '.join(removed))))
+        print(_("These packages can now be upgraded and replaced by "
+                "obsoletes."))
 
     return 0 if removed else 1
+
+
+def cmd_unhold(args, db: 'PackageDatabase') -> int:
+    """``urpm unhold`` : kept, and says where the grammar went.
+
+    The verb everybody knows keeps working.  It has no ambiguity of
+    its own, unlike ``urpm hold <package>``, which argparse cannot
+    tell from a subcommand.
+    """
+    from .. import colors
+
+    print(colors.dim(_(
+        "Note: the grammar changed, this is now `urpm hold remove`.")))
+    return _hold_remove(args, db)
 
 
 def cmd_cleandeps(args, db: 'PackageDatabase') -> int:

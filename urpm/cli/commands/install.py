@@ -26,6 +26,7 @@ from ..helpers.package import (
 from ..helpers.debug import (
     notify_urpmd_cache_invalidate as _notify_urpmd_cache_invalidate,
 )
+from ..helpers.hold import confirm_hold_override
 from ..helpers.resolver import (
     create_resolver as _create_resolver,
 )
@@ -433,6 +434,14 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     if sibling_rpm_infos:
         resolver.add_local_rpms(sibling_rpm_infos)
 
+    # Naming a held package overrides its hold, here as in `urpm
+    # upgrade`: an install of an already installed package is an
+    # upgrade of it, so the same question has to be asked.
+    if not confirm_hold_override(
+            db, resolved_packages, auto=getattr(args, 'auto', False),
+            operation="install"):
+        return 1
+
     if nodeps:
         # --nodeps: build actions directly without dependency resolution
         from ...core.resolver import PackageAction, TransactionType, Resolution
@@ -519,6 +528,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
         list(result.skipped or []),
         show_all=getattr(args, 'show_all', False),
         command_hint="urpm install",
+        operation="install",
     )
     partial_exit = 2 if result.skipped else 0
 

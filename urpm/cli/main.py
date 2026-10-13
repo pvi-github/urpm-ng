@@ -116,6 +116,7 @@ from .commands.upgrade import (
 from .commands.cleanup import (
     cmd_autoremove, cmd_mark, cmd_hold, cmd_unhold, cmd_cleandeps,
 )
+from .commands.skip import cmd_skip
 from .commands.depends import (
     cmd_depends, cmd_rdepends, cmd_recommends, cmd_whatrecommends,
     cmd_suggests, cmd_whatsuggests, cmd_why,
@@ -1907,34 +1908,87 @@ diagnostic short of running ldd by hand.
     )
 
     # =========================================================================
-    # hold / unhold
+    # hold / unhold / skip
+    #
+    # Two mechanisms, two objects.  ``hold`` keeps an installed package
+    # at the version it is at.  ``skip`` masks candidates from the
+    # media, as if they were not declared in the synthesis, and is
+    # stored in urpmi's own ``skip.list`` so both tools read the same
+    # list.  That an installed and masked package stops moving is a
+    # consequence, not the intention.
+    #
+    # One word per notion, in every message the user reads: a hold is
+    # held and released, never frozen or unfrozen.  Three words for one
+    # mechanism is a translator's trap and a user's.
     # =========================================================================
     hold_parser = subparsers.add_parser(
         'hold',
-        help=_('Hold packages (prevent upgrades and obsoletes replacement)'),
+        help=_('Hold installed packages at the version they are at'),
         parents=[display_parent]
     )
-    hold_parser.add_argument(
-        'packages', nargs='*', metavar='PACKAGE',
-        help=_('Package names to hold (or list holds if empty)')
+    hold_sub = hold_parser.add_subparsers(
+        dest='hold_command', metavar='<subcommand>', required=True)
+
+    hold_add = hold_sub.add_parser(
+        'add', help=_('Hold packages'), parents=[display_parent])
+    hold_add.add_argument(
+        'packages', nargs='+', metavar='PACKAGE',
+        help=_('Installed package names to hold')
     )
-    hold_parser.add_argument(
+    hold_add.add_argument(
         '-r', '--reason',
         help=_('Reason for holding the package')
     )
-    hold_parser.add_argument(
-        '-l', '--list', action='store_true', dest='list_holds',
-        help=_('List held packages')
+
+    hold_remove = hold_sub.add_parser(
+        'remove', help=_('Release held packages'), parents=[display_parent])
+    hold_remove.add_argument(
+        'packages', nargs='+', metavar='PACKAGE',
+        help=_('Package names to release')
     )
+
+    hold_sub.add_parser(
+        'list', help=_('List held packages'), parents=[display_parent])
 
     unhold_parser = subparsers.add_parser(
         'unhold',
-        help=_('Remove hold from packages'),
+        help=_('Remove hold from packages (alias of `hold remove`)'),
         parents=[display_parent]
     )
     unhold_parser.add_argument(
         'packages', nargs='+', metavar='PACKAGE',
         help=_('Package names to unhold')
+    )
+
+    skip_parser = subparsers.add_parser(
+        'skip',
+        help=_("Mask packages from the media, as urpmi's skip.list does"),
+        parents=[display_parent]
+    )
+    skip_sub = skip_parser.add_subparsers(
+        dest='skip_command', metavar='<subcommand>', required=True)
+
+    for verb, helptext in (
+            ('add', _('Mask packages')),
+            ('remove', _('Stop masking packages')),
+    ):
+        sub = skip_sub.add_parser(verb, help=helptext,
+                                  parents=[display_parent])
+        sub.add_argument(
+            'entries', nargs='+', metavar='ENTRY',
+            help=_('A package name, or a regular expression between '
+                   'slashes matched against name-version-release.arch')
+        )
+        sub.add_argument(
+            '--file', metavar='PATH',
+            help=_('List to edit (default: /etc/urpmi/skip.list)')
+        )
+
+    skip_list_parser = skip_sub.add_parser(
+        'list', help=_('List masked entries'), parents=[display_parent])
+    skip_list_parser.add_argument(
+        '--file', metavar='PATH',
+        help=_('List to read (default: /etc/urpmi/skip.list)')
     )
 
     # =========================================================================
@@ -3404,6 +3458,9 @@ def main(argv=None) -> int:
 
         elif args.command == 'unhold':
             return cmd_unhold(args, db)
+
+        elif args.command == 'skip':
+            return cmd_skip(args, db)
 
         elif args.command in ('provides', 'p'):
             return cmd_provides(args, db)

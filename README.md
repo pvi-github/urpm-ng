@@ -534,33 +534,74 @@ urpm mark auto <package>      # Mark as auto-installed (dependency)
 urpm mark show <package>      # Show install reason
 ```
 
-## Package Holds
+## Holds and Masks
 
-Hold packages to prevent upgrades and replacement by obsoletes:
+Two mechanisms, two objects. A **hold** keeps an installed package at
+the version it is at. A **mask** hides candidates from the media, as if
+they had never been published.
+
+### Holds
 
 ```bash
-urpm hold <package>           # Hold a package
-urpm hold <package> -r "reason"  # Hold with a reason
-urpm hold                     # List held packages
-urpm unhold <package>         # Remove hold
+urpm hold add <package>              # Hold a package
+urpm hold add <package> -r "reason"  # Hold it, and record why
+urpm hold remove <package>           # Release the hold
+urpm hold list                       # List the holds
 ```
 
-Held packages are protected from:
-- Version upgrades during `urpm upgrade`
-- Being replaced by packages that obsolete them
+A held package is not upgraded by `urpm upgrade`, is not replaced by a
+package that obsoletes it, and cannot be dragged to a newer version as
+somebody else's dependency. That last one is what a hold is worth: when
+an upgrade is only possible by moving a held package, the upgrade is
+what gets set aside, and the report names the hold that blocked it.
 
-Example:
 ```bash
-# dhcpcd obsoletes dhcp-client, but you want to keep dhcp-client
-urpm hold dhcp-client -r "Prefer dhcp-client over dhcpcd"
+$ urpm hold add lib64gnome-desktop-gir3.0 -r "a local build needs it"
+$ urpm upgrade
+Not upgraded (2):
+  The hold on lib64gnome-desktop-gir3.0 blocks the upgrade of gnome-shell, mutter.
+  Release a hold with 'urpm hold remove <package>'.
 
-# Now urpm upgrade will skip dhcp-client and warn:
-#   Held packages (1) skipped:
-#     dhcp-client (would be obsoleted by dhcpcd)
-
-# To allow the replacement later:
-urpm unhold dhcp-client
+  - gnome-shell [hold on lib64gnome-desktop-gir3.0]
+      package gnome-shell-48 requires typelib(GnomeDesktop) = 4.0, ...
 ```
+
+The rest of the plan goes through, and the exit code is 2 to say so.
+A hold also stops an Obsoletes from replacing the package:
+
+```bash
+# dhcpcd obsoletes dhcp-client, and dhcp-client is the one you want
+urpm hold add dhcp-client -r "Prefer dhcp-client over dhcpcd"
+```
+
+Naming a held package on the command line is an override:
+`urpm upgrade lib64gnome-desktop-gir3.0` upgrades it, hold or no hold.
+`urpm unhold <package>` still works, as an alias of `urpm hold remove`.
+
+### Masks
+
+```bash
+urpm skip add <entry>      # Mask an entry
+urpm skip remove <entry>   # Stop masking it
+urpm skip list             # List the masked entries
+```
+
+An entry is a package name, or a regular expression between slashes
+matched against `name-version-release.arch`:
+
+```bash
+urpm skip add kernel-desktop
+urpm skip add '/^lib64foo-[0-9]/'
+```
+
+Masks are kept in `/etc/urpmi/skip.list`, urpmi's own file, so the two
+tools read one list; `--file` works on another path. A masked package
+is treated as if the media did not declare it: it is not pulled in as
+a dependency and not offered as an upgrade. Naming it on the command
+line overrides the mask, which is what urpmi does too.
+
+That an installed and masked package stops moving is a consequence, not
+the intention. To pin an installed package, use a hold.
 
 ## History and Undo
 

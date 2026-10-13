@@ -870,21 +870,62 @@ Rimuove una chiave GPG tramite il suo ID breve (es.
 .B mark \fIpacchetto\fR manual|auto
 Marca i pacchetti come installati manualmente o automaticamente.
 .TP
-.B hold \fR[\fIpacchetto\fR ...] [\fB\-r\fR \fImotivo\fR]
-Blocca i pacchetti per impedirne l'aggiornamento e la sostituzione tramite
-obsolete. Senza argomenti elenca i pacchetti bloccati.
+.B hold \fIsottocomando\fR
+Mantiene i pacchetti installati alla versione in cui sono.  Un
+pacchetto bloccato non viene aggiornato né sostituito tramite un
+.IR Obsoletes ,
+e nessun altro pacchetto può trascinarlo: un aggiornamento che
+richiedesse una versione più recente di un pacchetto bloccato viene
+messo da parte e segnalato, nominando il blocco che l'ha impedito.
 .RS
 .TP
-.BR \-r ", " \-\-reason " " \fImotivo\fR
-Registra un motivo per il blocco.
+.B add \fIpacchetto\fR ... [\fB\-r\fR \fImotivo\fR]
+Blocca i pacchetti installati indicati.
+.BR \-r ", " \-\-reason
+registra il perché, e
+.B urpm hold list
+lo mostra.
 .TP
-.BR \-l ", " \-\-list
-Elenca i pacchetti bloccati.
+.B remove \fIpacchetto\fR ...
+Rimuove i blocchi indicati.
+.TP
+.B list
+Elenca i blocchi con il loro motivo e la data in cui sono stati posti.
 .RE
 .TP
 .B unhold \fIpacchetto\fR ...
-Rimuove il blocco dai pacchetti, consentendone l'aggiornamento o la
-sostituzione.
+Alias di
+.BR "hold remove" ,
+conservato dalla sintassi precedente.
+.TP
+.B skip \fIsottocomando\fR
+Nasconde i candidati dai supporti, come fa lo
+.I skip.list
+di urpmi, e in quello stesso file affinché i due strumenti leggano un
+solo elenco.  Un pacchetto nascosto è trattato come se i supporti non
+lo dichiarassero: non viene tirato come dipendenza né proposto come
+aggiornamento.  Nominarlo sulla riga di comando scavalca la
+mascheratura, come fa urpmi.  Che un pacchetto installato e nascosto
+smetta di muoversi è una conseguenza, non l'intenzione: per fissare un
+pacchetto installato si usa
+.BR hold .
+.RS
+.TP
+.B add \fIvoce\fR ... [\fB\-\-file\fR \fIpercorso\fR]
+Nasconde delle voci.  Una voce è un nome di pacchetto, o
+un'espressione regolare tra barre confrontata con
+.IR nome\-versione\-release.arch .
+.TP
+.B remove \fIvoce\fR ... [\fB\-\-file\fR \fIpercorso\fR]
+Non nasconde più le voci.
+.TP
+.B list \fR[\fB\-\-file\fR \fIpercorso\fR]
+Elenca le voci nascoste.
+.TP
+.B \-\-file \fIpercorso\fR
+Legge e scrive un elenco diverso da
+.IR /etc/urpmi/skip.list .
+.RE
 .SS Inizializzazione e scaricamento
 .TP
 .B init \fR[\fIopzioni\fR]

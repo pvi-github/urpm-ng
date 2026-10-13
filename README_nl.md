@@ -536,33 +536,79 @@ urpm mark auto <pakket>       # Als automatisch geïnstalleerd markeren (afhanke
 urpm mark show <pakket>       # Installatiereden tonen
 ```
 
-## Pakket-holds
+## Vergrendelingen en maskers
 
-Pakketten vastzetten om upgrades en vervanging door obsoletes te verhinderen:
+Twee mechanismen, twee voorwerpen. Een **vergrendeling** houdt een
+geïnstalleerd pakket op de versie waarop het staat. Een **masker**
+verbergt kandidaten uit de media, alsof ze nooit uitgebracht zijn.
+
+### Vergrendelingen
 
 ```bash
-urpm hold <pakket>            # Een pakket vastzetten
-urpm hold <pakket> -r "reden" # Met reden vastzetten
-urpm hold                     # Vastgezette pakketten opsommen
-urpm unhold <pakket>          # Hold weghalen
+urpm hold add <pakket>              # Een pakket vergrendelen
+urpm hold add <pakket> -r "reden"   # Vergrendelen, en vastleggen waarom
+urpm hold remove <pakket>           # De vergrendeling opheffen
+urpm hold list                      # De vergrendelingen opsommen
 ```
 
-Vastgezette pakketten zijn beschermd tegen:
-- Versie-upgrades tijdens `urpm upgrade`
-- Vervanging door pakketten die ze obsoleet maken
+Een vergrendeld pakket wordt niet bijgewerkt door `urpm upgrade`, wordt
+niet vervangen door een pakket dat het verouderd verklaart, en kan ook
+niet als afhankelijkheid van een ander naar een nieuwere versie
+meegesleurd worden. Dat laatste is wat een vergrendeling waard is: kan
+een bijwerking alleen door een vergrendeld pakket te verplaatsen, dan
+is het de bijwerking die terzijde gelegd wordt, en het verslag noemt de
+vergrendeling die haar blokkeerde.
 
-Voorbeeld:
 ```bash
-# dhcpcd maakt dhcp-client obsoleet, maar je wil dhcp-client houden
-urpm hold dhcp-client -r "Prefer dhcp-client over dhcpcd"
+$ urpm hold add lib64gnome-desktop-gir3.0 -r "een lokale bouw heeft het nodig"
+$ urpm upgrade
+Niet bijgewerkt (2):
+  De vergrendeling op lib64gnome-desktop-gir3.0 blokkeert het bijwerken van gnome-shell, mutter.
+  Een vergrendeling opheffen met 'urpm hold remove <pakket>'.
 
-# Nu slaat urpm upgrade dhcp-client over en waarschuwt:
-#   Vastgezette pakketten (1) overgeslagen:
-#     dhcp-client (zou geobsoleteerd worden door dhcpcd)
-
-# Om de vervanging later toch toe te staan:
-urpm unhold dhcp-client
+  - gnome-shell [vergrendeling op lib64gnome-desktop-gir3.0]
+      package gnome-shell-48 requires typelib(GnomeDesktop) = 4.0, ...
 ```
+
+De rest van het plan gaat door, en afsluitcode 2 zegt dat. Een
+vergrendeling houdt ook tegen dat een Obsoletes het pakket vervangt:
+
+```bash
+# dhcpcd verklaart dhcp-client verouderd, en dhcp-client is wat men wil
+urpm hold add dhcp-client -r "Prefer dhcp-client over dhcpcd"
+```
+
+Een vergrendeld pakket op de opdrachtregel noemen gaat boven de
+vergrendeling: `urpm upgrade lib64gnome-desktop-gir3.0` werkt het bij,
+vergrendeld of niet. `urpm unhold <pakket>` werkt nog, als alias van
+`urpm hold remove`.
+
+### Maskers
+
+```bash
+urpm skip add <regel>      # Een regel maskeren
+urpm skip remove <regel>   # Haar niet meer maskeren
+urpm skip list             # De gemaskeerde regels opsommen
+```
+
+Een regel is een pakketnaam, of een reguliere expressie tussen schuine
+strepen vergeleken met `naam-versie-release.arch`:
+
+```bash
+urpm skip add kernel-desktop
+urpm skip add '/^lib64foo-[0-9]/'
+```
+
+Maskers staan in `/etc/urpmi/skip.list`, urpmi's eigen bestand, zodat
+beide gereedschappen één lijst lezen; `--file` werkt op een ander pad.
+Een gemaskeerd pakket wordt behandeld alsof de media het niet
+aanbieden: het wordt niet als afhankelijkheid binnengehaald en niet als
+bijwerking aangeboden. Het op de opdrachtregel noemen gaat boven het
+masker, net als bij urpmi.
+
+Dat een geïnstalleerd en gemaskeerd pakket niet meer beweegt is een
+gevolg, niet de bedoeling. Om een geïnstalleerd pakket vast te zetten
+dient een vergrendeling.
 
 ## Geschiedenis en ongedaan maken
 

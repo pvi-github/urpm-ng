@@ -528,33 +528,78 @@ urpm mark auto <pacote>       # Marcar como auto-instalado (dependência)
 urpm mark show <pacote>       # Mostrar a razão da instalação
 ```
 
-## Bloqueios de pacotes (holds)
+## Bloqueios e máscaras
 
-Bloquear pacotes para prevenir actualizações e substituição por obsoletes:
+Dois mecanismos, dois objectos. Um **bloqueio** mantém um pacote
+instalado na versão em que está. Uma **máscara** esconde candidatos dos
+média, como se nunca tivessem sido publicados.
+
+### Bloqueios
 
 ```bash
-urpm hold <pacote>            # Bloquear um pacote
-urpm hold <pacote> -r "razão" # Bloquear com uma razão
-urpm hold                     # Listar pacotes bloqueados
-urpm unhold <pacote>          # Retirar o bloqueio
+urpm hold add <pacote>              # Bloquear um pacote
+urpm hold add <pacote> -r "razão"   # Bloquear, e anotar o motivo
+urpm hold remove <pacote>           # Libertar o bloqueio
+urpm hold list                      # Listar os bloqueios
 ```
 
-Os pacotes bloqueados ficam protegidos de:
-- Actualizações de versão durante o `urpm upgrade`
-- Substituição por pacotes que os obsoletem
+Um pacote bloqueado não é actualizado por `urpm upgrade`, não é
+substituído por um pacote que o declara obsoleto, e não pode ser
+arrastado para uma versão mais recente como dependência de outro. É
+este último ponto que dá valor ao bloqueio: quando uma actualização só
+é possível movendo um pacote bloqueado, é a actualização que é posta de
+lado, e o relatório nomeia o bloqueio que a impediu.
 
-Exemplo:
 ```bash
-# O dhcpcd obsoleta dhcp-client, mas queres manter dhcp-client
-urpm hold dhcp-client -r "Prefer dhcp-client over dhcpcd"
+$ urpm hold add lib64gnome-desktop-gir3.0 -r "uma compilação local precisa dele"
+$ urpm upgrade
+Não actualizados (2):
+  O bloqueio em lib64gnome-desktop-gir3.0 impede a atualização de gnome-shell, mutter.
+  Para libertar um bloqueio: «urpm hold remove <pacote>».
 
-# Agora o urpm upgrade vai saltar dhcp-client e avisar:
-#   Pacotes bloqueados (1) saltados:
-#     dhcp-client (seria obsoletado por dhcpcd)
-
-# Para autorizar a substituição mais tarde:
-urpm unhold dhcp-client
+  - gnome-shell [bloqueio em lib64gnome-desktop-gir3.0]
+      package gnome-shell-48 requires typelib(GnomeDesktop) = 4.0, ...
 ```
+
+O resto do plano passa, e o código de saída 2 di-lo. Um bloqueio impede
+também que um Obsoletes substitua o pacote:
+
+```bash
+# dhcpcd declara obsoleto o dhcp-client, e é o dhcp-client que se quer
+urpm hold add dhcp-client -r "Prefer dhcp-client over dhcpcd"
+```
+
+Nomear um pacote bloqueado na linha de comandos passa por cima do
+bloqueio: `urpm upgrade lib64gnome-desktop-gir3.0` actualiza-o, com
+bloqueio ou sem ele. `urpm unhold <pacote>` continua a funcionar, como
+alias de `urpm hold remove`.
+
+### Máscaras
+
+```bash
+urpm skip add <entrada>      # Mascarar uma entrada
+urpm skip remove <entrada>   # Deixar de a mascarar
+urpm skip list               # Listar as entradas mascaradas
+```
+
+Uma entrada é um nome de pacote, ou uma expressão regular entre barras
+comparada com `nome-versão-release.arch`:
+
+```bash
+urpm skip add kernel-desktop
+urpm skip add '/^lib64foo-[0-9]/'
+```
+
+As máscaras ficam em `/etc/urpmi/skip.list`, o ficheiro do próprio
+urpmi, para que ambas as ferramentas leiam uma só lista; `--file`
+trabalha sobre outro caminho. Um pacote mascarado é tratado como se os
+média não o declarassem: não é arrastado como dependência nem oferecido
+como actualização. Nomeá-lo na linha de comandos passa por cima da
+máscara, como faz o urpmi.
+
+Que um pacote instalado e mascarado deixe de se mover é uma
+consequência, não a intenção. Para fixar um pacote instalado, usar um
+bloqueio.
 
 ## Histórico e desfazer
 

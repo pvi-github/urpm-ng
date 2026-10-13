@@ -860,20 +860,62 @@ Supprime une clé GPG par son identifiant court (ex.
 .B mark \fIpaquet\fR manual|auto
 Marque les paquets comme installés manuellement ou automatiquement.
 .TP
-.B hold \fR[\fIpaquet\fR ...] [\fB\-r\fR \fIraison\fR]
-Verrouille des paquets pour empêcher les mises à jour et le remplacement par obsoletes.
-Sans arguments, liste les paquets verrouilles.
+.B hold \fIsous\-commande\fR
+Maintient des paquets installés à la version où ils sont.  Un paquet
+verrouillé n'est ni mis à jour ni remplacé par un
+.IR Obsoletes ,
+et aucun autre paquet ne peut l'entraîner : une mise à jour qui
+exigerait une version plus récente d'un paquet verrouillé est écartée
+et signalée, en nommant le verrou qui l'a bloquée.
 .RS
 .TP
-.BR \-r ", " \-\-reason " " \fIraison\fR
-Enregistre une raison pour le verrouillage.
+.B add \fIpaquet\fR ... [\fB\-r\fR \fIraison\fR]
+Verrouille les paquets installés nommés.
+.BR \-r ", " \-\-reason
+enregistre pourquoi, et
+.B urpm hold list
+l'affiche.
 .TP
-.BR \-l ", " \-\-list
-Liste les paquets verrouilles.
+.B remove \fIpaquet\fR ...
+Lève les verrous nommés.
+.TP
+.B list
+Liste les verrous avec leur raison et la date où ils ont été posés.
 .RE
 .TP
 .B unhold \fIpaquet\fR ...
-Supprime le verrouillage des paquets, permettant leur mise à jour ou remplacement.
+Alias de
+.BR "hold remove" ,
+conservé de l'ancienne grammaire.
+.TP
+.B skip \fIsous\-commande\fR
+Masque des candidats des médias, comme le fait le
+.I skip.list
+d'urpmi, et dans ce fichier même afin que les deux outils lisent une
+seule liste.  Un paquet masqué est traité comme si les médias ne le
+déclaraient pas : il n'est pas tiré comme dépendance et n'est pas
+proposé en mise à jour.  Le nommer sur la ligne de commande passe
+outre le masque, comme le fait urpmi.  Qu'un paquet installé et masqué
+cesse de bouger est une conséquence, pas l'intention : pour figer un
+paquet installé, utiliser
+.BR hold .
+.RS
+.TP
+.B add \fIentrée\fR ... [\fB\-\-file\fR \fIchemin\fR]
+Masque des entrées.  Une entrée est un nom de paquet, ou une
+expression régulière entre barres obliques comparée à
+.IR nom\-version\-release.arch .
+.TP
+.B remove \fIentrée\fR ... [\fB\-\-file\fR \fIchemin\fR]
+Ne masque plus les entrées.
+.TP
+.B list \fR[\fB\-\-file\fR \fIchemin\fR]
+Liste les entrées masquées.
+.TP
+.B \-\-file \fIchemin\fR
+Lit et écrit une liste autre que
+.IR /etc/urpmi/skip.list .
+.RE
 .SS Initialisation et téléchargement
 .TP
 .B init \fR[\fIoptions\fR]

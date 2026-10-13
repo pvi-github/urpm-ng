@@ -605,6 +605,11 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
     # Create resolver with @System for installed package awareness
     resolver = Resolver(db)
     resolver._preserve_pool = True
+    # Interroger n'est pas résoudre : le masque de skip.list retire
+    # des candidats d'un plan, il n'a pas à cacher l'existence d'un
+    # paquet à qui demande qui dépend de quoi.  urpmi fait pareil, son
+    # ``urpmf`` a une option ``no_skiplist``.
+    resolver.skip_mask = None
     resolver.pool = resolver._create_pool()
 
     pool = resolver.pool

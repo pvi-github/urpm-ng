@@ -319,6 +319,15 @@ class PoolMixin:
             if arch in ('src', 'nosrc'):
                 continue
 
+            # urpmi's skip.list : the package is not declared at all,
+            # so it is neither offered as an upgrade nor used to
+            # satisfy somebody else's dependency.  The epoch is left
+            # out, as in urpmi's ``fullname``.
+            mask = getattr(self, "skip_mask", None)
+            if mask and name not in getattr(self, "skip_exempt", ()):
+                if mask.masks(name, f"{version}-{release}", arch):
+                    continue
+
             s = repo.add_solvable()
             s.name = name
             if epoch and epoch > 0:

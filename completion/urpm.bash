@@ -21,9 +21,23 @@ _urpm_installed_packages() {
     rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort -u
 }
 
+_urpm_cache_db() {
+    # Where urpm keeps its SQLite database, per urpm/core/config.py:
+    # ``/var/lib/urpm/packages.db``, or ``/var/lib/urpm-dev/packages.db``
+    # in dev mode. One function because three helpers need it, and the
+    # expression this replaces appended the production sub-path to the
+    # dev base directory, so dev mode never found its database.
+    if [[ -n "$URPM_DEV_MODE" ]]; then
+        echo "/var/lib/urpm-dev/packages.db"
+    else
+        echo "/var/lib/urpm/packages.db"
+    fi
+}
+
 _urpm_available_packages() {
     # Use urpm's SQLite cache when present; fall back to installed set.
-    local cache_db="${URPM_DEV_MODE:+/var/lib/urpm-dev}/var/lib/urpm/packages.db"
+    local cache_db
+    cache_db="$(_urpm_cache_db)"
     if [[ -f "$cache_db" ]]; then
         sqlite3 "$cache_db" "SELECT DISTINCT name FROM packages" 2>/dev/null
     else
@@ -31,11 +45,32 @@ _urpm_available_packages() {
     fi
 }
 
+_urpm_held_packages() {
+    # The holds the user has placed. Only these can be released, and
+    # offering the whole installed set for `hold remove` would be
+    # noise: holds are rare and deliberate.
+    local cache_db
+    cache_db="$(_urpm_cache_db)"
+    [[ -f "$cache_db" ]] || return 0
+    sqlite3 "$cache_db" 'SELECT package_name FROM held_packages' 2>/dev/null
+}
+
+_urpm_skipped_entries() {
+    # The masked entries, read from the list itself rather than from
+    # urpm: the file is urpmi's and is the single source of truth for
+    # both tools. Comments and blank lines are not entries.
+    local list="${URPM_SKIP_LIST:-/etc/urpmi/skip.list}"
+    [[ -r "$list" ]] || return 0
+    sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+        -e '/^$/d' "$list" 2>/dev/null
+}
+
 _urpm_media_names() {
     # Query urpm's SQLite cache directly. The `media` table stores one
     # row per configured medium, whose name may contain spaces (e.g.
     # "Core Release"), which ruled out the old text-scraping approach.
-    local cache_db="${URPM_DEV_MODE:+/var/lib/urpm-dev}/var/lib/urpm/packages.db"
+    local cache_db
+    cache_db="$(_urpm_cache_db)"
     [[ -f "$cache_db" ]] || return 0
     sqlite3 "$cache_db" 'SELECT name FROM media' 2>/dev/null
 }
@@ -142,16 +177,20 @@ _URPM_DEBUG_FLAGS="--debug --watched"
 # Real top-level commands, mirroring urpm/cli/main.py subparsers.
 # Phantom entries that existed in the old completion (kernel-keep,
 # blacklist, redlist, seed) have been removed: they are sub-subcommands
-# of `config` / `media`, never real top-level commands.
-_URPM_COMMANDS="install i erase e upgrade u update up \
+# of `config` / `media`, never real top-level commands.  So was `up`,
+# which `update` never declared as an alias; `audit`, `genmedia` and
+# `system` were the reverse case, real verbs that were never offered.
+# test_completion_matches_cli.py compares this list against argparse
+# so neither direction drifts again.
+_URPM_COMMANDS="install i erase e upgrade u update \
     distupgrade recover \
     search s query q show sh info list l find f \
     provides p whatprovides wp \
     depends d requires req rdepends rd whatrequires wr \
     recommends whatrecommends suggests whatsuggests why \
     download dl init cleanup autoremove ar cleandeps cd \
-    hold unhold mark progress readme mkimage build image img \
-    history h rollback r undo \
+    hold unhold skip mark progress readme mkimage build image img \
+    history h rollback r undo audit genmedia system \
     media m server srv config cfg peer cache c key k \
     appstream mirror proxy"
 
@@ -366,26 +405,62 @@ _urpm_cleanup() {
 }
 
 _urpm_hold() {
-    # `urpm hold` with no package lists current holds; with packages,
-    # adds them. Takes installed packages only.
+    # `urpm hold` is subcommand-based: add / remove / list. The old
+    # grammar (packages straight after the verb, --list to enumerate)
+    # is gone, and so are the flags that went with it.
+    local hold_subcmds="add remove list"
     case "$prev" in
         --reason|-r)
             return  # Free text.
             ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--reason -r --list -l $_URPM_DISPLAY_FLAGS" -- "$cur"))
-    else
+        if [[ "${words[2]}" == add ]]; then
+            COMPREPLY=($(compgen -W "--reason -r $_URPM_DISPLAY_FLAGS" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        fi
+    elif [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$hold_subcmds" -- "$cur"))
+    elif [[ "${words[2]}" == add ]]; then
         COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
+    elif [[ "${words[2]}" == remove ]]; then
+        # Only what is actually held can be released.
+        COMPREPLY=($(compgen -W "$(_urpm_held_packages)" -- "$cur"))
     fi
 }
 
 _urpm_unhold() {
-    # unhold releases held packages — no command-specific flags beyond display.
+    # unhold releases held packages — kept as an alias of
+    # `hold remove`, so it completes the same list.
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
     else
-        COMPREPLY=($(compgen -W "$(_urpm_installed_packages)" -- "$cur"))
+        COMPREPLY=($(compgen -W "$(_urpm_held_packages)" -- "$cur"))
+    fi
+}
+
+_urpm_skip() {
+    # `urpm skip` masks candidates from the media. add / remove take
+    # entries (a name or a /regexp/), list takes none; all three accept
+    # --file to work on a list other than urpmi's own.
+    local skip_subcmds="add remove list"
+    case "$prev" in
+        --file)
+            _filedir
+            return
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--file $_URPM_DISPLAY_FLAGS" -- "$cur"))
+    elif [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$skip_subcmds" -- "$cur"))
+    elif [[ "${words[2]}" == add ]]; then
+        # Any package the media know about can be masked, installed or
+        # not; a regular expression cannot be completed.
+        COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
+    elif [[ "${words[2]}" == remove ]]; then
+        COMPREPLY=($(compgen -W "$(_urpm_skipped_entries)" -- "$cur"))
     fi
 }
 
@@ -1147,6 +1222,7 @@ _urpm() {
         cleandeps|cd)                           _urpm_cleandeps ;;
         hold)                                   _urpm_hold ;;
         unhold)                                 _urpm_unhold ;;
+        skip)                                   _urpm_skip ;;
         progress)                               _urpm_progress ;;
         readme)                                 _urpm_readme ;;
         mkimage)                                _urpm_mkimage ;;

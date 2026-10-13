@@ -282,7 +282,7 @@ Ces fonctionnalités n'existent PAS dans DNF et sont un avantage de urpm-ng :
 | Recherche fulltext FTS5 | `urpm search` / `urpm q` | Indexation SQLite FTS5, résultats instantanés |
 | Explication d'installation | `urpm why` | Trace la chaîne de dépendances qui a installé un paquet |
 | Historique avec rollback | `urpm history undo/rollback` | Historique complet des transactions avec annulation |
-| Hold avec raison | `urpm hold --reason "..."` | Gel de version avec justification traçable |
+| Hold avec raison | `urpm hold add PKG -r "..."` | Verrou de version avec justification traçable |
 | Backend PackageKit D-Bus | automatique | Intégration Discover / GNOME Software via D-Bus + PolicyKit |
 | Politique auto-upgrade | `urpm config gnome-auto-updates` | Contrôle de l'auto-update GNOME/Discover/PackageKit |
 

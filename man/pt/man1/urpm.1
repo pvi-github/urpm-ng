@@ -637,20 +637,62 @@ Gere as chaves GPG para verificação de pacotes.
 .B mark \fIpacote\fR manual|auto
 Marca os pacotes como instalados manualmente ou automaticamente.
 .TP
-.B hold \fR[\fIpacote\fR ...] [\fB\-r\fR \fIrazão\fR]
-Bloqueia pacotes para impedir actualizações e substituicao por obsoletos.
-Sem argumentos, lista os pacotes bloqueados.
+.B hold \fIsubcomando\fR
+Mantém pacotes instalados na versão em que estão.  Um pacote bloqueado
+não é actualizado nem substituído através de um
+.IR Obsoletes ,
+e nenhum outro pacote o pode arrastar: uma actualização que
+necessitasse de uma versão mais recente de um pacote bloqueado é posta
+de lado e comunicada, nomeando o bloqueio que a impediu.
 .RS
 .TP
-.BR \-r ", " \-\-reason " " \fIrazão\fR
-Regista uma razão para o bloqueio.
+.B add \fIpacote\fR ... [\fB\-r\fR \fIrazão\fR]
+Bloqueia os pacotes instalados indicados.
+.BR \-r ", " \-\-reason
+registra o motivo, e
+.B urpm hold list
+mostra\-o.
 .TP
-.BR \-l ", " \-\-list
-Lista os pacotes bloqueados.
+.B remove \fIpacote\fR ...
+Liberta os bloqueios indicados.
+.TP
+.B list
+Lista os bloqueios com a sua razão e a data em que foram postos.
 .RE
 .TP
 .B unhold \fIpacote\fR ...
-Remove o bloqueio dos pacotes, permitindo a sua actualizacao ou substituicao.
+Alias de
+.BR "hold remove" ,
+conservado da sintaxe anterior.
+.TP
+.B skip \fIsubcomando\fR
+Mascara candidatos dos média, como faz o
+.I skip.list
+do urpmi, e nesse mesmo ficheiro para que ambas as ferramentas leiam
+uma só lista.  Um pacote mascarado é tratado como se os média não o
+declarassem: não é arrastado como dependência nem oferecido como
+actualização.  Nomeá\-lo na linha de comandos passa por cima da
+máscara, como faz o urpmi.  Que um pacote instalado e mascarado deixe
+de se mover é uma consequência, não a intenção: para fixar um pacote
+instalado, usar
+.BR hold .
+.RS
+.TP
+.B add \fIentrada\fR ... [\fB\-\-file\fR \fIcaminho\fR]
+Mascara entradas.  Uma entrada é um nome de pacote, ou uma expressão
+regular entre barras comparada com
+.IR nome\-versão\-release.arch .
+.TP
+.B remove \fIentrada\fR ... [\fB\-\-file\fR \fIcaminho\fR]
+Deixa de mascarar as entradas.
+.TP
+.B list \fR[\fB\-\-file\fR \fIcaminho\fR]
+Lista as entradas mascaradas.
+.TP
+.B \-\-file \fIcaminho\fR
+Lê e escreve uma lista diferente de
+.IR /etc/urpmi/skip.list .
+.RE
 .SS Inicialização e descarga
 .TP
 .B init \fR[\fB\-\-release\fR \fIversão\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]

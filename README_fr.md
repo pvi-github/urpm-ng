@@ -511,33 +511,77 @@ urpm mark auto <paquet>       # Marquer comme auto-installé (dépendance)
 urpm mark show <paquet>       # Afficher la raison d'installation
 ```
 
-## Blocages de paquets (holds)
+## Verrous et masques
 
-Bloquer des paquets pour empêcher les mises à jour et le remplacement par des obsoletes :
+Deux mécanismes, deux objets. Un **verrou** maintient un paquet
+installé à la version où il est. Un **masque** cache des candidats des
+médias, comme s'ils n'avaient jamais été publiés.
+
+### Verrous
 
 ```bash
-urpm hold <paquet>            # Bloquer un paquet
-urpm hold <paquet> -r "raison"  # Bloquer avec une raison
-urpm hold                     # Lister les paquets bloqués
-urpm unhold <paquet>          # Retirer le blocage
+urpm hold add <paquet>              # Verrouiller un paquet
+urpm hold add <paquet> -r "raison"  # Verrouiller, et noter pourquoi
+urpm hold remove <paquet>           # Lever le verrou
+urpm hold list                      # Lister les verrous
 ```
 
-Les paquets bloqués sont protégés contre :
-- Les mises à jour de version pendant `urpm upgrade`
-- Le remplacement par des paquets qui les obsolètent
+Un paquet verrouillé n'est pas mis à jour par `urpm upgrade`, n'est pas
+remplacé par un paquet qui l'obsolète, et ne peut pas être entraîné
+vers une version plus récente comme dépendance d'un autre. C'est ce
+dernier point qui fait la valeur du verrou : quand une mise à jour
+n'est possible qu'en déplaçant un paquet verrouillé, c'est la mise à
+jour qui est écartée, et le rapport nomme le verrou qui l'a bloquée.
 
-Exemple :
 ```bash
-# dhcpcd obsolète dhcp-client, mais on veut garder dhcp-client
-urpm hold dhcp-client -r "Prefer dhcp-client over dhcpcd"
+$ urpm hold add lib64gnome-desktop-gir3.0 -r "une compilation locale en a besoin"
+$ urpm upgrade
+Non mis à jour (2) :
+  Le verrou posé sur lib64gnome-desktop-gir3.0 bloque la mise à jour de gnome-shell, mutter.
+  Pour lever un verrou : « urpm hold remove <paquet> ».
 
-# Maintenant urpm upgrade va sauter dhcp-client et prévenir :
-#   Paquets bloqués (1) sautés :
-#     dhcp-client (serait obsolété par dhcpcd)
-
-# Pour autoriser le remplacement plus tard :
-urpm unhold dhcp-client
+  - gnome-shell [verrou sur lib64gnome-desktop-gir3.0]
+      package gnome-shell-48 requires typelib(GnomeDesktop) = 4.0, ...
 ```
+
+Le reste du plan passe, et le code de retour vaut 2 pour le dire. Un
+verrou empêche aussi un Obsoletes de remplacer le paquet :
+
+```bash
+# dhcpcd obsolète dhcp-client, et c'est dhcp-client qu'on veut garder
+urpm hold add dhcp-client -r "Prefer dhcp-client over dhcpcd"
+```
+
+Nommer un paquet verrouillé sur la ligne de commande passe outre :
+`urpm upgrade lib64gnome-desktop-gir3.0` le met à jour, verrou ou pas.
+`urpm unhold <paquet>` fonctionne toujours, en alias de
+`urpm hold remove`.
+
+### Masques
+
+```bash
+urpm skip add <entrée>      # Masquer une entrée
+urpm skip remove <entrée>   # Ne plus la masquer
+urpm skip list              # Lister les entrées masquées
+```
+
+Une entrée est un nom de paquet, ou une expression régulière entre
+barres obliques comparée à `nom-version-release.arch` :
+
+```bash
+urpm skip add kernel-desktop
+urpm skip add '/^lib64foo-[0-9]/'
+```
+
+Les masques sont conservés dans `/etc/urpmi/skip.list`, le fichier
+d'urpmi lui-même, afin que les deux outils lisent une seule liste ;
+`--file` travaille sur un autre chemin. Un paquet masqué est traité
+comme si les médias ne le déclaraient pas : il n'est pas tiré comme
+dépendance et n'est pas proposé en mise à jour. Le nommer sur la ligne
+de commande passe outre le masque, comme le fait urpmi.
+
+Qu'un paquet installé et masqué cesse de bouger est une conséquence,
+pas l'intention. Pour figer un paquet installé, utiliser un verrou.
 
 ## Historique et annulation
 

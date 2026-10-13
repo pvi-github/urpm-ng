@@ -58,24 +58,42 @@ class TestCacheVerbs:
     """The list this session touched, and the one that was already
     wrong when it was touched."""
 
-    def test_every_verb_the_cli_takes_is_offered(self):
-        missing = _parser_verbs("cache") - _completion_verbs("cache_subcmds")
-        assert not missing, (
-            f"the CLI accepts {sorted(missing)} and the completion does "
-            f"not offer them"
-        )
-
-    def test_nothing_is_offered_that_does_not_exist(self):
-        extra = _completion_verbs("cache_subcmds") - _parser_verbs("cache")
-        assert not extra, (
-            f"the completion offers {sorted(extra)}, which no parser "
-            f"accepts — it completes straight into an error"
-        )
-
     def test_flush_is_among_them(self):
         """The one that went missing, named so a regression says why."""
         assert "flush" in _completion_verbs("cache_subcmds")
         assert "flush" in _parser_verbs("cache")
+
+
+#: ``(completion variable, path through the parser tree)`` for every
+#: verb list the completion keeps.  The top level is in here because
+#: that is where the drift was worst and least visible: three real
+#: verbs (``audit``, ``genmedia``, ``system``) were never offered, and
+#: ``up`` was offered although ``update`` never declared it as an
+#: alias, so completing it led straight to a usage error.
+VERB_LISTS = [
+    ("_URPM_COMMANDS", ()),
+    ("cache_subcmds", ("cache",)),
+    ("hold_subcmds", ("hold",)),
+    ("skip_subcmds", ("skip",)),
+    ("mark_subcmds", ("mark",)),
+]
+
+
+@pytest.mark.parametrize("variable,path", VERB_LISTS)
+def test_every_verb_the_cli_takes_is_offered(variable, path):
+    missing = _parser_verbs(*path) - _completion_verbs(variable)
+    assert not missing, (
+        f"the CLI accepts {sorted(missing)} under {' '.join(('urpm',) + path)} "
+        f"and {variable} does not offer them")
+
+
+@pytest.mark.parametrize("variable,path", VERB_LISTS)
+def test_nothing_is_offered_that_does_not_exist(variable, path):
+    extra = _completion_verbs(variable) - _parser_verbs(*path)
+    assert not extra, (
+        f"{variable} offers {sorted(extra)}, which no parser accepts "
+        f"under {' '.join(('urpm',) + path)} — it completes straight "
+        f"into an error")
 
 
 class TestTheHelperReadsWhatItThinksItReads:

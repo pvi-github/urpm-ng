@@ -26,6 +26,7 @@ urpm/cli/commands/peer.py
 urpm/cli/commands/mirror.py
 urpm/cli/commands/depends.py
 urpm/cli/commands/cleanup.py
+urpm/cli/commands/skip.py
 urpm/cli/commands/build.py
 urpm/cli/commands/appstream.py
 urpm/cli/commands/_install_pipeline.py
@@ -37,6 +38,7 @@ urpm/cli/helpers/debug.py
 urpm/cli/helpers/kernel.py
 urpm/cli/helpers/media.py
 urpm/cli/helpers/package.py
+urpm/cli/helpers/hold.py
 urpm/cli/helpers/progress.py
 urpm/cli/helpers/resolver.py
 urpm/cli/helpers/orphans_triage.py

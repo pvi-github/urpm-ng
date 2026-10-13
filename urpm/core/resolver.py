@@ -90,6 +90,18 @@ class VersionConflictError(Exception):
         self.conflict_info = conflict_info or {}
 
 
+def _extract_name(spec: str) -> str:
+    """The package name inside what the operator typed.
+
+    ``firefox`` and ``firefox-153.3.0-1.mga10.x86_64`` both name
+    firefox.  Used to exempt an explicit request from the skip list,
+    where the match is on the name alone.
+    """
+    if spec and _is_nevra(spec):
+        return _name_from_nevra(spec)
+    return spec
+
+
 # Debug flag for resolver - set to True to enable debug output
 DEBUG_RESOLVER = False
 
@@ -380,6 +392,10 @@ class JobOrigin:
               job for an installed package.
             * ``"obsolete"`` — an Obsoletes transition replaces an
               installed package by another.
+            * ``"lock"`` — a hold the user placed with ``urpm hold``,
+              posted as ``SOLVER_LOCK``.  Never dropped: libsolv
+              offers to relax it on every problem it causes, and that
+              offer is always declined (see :data:`DROPPABLE_KINDS`).
 
         request_id: Stable group identifier.  Jobs sharing the same
             ``request_id`` fall together: this is how a ``--prefer X``
@@ -397,6 +413,16 @@ class JobOrigin:
     request_id: str
     package_name: str
     srpm_id: Optional[str] = None
+
+
+#: The :attr:`JobOrigin.kind` values a partial transaction is allowed
+#: to drop.  Membership is the whole policy: ``"hint"`` is absent
+#: because a hint only ever falls with its request group, and
+#: ``"lock"`` is absent because a hold is a decision the user took
+#: deliberately.  libsolv proposes ``"do not ask to lock X"`` as a
+#: solution to every problem a hold causes; declining it and dropping
+#: the blocked upgrade instead is what makes a hold a hold.
+DROPPABLE_KINDS = ("user_explicit", "implicit_upgrade", "obsolete")
 
 
 @dataclass
@@ -419,6 +445,13 @@ class SkippedJob:
             post-solve diff in :meth:`Resolver.resolve_upgrade`).
         request_id: Group identifier copied from the originating
             :class:`JobOrigin`; empty for post-solve diff entries.
+        blocked_by: Names of the held packages whose lock made this job
+            unsolvable, empty when no hold is involved.  Filled from
+            libsolv's own verdict: among the solutions it offers for a
+            problem, one is ``"do not ask to lock X"``, which names the
+            responsible lock job by index.  Only locks libsolv named
+            for *this* problem are recorded, so an entry here is never
+            a guess.
     """
 
     name: str
@@ -426,6 +459,7 @@ class SkippedJob:
     reason: str = ""
     kind: str = ""
     request_id: str = ""
+    blocked_by: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -489,6 +523,20 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         self.install_recommends = install_recommends
         self.ignore_installed = ignore_installed
         self._preserve_pool = False  # When True, reuse pool across resolve calls
+        # urpmi's skip.list, read once and applied when the media are
+        # loaded into the pool : a masked package is not declared, so
+        # it is neither offered nor used to satisfy a dependency, which
+        # is what urpmi's own resolver does with its skip flag.
+        #
+        # ``skip_exempt`` holds the names the operator asked for
+        # explicitly.  urpmi clears the flag for those (select.pm) and
+        # so do we : masking means no longer offering, not forbidding.
+        #
+        # A query verb sets ``skip_mask`` to None : the mask belongs to
+        # resolution, and ``urpm search`` must keep showing what exists.
+        from .skip_list import SkipList
+        self.skip_mask = SkipList.from_file(self.root)
+        self.skip_exempt = set()
         # Default allowed architectures: system arch + compatible arches + noarch
         if allowed_arches is not None:
             self.allowed_arches = allowed_arches
@@ -514,6 +562,68 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         self._held_obsolete_warnings = []  # List of (held_pkg, obsoleting_pkg) tuples
         self._held_upgrade_warnings = []  # List of held package names skipped from upgrade
 
+    def _add_hold_locks(self, jobs: list, exempt=()) -> List[str]:
+        """Post one ``SOLVER_LOCK`` job per installed package under hold.
+
+        Until this existed, a hold only meant "do not *ask* to upgrade
+        this package": :meth:`resolve_upgrade` simply left the job out.
+        Nothing stopped libsolv from upgrading it anyway as a
+        dependency of something else, so a held package could move
+        under the user without a word.  A lock closes that door: the
+        solvable's installed state becomes a constraint, and any
+        request that needs the newer version turns into a problem the
+        partial-transaction loop drops rather than satisfies.
+
+        The lock is posted on the **name** (``SOLVER_SOLVABLE_NAME``),
+        not on the installed solvable: one job per hold instead of one
+        per architecture, and libsolv then phrases the resulting
+        problem around the package whose upgrade was requested rather
+        than around the intermediate dependency that happened to be
+        the innermost hop, which is the sentence the user needs.
+
+        Only held names that are **currently installed** get a lock.
+        A hold on an absent package is left inert here rather than
+        quietly turned into an install ban, which would be a different
+        feature (``urpm skip`` is the one that forbids installing).
+
+        Args:
+            jobs: The job list being built, appended to in place.
+            exempt: Names the user asked for explicitly on this command
+                line.  Naming a held package is a deliberate override,
+                the same way urpmi's ``select.pm`` clears the skip flag
+                on an explicit selection, so no lock is posted for it.
+                Case-insensitive.
+
+        Returns:
+            The held package names actually locked, sorted.  Empty when
+            nothing is held, which costs one database query.
+        """
+        if self.db is None or self.pool is None:
+            return []
+        try:
+            held = self.db.get_held_packages_set()
+        except Exception as exc:  # noqa: BLE001 - a hold must not break a solve
+            LOGGER.warning("cannot read the hold list, no lock posted: %s", exc)
+            return []
+        if not held:
+            return []
+
+        exempt_lower = {str(n).lower() for n in exempt}
+        installed_only = (solv.Selection.SELECTION_NAME |
+                          solv.Selection.SELECTION_INSTALLED_ONLY)
+        locked: List[str] = []
+        for name in sorted(held):
+            if name.lower() in exempt_lower:
+                continue
+            if self.pool.select(name, installed_only).isempty():
+                continue
+            jobs.append(self.pool.Job(
+                solv.Job.SOLVER_LOCK | solv.Job.SOLVER_SOLVABLE_NAME,
+                self.pool.str2id(name),
+            ))
+            locked.append(name)
+        return locked
+
     def _solvable_srpm_id(self, solvable) -> Optional[str]:
         """Return ``"<sourcename>-<sourceevr>"`` for a solvable or ``None``.
 
@@ -538,10 +648,15 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         """Build a parallel ``List[JobOrigin]`` for ``jobs``.
 
         Each origin is derived from the job's solvable (name + SRPM
-        id) and its libsolv flags: ``SOLVER_FAVOR`` / ``DISFAVOR`` /
-        ``SOLVER_WEAK`` flag a hint; everything else takes
-        ``default_kind``. Jobs whose ``id()`` is in ``obsolete_jobs``
-        are tagged as ``"obsolete"`` regardless.
+        id) and its libsolv flags: ``SOLVER_LOCK`` flags a hold,
+        ``SOLVER_FAVOR`` / ``DISFAVOR`` / ``SOLVER_WEAK`` flag a hint;
+        everything else takes ``default_kind``. Jobs whose ``id()`` is
+        in ``obsolete_jobs`` are tagged as ``"obsolete"`` regardless.
+
+        Classification is driven by the job's flags alone, so a job
+        list that is re-classified for a second solver pass (the
+        file-provides rescue) keeps the same kinds without the caller
+        having to remember anything.
 
         Args:
             jobs: List of ``solv.Job`` objects, in construction order.
@@ -556,17 +671,21 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             A list of :class:`JobOrigin`, exactly as long as ``jobs``.
         """
         obsolete_ids = {id(j) for j in (obsolete_jobs or [])}
-        # FAVOR / DISFAVOR are *action* codes within ``SOLVER_JOBMASK``
-        # (e.g. INSTALL=0x100, FAVOR=0xc00), not bitflags — they must
-        # be matched on equality after masking.  WEAK is a true bitflag
-        # (0x10000) and can be tested directly.
+        # FAVOR / DISFAVOR / LOCK are *action* codes within
+        # ``SOLVER_JOBMASK`` (INSTALL=0x100, LOCK=0x600, FAVOR=0xc00),
+        # not bitflags — they must be matched on equality after
+        # masking.  WEAK is a true bitflag (0x10000) and can be tested
+        # directly.
         hint_actions = {solv.Job.SOLVER_FAVOR, solv.Job.SOLVER_DISFAVOR}
         origins: List[JobOrigin] = []
         for idx, job in enumerate(jobs):
             flags = getattr(job, "how", 0) or 0
             action = flags & solv.Job.SOLVER_JOBMASK
             is_hint = action in hint_actions or bool(flags & solv.Job.SOLVER_WEAK)
-            if id(job) in obsolete_ids:
+            if action == solv.Job.SOLVER_LOCK:
+                kind = "lock"
+                group = "lock"
+            elif id(job) in obsolete_ids:
                 kind = "obsolete"
                 group = "obs"
             elif is_hint:
@@ -1045,6 +1164,13 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
           remaining problems plus the structured list of dropped
           requests so the caller can surface them.
 
+          Only the kinds in :data:`DROPPABLE_KINDS` are candidates, so
+          a ``SOLVER_LOCK`` job is never dropped: when a hold is what
+          makes a request unsolvable, libsolv names both the lock and
+          the request among the problem's solutions, the request goes
+          and the hold stays.  The lock's name is carried out on
+          :attr:`SkippedJob.blocked_by`.
+
         Args:
             solver: An already-configured ``solv.Solver``.
             jobs: Mutable list of ``solv.Job``.  ``atomic=True`` may
@@ -1156,22 +1282,45 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                         "_solve(atomic=False) requires job_origins"
                     )
                 drop_set: set = set()
+                #: dropped job index -> names of the locks libsolv held
+                #: responsible, and -> the text of the problem that got
+                #: it dropped.  Both are per problem: attributing every
+                #: dropped job to ``problems[0]`` would pin one
+                #: problem's sentence onto jobs a different problem
+                #: killed, which is exactly the kind of plausible lie a
+                #: user cannot check.
+                blocking_locks: Dict[int, set] = {}
+                problem_reason: Dict[int, str] = {}
                 for problem in problems:
                     candidate_indices: set = set()
                     for solution in problem.solutions():
                         for element in solution.elements():
                             if element.type == solv.Solver.SOLVER_SOLUTION_JOB:
                                 candidate_indices.add(element.jobidx)
+                    named = {idx for idx in candidate_indices
+                             if 0 <= idx < len(job_origins)}
                     skippable = {
-                        idx for idx in candidate_indices
-                        if 0 <= idx < len(job_origins)
-                        and job_origins[idx].kind in (
-                            "user_explicit", "implicit_upgrade", "obsolete"
-                        )
+                        idx for idx in named
+                        if job_origins[idx].kind in DROPPABLE_KINDS
                     }
                     if not skippable:
                         continue
                     drop_set |= skippable
+                    # libsolv offers "do not ask to lock X" among the
+                    # solutions of any problem a hold caused, naming the
+                    # lock job by index.  That offer *is* the
+                    # attribution: the locks named by a problem are the
+                    # locks that block the jobs named by the same
+                    # problem.  No rule introspection, no reading of the
+                    # sentence.
+                    locks = {job_origins[idx].package_name
+                             for idx in named
+                             if job_origins[idx].kind == "lock"}
+                    text = str(problem)
+                    for idx in skippable:
+                        problem_reason.setdefault(idx, text)
+                        if locks:
+                            blocking_locks.setdefault(idx, set()).update(locks)
 
                 if not drop_set:
                     break
@@ -1187,6 +1336,12 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     for i in drop_set if job_origins[i].srpm_id
                 }
                 for i, origin in enumerate(job_origins):
+                    if origin.kind == "lock":
+                        # A hold falls with nothing.  Without this a
+                        # lock would be eligible for the SRPM cascade
+                        # (it carries a srpm_id like any other job) and
+                        # a dropped sibling could silently unlock it.
+                        continue
                     if origin.request_id in request_ids:
                         drop_set.add(i)
                     elif origin.srpm_id and origin.srpm_id in srpm_ids:
@@ -1197,21 +1352,26 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                 # Use the raw libsolv string for the per-iteration
                 # reason — pretty-formatting (which calls into the
                 # synthesis DB) is reserved for the final remaining
-                # problems handled by the caller.
+                # problems handled by the caller.  Jobs that came in
+                # through the cascade were named by no problem, so they
+                # fall back to the first one.
                 reason_default = str(problems[0]) if problems else ""
                 for i in sorted(drop_set):
                     origin = job_origins[i]
+                    locks = tuple(sorted(blocking_locks.get(i, ())))
                     skipped.append(SkippedJob(
                         name=origin.package_name,
                         evr="",
-                        reason=reason_default,
+                        reason=problem_reason.get(i, reason_default),
                         kind=origin.kind,
                         request_id=origin.request_id,
+                        blocked_by=locks,
                     ))
                     if debug:
+                        held = f", held by {', '.join(locks)}" if locks else ""
                         debug.log(
                             f"_solve(partial): drop {origin.package_name} "
-                            f"({origin.kind}, {origin.request_id})"
+                            f"({origin.kind}, {origin.request_id}{held})"
                         )
                 kept = [
                     (j, o) for i, (j, o) in enumerate(zip(jobs, job_origins))
@@ -1266,6 +1426,11 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
             preference_patterns = []
         if local_packages is None:
             local_packages = set()
+
+        # What the operator named is never masked : urpmi clears the
+        # skip flag for an explicit selection, and so do we.  Masking
+        # means no longer offering, not forbidding.
+        self.skip_exempt = {_extract_name(n) for n in package_names}
 
         # Preserve pool if it has @LocalRPMs repo or if _preserve_pool is set
         # (used by depends command to avoid costly pool recreation in alternatives loop)
@@ -1514,8 +1679,16 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
         # call at ``_create_pool`` fires before ``add_local_rpms``, so
         # any @LocalRPMs contribution is invisible in that first
         # listing — repeating here surfaces sibling scan content.
+        # Freeze whatever the user put on hold, so a held package is not
+        # dragged to a newer version as a dependency of what is being
+        # installed.  Names given on the command line are exempt: asking
+        # for a held package by name is an override.
+        locked = self._add_hold_locks(jobs, exempt=self.skip_exempt)
+
         debug = get_solver_debug()
         debug.log("=== resolve_install() : pre-solve ===")
+        if locked:
+            debug.log(f"locked by hold: {', '.join(locked)}")
         debug.log_pool_stats(self.pool)
         debug.log_jobs(jobs)
 
@@ -2127,6 +2300,17 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     actions=[],
                     problems=[],
                 )
+
+        # Freeze whatever the user put on hold.  Leaving the upgrade job
+        # out (above) stops us from *asking*; the lock stops libsolv from
+        # doing it anyway to satisfy somebody else's dependency.  A name
+        # the user put on this command line is an override and keeps no
+        # lock, which is what the confirmation prompt is for.
+        exempt = {(_name_from_nevra(n) if _is_nevra(n) else n)
+                  for n in (package_names or [])}
+        locked = self._add_hold_locks(jobs, exempt=exempt)
+        if locked:
+            debug.log(f"locked by hold: {', '.join(locked)}")
 
         # Solve
         debug.log_jobs(jobs)

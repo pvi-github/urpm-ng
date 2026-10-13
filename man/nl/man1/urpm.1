@@ -635,20 +635,64 @@ Beheer GPG-sleutels voor pakketverificatie.
 .B mark \fIpakket\fR manual|auto
 Markeer pakketten als handmatig of automatisch geïnstalleerd.
 .TP
-.B hold \fR[\fIpakket\fR ...] [\fB\-r\fR \fIreden\fR]
-Vergrendel pakketten om upgrades en vervanging door obsoletes te voorkomen.
-Zonder argumenten worden vergrendelde pakketten weergegeven.
+.B hold \fIsubopdracht\fR
+Houdt geïnstalleerde pakketten op de versie waarop ze staan.  Een
+vergrendeld pakket wordt niet bijgewerkt en niet vervangen via een
+.IR Obsoletes ,
+en geen enkel ander pakket kan het meesleuren: een bijwerking die een
+nieuwere versie van een vergrendeld pakket nodig zou hebben, wordt
+terzijde gelegd en gemeld, met vermelding van de vergrendeling die
+haar blokkeerde.
 .RS
 .TP
-.BR \-r ", " \-\-reason " " \fIreden\fR
-Registreer een reden voor de vergrendeling.
+.B add \fIpakket\fR ... [\fB\-r\fR \fIreden\fR]
+Vergrendelt de genoemde geïnstalleerde pakketten.
+.BR \-r ", " \-\-reason
+legt vast waarom, en
+.B urpm hold list
+toont het.
 .TP
-.BR \-l ", " \-\-list
-Lijst vergrendelde pakketten.
+.B remove \fIpakket\fR ...
+Heft de genoemde vergrendelingen op.
+.TP
+.B list
+Somt de vergrendelingen op, met hun reden en de datum waarop ze
+geplaatst zijn.
 .RE
 .TP
 .B unhold \fIpakket\fR ...
-Verwijder de vergrendeling van pakketten, zodat ze kunnen worden bijgewerkt of vervangen.
+Alias van
+.BR "hold remove" ,
+behouden uit de vorige syntaxis.
+.TP
+.B skip \fIsubopdracht\fR
+Maskeert kandidaten uit de media, zoals de
+.I skip.list
+van urpmi doet, en in datzelfde bestand zodat beide gereedschappen één
+lijst lezen.  Een gemaskeerd pakket wordt behandeld alsof de media het
+niet aanbieden: het wordt niet als afhankelijkheid binnengehaald en
+niet als bijwerking aangeboden.  Het op de opdrachtregel noemen gaat
+boven de maskering, net als bij urpmi.  Dat een geïnstalleerd en
+gemaskeerd pakket niet meer beweegt is een gevolg, niet de bedoeling:
+om een geïnstalleerd pakket vast te zetten dient
+.BR hold .
+.RS
+.TP
+.B add \fIregel\fR ... [\fB\-\-file\fR \fIpad\fR]
+Maskeert regels.  Een regel is een pakketnaam, of een reguliere
+expressie tussen schuine strepen vergeleken met
+.IR naam\-versie\-release.arch .
+.TP
+.B remove \fIregel\fR ... [\fB\-\-file\fR \fIpad\fR]
+Maskeert de regels niet meer.
+.TP
+.B list \fR[\fB\-\-file\fR \fIpad\fR]
+Somt de gemaskeerde regels op.
+.TP
+.B \-\-file \fIpad\fR
+Leest en schrijft een andere lijst dan
+.IR /etc/urpmi/skip.list .
+.RE
 .SS Initialisatie en downloaden
 .TP
 .B init \fR[\fB\-\-release\fR \fIversie\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]
