@@ -115,8 +115,10 @@ def parse_buildrequires_from_spec(spec_path: Path) -> List[str]:
         raise FileNotFoundError(f"Spec file not found: {spec_path}")
 
     try:
+        sourcedir = Path(spec_path).parent.parent / "SOURCES"
+        cmd = ["rpmspec", "-q", "--buildrequires", "--define", f'_sourcedir {str(sourcedir)}', str(spec_path)]
         result = subprocess.run(
-            ["rpmspec", "-q", "--buildrequires", str(spec_path)],
+            cmd,
             capture_output=True, text=True, timeout=30,
         )
     except FileNotFoundError as e:
@@ -132,7 +134,7 @@ def parse_buildrequires_from_spec(spec_path: Path) -> List[str]:
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"rpmspec -q --buildrequires {spec_path.name} failed: "
+            f"{' '.join(cmd)} failed: "
             f"{result.stderr.strip() or 'unknown error'}"
         )
 
