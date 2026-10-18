@@ -403,15 +403,21 @@ class AppStreamManager:
             # Every NEVRA failed to parse — nothing to emit.
             return self._serialize_root(root), 0
 
-        # Batch-fetch metadata for every surviving pkgname in this media.
-        # A single query beats N round-trips through ``get_package_by_nevra``.
+        # Fetch metadata for every surviving pkgname in this media in
+        # one query, which beats N round-trips through
+        # ``get_package_by_nevra``.
+        #
+        # ``json_each`` and not a literal ``IN (?, ?, …)``: there is an
+        # entry per package name here, 38861 on a full Core Release,
+        # and one parameter each would pass SQLite's limit.
         conn = self.db._get_connection()
-        placeholders = ','.join('?' * len(by_name))
         cursor = conn.execute(
-            f'SELECT name, arch, summary, description, url, license, group_name '
-            f'FROM packages '
-            f'WHERE media_id = ? AND name IN ({placeholders})',
-            (media_id, *by_name.keys()),
+            'SELECT name, arch, summary, description, url, license, '
+            'group_name '
+            'FROM packages '
+            'WHERE media_id = ? '
+            '  AND name IN (SELECT value FROM json_each(?))',
+            (media_id, json.dumps(list(by_name.keys()))),
         )
         # Prefer the row that matches the arch chosen at dedup time;
         # fall back to any row for that name if the arch is missing.

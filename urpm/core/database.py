@@ -5,6 +5,7 @@ Provides fast queries on package metadata, replacing repeated parsing
 of synthesis/hdlist files.
 """
 
+import json
 import sqlite3
 import hashlib
 import threading
@@ -2039,12 +2040,23 @@ class PackageDatabase(
                             (filename, media_id)
                         )
 
-                # Delete obsolete packages from DB
+                # Delete obsolete packages from DB.
+                #
+                # ``json_each`` instead of a literal ``IN (?, ?, …)``:
+                # that list has one parameter per obsolete package and
+                # grows with the media, past SQLite's parameter limit
+                # (32766 here, 999 on older builds).  Observed in the
+                # field at 34373 rows, when a Core Release's metadata
+                # source moved from a mirror to an installation disc:
+                # the update died on "too many SQL variables" after
+                # the download had already succeeded.  As a JSON array
+                # the whole set is one bound parameter, so there is no
+                # limit left to respect.
                 obsolete_ids = [p['id'] for p in obsolete_packages]
-                placeholders = ','.join('?' * len(obsolete_ids))
                 conn.execute(
-                    f"DELETE FROM packages WHERE id IN ({placeholders})",
-                    obsolete_ids
+                    "DELETE FROM packages "
+                    "WHERE id IN (SELECT value FROM json_each(?))",
+                    (json.dumps(obsolete_ids),)
                 )
 
             # Step 4: UPSERT packages (preserves added_timestamp and server_last_modified)
@@ -2328,14 +2340,17 @@ class PackageDatabase(
                 pkg['media_name'] = None
             return
 
-        placeholders = ','.join(['?'] * len(pkg_ids))
         with self._conn_read() as conn:
-            cursor = conn.execute(f"""
+            # ``json_each`` and not a literal ``IN (?, ?, …)``: this list
+            # is as long as the caller's result set, which a bare search
+            # or a full listing makes arbitrarily long, and one
+            # parameter per id would pass SQLite's limit.
+            cursor = conn.execute("""
                 SELECT p.id, m.name AS media_name
                 FROM packages p
                 LEFT JOIN media m ON m.id = p.media_id
-                WHERE p.id IN ({placeholders})
-            """, pkg_ids)
+                WHERE p.id IN (SELECT value FROM json_each(?))
+            """, (json.dumps(pkg_ids),))
             name_by_id = {row['id']: row['media_name'] for row in cursor}
         for pkg in need_id_lookup:
             pkg['media_name'] = name_by_id.get(pkg.get('id'))
@@ -2975,24 +2990,29 @@ class PackageDatabase(
 
         version_join, version_filter, version_params = self._build_version_filter()
 
-        placeholders = ','.join(['?' for _ in names])
         names_lower = [n.lower() for n in names]
 
         # Same ordering as get_package(): RPM-semantic, highest first, so
         # the first row of a name is the candidate rather than whichever
         # one happened to be inserted first. Without it the media rows
         # come back in rowid order and the oldest wins.
+        #
+        # ``json_each`` and not a literal ``IN (?, ?, …)``: the caller
+        # sizes this list, and a whole dependency closure or a full
+        # package listing goes through here, which one parameter per
+        # name would not fit into SQLite's limit.
         query = f"""
             SELECT p.id, p.name, p.version, p.release, p.arch, p.summary
             FROM packages p
             {version_join}
-            WHERE p.name_lower IN ({placeholders}) {version_filter}
+            WHERE p.name_lower IN (SELECT value FROM json_each(?))
+                  {version_filter}
             ORDER BY p.name_lower,
                      p.epoch COLLATE rpm_version_compare DESC,
                      p.version COLLATE rpm_version_compare DESC,
                      p.release COLLATE rpm_version_compare DESC
         """
-        params = tuple(names_lower) + version_params
+        params = (json.dumps(names_lower),) + version_params
 
         with self._conn_read() as conn:
             rows = conn.execute(query, params).fetchall()

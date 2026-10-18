@@ -1,5 +1,6 @@
 """Cache file tracking database operations."""
 
+import json
 import time
 from typing import Any, Dict, List, Optional
 
@@ -155,12 +156,17 @@ class CacheMixin:
                     "UPDATE cache_files SET is_referenced = 0 WHERE media_id = ?",
                     (media_id,)
                 )
-                # Then mark the referenced ones
-                placeholders = ','.join('?' * len(referenced_filenames))
-                conn.execute(f"""
+                # Then mark the referenced ones.
+                #
+                # ``json_each`` and not a literal ``IN (?, ?, …)``: this
+                # list holds every filename a media's synthesis names,
+                # so it grows with the media and one parameter each
+                # would pass SQLite's limit on a full one.
+                conn.execute("""
                     UPDATE cache_files SET is_referenced = 1
-                    WHERE media_id = ? AND filename IN ({placeholders})
-                """, [media_id] + referenced_filenames)
+                    WHERE media_id = ?
+                      AND filename IN (SELECT value FROM json_each(?))
+                """, (media_id, json.dumps(referenced_filenames)))
             conn.commit()
 
     def delete_cache_file(self, filename: str, media_id: int = None) -> bool:
