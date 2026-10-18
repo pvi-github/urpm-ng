@@ -1,7 +1,16 @@
 """Tests for `_apply_transaction_niceness` (SPEC_DISTUPGRADE §3.E0).
 
-Minimal ionice + os.nice hook applied post-fork on the transaction
-child so long transactions don't monopolize the machine.
+The hook is applied post-fork on the transaction child so a long
+transaction does not monopolize the machine.  It now delegates to
+:func:`urpm.core.txresources.lower_priority`, which prefers a cgroup
+v2 weight — the only one of the two that governs writeback — and falls
+back to the ``ionice`` + ``os.nice`` pair these tests cover.
+
+The cgroup root is pinned to an empty directory throughout, so the
+fallback is tested because it was *asked for* and not because the
+machine running the suite happens to lack the privilege to create a
+cgroup.  Without that, the same tests would fail when run as root on
+a host that delegates the ``io`` controller.
 """
 
 from __future__ import annotations
@@ -9,7 +18,15 @@ from __future__ import annotations
 import os
 from unittest.mock import patch, MagicMock
 
+import pytest
+
+from urpm.core import txresources
 from urpm.core.transaction_queue import _apply_transaction_niceness
+
+
+@pytest.fixture(autouse=True)
+def without_cgroups(tmp_path, monkeypatch):
+    monkeypatch.setattr(txresources, "CGROUP_ROOT", tmp_path / "absent")
 
 
 def test_ionice_invoked_with_current_pid_when_available():

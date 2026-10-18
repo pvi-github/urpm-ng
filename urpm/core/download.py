@@ -2231,11 +2231,20 @@ class Downloader:
         else:
             coord_callback = None
 
-        dl_results, stats = coordinator.download_all(
-            to_download,
-            peer_availability,
-            progress_callback=coord_callback
-        )
+        # The payload is written by *this* process, and nothing used to
+        # moderate it: the transaction child had its ionice, the
+        # download had nothing at all, and a distupgrade writes several
+        # gigabytes here before rpm is even called.  Scoped to the
+        # phase because this process goes on to do interactive work
+        # afterwards, which has no reason to stay deprioritised.
+        from .txresources import yielding_the_machine
+
+        with yielding_the_machine():
+            dl_results, stats = coordinator.download_all(
+                to_download,
+                peer_availability,
+                progress_callback=coord_callback
+            )
 
         t_dl_end = _time.time()
         logger.debug(f"Downloads completed in {t_dl_end - t_dl_start:.2f}s")

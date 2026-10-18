@@ -271,39 +271,21 @@ def _apply_transaction_niceness() -> None:
 
     Called by the child process right after fork so the RPM commit +
     scriptlets don't monopolize the machine while an user is typing
-    in their desktop.  Minimal implementation (SPEC_DISTUPGRADE
-    §3.E0) — apt/dpkg-style :
+    in their desktop.  Scriptlets inherit the cgroup of the process
+    that spawns them, so placing this child covers the whole commit.
 
-    - ``ionice -c3`` (Idle class) via subprocess, invoked with the
-      caller's own PID.  ``check=False`` so a missing ``ionice``
-      binary (rare on Mageia — util-linux ships it) is silently
-      tolerated, we don't want to fail the transaction over UX
-      niceness.
-    - ``os.nice(5)`` for CPU niceness — pure Python syscall, no
-      external dependency, effect immediate on the child and
-      inherited by scriptlets.
-
-    Cross-init compatible (no cgroup, no systemd), no session
-    monitor.  The complete « Phase E » with cgroup v2 slice, session
-    idle tracker and ``urpm boost`` escape hatch is planned for
-    ``SPEC_TX_RESOURCE_CONTROL`` post-v1.
+    Delegates to :func:`urpm.core.txresources.lower_priority`, which
+    prefers a cgroup v2 weight and falls back to exactly what this
+    function used to do on its own, ``ionice -c3`` plus ``nice(5)``.
+    The fallback is kept because it is all a machine without cgroup
+    v2 can get; it is also why the original net did not prevent a
+    desktop from freezing during a 2509-package transaction — an I/O
+    priority does not govern writeback, and that is where the volume
+    is.  See the module docstring there.
     """
-    import shutil
-    import subprocess
+    from .txresources import lower_priority
 
-    if shutil.which("ionice"):
-        subprocess.run(
-            ["ionice", "-c3", "-p", str(os.getpid())],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    try:
-        os.nice(5)
-    except OSError:
-        # nice(5) can fail on ancient / restricted kernels — no reason
-        # to abort a legitimate transaction over that.
-        pass
+    lower_priority()
 
 
 def _list_rpmnew_files(root: str = "/") -> set:
