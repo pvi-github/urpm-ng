@@ -289,7 +289,15 @@ class MediaGenerator:
             raise
         except Exception as e:
             logger.error(f"Generation failed: {e}")
-            print(format_exc())
+            # The traceback is a developer's tool, and most failures
+            # here are about the tree being scanned rather than about
+            # this code: an unreadable package, a directory that moved.
+            # Printing it unconditionally buried the one line that
+            # named the problem.  It stays available under --verbose,
+            # and in the log either way.
+            logger.debug("%s", format_exc())
+            if self.verbose:
+                print(format_exc())
             result.errors.append(str(e))
         finally:
             if lock_ctx is not None:

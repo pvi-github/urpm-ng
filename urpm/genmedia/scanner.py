@@ -73,20 +73,69 @@ class RpmScanner:
         rpms_todo = {os.path.basename(f): None for f in rpms}
 
         ts = rpm.TransactionSet()
+        skipped = 0
         try:
             for pkg in rpms_todo:
                 rpm_path = rpms_dir / pkg
-                if rpm_path.exists():
+                if not rpm_path.exists():
+                    continue
+                try:
                     with rpm_path.open("rb") as rpm_file:
                         rpm_header = self._get_rpm_info(rpm_file, ts)
 
                         # create hdlist entry
                         yield self.rpm_data(rpm_header, rpm_file)
+                except (rpm.error, OSError) as exc:
+                    # ``rpm.error`` says « error reading package header »
+                    # and nothing else : not which file, not why.  On a
+                    # directory of three hundred packages that leaves
+                    # the maintainer to find it by hand, so the file is
+                    # named here, with its size, because a zero-length
+                    # RPM left by an interrupted copy is the common
+                    # case and the size says so at a glance.
+                    if not self.no_bad_rpm:
+                        raise RuntimeError(
+                            self._unreadable_rpm_message(rpm_path, exc)
+                        ) from exc
+                    skipped += 1
+                    logger.warning(
+                        "Left out of the metadata: %s",
+                        self._unreadable_rpm_message(
+                            rpm_path, exc, with_hint=False))
+            if skipped:
+                logger.warning(
+                    "%d unreadable RPM(s) skipped; the generated metadata "
+                    "does not describe them", skipped)
         finally:
             try:
                 ts.closeDB()
             except Exception:
                 pass
+
+    @staticmethod
+    def _unreadable_rpm_message(rpm_path: Path, exc: Exception,
+                                *, with_hint: bool = True) -> str:
+        """Say which file could not be read, and what it looks like.
+
+        The hint is omitted when the caller already asked to skip
+        these, where suggesting the option it just used would be
+        noise.
+        """
+        try:
+            size = rpm_path.stat().st_size
+        except OSError:
+            size = None
+        if size is None:
+            detail = "cannot be read"
+        elif size == 0:
+            detail = "is empty (0 bytes)"
+        else:
+            detail = f"is not a readable package ({size} bytes)"
+        message = f"{rpm_path} {detail}: {exc}"
+        if with_hint:
+            message += (". Remove or replace it, or pass --no-bad-rpm "
+                        "to leave it out of the metadata")
+        return message
 
     def _get_rpm_info(self, rpm_file, ts):
         # Extract the RPM package header from an already-open TS
