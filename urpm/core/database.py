@@ -1142,17 +1142,30 @@ class PackageDatabase(
         # Thread-local storage for per-thread connections
         self._local = threading.local()
 
-        # Track EVERY connection ever produced by ``_create_connection``
-        # so ``close()`` can shut down worker-thread connections in
+        # Track every connection produced by ``_create_connection`` so
+        # ``close()`` can shut down worker-thread connections in
         # addition to the main-thread one.  ``threading.local`` scopes
         # the *lookup* per-thread but does not expose the storage of
         # other threads, so the main thread has no other way to reach
-        # a worker's connection.  Without this list, ThreadPoolExecutor
-        # workers (download / resolver / import) leak their sqlite3 fd
-        # until process exit -- which in mkimage means ~13 fd still open
-        # on ``packages.db{,-wal,-shm}`` at commit time, blocking the
-        # WAL checkpoint and leaving ~90 MB of dead weight in the image.
-        self._all_conns: list = []
+        # a worker's connection.  Without this registry,
+        # ThreadPoolExecutor workers (download / resolver / import)
+        # leak their sqlite3 fd until process exit -- which in mkimage
+        # means ~13 fd still open on ``packages.db{,-wal,-shm}`` at
+        # commit time, blocking the WAL checkpoint and leaving ~90 MB
+        # of dead weight in the image.
+        #
+        # Keyed by the owning thread so that
+        # ``_close_connections_of_dead_threads`` can reclaim an entry
+        # as soon as that thread is gone.  The key is the thread
+        # *object*, not its ``ident``, which the kernel reuses once a
+        # thread has finished: a numeric key could name a live
+        # thread's entry and have its connection closed underneath it.
+        self._all_conns: Dict[threading.Thread, sqlite3.Connection] = {}
+        # Connections reclaimed from finished threads, waiting to be
+        # handed to the next thread that asks.  See
+        # :meth:`_acquire_connection` for why they are kept open rather
+        # than closed.
+        self._idle_conns: List[sqlite3.Connection] = []
         self._all_conns_lock = threading.Lock()
 
         # Register in the module-level weak set so ``os.fork``ing
@@ -1252,14 +1265,72 @@ class PackageDatabase(
         # columns orders by RPM semantics, not lexicographic ASCII.
         _register_rpm_collation(conn)
         with self._all_conns_lock:
-            self._all_conns.append(conn)
+            self._all_conns[threading.current_thread()] = conn
         return conn
+
+    def _acquire_connection(self) -> sqlite3.Connection:
+        """Give the calling thread a connection, reusing an idle one.
+
+        A connection handed out by :meth:`_get_connection` lives in the
+        thread's own storage, so once that thread is gone nothing can
+        reach it again and the registry is the only thing still holding
+        it.  Taking it back is therefore exact, not a guess.
+
+        Reclaimed connections are *reused* and not closed, which is the
+        whole point.  Closing one does not give its descriptors back :
+        SQLite's unix VFS defers closing the main database file for as
+        long as the process holds another connection to the same inode,
+        because closing that descriptor would drop every POSIX lock the
+        process holds on the file.  Verified on plain ``sqlite3``,
+        outside this code : closing the second of two connections
+        releases its ``-wal`` descriptor but keeps the one on the
+        database, and only closing the last one releases both.  So in a
+        process that always keeps one connection open, the only way not
+        to accumulate descriptors is to stop opening new ones.
+
+        Not a theoretical tidy-up.  ``urpmd`` serves every HTTP request
+        in a fresh thread, so each request that touched the database
+        used to strand descriptors; the usual 1024 soft limit is then
+        reached in a few hundred requests, after which the daemon could
+        no longer open the database, nor ``/proc/loadavg``, nor its own
+        lock file, and burned a whole core in an accept loop that had
+        no descriptor left to accept with.  Reported from the field on
+        2026-10-14.  With reuse, the count settles at the number of
+        threads that have ever been *concurrently* active, instead of
+        growing with every request.
+        """
+        with self._all_conns_lock:
+            # A finished thread's connection goes back in the pool.
+            for thread in [t for t in self._all_conns if not t.is_alive()]:
+                self._idle_conns.append(self._all_conns.pop(thread))
+
+            while self._idle_conns:
+                conn = self._idle_conns.pop()
+                try:
+                    # A thread that ended without committing would
+                    # otherwise pass its open transaction to whoever
+                    # gets this connection next.
+                    conn.rollback()
+                except sqlite3.Error:
+                    # Unusable: drop it rather than hand it out.  Its
+                    # descriptors are not recoverable anyway while the
+                    # main connection stays open.
+                    continue
+                self._all_conns[threading.current_thread()] = conn
+                return conn
+
+        # Nothing to reuse.  Opened outside the lock, since this does
+        # file I/O and runs the PRAGMAs.
+        return self._create_connection()
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get the connection for the current thread.
 
-        Creates a new connection if this thread doesn't have one yet.
-        This enables safe concurrent access from ThreadPoolExecutor.
+        A thread that already owns one gets it back with no locking at
+        all, which is what keeps concurrent access from a
+        ThreadPoolExecutor cheap.  A thread that does not goes through
+        :meth:`_acquire_connection`, which prefers a connection left
+        behind by a finished thread over opening another one.
 
         Returns:
             SQLite connection for current thread
@@ -1269,8 +1340,7 @@ class PackageDatabase(
         if conn is not None:
             return conn
 
-        # Create new connection for this thread
-        conn = self._create_connection()
+        conn = self._acquire_connection()
         self._local.conn = conn
         return conn
 
@@ -1944,8 +2014,11 @@ class PackageDatabase(
         with self._all_conns_lock:
             # Drop references without closing — the parent still owns
             # these fds and would notice a close in the middle of its
-            # own operation.
+            # own operation.  The idle pool goes too : those are the
+            # parent's connections just as much, and reusing one in the
+            # child is exactly what SQLite forbids.
             self._all_conns.clear()
+            self._idle_conns.clear()
         self.conn = None
         if hasattr(self._local, "conn"):
             self._local.conn = None
@@ -1969,14 +2042,16 @@ class PackageDatabase(
         """
         if not self.read_only:
             self.ensure_wal_readable()
-        # Close every tracked connection (main thread + worker threads).
+        # Close every tracked connection: the main thread's, every
+        # live thread's, and the idle ones waiting to be reused.
         with self._all_conns_lock:
-            for conn in self._all_conns:
+            for conn in list(self._all_conns.values()) + self._idle_conns:
                 try:
                     conn.close()
                 except sqlite3.Error:
                     pass
             self._all_conns.clear()
+            self._idle_conns.clear()
         self.conn = None
         # Clear thread-local reference if in main thread
         if hasattr(self._local, 'conn'):

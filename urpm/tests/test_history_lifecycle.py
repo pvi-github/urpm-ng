@@ -162,11 +162,12 @@ class TestResetAfterFork:
         assert getattr(db._local, "conn", None) is None
         assert db.conn is None
 
-    def test_reset_clears_all_conns_list(self, db):
+    def test_reset_clears_the_connection_registry(self, db):
+        """A mapping keyed by owning thread since connections are reused."""
         _ = db._get_connection()
         assert len(db._all_conns) >= 1
         db.reset_after_fork()
-        assert db._all_conns == []
+        assert db._all_conns == {}
 
     def test_reset_does_not_close_conns(self, db):
         """The parent still owns the fds — closing would break it.

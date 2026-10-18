@@ -1,11 +1,13 @@
 """HTTP server for urpmd."""
 
+import errno
 import json
 import logging
 import mimetypes
 import os
 import sys
 import threading
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -591,6 +593,45 @@ class UrpmdHandler(BaseHTTPRequestHandler):
         self.send_json(result)
 
 
+#: How long the accept loop stands down after running out of file
+#: descriptors.  Long enough that the loop stops spinning, short
+#: enough that the daemon answers again as soon as descriptors are
+#: available.
+EMFILE_BACKOFF_SECONDS = 0.5
+
+
+class ResilientThreadingHTTPServer(ThreadingHTTPServer):
+    """A threading server that does not spin when it runs out of fds.
+
+    ``socketserver`` swallows an ``OSError`` from ``accept()`` and
+    returns at once, while the pending connection keeps the listening
+    socket readable, so ``serve_forever`` selects, fails to accept, and
+    selects again with nothing in between.  On descriptor exhaustion
+    that is a busy loop: a tester's daemon held a core at 100% for
+    days, and because the error was swallowed the logs said nothing
+    about why.
+
+    Hitting ``EMFILE`` means something is wrong elsewhere -- the leak
+    that caused that incident is fixed in
+    ``PackageDatabase._close_connections_of_dead_threads`` -- so this
+    does not pretend to repair anything.  It makes the failure cheap
+    and, above all, legible.
+    """
+
+    def get_request(self):
+        try:
+            return super().get_request()
+        except OSError as exc:
+            if exc.errno in (errno.EMFILE, errno.ENFILE):
+                logger.error(
+                    "Out of file descriptors while accepting a connection "
+                    "(%s). Standing down for %.1fs. Check 'ls /proc/%d/fd' "
+                    "for what is holding them.",
+                    exc.strerror, EMFILE_BACKOFF_SECONDS, os.getpid())
+                time.sleep(EMFILE_BACKOFF_SECONDS)
+            raise
+
+
 class UrpmdServer:
     """urpmd HTTP server wrapper."""
 
@@ -609,9 +650,10 @@ class UrpmdServer:
         # Set daemon reference on handler class
         UrpmdHandler.daemon = daemon
 
-        # Use ThreadingHTTPServer for concurrent request handling
-        # This allows multiple parallel downloads from peers
-        self.server = ThreadingHTTPServer((self.host, self.port), UrpmdHandler)
+        # Threaded for concurrent request handling, which is what
+        # allows several peers to download in parallel.
+        self.server = ResilientThreadingHTTPServer(
+            (self.host, self.port), UrpmdHandler)
         logger.info(f"urpmd HTTP server listening on {self.host}:{self.port}")
 
     def serve_forever(self):
