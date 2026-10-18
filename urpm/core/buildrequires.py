@@ -149,6 +149,15 @@ def rpm_dep_to_solver_format(dep: str) -> str:
     RPM format: "name >= 1.0" or "name"
     Solver format: "name >= 1.0" or "name" (same, libsolv uses this directly)
 
+    A boolean dependency — ``(A with B)``, RPM 4.13+ — falls through
+    unchanged, and has to keep doing so: the name pattern below cannot
+    begin with a parenthesis, so the match fails and the string is
+    returned verbatim, which is exactly right.  ``urpm install``
+    evaluates it with libsolv's own parser, see
+    :func:`urpm.core.resolver.parse_rich_dep`.  Widening the pattern
+    to « handle » them here would re-break the builds that this
+    pass-through makes work.
+
     Args:
         dep: Dependency string in RPM format.
 

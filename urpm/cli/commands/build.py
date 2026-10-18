@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1614,7 +1615,10 @@ def _build_single_package(
         import re
         RPMBUILD_MISSING_BR = 11        # rpm's documented "more BRs needed" exit code
         MAX_DYNBR_PASSES = 16           # safety cap; real builds converge in 1-3
-        _ver_re = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
+        # No version-stripping regex here, deliberately: the deps read
+        # from the sidecar go to ``urpm install`` verbatim (see the
+        # comment at the read site).  One used to sit here unused, an
+        # invitation to start stripping again.
 
         # Output discipline: the per-iteration `rpmbuild -br` runs are an
         # implementation detail of dynamic BR resolution, not output we want
@@ -1782,6 +1786,9 @@ def _diagnose_unsatisfied_buildrequires(
     print(colors.error(_("Dynamic BuildRequires cannot be satisfied:")))
 
     for dep in requested_deps:
+        if _is_rich_dep(dep):
+            _report_rich_dep(cid, container, dep)
+            continue
         bare = _ver_re.sub('', dep).strip()
         has_constraint = (dep != bare)
         wp = container.exec(cid, ['urpm', 'whatprovides', bare])
@@ -1802,6 +1809,63 @@ def _diagnose_unsatisfied_buildrequires(
             # down.
         else:
             print(f"  {colors.warning(dep)} → "
+                  + colors.error(_("no provider in any enabled medium")))
+
+
+#: A boolean dependency, which RPM 4.13+ writes parenthesised.
+#: Recognising one is all this module needs to know about the grammar:
+#: everything that has to *understand* it goes through libsolv's
+#: parser (see :func:`urpm.core.resolver.parse_rich_dep`).
+def _is_rich_dep(dep: str) -> bool:
+    return dep.lstrip().startswith('(')
+
+
+#: Capability-shaped tokens inside a boolean dependency : a name,
+#: optionally with its own parenthesised argument as ``python3dist()``
+#: and ``pkgconfig()`` have.  Used to *find* what to query, never to
+#: interpret the expression — the operators and versions around them
+#: are left to libsolv.
+_CAPABILITY_TOKEN = re.compile(r'[A-Za-z][\w.+-]*(?:\([^()]*\))?')
+
+#: The keywords of that grammar, which are not capabilities.
+_RICH_KEYWORDS = frozenset({
+    "and", "or", "if", "else", "with", "without", "unless",
+})
+
+
+def _report_rich_dep(cid: str, container, dep: str) -> None:
+    """Report a boolean dependency without taking it apart.
+
+    Version-stripping a boolean dependency produced a diagnostic that
+    said more than it knew : ``(python3dist(gitdb) < 5~~ with
+    python3dist(gitdb) >= 4.0.1)`` was reported as « No package
+    provides '(python3dist(gitdb) with python3dist(gitdb)' », an
+    unbalanced string nobody had asked for, and the operator was left
+    to wonder whether the missing constraints were the cause.
+
+    So the request is shown verbatim, and each capability it names is
+    queried on its own.  That is the actionable part: it says which of
+    them has a provider and at what version, leaving the reader to see
+    which side of the expression is out of range.
+    """
+    from .. import colors
+    print(f"  {colors.warning(_('want'))}: {dep}")
+
+    seen = []
+    for match in _CAPABILITY_TOKEN.finditer(dep):
+        token = match.group(0)
+        if token in _RICH_KEYWORDS or token in seen:
+            continue
+        seen.append(token)
+
+    for token in seen:
+        wp = container.exec(cid, ['urpm', 'whatprovides', token])
+        available = (wp.stdout or '').strip()
+        if available:
+            first = available.splitlines()[0].strip()
+            print(f"  {colors.dim(_('have'))}: {token} → {first}")
+        else:
+            print(f"  {colors.dim(_('have'))}: {token} → "
                   + colors.error(_("no provider in any enabled medium")))
 
 
@@ -1849,9 +1913,21 @@ def _extract_buildrequires(path: str) -> list[str] | None:
     # Post-process: strip version constraints, drop rpmlib(...) noise,
     # keep pkgconfig(...) wrappers (rpm resolves them on its own),
     # dedupe preserving order.
+    #
+    # A boolean dependency goes through untouched.  Neither step below
+    # is safe on one: splitting on commas would cut an ``(A or B)``
+    # that happens to contain one, and removing the version
+    # constraints leaves an expression that means something else — or
+    # nothing, since a greedy ``\S+`` takes the closing parenthesis
+    # with the version.  ``urpm install`` evaluates them with
+    # libsolv's own parser, so passing them verbatim is both simpler
+    # and correct.
     packages = []
     ver_re = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
     for raw in raw_deps:
+        if _is_rich_dep(raw):
+            packages.append(raw.strip())
+            continue
         for dep in raw.split(','):
             dep = dep.strip()
             if not dep or dep.startswith('#'):

@@ -254,6 +254,40 @@ OP_FLAGS = {
 }
 
 
+def is_rich_dep(cap_str: str) -> bool:
+    """Whether *cap_str* is one of RPM's boolean dependencies.
+
+    RPM 4.13+ writes them parenthesised : ``(A with B)``,
+    ``(A or B)``, ``(A if B)``.  They have a grammar of their own, and
+    taking a regex to them is how a build came to fail on a dependency
+    that was perfectly satisfiable : ``(python3dist(gitdb) < 5~~ with
+    python3dist(gitdb) >= 4.0.1)`` was cut at its first operator by a
+    non-greedy ``(.+?)``, leaving ``(python3dist(gitdb)`` to look up,
+    and a version-stripping ``\\S+`` ate the closing parenthesis along
+    with the version it was meant to remove.  libsolv ships the
+    parser; every site that turns a dependency string into a job or a
+    query asks this first.
+    """
+    return cap_str.lstrip().startswith('(')
+
+
+def parse_rich_dep(pool: solv.Pool, cap_str: str) -> Optional[solv.Dep]:
+    """A boolean dependency as a libsolv Dep, or ``None`` if unparseable.
+
+    Separate from :func:`parse_capability`, which is lenient on
+    purpose : when a media's metadata is being loaded, one malformed
+    dependency must not abort the import, so it degrades to an opaque
+    capability nothing provides.  A *caller's* request is the opposite
+    case — an unparseable one has to be reported, not silently turned
+    into something unsatisfiable.
+    """
+    try:
+        dep = pool.parserpmrichdep(cap_str)
+    except Exception:
+        return None
+    return dep or None
+
+
 def parse_capability(pool: solv.Pool, cap_str: str) -> solv.Dep:
     """Parse a capability string into a libsolv Dep.
 
@@ -267,12 +301,13 @@ def parse_capability(pool: solv.Pool, cap_str: str) -> solv.Dep:
     - "(pkgA if pkgB)" -> conditional dependency
     """
     # Handle rich/boolean dependencies (start with parenthesis)
-    if cap_str.startswith('('):
-        try:
-            return pool.parserpmrichdep(cap_str)
-        except Exception:
-            # Fallback to simple dep on parse error
-            return pool.Dep(cap_str)
+    if is_rich_dep(cap_str):
+        dep = parse_rich_dep(pool, cap_str)
+        if dep is not None:
+            return dep
+        # Lenient here, see :func:`parse_rich_dep`: a solvable with one
+        # malformed dependency is better than a media that will not load.
+        return pool.Dep(cap_str)
 
     # Strip [*] scriptlet marker if present (can appear anywhere)
     cap_str = cap_str.replace('[*]', '')
@@ -1556,6 +1591,21 @@ class Resolver(PoolMixin, QueriesMixin, AlternativesMixin, OrphansMixin):
                     favored.add(pkg_name)
 
         for name in package_names:
+            # A boolean dependency goes to libsolv's own parser, before
+            # anything below takes a regex to it.  ``pool.select`` has
+            # no flag that evaluates one — not even SELECTION_REL — so
+            # the job is built from the parsed Dep instead of from a
+            # selection.
+            if is_rich_dep(name):
+                dep = parse_rich_dep(self.pool, name)
+                if dep is None:
+                    not_found.append(name)
+                    continue
+                jobs.append(self.pool.Job(
+                    solv.Job.SOLVER_INSTALL
+                    | solv.Job.SOLVER_SOLVABLE_PROVIDES, dep.id))
+                continue
+
             # NEVRA mode: select the exact target version with SELECTION_CANON.
             # Unlike SOLVER_UPDATE (which needs to target an installed package),
             # SOLVER_INSTALL works correctly with a specific repo solvable.

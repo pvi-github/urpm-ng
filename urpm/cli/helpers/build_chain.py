@@ -65,7 +65,11 @@ PRODUCED_MEDIA_NAME = "chain-produced"
 # so this module has no build.py dependency.
 RPMBUILD_MISSING_BR = 11
 MAX_DYNBR_PASSES = 16
-_VER_RE = re.compile(r'\s*(?:>=|<=|=>|=<|[><=!])\s*\S+')
+# No version-stripping regex here, deliberately: dynamic
+# BuildRequires go to ``urpm install`` verbatim, constraints included,
+# and a boolean dependency does not survive that kind of surgery at
+# all.  One used to sit here, unused, which is how the same mistake
+# gets made twice.
 
 # Capabilities the build container needs so ``unshare --net`` can
 # create a network namespace: ``SYS_ADMIN`` to create it at all,
