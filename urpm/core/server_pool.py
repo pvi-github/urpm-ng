@@ -439,7 +439,14 @@ def verify_media_match(candidate_url: str, media: dict,
     # If this is the first server for the media there is nothing to
     # compare against — accept it directly.  MD5 verification will
     # kick in when a second server tries to link.
-    linked_servers = db.get_servers_for_media(media['id'])
+    #
+    # A removable disc is never a usable reference: a pressing carries
+    # a subset of the media (4488 of Core Release's 38861 names on a
+    # Mageia 10 DVD, all at identical versions), so its synthesis
+    # checksum cannot match a full mirror's and comparing against it
+    # would reject every honest candidate.
+    from .removable import mirrors_only
+    linked_servers = mirrors_only(db.get_servers_for_media(media['id']))
     if not linked_servers:
         return True
 

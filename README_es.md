@@ -684,6 +684,7 @@ urpm media set <nombre> [opts]  # Modificar los parámetros de un medio (sharing
 urpm media seed-info <nombre> # Mostrar la info del seed set (secciones, nº paquetes, tamaño estimado)
 urpm media autoconfig -r 10   # Auto-añadir los medios Mageia oficiales para la release 10
 urpm media discover <url>     # Descubrir medios desde el media.cfg de un repo
+urpm media add-cdrom          # Usar un disco montado como fuente de sus medios
 ```
 
 Flags útiles para `urpm media add`:
@@ -696,6 +697,34 @@ Flags útiles para `urpm media add`:
 --disabled                    # Añadir pero dejar desactivado
 -y, --auto                    # No interactivo: aceptar el nombre/short_name auto-detectado
 ```
+
+### Usar un disco (DVD) como fuente
+
+Un DVD de Mageia lleva los mismos paquetes que las réplicas, en las
+mismas versiones. No es por tanto un catálogo aparte, sino un origen más
+barato para medios que ya existen: sus árboles se asocian a los medios
+configurados en vez de añadirse una segunda vez, y el disco se prefiere
+mientras está en la unidad.
+
+```bash
+urpm media add-cdrom              # Usar el disco montado
+urpm media add-cdrom --dry-run    # Mostrar lo que lleva, sin escribir nada
+```
+
+No se pide URL ni punto de montaje. Un disco no tiene una ubicación
+estable, así que lo que se guarda es el disco mismo, y el montaje se
+busca de nuevo en `/proc/mounts` cada vez que hace falta; la misma orden
+funciona tanto si una sesión de escritorio montó el disco en
+`/run/media/<usuario>/<etiqueta>` como si lo montaste a mano en
+`/mnt/cdrom`. Nunca se monta nada por ti.
+
+Los medios que aún no existen se crean con los atributos que les habría
+dado una réplica. Eso es lo que permite instalar o actualizar sin red
+alguna, y también por eso una réplica añadida más tarde se une a esas
+mismas filas de medios en vez de duplicarlas.
+
+Un disco se quita como cualquier otra fuente, con `urpm server remove
+<etiqueta>`.
 
 ### Importar medios desde un urpmi.cfg heredado
 

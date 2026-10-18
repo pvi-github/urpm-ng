@@ -694,6 +694,7 @@ urpm media set <nome> [opts]  # Modifica i parametri del media (sharing, replica
 urpm media seed-info <nome>   # Mostra le info del seed set (sezioni, num. pacchetti, dim. stimata)
 urpm media autoconfig -r 10   # Auto-aggiungi i media Mageia ufficiali per la release 10
 urpm media discover <url>     # Scopri i media dal media.cfg di un repo
+urpm media add-cdrom          # Usare un disco montato come fonte dei suoi media
 ```
 
 Flag utili per `urpm media add`:
@@ -706,6 +707,35 @@ Flag utili per `urpm media add`:
 --disabled                    # Aggiungi ma lascia disabilitato
 -y, --auto                    # Non interattivo: accetta il nome/short_name auto-rilevato
 ```
+
+### Usare un disco (DVD) come fonte
+
+Un DVD Mageia contiene gli stessi pacchetti dei mirror, nelle stesse
+versioni. Non è quindi un catalogo a parte, ma un'origine meno costosa
+per media già presenti: i suoi alberi vengono collegati ai media
+configurati invece di essere aggiunti una seconda volta, e il disco viene
+preferito finché è nel lettore.
+
+```bash
+urpm media add-cdrom              # Usare il disco montato
+urpm media add-cdrom --dry-run    # Mostrare cosa contiene, senza scrivere
+```
+
+Non vengono richiesti né URL né punto di montaggio. Un disco non ha una
+posizione stabile, quindi ciò che viene registrato è il disco stesso, e
+il montaggio viene ricercato in `/proc/mounts` a ogni utilizzo; lo stesso
+comando funziona sia che una sessione grafica abbia montato il disco in
+`/run/media/<utente>/<etichetta>`, sia che lo si sia montato a mano in
+`/mnt/cdrom`. Nulla viene mai montato al posto vostro.
+
+I media non ancora configurati vengono creati con gli attributi che un
+mirror avrebbe dato loro. È questo che rende possibile
+un'installazione o un aggiornamento senza alcuna rete, ed è anche il
+motivo per cui un mirror aggiunto più tardi si unisce esattamente alle
+stesse righe di media invece di duplicarle.
+
+Un disco si rimuove come qualunque altra fonte, con `urpm server remove
+<etichetta>`.
 
 ### Importare i media da un urpmi.cfg legacy
 

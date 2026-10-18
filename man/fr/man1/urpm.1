@@ -481,6 +481,33 @@ Version Mageia cible pour un média personnalisé (9, 10, cauldron ...).
 Mode non-interactif.
 .RE
 .TP
+.B add\-cdrom \fR[\fB\-\-dry\-run\fR]
+Utiliser un disque monté comme source des médias qu'il contient. Ne
+demande ni URL ni point de montage : un pressage n'a pas d'emplacement
+stable, donc ce qui est enregistré est le disque lui-même, et le montage
+est retrouvé dans
+.I /proc/mounts
+à chaque fois qu'on en a besoin. Rien n'est jamais monté à votre place :
+insérer le disque, le monter si aucune session graphique ne l'a fait,
+puis lancer la commande.
+.sp
+Un DVD Mageia porte les mêmes paquets que les miroirs, aux mêmes
+versions. Ses arborescences sont donc rattachées aux médias déjà
+configurés au lieu d'être ajoutées une seconde fois, et le disque est
+simplement préféré tant qu'il est dans le lecteur, étant l'origine la
+moins chère. Les médias encore absents sont créés avec les attributs
+qu'un miroir leur aurait donnés, ce qui rend une installation ou une
+mise à niveau possible sans réseau, et ce qui permet à un miroir ajouté
+plus tard de rejoindre exactement les mêmes lignes.
+.sp
+Un disque se retire comme n'importe quelle autre source, avec
+.BR "urpm server remove " \fIétiquette\fR .
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Montrer ce que porte le disque, sans rien écrire.
+.RE
+.TP
 .B remove \fInom\fR ...
 Supprime un ou plusieurs médias. Tout serveur dont la liste de
 médias devient vide suite à cette suppression est retiré dans la

@@ -993,6 +993,20 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
                     n=n_failed,
                     names=", ".join(stage1_summary["failed_servers"]))))
 
+        # Named because it decides where the download will come from,
+        # and because a disc that stayed unused is exactly what the
+        # operator could not see before.
+        linked_discs = stage1_summary.get("linked_discs") or []
+        if linked_discs:
+            print(colors.success(ngettext(
+                "  The mounted disc now also serves {n} target medium: "
+                "{names}",
+                "  The mounted disc now also serves {n} target media: "
+                "{names}",
+                len(linked_discs)).format(
+                    n=len(linked_discs),
+                    names=", ".join(name for name, _layout in linked_discs))))
+
         # List the third-party repositories that couldn't be transposed
         # to a mga N+1 counterpart, upfront — the user needs to know
         # BEFORE the Stage 2 prompt what they're losing, so they can
@@ -1162,11 +1176,10 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
     if _dp["shown"] and _dp["start"] is not None:
         elapsed = _display.format_duration(time.monotonic() - _dp["start"])
         print("  " + colors.success(_(
-            "{n_dl} downloaded ({n_peers} from peers, {n_up} from "
-            "mirrors, {n_cached} from cache) in {time}").format(
+            "{n_dl} downloaded ({sources}, {n_cached} from cache) "
+            "in {time}").format(
                 n_dl=dl["downloaded"],
-                n_peers=dl.get("from_peers", 0),
-                n_up=dl.get("from_upstream", 0),
+                sources=_display.format_download_sources(dl),
                 n_cached=dl["already_present"],
                 time=elapsed)))
     else:

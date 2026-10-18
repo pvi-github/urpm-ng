@@ -489,6 +489,33 @@ cauldron, ...).
 Modalità non interattiva.
 .RE
 .TP
+.B add\-cdrom \fR[\fB\-\-dry\-run\fR]
+Usare un disco montato come fonte dei media che contiene. Non richiede
+né URL né punto di montaggio: un disco non ha una posizione stabile,
+quindi ciò che viene registrato è il disco stesso, e il montaggio viene
+ricercato in
+.I /proc/mounts
+a ogni utilizzo. Nulla viene mai montato al posto vostro: inserire il
+disco, montarlo se nessuna sessione grafica lo ha fatto, poi eseguire il
+comando.
+.sp
+Un DVD Mageia contiene gli stessi pacchetti dei mirror, nelle stesse
+versioni. I suoi alberi vengono quindi collegati ai media già
+configurati invece di essere aggiunti una seconda volta, e il disco
+viene semplicemente preferito finché è nel lettore, essendo l'origine
+meno costosa. I media non ancora configurati vengono creati con gli
+attributi che un mirror avrebbe dato loro, ed è questo che rende
+possibile un'installazione o un aggiornamento senza rete, e che permette
+a un mirror aggiunto più tardi di unirsi alle stesse righe.
+.sp
+Un disco si rimuove come qualunque altra fonte, con
+.BR "urpm server remove " \fIetichetta\fR .
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Mostrare cosa contiene il disco, senza scrivere nulla.
+.RE
+.TP
 .B remove \fInome\fR ...
 Rimuove uno o più media. Ogni server la cui lista di media resta
 vuota dopo la rimozione viene eliminato nella stessa passata.

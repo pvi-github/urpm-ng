@@ -444,8 +444,14 @@ class Scheduler:
             # New schema: use server + relative_path
             # Legacy: use media.url directly
             if relative_path:
-                # Get best server for this media
-                server = self.db.get_best_server_for_media(media['id'])
+                # Best mirror for this media.  A removable disc is not a
+                # candidate: this is an unattended freshness probe, and
+                # whether a disc happens to be in the tray says nothing
+                # about whether the media changed upstream.
+                from ..core.removable import mirrors_only
+                candidates = mirrors_only(self.db.get_servers_for_media(
+                    media['id'], enabled_only=True))
+                server = candidates[0] if candidates else None
                 if server:
                     from ..core.config import build_media_url
                     base_url = build_media_url(server, media)
@@ -1091,8 +1097,13 @@ class Scheduler:
 
             logger.info(f"Media {media_name}: fetching server dates for {len(packages)} packages")
 
-            # Get all servers for this media (for round-robin distribution)
-            servers = self.db.get_servers_for_media(media_id, enabled_only=True)
+            # Get all servers for this media (for round-robin distribution).
+            # Mirrors only: these are HEAD requests after a Last-Modified
+            # header, which a disc does not have and a local read does
+            # not need.
+            from ..core.removable import mirrors_only
+            servers = mirrors_only(
+                self.db.get_servers_for_media(media_id, enabled_only=True))
             servers = [dict(s) for s in servers]
 
             if not servers and not media.get('url'):

@@ -665,6 +665,7 @@ urpm media set <nom> [opts]   # Modifier les paramètres d'un média (sharing, r
 urpm media seed-info <nom>    # Afficher les infos du seed set (sections, nb paquets, taille estimée)
 urpm media autoconfig -r 10   # Auto-ajouter les médias Mageia officiels pour la release 10
 urpm media discover <url>     # Découvrir les médias depuis un media.cfg de repo
+urpm media add-cdrom          # Utiliser un disque monté comme source de ses médias
 ```
 
 Flags utiles pour `urpm media add` :
@@ -677,6 +678,35 @@ Flags utiles pour `urpm media add` :
 --disabled                    # Ajouter mais laisser désactivé
 -y, --auto                    # Non-interactif : accepter le nom/short_name auto-détecté
 ```
+
+### Utiliser un disque (DVD) comme source
+
+Un DVD Mageia porte les mêmes paquets que les miroirs, aux mêmes
+versions. Ce n'est donc pas un catalogue à part, c'est une origine moins
+chère pour des médias déjà présents : ses arborescences sont rattachées
+aux médias configurés au lieu d'être ajoutées une seconde fois, et le
+disque est préféré tant qu'il est dans le lecteur.
+
+```bash
+urpm media add-cdrom              # Utiliser le disque monté
+urpm media add-cdrom --dry-run    # Montrer ce qu'il porte, sans rien écrire
+```
+
+Ni URL ni point de montage ne sont demandés. Un disque n'a pas
+d'emplacement stable, donc ce qui est enregistré est le disque lui-même,
+et le montage est retrouvé dans `/proc/mounts` à chaque fois qu'on en a
+besoin ; la même commande marche que le disque ait été monté par une
+session graphique sous `/run/media/<utilisateur>/<étiquette>` ou à la
+main sur `/mnt/cdrom`. Rien n'est jamais monté à votre place.
+
+Les médias encore absents sont créés avec les attributs qu'un miroir
+leur aurait donnés. C'est ce qui rend une installation ou une mise à
+niveau possible sans aucun réseau, et c'est aussi pourquoi un miroir
+ajouté plus tard rejoint exactement les mêmes lignes de médias au lieu
+de les dupliquer.
+
+Un disque se retire comme n'importe quelle autre source, avec `urpm
+server remove <étiquette>`.
 
 ### Importer les médias depuis un urpmi.cfg existant
 

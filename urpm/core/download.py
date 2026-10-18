@@ -17,7 +17,7 @@ import urllib.error
 import time as _time_mod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Callable, Tuple, Dict, Set, Iterable
+from typing import Any, List, Optional, Callable, Tuple, Dict, Set, Iterable
 
 import pycurl
 
@@ -380,6 +380,10 @@ class DownloadResult:
     blacklist_peer: Optional[PeerToBlacklist] = None  # Set if peer should be blacklisted
     from_peer: bool = False  # True if downloaded from peer (not upstream)
     source_server_id: Optional[int] = None  # Server that served this file
+    # True when the server that served it was a removable disc.  Not
+    # derivable afterwards from ``source_server_id`` alone without a
+    # second DB read, and the worker threads must not touch SQLite.
+    from_disc: bool = False
 
 
 @dataclass
@@ -463,8 +467,11 @@ class DownloadCoordinator:
         # Pending DB operations (collected in main thread after workers finish)
         self._pending_blacklist: List[PeerToBlacklist] = []
 
-        # Stats
+        # Stats.  The three counters are disjoint and sum to the
+        # number of successful transfers : a file comes from a peer, a
+        # mounted disc, or a mirror.
         self._from_peer_count = 0
+        self._from_disc_count = 0
         self._from_upstream_count = 0
         self._stats_lock = threading.Lock()
 
@@ -626,9 +633,11 @@ class DownloadCoordinator:
 
                 # Update stats
                 with self._stats_lock:
-                    if result.success:
+                    if result.success and not result.cached:
                         if result.from_peer:
                             self._from_peer_count += 1
+                        elif result.from_disc:
+                            self._from_disc_count += 1
                         else:
                             self._from_upstream_count += 1
 
@@ -768,6 +777,12 @@ class DownloadCoordinator:
         Returns:
             Tuple of (results, stats)
         """
+        # Removable sources become located ``file`` servers before
+        # anything is planned: the planner can only prefer a disc it
+        # can see, and the mount table is read once here for the whole
+        # batch rather than once per package.
+        self.downloader.resolve_removable_sources(items)
+
         # Build peer availability index from PeerPackageInfo format
         # Input: {filename: [PeerPackageInfo(peer, path, ...), ...], ...}
         # Output: {filename: [(peer, path), ...], ...}
@@ -928,12 +943,66 @@ class DownloadCoordinator:
 
         stats = {
             'from_peers': self._from_peer_count,
+            'from_discs': self._from_disc_count,
             'from_upstream': self._from_upstream_count,
             'failed_peers': list(self._failed_peers),
             'pending_blacklist': self._pending_blacklist,
         }
 
         return results, stats
+
+
+def _assign_local_sources(items: List['DownloadItem']) -> List['DownloadItem']:
+    """Send every item a local source can serve to that source.
+
+    A local source — a disc :func:`urpm.core.removable.resolve` has
+    found, or a ``file://`` tree — is not a bandwidth competitor.  It
+    costs no network, and nothing of the shared Mageia mirrors'
+    capacity, so there is no arithmetic to do : it takes what it can
+    serve and the proportional allocation shares out the rest.
+
+    Measured on a real 9 → 10 distupgrade before this existed : of
+    2747 packages, the mounted disc served 359 and the mirrors 2388,
+    while the disc carried 69% of what was being installed.  The
+    reason was the planner treating it as the slowest mirror in the
+    fleet, because a ``cdrom`` row has no measured bandwidth and the
+    fallback was 1 KB/s against mirrors at 74 to 1942.  Trying to give
+    it a speed instead would have been the wrong repair: for a disc
+    the throughput is beside the point, nobody inserting one expects a
+    rate to be negotiated.
+
+    The two streams then run at the same time, so the wall clock is
+    the longer of the two rather than their sum.  What the disc cannot
+    serve it is not even a candidate for: an updated package is a
+    different NEVRA in ``Core Updates``, a medium no pressing is
+    attached to.
+
+    Returns:
+        The items left for the bandwidth planner, in input order.
+    """
+    from .config import is_local_server
+
+    remaining: List['DownloadItem'] = []
+    local_count = 0
+    for item in items:
+        local = next((s for s in item.servers if is_local_server(s)), None)
+        if local is None:
+            remaining.append(item)
+            continue
+        # First in the list is all it takes : ``download_one`` tries
+        # them in order, so a disc pulled out mid-run still falls
+        # through to the mirrors behind it.
+        item.servers.sort(
+            key=lambda s, _id=local.get('id'): 0 if s.get('id') == _id else 1
+        )
+        local_count += 1
+
+    if local_count:
+        logger.info(
+            "Download plan: %d of %d items from a local source, "
+            "%d left to the mirrors",
+            local_count, len(items), len(remaining))
+    return remaining
 
 
 def _plan_server_assignments(items: List['DownloadItem'],
@@ -951,10 +1020,19 @@ def _plan_server_assignments(items: List['DownloadItem'],
     so the assigned server appears first — ``download_one`` simply tries
     servers in list order, giving natural failover to the next-best.
 
+    A local source does not take part in any of this : see
+    :func:`_assign_local_sources`.
+
     Args:
         items: Download items, ideally sorted by size descending.
         server_speeds: ``{server_id: KB/s}`` from session EWMA or DB.
     """
+    # Anything a mounted disc or a local tree can serve is settled
+    # before the bandwidth arithmetic, and leaves it.
+    items = _assign_local_sources(items)
+    if not items:
+        return
+
     # Collect all unique servers with their best speed estimate
     speed_map: Dict[int, float] = {}  # server_id → KB/s
     for item in items:
@@ -1428,9 +1506,22 @@ class Downloader:
             # partial transfer truncated by a proxy, …).  Distinguishing
             # the rare hard-pycurl cases is not worth the table; we let the
             # caller retry once or twice.
+            #
+            # Except on a ``file://`` source, where there is no network
+            # between us and the bytes : the failure is the file not
+            # being readable, and asking again cannot change that.
+            # This matters because a pressing carries a *subset* of the
+            # media it serves (4489 of Core Release's 38861 packages,
+            # measured on a Mageia 10 disc), so a miss is the normal
+            # case.  Left transient, each one would cost three attempts
+            # and three seconds of backoff before falling through to a
+            # mirror.
             code, msg = e.args
+            kind = (DownloadErrorKind.LOCAL_IO
+                    if url.startswith('file://')
+                    else DownloadErrorKind.TRANSIENT_NETWORK)
             return False, DownloadError(
-                kind=DownloadErrorKind.TRANSIENT_NETWORK,
+                kind=kind,
                 message=f"libcurl error: {msg}",
             )
         except (OSError, IOError) as e:
@@ -1455,10 +1546,113 @@ class Downloader:
                     pass
 
     def _build_package_url(self, server: dict, relative_path: str, filename: str) -> str:
-        """Build full package URL from server info."""
+        """Build full package URL from server info.
+
+        *relative_path* is the media's layout as every mirror serves
+        it.  A server that serves the same media at its own layout —
+        a pressed disc, the only case — carries the override on
+        ``media_relative_path``, and it wins.  See
+        :func:`urpm.core.config.media_relative_path`.
+        """
         from .config import build_server_url
         base_url = build_server_url(server)
-        return f"{base_url}/{relative_path}/{filename}"
+        path = server.get('media_relative_path') or relative_path
+        return f"{base_url}/{path}/{filename}"
+
+    @staticmethod
+    def _resolve_removable_servers(servers: List[dict],
+                                   relative_path: str) -> List[dict]:
+        """Point the removable sources at the disc that is mounted now.
+
+        A ``cdrom`` server is an identity, not a location : nothing is
+        stored about where the disc sits, because nothing about that is
+        stable.  Here each one becomes an ordinary ``file`` server
+        aimed at the mount point it was just found at, so the transfer
+        below neither knows nor cares that a disc is involved.
+
+        Sources whose disc is absent are dropped from the list.  That
+        is deliberate for now : a missing disc means one fewer origin,
+        and the operation proceeds on the mirrors.  Asking the operator
+        to insert it belongs to the decision layer
+        (doc/NOTES_AMOVIBLE_MEDIA.md §6.2), which must count what the
+        disc would cover before it can ask a question worth answering,
+        and that count does not exist this far down.
+
+        The mount table is read once for the whole list, and only when
+        a removable source is actually present, so the ordinary
+        mirror-only path costs nothing.
+        """
+        from .removable import is_removable_server, mounted_removable, resolve
+
+        if not any(is_removable_server(s) for s in servers):
+            return servers
+
+        mounts = mounted_removable()
+        resolved = []
+        for server in servers:
+            if not is_removable_server(server):
+                resolved.append(server)
+                continue
+            located = resolve(
+                server,
+                server.get('media_relative_path') or relative_path,
+                mounts,
+            )
+            if located is not None:
+                resolved.append(located)
+            else:
+                logger.debug(
+                    f"Removable source {server['name']} skipped: "
+                    f"no mounted disc carries this media")
+        return resolved
+
+    @staticmethod
+    def resolve_removable_sources(items: List[DownloadItem]) -> None:
+        """Resolve the removable sources of a whole batch, in place.
+
+        Same work as :meth:`_resolve_removable_servers`, hoisted to the
+        batch for two reasons.  The planner has to see a *located* disc
+        to prefer it, and an unresolved ``cdrom`` row carries no
+        location to prefer.  And the mount table was being read once
+        per package: 2747 times on a measured distupgrade, where once
+        says the same thing.
+
+        Each item keeps its own server dicts, since the planner
+        reorders them per item, but the lookup is cached per
+        ``(server, layout)`` pair so a medium's disc is located once
+        however many packages come from it.
+
+        Items whose disc is absent simply lose that source and proceed
+        on their mirrors, as in the single-item path.
+        """
+        from .removable import is_removable_server, mounted_removable, resolve
+
+        if not any(is_removable_server(server)
+                   for item in items for server in item.servers):
+            return
+
+        mounts = mounted_removable()
+        located: Dict[Tuple[Any, str], Optional[dict]] = {}
+        for item in items:
+            if not any(is_removable_server(s) for s in item.servers):
+                continue
+            resolved = []
+            for server in item.servers:
+                if not is_removable_server(server):
+                    resolved.append(server)
+                    continue
+                layout = (server.get('media_relative_path')
+                          or item.relative_path)
+                key = (server.get('id'), layout)
+                if key not in located:
+                    located[key] = resolve(server, layout, mounts)
+                    if located[key] is None:
+                        logger.debug(
+                            f"Removable source {server['name']} skipped: "
+                            f"no mounted disc carries {layout}")
+                if located[key] is not None:
+                    resolved.append(dict(located[key]))
+            item.servers = resolved
 
     def download_one(self, item: DownloadItem,
                      progress_callback: Callable[[int, int], None] = None,
@@ -1483,6 +1677,9 @@ class Downloader:
         import time
         import socket
 
+        from .config import is_local_server
+        from .removable import was_resolved_from_disc
+
         # Check cache first
         cache_path = self.get_cache_path(item)
         if self.is_cached(item):
@@ -1501,6 +1698,23 @@ class Downloader:
                     item=item,
                     success=False,
                     error="No servers configured for this media"
+                )
+
+            # Removable sources are identities until the disc is found.
+            # Done before any other filtering so everything below sees
+            # ordinary file:// servers, with their row id intact.  A
+            # no-op when the batch was already resolved by
+            # ``resolve_removable_sources``, since a located disc is a
+            # ``file`` server and no longer answers to
+            # ``is_removable_server``.
+            servers = self._resolve_removable_servers(
+                servers, item.relative_path)
+            if not servers:
+                return DownloadResult(
+                    item=item,
+                    success=False,
+                    error=("No source available: every server for this media "
+                           "is a removable disc and none is mounted")
                 )
 
             # Server order is pre-planned by _plan_server_assignments()
@@ -1613,7 +1827,8 @@ class Downloader:
                                 item=item,
                                 success=True,
                                 path=cache_path,
-                                source_server_id=server_id
+                                source_server_id=server_id,
+                                from_disc=was_resolved_from_disc(server)
                             )
 
                         # Download failed on this attempt
@@ -1622,7 +1837,15 @@ class Downloader:
                             # Hard failure (4xx/5xx or local I/O) — no
                             # point retrying this server, move on to
                             # the next mirror.
-                            if server_id and self.db:
+                            #
+                            # A local source is not charged for it: a
+                            # pressing serves a subset of its media by
+                            # construction, so a file it does not carry
+                            # is a miss and not a fault.  Counting those
+                            # would show a disc with tens of thousands
+                            # of failures in ``urpm server list``.
+                            if (server_id and self.db
+                                    and not is_local_server(server)):
                                 self.db.update_server_stats(
                                     server_id, success=False)
                             break
@@ -1938,7 +2161,10 @@ class Downloader:
             progress_callback("(cache)", cached_count, len(items), downloaded_bytes, total_bytes)
 
         if not to_download:
-            return results, 0, cached_count, {'from_peers': 0, 'from_upstream': 0}
+            return results, 0, cached_count, {
+                'from_peers': 0, 'from_discs': 0, 'from_upstream': 0,
+                'peers_used': self.use_peers,
+            }
 
         # P2P: Discover peers and get availability
         peer_availability = {}  # peer -> {filename: path}
@@ -2071,8 +2297,14 @@ class Downloader:
 
         peer_stats = {
             'from_peers': stats.get('from_peers', 0),
+            'from_discs': stats.get('from_discs', 0),
             'from_upstream': stats.get('from_upstream', 0),
             'failed_peers': stats.get('failed_peers', []),
+            # Whether peer discovery was allowed to run at all, so the
+            # report can tell « no peer had anything » (a zero worth
+            # printing) from « peers were switched off » (a zero that
+            # would only be noise).
+            'peers_used': self.use_peers,
         }
         return results, downloaded_count, cached_count, peer_stats
 

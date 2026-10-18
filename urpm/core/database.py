@@ -126,7 +126,7 @@ class InstalledRpm(NamedTuple):
 
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 37
+SCHEMA_VERSION = 38
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -349,6 +349,16 @@ CREATE TABLE IF NOT EXISTS server_media (
     server_id INTEGER NOT NULL,
     media_id INTEGER NOT NULL,
     added_timestamp INTEGER,
+    -- Layout of this media *on this server*, overriding
+    -- media.relative_path when set (v38+).  NULL for every mirror:
+    -- Mageia's convention is that all mirrors serve the whole set at
+    -- identical relative paths, which is why the layout normally
+    -- belongs to the media row.  A pressed disc is the exception —
+    -- a Mageia 10 DVD serves core at 'x86_64/media/core' where a
+    -- mirror serves the same packages at
+    -- '10/x86_64/media/core/release' — and a server base_path cannot
+    -- bridge that, being a prefix rather than a layout.
+    relative_path TEXT,
     PRIMARY KEY (server_id, media_id),
     FOREIGN KEY (server_id) REFERENCES server(id) ON DELETE CASCADE,
     FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
@@ -1036,6 +1046,19 @@ MIGRATIONS = {
     # schema v29-v31 and let the migration chain replay every hop up
     # to the current version.
     36: (37, ""),
+    # Migration v37 -> v38 : server_media.relative_path, the per-pair
+    # layout a removable disc needs (doc/NOTES_AMOVIBLE_MEDIA.md §7.3).
+    # A disc is a server of media we already know, not a media of its
+    # own — its packages are identical to the mirror's — but it serves
+    # them at its own tree, and media.relative_path is shared by every
+    # server of a media.  NULL on every existing row keeps the shared
+    # layout, so this is a no-op for anyone without a disc.
+    # Runs in Python (see
+    # :meth:`PackageDatabase._migrate_v37_to_v38_server_media_path`) so
+    # it can skip cleanly when ``server_media`` doesn't exist yet: old
+    # test fixtures seed a DB at v29-v35 without the server tables and
+    # let the chain replay every hop up to the current version.
+    37: (38, ""),
 }
 
 
@@ -1458,6 +1481,8 @@ class PackageDatabase(
                     self._migrate_v35_to_v36_indexes(logger)
                 elif version == 36 and to_version == 37:
                     self._migrate_v36_to_v37_drop_mageia_version(logger)
+                elif version == 37 and to_version == 38:
+                    self._migrate_v37_to_v38_server_media_path(logger)
                 version = to_version
             except sqlite3.Error as e:
                 logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
@@ -1470,6 +1495,40 @@ class PackageDatabase(
                 raise RuntimeError(f"Database migration failed: {e}")
 
         logger.info(f"Database schema is now at version {SCHEMA_VERSION}")
+
+    def _migrate_v37_to_v38_server_media_path(self, logger):
+        """Add the per-(server, media) layout column.
+
+        Mageia's mirror convention is that every mirror serves the
+        whole set of sub-media at identical relative paths, which is
+        why the layout lives on ``media.relative_path`` and is shared
+        by all of a media's servers.  A pressed disc is the one source
+        that breaks it: a Mageia 10 DVD serves core at
+        ``x86_64/media/core`` where a mirror serves the same packages,
+        at identical versions, at ``10/x86_64/media/core/release``.  A
+        server ``base_path`` cannot bridge that, being a prefix rather
+        than a layout, so the exception is recorded on the link.
+
+        Skips silently when ``server_media`` doesn't exist yet, and
+        when the column is already there — test fixtures seed a DB at
+        schema v29-v35 without the server tables and let the chain
+        replay every hop up to the current version.
+        """
+        exists = self.conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='server_media'"
+        ).fetchone()
+        if not exists:
+            logger.debug("v38: server_media absent, nothing to alter")
+            return
+        columns = {row[1] for row in
+                   self.conn.execute("PRAGMA table_info(server_media)")}
+        if "relative_path" in columns:
+            logger.debug("v38: server_media.relative_path already present")
+            return
+        self.conn.execute(
+            "ALTER TABLE server_media ADD COLUMN relative_path TEXT")
+        self.conn.commit()
 
     def _migrate_v36_to_v37_drop_mageia_version(self, logger):
         """Retire the ``mageia-version`` config pin.

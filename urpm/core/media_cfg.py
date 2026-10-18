@@ -229,7 +229,7 @@ def parse_media_cfg(
         short_name = _make_short_name(section, architecture, info.arch)
 
         # ── Generate name if missing ─────────────────────────────
-        name = raw_name or _make_display_name(section)
+        name = raw_name or make_display_name(section)
 
         # ── Detect is_official ───────────────────────────────────
         is_official = media_type.startswith('official:')
@@ -447,7 +447,7 @@ def resolve_display_name(
         if candidate:
             return candidate
 
-    return _make_display_name(section)
+    return make_display_name(section)
 
 
 @dataclass
@@ -724,12 +724,19 @@ def _make_short_name(section: str, arch: str, default_arch: str) -> str:
     return name.lower()
 
 
-def _make_display_name(section: str) -> str:
+def make_display_name(section: str) -> str:
     """Generate a human-readable display name from a section path.
 
     Examples:
         - ``core/release`` → ``Core Release``
         - ``../../i686/media/core/release`` → ``Core 32bit Release``
+
+    Public because it is the project's one naming convention for media
+    and has a second caller outside this module:
+    :mod:`urpm.core.removable_catalogue` names a disc's trees the way a
+    mirror's would be named, rather than after the labels a pressing
+    carries (``Core Release (Installer)``).  A second convention living
+    there is exactly what this being reachable avoids.
     """
     # Detect cross-arch
     is_cross = section.startswith('../../')

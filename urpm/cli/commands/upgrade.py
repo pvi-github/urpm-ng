@@ -424,16 +424,14 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
                 print(f"  {colors.error(r.item.name)}: {r.error}")
             return 1
 
-        # Download summary with P2P stats and timing
+        # Download summary with provenance and timing
         cache_str = colors.warning(str(cached)) if cached > 0 else colors.dim(str(cached))
-        from_peers = peer_stats.get('from_peers', 0)
-        from_upstream = peer_stats.get('from_upstream', 0)
+        sources = display.format_download_sources(peer_stats)
         time_str = display.format_duration(download_elapsed)
-        if from_peers > 0:
-            print("  " + _("{downloaded} ({from_peers} from peers, {from_upstream} from mirrors), {cached} from cache in {time}").format(
+        if sources:
+            print("  " + _("{downloaded} ({sources}), {cached} from cache in {time}").format(
                 downloaded=colors.success(_("{count} downloaded").format(count=downloaded)),
-                from_peers=from_peers, from_upstream=from_upstream,
-                cached=cache_str, time=time_str))
+                sources=sources, cached=cache_str, time=time_str))
         else:
             print("  " + _("{downloaded}, {cached} from cache in {time}").format(
                 downloaded=colors.success(_("{count} downloaded").format(count=downloaded)),

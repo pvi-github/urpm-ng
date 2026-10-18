@@ -790,8 +790,8 @@ _urpm_undo() {
 # ── Subcommand groups ────────────────────────────────────────
 
 _urpm_media() {
-    local media_subcmds="list l ls add a remove r enable e disable d update u \
-set s import discover disc autoconfig auto ac seed-info link"
+    local media_subcmds="list l ls add a add-cdrom remove r enable e disable d \
+update u set s import discover disc autoconfig auto ac seed-info link"
 
     if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$media_subcmds" -- "$cur"))
@@ -812,6 +812,11 @@ set s import discover disc autoconfig auto ac seed-info link"
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--name --custom --update --disabled \
 --auto -y --import-key --allow-unsigned --version $_URPM_DISPLAY_FLAGS" -- "$cur"))
+            fi
+            ;;
+        add-cdrom)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--dry-run -n $_URPM_DISPLAY_FLAGS" -- "$cur"))
             fi
             ;;
         remove|r)

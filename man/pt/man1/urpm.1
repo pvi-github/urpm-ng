@@ -400,6 +400,31 @@ cauldron, ...).
 Modo não interactivo.
 .RE
 .TP
+.B add\-cdrom \fR[\fB\-\-dry\-run\fR]
+Usar um disco montado como fonte dos meios que contém. Não pede URL nem
+ponto de montagem: um disco não tem localização estável, por isso o que
+fica registado é o disco em si, e a montagem é reencontrada em
+.I /proc/mounts
+sempre que for necessária. Nada é montado por você: insira o disco,
+monte\-o se nenhuma sessão gráfica o fez e execute o comando.
+.sp
+Um DVD Mageia traz os mesmos pacotes que os espelhos, nas mesmas
+versões. As suas árvores são por isso associadas aos meios já
+configurados em vez de adicionadas uma segunda vez, e o disco é
+simplesmente preferido enquanto está na unidade, por ser a origem mais
+barata. Os meios que ainda não existem são criados com os atributos que
+um espelho lhes teria dado, e é isso que torna possível instalar ou
+atualizar sem rede, e o que deixa um espelho adicionado mais tarde
+juntar\-se às mesmas linhas.
+.sp
+Um disco remove\-se como qualquer outra fonte, com
+.BR "urpm server remove " \fIetiqueta\fR .
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Mostrar o que o disco traz, sem escrever nada.
+.RE
+.TP
 .B remove \fInome\fR ...
 Remove um ou vários medias. Todo servidor cuja lista de medias
 fique vazia após a remoção é retirado na mesma passagem.

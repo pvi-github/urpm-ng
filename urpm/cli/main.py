@@ -96,7 +96,7 @@ from .commands.media import (
     cmd_media_enable, cmd_media_disable, cmd_media_update,
     cmd_media_import, cmd_media_set, cmd_media_seed_info,
     cmd_media_link, cmd_media_autoconfig, cmd_media_discover,
-    parse_urpmi_cfg,
+    cmd_media_add_cdrom, parse_urpmi_cfg,
 )
 from .commands.distupgrade import cmd_distupgrade
 from .commands.recover import cmd_recover
@@ -2286,6 +2286,31 @@ Examples:
         help=_('Skip tainted media')
     )
 
+    media_add_cdrom = media_subparsers.add_parser(
+        'add-cdrom',
+        help=_('Use a mounted disc as a source for the media it carries'),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_('''Use a mounted disc as a media source.
+
+Takes no URL and no mount point: a disc has no stable location, so what
+is recorded is the disc itself and the mount is looked up again each time
+it is needed.  Insert the disc, make sure it is mounted, and run:
+  urpm media add-cdrom
+
+A Mageia DVD carries the same packages as the mirrors, at the same
+versions, so its trees are attached to the media already configured
+rather than added again.  Media that are not configured yet are created,
+which is what makes an install or an upgrade possible with no network.
+
+  urpm media add-cdrom --dry-run    show what the disc carries, write nothing
+''')
+    )
+    media_add_cdrom.add_argument(
+        '--dry-run', '-n',
+        action='store_true',
+        help=_('Show what the disc carries without writing anything')
+    )
+
     media_discover = media_subparsers.add_parser(
         'discover', aliases=['disc'],
         help=_('Discover media from a repository via media.cfg'),
@@ -3359,6 +3384,8 @@ def main(argv=None) -> int:
                 return cmd_media_link(args, db)
             elif args.media_command in ('autoconfig', 'auto', 'ac'):
                 return cmd_media_autoconfig(args, db)
+            elif args.media_command == 'add-cdrom':
+                return cmd_media_add_cdrom(args, db)
             elif args.media_command in ('discover', 'disc'):
                 return cmd_media_discover(args, db)
             else:

@@ -2812,3 +2812,107 @@ def cmd_media_discover(args, db: 'PackageDatabase') -> int:
         print(colors.dim(_("Run 'urpm media update' to sync metadata")))
 
     return 0
+
+
+def cmd_media_add_cdrom(args, db: 'PackageDatabase') -> int:
+    """Record a mounted disc as a source for the media it carries.
+
+    No URL and no mount point are asked for.  A pressing has no stable
+    location — the same disc is under ``/run/media/<user>/<label>``
+    with a desktop session and on ``/mnt/cdrom`` when mounted by
+    hand — so what gets stored is the disc's identity, and the mount
+    is looked up again every time the disc is actually used.  All the
+    operator has to do is make the disc readable, which is also the
+    one thing we refuse to do for them (see
+    :mod:`urpm.core.removable`).
+
+    The media the disc carries are the ones already configured, when
+    they are: a Mageia 10 DVD holds 4488 package names, all at
+    versions identical to the mirror's ``Core Release``, so it is a
+    cheaper origin and not a separate catalogue.  Media that do not
+    exist yet are created with the mirror's own attributes, which is
+    what makes this usable with no network at all and still
+    convergent when mirrors are added later.
+    """
+    from .. import colors
+    from ...auth.privileges import require_privileges
+    from ...core.removable_catalogue import (
+        DiscCatalogueError, attach_disc, read_catalogue,
+    )
+    from ...core.removable import mounted_removable
+
+    dry_run = getattr(args, 'dry_run', False)
+    if not dry_run:
+        require_privileges(action_id="org.mageia.urpm.media-manage")
+
+    mounts = mounted_removable()
+    if not mounts:
+        print(colors.error(_("No disc is mounted.")))
+        print(colors.dim(_(
+            "Insert the disc. On a desktop session it is mounted for you; "
+            "otherwise mount it yourself, then run this command again.")))
+        return 1
+
+    # One disc at a time, by decision (doc/NOTES_AMOVIBLE_MEDIA.md §8):
+    # Mageia ships one DVD per architecture, and urpmi's sorted
+    # multi-disc claim loop is an inheritance from four-CD sets.
+    catalogues = []
+    for mount in mounts:
+        try:
+            catalogues.append(read_catalogue(mount))
+        except DiscCatalogueError as exc:
+            # A mounted data disc is not an error, it is just not a
+            # source.  Said out loud because the operator inserted
+            # *something* and is owed an explanation of why it was
+            # passed over.
+            print(colors.dim(_("{path}: not a Mageia media disc ({reason})")
+                             .format(path=mount.path, reason=exc)))
+
+    if not catalogues:
+        print(colors.error(_("No mounted disc carries Mageia media.")))
+        return 1
+
+    if len(catalogues) > 1:
+        print(colors.warning(_(
+            "Several media discs are mounted; add them one at a time:")))
+        for found in catalogues:
+            print("  " + str(found.mount.path))
+        return 1
+
+    catalogue = catalogues[0]
+    print(colors.bold(_("{label}, Mageia {version} {arch}").format(
+        label=catalogue.mount.path.name,
+        version=catalogue.info.version,
+        arch=catalogue.info.arch)))
+    for media in catalogue.media:
+        print("  " + _("{name} at {path}").format(
+            name=media.name,
+            path=catalogue.disc_paths.get(media.section, "")))
+
+    if dry_run:
+        print(colors.dim(_("Nothing written (--dry-run).")))
+        return 0
+
+    result = attach_disc(db, catalogue)
+
+    linked = 0
+    created = 0
+    for outcome in result.outcomes:
+        if outcome.action == "created":
+            created += 1
+            print(colors.success(_("{name} created, served by this disc")
+                                 .format(name=outcome.media_name)))
+        elif outcome.action in ("relinked", "noop"):
+            linked += 1
+            print(colors.success(_("{name} is now also served by this disc")
+                                 .format(name=outcome.media_name)))
+        else:
+            print(colors.warning(_("{name} skipped: {reason}").format(
+                name=outcome.media_name, reason=outcome.reason or "")))
+
+    if created:
+        # Created media have no package metadata yet, and on the
+        # offline path the disc is the only thing that can provide it.
+        print(colors.dim(_("Run 'urpm media update' to read the metadata "
+                           "off the disc")))
+    return 0 if (linked or created) else 1

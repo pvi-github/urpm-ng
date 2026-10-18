@@ -965,19 +965,17 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
                 print(f"  {colors.error(r.item.name)}: {r.error}")
             return 1
 
-        # Download summary with P2P stats and timing.  Always show the
-        # peer / mirror split even when no peer served anything -- the
-        # short-form fallback used to be surprising in mkimage logs
-        # ("39 downloaded" without saying where from), and a zero peer
-        # count is itself useful info (peer discovery reached out).
+        # Download summary with provenance and timing.  The split is
+        # shown whenever something was downloaded -- the short-form
+        # fallback used to be surprising in mkimage logs ("39
+        # downloaded" without saying where from).
         cache_str = colors.warning(str(cached)) if cached > 0 else colors.dim(str(cached))
-        from_peers = peer_stats.get('from_peers', 0)
-        from_upstream = peer_stats.get('from_upstream', 0)
+        sources = display.format_download_sources(peer_stats)
         time_str = display.format_duration(download_elapsed)
-        if downloaded > 0:
-            print("  " + colors.success(_("{count} downloaded").format(count=downloaded))
-                  + " " + _("({peers} from peers, {upstream} from mirrors), {cached} from cache in {time}").format(
-                      peers=from_peers, upstream=from_upstream, cached=cache_str, time=time_str))
+        if sources:
+            print("  " + _("{downloaded} ({sources}), {cached} from cache in {time}").format(
+                downloaded=colors.success(_("{count} downloaded").format(count=downloaded)),
+                sources=sources, cached=cache_str, time=time_str))
         else:
             print("  " + colors.success(_("{count} downloaded").format(count=downloaded))
                   + ", " + _("{cached} from cache in {time}").format(cached=cache_str, time=time_str))
@@ -1493,15 +1491,19 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
                 print(colors.warning(
                     _("Corrupt files have been removed from cache.")))
 
-    # Summary
-    from_peers = peer_stats.get('from_peers', 0)
-    from_upstream = peer_stats.get('from_upstream', 0)
+    # Summary.  Same sentence as ``urpm install`` and ``urpm upgrade``
+    # so the provenance reads identically whichever command pulled the
+    # files.
+    sources = display.format_download_sources(peer_stats)
     time_str = display.format_duration(download_elapsed)
 
     print("\n" + colors.success(_("Download complete")) + ":")
-    print("  " + _("{downloaded} downloaded, {cached} from cache in {time}").format(downloaded=downloaded, cached=cached, time=time_str))
-    if from_peers > 0:
-        print("  " + _("P2P: {peers} from peers, {upstream} from upstream").format(peers=from_peers, upstream=from_upstream))
+    if sources:
+        print("  " + _("{downloaded} ({sources}), {cached} from cache in {time}").format(
+            downloaded=colors.success(_("{count} downloaded").format(count=downloaded)),
+            sources=sources, cached=cached, time=time_str))
+    else:
+        print("  " + _("{downloaded} downloaded, {cached} from cache in {time}").format(downloaded=downloaded, cached=cached, time=time_str))
 
     # Notify urpmd to invalidate cache index (so new downloads are visible to peers)
     if downloaded > 0:

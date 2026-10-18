@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from urpm.core.database import PackageDatabase, SCHEMA_VERSION
+from urpm.core.database import MIGRATIONS, PackageDatabase, SCHEMA_VERSION
 from urpm.cli.commands.media import _seed_stub_os_release
 
 
@@ -34,7 +34,16 @@ class TestMigrationV36ToV37:
     key so ``version-mode`` becomes the single source of truth."""
 
     def test_schema_bumped(self):
-        assert SCHEMA_VERSION == 37
+        """The v37 hop is in the chain and reachable.
+
+        Asserting equality with 37 would have been a pin on the head of
+        the chain rather than on this migration: every later feature
+        that adds a column breaks it, and the breakage says nothing
+        about ``mageia-version``.  What this test is for is that the
+        hop exists and that a database can actually reach it.
+        """
+        assert MIGRATIONS[36][0] == 37
+        assert SCHEMA_VERSION >= 37
 
     def test_migration_deletes_mageia_version(self):
         # Seed a DB at v36 by hand : create the config table + write

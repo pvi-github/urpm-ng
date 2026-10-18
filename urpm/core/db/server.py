@@ -37,9 +37,21 @@ class ServerMixin:
 
         Args:
             name: Display name for the server
-            protocol: 'http', 'https', or 'file'
-            host: FQDN or 'localhost' for file://
-            base_path: Base path on the server (e.g., '/mageia')
+            protocol: 'http', 'https', 'file', or 'cdrom'.  The last
+                one stands for a removable disc and is an identity
+                rather than a location: see
+                :mod:`urpm.core.removable`, which resolves it to a
+                ``file`` server against the current mount table every
+                time the disc is actually used.
+            host: FQDN, 'localhost' for file://, or the disc label for
+                cdrom:// — the label is what distinguishes two
+                pressings and what the operator sees in the mount
+                path, and it is part of the (host, base_path) unique
+                key.
+            base_path: Base path on the server (e.g., '/mageia').
+                Empty for cdrom://, whose layout lives on the
+                ``server_media`` link instead because it differs from
+                the mirror layout the media row carries.
             is_official: True for official Mageia mirrors
             enabled: Whether the server is enabled
             priority: Manual priority (higher = preferred)
@@ -190,13 +202,37 @@ class ServerMixin:
     # Server-Media links
     # =========================================================================
 
-    def link_server_media(self, server_id: int, media_id: int):
-        """Create a link between a server and a media."""
+    def link_server_media(self, server_id: int, media_id: int,
+                          relative_path: Optional[str] = None):
+        """Create a link between a server and a media.
+
+        Args:
+            server_id: Server that serves the media.
+            media_id: Media served.
+            relative_path: Layout of this media *on this server*,
+                overriding ``media.relative_path``.  Leave ``None``
+                for a mirror — Mageia's convention is that every
+                mirror serves the whole set at identical relative
+                paths, so the layout belongs to the media row.  Pass
+                a value only for a source with its own tree, which in
+                practice means a pressed disc : a Mageia 10 DVD
+                serves core at ``x86_64/media/core``.
+
+        Re-linking an existing pair is not an error, as it never was.
+        It refreshes ``relative_path`` when one is supplied and leaves
+        it untouched otherwise, so re-reading a disc's ``media.cfg``
+        can correct a layout without a caller having to know whether
+        the link already existed.
+        """
         with self._conn_write() as conn:
             conn.execute("""
-                INSERT OR IGNORE INTO server_media (server_id, media_id, added_timestamp)
-                VALUES (?, ?, ?)
-            """, (server_id, media_id, int(time.time())))
+                INSERT INTO server_media
+                    (server_id, media_id, added_timestamp, relative_path)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(server_id, media_id) DO UPDATE SET
+                    relative_path = COALESCE(excluded.relative_path,
+                                             server_media.relative_path)
+            """, (server_id, media_id, int(time.time()), relative_path))
             conn.commit()
 
     def link_official_mesh(self) -> int:
@@ -221,10 +257,20 @@ class ServerMixin:
         their explicit link topology — the mesh only pairs
         ``is_official=1`` rows on both sides.
 
+        Removable discs are excluded even though an official pressing
+        is official : the convention the mesh rests on is false for
+        them.  A Mageia DVD carries a subset of ``Core Release`` and
+        ``Nonfree Release`` and no ``updates`` media at all, so
+        meshing it would advertise a disc as a source for packages it
+        does not contain and for media it never heard of, and each of
+        those would then cost a disc request to discover.
+
         Returns:
             Number of link rows newly inserted.  ``0`` when the mesh
             was already complete.
         """
+        from ..removable import PROTOCOL as REMOVABLE_PROTOCOL
+
         added_at = int(time.time())
         with self._conn_write() as conn:
             cursor = conn.execute("""
@@ -234,11 +280,12 @@ class ServerMixin:
                 CROSS JOIN media m
                 WHERE s.is_official = 1
                   AND m.is_official = 1
+                  AND s.protocol <> ?
                   AND NOT EXISTS (
                       SELECT 1 FROM server_media sm
                       WHERE sm.server_id = s.id AND sm.media_id = m.id
                   )
-            """, (added_at,))
+            """, (added_at, REMOVABLE_PROTOCOL))
             added = cursor.rowcount or 0
             conn.commit()
         return added
@@ -345,7 +392,12 @@ class ServerMixin:
 
         Returns:
             List of server dicts, best server first.  Each dict carries
-            a ``reputation_score`` key (integer 0-100) computed inline.
+            a ``reputation_score`` key (integer 0-100) computed inline,
+            and a ``media_relative_path`` key holding this pair's
+            layout override (``None`` for every mirror).  The latter is
+            what :func:`urpm.core.config.media_relative_path` reads, so
+            a disc's own tree travels with the server dict rather than
+            being looked up again downstream.
         """
         cutoff = int(time.time()) - reputation_window_hours * 3600
         # Subquery uses the (server_id, ts) index for an efficient
@@ -353,6 +405,7 @@ class ServerMixin:
         # score 100, preserving today's ordering for healthy mirrors.
         query = """
             SELECT s.*,
+                   sm.relative_path AS media_relative_path,
                    MAX(0, 100 - COALESCE((
                        SELECT SUM(weight)
                        FROM server_failure_events

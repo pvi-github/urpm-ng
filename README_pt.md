@@ -685,6 +685,7 @@ urpm media set <nome> [opts]  # Modificar definições do média (sharing, repli
 urpm media seed-info <nome>   # Mostrar info do seed set (secções, contagem de pacotes, tamanho estimado)
 urpm media autoconfig -r 10   # Auto-adicionar médias Mageia oficiais para a release 10
 urpm media discover <url>     # Descobrir médias a partir do media.cfg de um repositório
+urpm media add-cdrom          # Usar um disco montado como fonte dos seus meios
 ```
 
 Flags úteis para `urpm media add`:
@@ -697,6 +698,34 @@ Flags úteis para `urpm media add`:
 --disabled                    # Adicionar mas deixar desactivado
 -y, --auto                    # Não-interactivo: aceitar o nome/short_name auto-detectado
 ```
+
+### Usar um disco (DVD) como fonte
+
+Um DVD Mageia traz os mesmos pacotes que os espelhos, nas mesmas versões.
+Não é por isso um catálogo à parte, mas uma origem mais barata para
+médias que já existem: as suas árvores são associadas às médias
+configuradas em vez de adicionadas uma segunda vez, e o disco é preferido
+enquanto está na unidade.
+
+```bash
+urpm media add-cdrom              # Usar o disco montado
+urpm media add-cdrom --dry-run    # Mostrar o que traz, sem escrever nada
+```
+
+Não se pede URL nem ponto de montagem. Um disco não tem localização
+estável, por isso o que fica registado é o disco em si, e a montagem é
+reencontrada em `/proc/mounts` sempre que for necessária; o mesmo comando
+funciona tanto se uma sessão gráfica montou o disco em
+`/run/media/<utilizador>/<etiqueta>` como se o montou você mesmo em
+`/mnt/cdrom`. Nada é montado por você.
+
+As médias que ainda não existem são criadas com os atributos que um
+espelho lhes teria dado. É isso que torna possível instalar ou atualizar
+sem rede alguma, e é também por isso que um espelho adicionado mais tarde
+se junta exactamente às mesmas linhas de médias em vez de as duplicar.
+
+Um disco remove-se como qualquer outra fonte, com `urpm server remove
+<etiqueta>`.
 
 ### Importar médias a partir de um urpmi.cfg antigo
 

@@ -686,6 +686,7 @@ urpm media set <name> [opts]  # Medien-Einstellungen ändern (Sharing, Replikati
 urpm media seed-info <name>   # Seed-Info anzeigen (Sektionen, Paketzahl, Größenabschätzung)
 urpm media autoconfig -r 10   # Offizielle Mageia-Medien für Release 10 automatisch hinzufügen
 urpm media discover <url>     # Medien aus dem media.cfg eines Repos entdecken
+urpm media add-cdrom          # Eine eingebundene Disc als Quelle ihrer Medien nutzen
 ```
 
 Nützliche Flags für `urpm media add`:
@@ -698,6 +699,36 @@ Nützliche Flags für `urpm media add`:
 --disabled                    # Hinzufügen, aber deaktiviert lassen
 -y, --auto                    # Nicht-interaktiv: den auto-detektierten Namen/short_name akzeptieren
 ```
+
+### Eine Disc (DVD) als Quelle verwenden
+
+Eine Mageia-DVD enthält dieselben Pakete wie die Spiegelserver, in
+denselben Versionen. Sie ist daher kein eigener Katalog, sondern eine
+günstigere Quelle für Medien, die bereits vorhanden sind: ihre Bäume
+werden den eingerichteten Medien zugeordnet statt erneut hinzugefügt,
+und die Disc wird bevorzugt, solange sie im Laufwerk liegt.
+
+```bash
+urpm media add-cdrom              # Die eingebundene Disc verwenden
+urpm media add-cdrom --dry-run    # Zeigen, was sie enthält, ohne zu schreiben
+```
+
+Es werden weder URL noch Einbindungspunkt verlangt. Eine Disc hat keinen
+stabilen Ort, gespeichert wird daher die Disc selbst, und die Einbindung
+wird bei jedem Zugriff erneut in `/proc/mounts` gesucht; derselbe Befehl
+funktioniert, ob eine Desktop-Sitzung die Disc unter
+`/run/media/<Benutzer>/<Bezeichnung>` eingebunden hat oder Sie sie selbst
+auf `/mnt/cdrom` eingebunden haben. Es wird nie etwas für Sie
+eingebunden.
+
+Noch nicht eingerichtete Medien werden mit den Eigenschaften angelegt,
+die ein Spiegelserver ihnen gegeben hätte. Genau das macht eine
+Installation oder Aktualisierung ohne jedes Netz möglich, und deshalb
+tritt ein später hinzugefügter Spiegelserver denselben Medienzeilen bei,
+statt sie zu verdoppeln.
+
+Eine Disc wird wie jede andere Quelle entfernt, mit `urpm server remove
+<Bezeichnung>`.
 
 ### Medien aus einer alten urpmi.cfg importieren
 

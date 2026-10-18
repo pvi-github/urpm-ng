@@ -61,7 +61,8 @@ MEDIA_INFO_MODES = {
 
 
 # Import from config
-from .config import get_base_dir, get_media_local_path, build_server_url, build_media_url, is_local_server
+from .config import (get_base_dir, get_media_local_path, build_server_url,
+                     build_media_url, is_local_server, media_relative_path)
 # Deprecated imports (kept for migration)
 from .config import get_hostname_from_url, get_media_dir
 
@@ -228,6 +229,71 @@ def build_md5sum_url_v8(server: dict, media: dict) -> str:
     return f"{base_url}/{MD5SUM_PATH}"
 
 
+def servers_for_media(db, media: dict, enabled_only: bool = True) -> List[dict]:
+    """The servers that can supply *media*'s **metadata**, best first.
+
+    Two things happen here, and the second one is the important one.
+
+    First, the step the database layer cannot do: a ``cdrom`` row says
+    *which* disc, never *where*, so it is matched against what is
+    mounted right now.  A disc that is present becomes an ordinary
+    ``file`` server; one that is absent drops out.  Callers then work
+    on plain servers throughout.
+
+    Second, **a disc is put last, whatever its priority.**  Metadata
+    and files want opposite things from a source.  For a file, the
+    cheapest origin wins, and that is the disc while it is in the
+    drive.  For metadata, the *most complete* source wins, and a
+    pressing is a subset: a Mageia 10 DVD declares 4488 packages of a
+    ``Core Release`` that a mirror declares 38861 of, and no
+    ``updates`` media at all.  Taking the disc's synthesis because it
+    outranks the mirror would silently shrink the medium to what the
+    pressing happens to carry, and every other package in it would
+    vanish from the pool.  That is exactly what happened the first
+    time a disc was attached to a configured machine: ``media update``
+    re-parsed ``Core Release`` from the disc and tried to drop 34373
+    packages.
+
+    Ordering rather than excluding, because the fallback still has to
+    work: with no mirror configured, or none reachable, the disc is
+    the only thing that can supply the metadata, and that is the whole
+    point of an offline install or upgrade.  The caller tries
+    candidates in order and falls through on failure, so « mirrors
+    first, disc last » gives both behaviours with no special case.
+
+    Args:
+        db: Database instance.
+        media: Media dict, needed for its shared ``relative_path``
+            when a link carries no override.
+        enabled_only: Passed through to the query.
+
+    Returns:
+        Server dicts, ready to be handed to :func:`build_media_url` or
+        :func:`download_from_server`: the mirrors in the order the
+        query ranked them, then any disc that is actually mounted.
+    """
+    from .removable import is_removable_server, mounted_removable, resolve
+
+    servers = db.get_servers_for_media(media['id'], enabled_only=enabled_only)
+    if not any(is_removable_server(s) for s in servers):
+        return servers
+
+    mounts = mounted_removable()
+    mirrors = []
+    discs = []
+    for server in servers:
+        if not is_removable_server(server):
+            mirrors.append(server)
+            continue
+        located = resolve(server, media_relative_path(server, media), mounts)
+        if located is not None:
+            discs.append(located)
+        else:
+            logger.debug("Removable source %s has no mounted disc for %s",
+                         server['name'], media['name'])
+    return mirrors + discs
+
+
 def download_from_server(url: str, dest: Path, server: dict,
                          progress_callback: Callable[[int, int], None] = None,
                          timeout: int = 30) -> DownloadResult:
@@ -300,15 +366,17 @@ def get_effective_media_url(db, media: dict) -> Tuple[Optional[dict], Optional[s
         Tuple of (server_dict or None, full_media_url or None)
         If using legacy URL, server_dict is None
     """
-    media_id = media['id']
+    # Best linked server, skipping removable discs that are not in the
+    # drive.  Going through the ranked list rather than asking for a
+    # single best one matters here: when the top-ranked server is an
+    # absent disc, the mirror behind it is still a perfectly good
+    # answer, and giving up would fall through to the legacy URL.
+    servers = servers_for_media(db, media, enabled_only=True)
 
-    # Try to get the best linked server
-    server = db.get_best_server_for_media(media_id)
-
-    if server:
-        # Use new model: server + media.relative_path
-        url = build_media_url(server, media)
-        return server, url
+    if servers:
+        # Use new model: server + relative path for that pair
+        server = servers[0]
+        return server, build_media_url(server, media)
 
     # Fallback to legacy URL in media table
     if media.get('url'):
@@ -424,7 +492,7 @@ def sync_media_tail(db: PackageDatabase, media_id: int,
         return False
     media_name = media['name']
 
-    linked_servers = db.get_servers_for_media(media_id, enabled_only=True)
+    linked_servers = servers_for_media(db, media, enabled_only=True)
     if linked_servers:
         candidates = [(s, build_media_url(s, media)) for s in linked_servers]
     elif media.get('url'):
@@ -694,7 +762,7 @@ def sync_media(db: PackageDatabase, media_name: str,
     # get_servers_for_media() already orders by priority DESC, bandwidth_kbps DESC
     # so we try the fastest/most reliable servers first.
     # Falls back to a single legacy URL entry if no servers are linked.
-    linked_servers = db.get_servers_for_media(media_id, enabled_only=True)
+    linked_servers = servers_for_media(db, media, enabled_only=True)
     if linked_servers:
         server_candidates = [
             (s, build_media_url(s, media)) for s in linked_servers

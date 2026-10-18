@@ -287,6 +287,54 @@ def format_speed(bytes_per_sec: float) -> str:
         return f"{bytes_per_sec / (1024 * 1024):.1f}MB/s"
 
 
+def format_download_sources(stats: Optional[Dict]) -> str:
+    """Name the origins that served a download.
+
+    The report used to stop at a count : « 17 downloaded » said
+    nothing about where the files came from, and that is how an
+    installation disc serving eight of them went unnoticed by the
+    operator who had just mounted it.  So every origin that
+    contributed is named, from the downloader's own counters rather
+    than from a re-read of the cache table.
+
+    Only the peers' count may show as zero, and only when discovery
+    actually ran : there the zero says « the LAN was asked and had
+    nothing », which is worth a reader's attention.  A disc that
+    served nothing is not mentioned at all, the common case being a
+    machine with no disc configured.
+
+    Args:
+        stats: The provenance dict a download returns alongside its
+            results : ``from_peers``, ``from_discs``, ``from_upstream``
+            and ``peers_used``.  A missing key counts as zero, so a
+            caller holding an older dict still gets a usable line.
+
+    Returns:
+        A fragment such as ``8 from the disc, 9 from mirrors``, ready
+        to drop into a summary sentence, or the empty string when
+        nothing was downloaded : a run served entirely from the cache
+        has no origin to name.
+    """
+    from ..i18n import _
+
+    stats = stats or {}
+    peers = stats.get('from_peers', 0)
+    discs = stats.get('from_discs', 0)
+    mirrors = stats.get('from_upstream', 0)
+
+    if peers + discs + mirrors == 0:
+        return ""
+
+    parts = []
+    if peers > 0 or stats.get('peers_used'):
+        parts.append(_("{count} from peers").format(count=peers))
+    if discs > 0:
+        parts.append(_("{count} from the disc").format(count=discs))
+    if mirrors > 0 or not parts:
+        parts.append(_("{count} from mirrors").format(count=mirrors))
+    return ", ".join(parts)
+
+
 def format_duration(seconds: float) -> str:
     """Format duration as human-readable string.
 

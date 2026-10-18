@@ -401,6 +401,33 @@ Doel-Mageia-versie voor eigen media (9, 10, cauldron, ...).
 Niet-interactieve modus.
 .RE
 .TP
+.B add\-cdrom \fR[\fB\-\-dry\-run\fR]
+Een aangekoppelde schijf gebruiken als bron voor de media die erop
+staan. Vraagt geen URL en geen aankoppelpunt: een schijf heeft geen
+vaste plaats, dus wat wordt opgeslagen is de schijf zelf, en de
+aankoppeling wordt elke keer opnieuw opgezocht in
+.I /proc/mounts
+wanneer de schijf nodig is. Er wordt nooit iets voor u aangekoppeld:
+plaats de schijf, koppel ze zelf aan als geen bureaubladsessie dat deed,
+en voer de opdracht uit.
+.sp
+Een Mageia\-dvd bevat dezelfde pakketten als de spiegelservers, in
+dezelfde versies. De bomen erop worden daarom gekoppeld aan de al
+ingestelde media in plaats van een tweede keer toegevoegd, en de schijf
+krijgt gewoon de voorkeur zolang ze in de lade zit, omdat ze de
+goedkoopste bron is. Media die nog niet bestaan worden aangemaakt met de
+eigenschappen die een spiegelserver ze gegeven zou hebben; dat is wat
+installeren of bijwerken zonder netwerk mogelijk maakt, en wat een later
+toegevoegde spiegelserver bij dezelfde rijen laat aansluiten.
+.sp
+Een schijf wordt verwijderd als elke andere bron, met
+.BR "urpm server remove " \fIlabel\fR .
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Tonen wat de schijf bevat, zonder iets te schrijven.
+.RE
+.TP
 .B remove \fInaam\fR ...
 Verwijder één of meerdere media. Elke server waarvan de medialijst
 na verwijdering leeg blijft wordt in dezelfde beweging weggehaald.

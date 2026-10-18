@@ -35,6 +35,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from ..removable import PROTOCOL as REMOVABLE_PROTOCOL
+
 if TYPE_CHECKING:
     from ..database import PackageDatabase
     from .version import ReleaseIdentity
@@ -629,12 +631,26 @@ def _insert_target_media(db: "PackageDatabase",
     # for the 3-case decision (NULL / stale source-identity / alias).
 
     conn = db._get_connection()
+    # Removable sources are not catalogue sources, and must not go
+    # through the release switch at all.  A mirror serves every release
+    # from one host, so rewriting its URL segment from 9 to 10 is what
+    # migration *is* ; a pressing carries one release, pressed into the
+    # plastic.  Two things would go wrong here: the catalogue URL
+    # ``cdrom://<label>/10/x86_64/media/`` is neither fetchable (the
+    # scheme is an identity, by design) nor right (a disc has no
+    # release level, its trees sit at ``x86_64/media/``), and the
+    # ``url_version`` pin below would stamp the target release onto a
+    # row whose release is a physical property of the disc.
+    #
+    # The disc is attached to the target media afterwards, by
+    # :func:`_relink_mounted_discs`, which links without creating.
     servers = conn.execute("""
         SELECT id, name, protocol, host, base_path, url_version,
                is_official
         FROM server
         WHERE is_official = 1 AND enabled = 1
-    """).fetchall()
+          AND protocol <> ?
+    """, (REMOVABLE_PROTOCOL,)).fetchall()
 
     if not servers:
         return [], []
@@ -754,6 +770,76 @@ def _insert_target_media(db: "PackageDatabase",
     return created, failed, skipped
 
 
+def _relink_mounted_discs(db: "PackageDatabase") -> List[tuple]:
+    """Attach a declared, mounted disc to the target media.
+
+    The media the release switch just created come from the mirrors,
+    which are authoritative for what the release contains and which
+    sections the operator had enabled.  A mounted pressing that
+    carries some of them is a cheaper origin for those, and without
+    this step it stays attached to the source-release rows that were
+    just disabled: declaring a disc would then change nothing for the
+    download, which is the case the whole feature exists for (an
+    offline 9 → 10 upgrade).
+
+    **Links, never creates.**  The disc in the drive during a mga9
+    upgrade is a mga10 pressing, and letting its catalogue create
+    media would have a disc decide what the target release contains,
+    including sections the operator left out.  So a tree with no
+    counterpart among the target media is skipped and logged, and
+    ``upsert_media_tree`` is deliberately not used here: all three of
+    its modes create.
+
+    Only a disc the operator **declared** is touched (one ``server``
+    row of the removable protocol, as ``urpm media add-cdrom``
+    creates).  A disc that merely happens to be mounted is not
+    enrolled behind their back.
+
+    No undo-journal entry: the links point at media this stage
+    created, and ``--abort`` deletes those rows, which takes the links
+    with them through the foreign key.  A link onto a medium that
+    pre-existed outlives an abort, and says something that stays true.
+
+    Returns:
+        ``(media_name, disc_layout)`` pairs for what was linked.
+    """
+    from ..removable_catalogue import read_mounted_catalogues
+
+    try:
+        catalogues = read_mounted_catalogues()
+    except Exception as exc:  # noqa: BLE001
+        # A disc that cannot be read must never fail the release
+        # switch: the mirrors alone are enough to proceed.
+        logger.warning("stage1 : mounted discs not readable : %s", exc)
+        return []
+
+    linked: List[tuple] = []
+    for catalogue in catalogues:
+        label = catalogue.mount.path.name or catalogue.info.version
+        server = db.get_server(label)
+        if not server or server.get("protocol") != REMOVABLE_PROTOCOL:
+            logger.info(
+                "stage1 : disc %s is mounted but not declared as a source, "
+                "left alone", label)
+            continue
+        for discovered in catalogue.media:
+            media = db.get_media_by_version_arch_shortname(
+                discovered.version, discovered.architecture,
+                discovered.short_name)
+            if not media:
+                logger.info(
+                    "stage1 : disc %s carries %s, which is not among the "
+                    "target media : not linked", label, discovered.short_name)
+                continue
+            layout = catalogue.disc_paths.get(discovered.section)
+            db.link_server_media(server["id"], media["id"],
+                                 relative_path=layout)
+            linked.append((media["name"], layout))
+            logger.info("stage1 : %s is now also served by disc %s (%s)",
+                        media["name"], label, layout)
+    return linked
+
+
 def run_stage1(
     db: "PackageDatabase",
     *,
@@ -769,6 +855,8 @@ def run_stage1(
     - ``disabled_orphan`` : rows flagged ``disabled_by='distupgrade_orphan'``
     - ``created_urls``    : target catalogue URLs successfully upserted
     - ``failed_servers``  : official servers whose upsert failed
+    - ``linked_discs``    : ``(media_name, layout)`` pairs for the
+      target media a declared, mounted disc now also serves
 
     The state file is bumped to ``stage1_running`` at entry and
     ``media_swapped`` on success (§4.6 state machine).
@@ -843,6 +931,12 @@ def run_stage1(
             + "; ".join(f"{name} ({reason})"
                         for name, reason in skipped_media))
 
+    # Once the target media exist, a declared disc in the drive is
+    # attached to the ones it carries.  After the upsert, because
+    # there is nothing to attach to before it, and before Stage 2, so
+    # the download finds the cheaper origin.
+    linked_discs = _relink_mounted_discs(db)
+
     write_state({
         "version_from": source_identity,
         "version_to": target.display(),
@@ -857,4 +951,5 @@ def run_stage1(
         "third_party_activated": tp_activated,
         "created_urls": created_urls,
         "failed_servers": failed_servers,
+        "linked_discs": linked_discs,
     }

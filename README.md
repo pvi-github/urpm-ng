@@ -683,6 +683,7 @@ urpm media set <name> [opts]  # Modify media settings (sharing, replication, quo
 urpm media seed-info <name>   # Show seed set info (sections, package count, size estimate)
 urpm media autoconfig -r 10   # Auto-add official Mageia media for release 10
 urpm media discover <url>     # Discover media from a repo's media.cfg
+urpm media add-cdrom          # Use a mounted disc as a source for its media
 ```
 
 Useful flags for `urpm media add`:
@@ -695,6 +696,34 @@ Useful flags for `urpm media add`:
 --disabled                    # Add but leave disabled
 -y, --auto                    # Non-interactive: accept the auto-detected name/short_name
 ```
+
+### Use a disc (DVD) as a source
+
+A Mageia DVD carries the same packages as the mirrors, at the same
+versions. So it is not a separate catalogue, it is a cheaper origin for
+media you already have: its trees are attached to the configured media
+rather than added a second time, and the disc is preferred while it is
+in the drive.
+
+```bash
+urpm media add-cdrom              # Use the mounted disc
+urpm media add-cdrom --dry-run    # Show what it carries, write nothing
+```
+
+No URL and no mount point are asked for. A disc has no stable location,
+so what gets recorded is the disc itself, and the mount is looked up
+again in `/proc/mounts` each time it is needed; the same command works
+whether a desktop session mounted the disc under
+`/run/media/<user>/<label>` or you mounted it by hand on `/mnt/cdrom`.
+Nothing is ever mounted for you.
+
+Media that are not configured yet are created with the attributes a
+mirror would have given them. That is what makes an install or an
+upgrade possible with no network at all, and it is also why a mirror
+added later joins the very same media rows instead of duplicating them.
+
+A disc is removed like any other source, with `urpm server remove
+<label>`.
 
 ### Import media from a legacy urpmi.cfg
 

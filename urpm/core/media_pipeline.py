@@ -428,6 +428,7 @@ def upsert_media_tree(
     raw_catalogue: Optional[str] = None,
     media_filter: Optional[Callable[[DiscoveredMedia], bool]] = None,
     enabled_policy: Optional[Callable[[DiscoveredMedia], bool]] = None,
+    link_paths: Optional[dict] = None,
 ) -> UpsertResult:
     """Insert or reconcile media entries discovered at *url*.
 
@@ -481,6 +482,17 @@ def upsert_media_tree(
             Used by ``cmd_media_discover`` to apply smart-enable
             policies based on detected installed categories
             (nonfree, tainted, 32-bit).
+        link_paths: Optional ``{section: relative_path}`` mapping
+            giving, per media, the layout **on this server** when it
+            differs from the layout stored on the media row.  Left
+            ``None`` for mirrors, where the two always coincide:
+            Mageia's convention is that every mirror serves the whole
+            set at identical relative paths.  A pressed disc is the
+            one source that diverges — it serves core at
+            ``x86_64/media/core`` while the media row keeps the mirror
+            path ``10/x86_64/media/core/release`` — so the exception
+            is recorded on the ``server_media`` link rather than
+            forced onto the media row, which other servers share.
 
     Returns:
         An :class:`UpsertResult` summarising what happened.
@@ -596,6 +608,7 @@ def upsert_media_tree(
             mode=mode,
             parent_cfg_sections=parent_cfg_sections,
             enabled_policy=enabled_policy,
+            link_path=(link_paths or {}).get(media.section),
         )
         outcomes.append(outcome)
 
@@ -954,8 +967,14 @@ def _process_one_media(
     mode: str,
     parent_cfg_sections: Optional[dict],
     enabled_policy: Optional[Callable[[DiscoveredMedia], bool]] = None,
+    link_path: Optional[str] = None,
 ) -> UpsertOutcome:
     """Apply the decision tree to a single media candidate.
+
+    *link_path* is this server's own layout for the media, stored on
+    the link when the server does not serve it where the media row
+    says.  Only a removable disc does that ; see ``link_paths`` in
+    :func:`upsert_media_tree`.
 
     Steps:
       1. Resolve canonical attributes (version, arch, short_name,
@@ -1073,7 +1092,7 @@ def _process_one_media(
             priority=priority,
             url=None,
         )
-        db.link_server_media(server_id, media_id)
+        db.link_server_media(server_id, media_id, link_path)
         return UpsertOutcome(
             action="created",
             media_id=media_id,
@@ -1084,13 +1103,20 @@ def _process_one_media(
     # Canonical key already exists. Either re-link or noop.
     media_id = existing["id"]
     if db.server_media_link_exists(server_id, media_id):
+        if link_path:
+            # The pair is already linked, but a server with its own
+            # layout still has to record it: the link may predate the
+            # layout being known, or have been created without one.
+            # ``link_server_media`` refreshes the path and leaves the
+            # rest of the row alone.
+            db.link_server_media(server_id, media_id, link_path)
         return UpsertOutcome(
             action="noop",
             media_id=media_id,
             media_name=existing["name"],
             short_name=short_name,
         )
-    db.link_server_media(server_id, media_id)
+    db.link_server_media(server_id, media_id, link_path)
     return UpsertOutcome(
         action="relinked",
         media_id=media_id,

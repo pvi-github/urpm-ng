@@ -268,6 +268,17 @@ def get_media_local_path(media: dict, base_dir: Path = None) -> Path:
 def build_server_url(server: dict) -> str:
     """Build base URL for a server.
 
+    This is a pure function of the stored row : no filesystem access,
+    no network, no process state.  That matters for ``cdrom`` servers,
+    whose URL here is the disc's *identity* (``cdrom://<label>``) and
+    not a location — a pressing has no stable mount point, so nothing
+    about where it currently sits is ever stored.  An operation that
+    means to read from a disc calls :func:`urpm.core.removable.resolve`
+    first, which hands back a ``file`` server pointed at the mount it
+    just found ; a ``cdrom://`` URL reaching a transfer layer is a
+    missing resolution step, and libcurl rejecting the scheme is the
+    intended safety net rather than a bug to paper over.
+
     Args:
         server: Server dict with 'protocol', 'host', 'base_path'
 
@@ -284,6 +295,40 @@ def build_server_url(server: dict) -> str:
     else:
         # Remote URL
         return f"{protocol}://{host}{base_path}"
+
+
+def media_relative_path(server: dict, media: dict) -> str:
+    """Where *media* sits on *server*, relative to that server's root.
+
+    Normally every server of a medium serves it at the same place :
+    Mageia's mirror convention is that any mirror carrying
+    ``/distrib/<release>/<arch>/media/`` carries the whole set at
+    identical relative paths, which is why the layout lives on
+    ``media.relative_path`` and is shared.
+
+    A pressing breaks that assumption, and it is the only thing that
+    does.  A Mageia 10 DVD serves its core tree at
+    ``x86_64/media/core`` where the mirror serves the same packages at
+    ``10/x86_64/media/core/release``, and a server-side prefix cannot
+    bridge the two because it is a prefix, not a layout.  So
+    ``server_media`` may carry a per-pair ``relative_path``, surfaced
+    on the server dict as ``media_relative_path`` by
+    ``get_servers_for_media``, and it wins when present.
+
+    This is a stored fact about one (server, media) pair, read as-is.
+    It is deliberately *not* the rewrite layer that ``url_version``
+    once was and that :func:`build_media_url` documents the cost of :
+    nothing here recomputes or substitutes a segment at call time.
+
+    Args:
+        server: Server dict, possibly carrying ``media_relative_path``.
+        media: Media dict with ``relative_path``.
+
+    Returns:
+        The relative path to use, without leading or trailing slash.
+    """
+    override = server.get('media_relative_path') if server else None
+    return (override or media['relative_path']).strip('/')
 
 
 def build_media_url(server: dict, media: dict) -> str:
@@ -309,6 +354,11 @@ def build_media_url(server: dict, media: dict) -> str:
     ``url_version`` at the discovery layer, which is where fresh
     data belongs.
 
+    One server kind does override the layout, and only one : a
+    removable disc, whose tree differs from a mirror's.  That goes
+    through :func:`media_relative_path`, which reads a stored per-pair
+    value instead of recomputing anything.
+
     Args:
         server: Server dict with 'protocol', 'host', 'base_path'.
         media: Media dict with 'relative_path'.
@@ -317,12 +367,18 @@ def build_media_url(server: dict, media: dict) -> str:
         Full URL or local path to the media.
     """
     base_url = build_server_url(server)
-    relative_path = media['relative_path'].strip('/')
-    return f"{base_url}/{relative_path}"
+    return f"{base_url}/{media_relative_path(server, media)}"
 
 
 def is_local_server(server: dict) -> bool:
-    """Check if a server is a local filesystem (file://)."""
+    """Check if a server is a local filesystem (file://).
+
+    A ``cdrom`` server is **not** local by this test, on purpose : it
+    is an identity until :func:`urpm.core.removable.resolve` has found
+    the disc, and what that returns is a ``file`` server which does
+    answer True here.  Treating an unresolved disc as local would send
+    the local-copy path at a ``base_path`` that is empty.
+    """
     return server.get('protocol') == 'file'
 
 

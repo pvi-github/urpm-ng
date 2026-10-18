@@ -222,10 +222,13 @@ def download_plan(
     )
     summary["downloaded"] = downloaded
     summary["already_present"] = cached
-    # P2P split so the CLI can render « X from peers, Y from mirrors »
-    # like ``urpm i``/``urpm u`` do.
-    summary["from_peers"] = peer_stats.get("from_peers", 0) if peer_stats else 0
-    summary["from_upstream"] = peer_stats.get("from_upstream", 0) if peer_stats else 0
+    # Provenance split so the CLI can render « X from peers, Y from the
+    # disc, Z from mirrors » like ``urpm i``/``urpm u`` do.  Key names
+    # are the downloader's, so the summary feeds
+    # ``display.format_download_sources`` as it stands.
+    peer_stats = peer_stats or {}
+    for key in ("from_peers", "from_discs", "from_upstream", "peers_used"):
+        summary[key] = peer_stats.get(key, 0)
     for r in dl_results:
         if r.success and r.path is not None:
             nevra = f"{r.item.name}-{r.item.version}-{r.item.release}.{r.item.arch}"

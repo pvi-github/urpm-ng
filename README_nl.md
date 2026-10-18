@@ -693,6 +693,7 @@ urpm media set <naam> [opts]  # Media-instellingen wijzigen (sharing, replicatie
 urpm media seed-info <naam>   # Seed-info tonen (secties, aantal pakketten, geschatte omvang)
 urpm media autoconfig -r 10   # Officiële Mageia-media voor release 10 automatisch toevoegen
 urpm media discover <url>     # Media ontdekken uit de media.cfg van een repo
+urpm media add-cdrom          # Een aangekoppelde schijf als bron van haar media gebruiken
 ```
 
 Nuttige vlaggen voor `urpm media add`:
@@ -705,6 +706,35 @@ Nuttige vlaggen voor `urpm media add`:
 --disabled                    # Toevoegen maar gedeactiveerd laten
 -y, --auto                    # Niet-interactief: de auto-gedetecteerde naam/short_name aanvaarden
 ```
+
+### Een schijf (dvd) als bron gebruiken
+
+Een Mageia-dvd bevat dezelfde pakketten als de spiegelservers, in
+dezelfde versies. Het is dus geen afzonderlijke catalogus, maar een
+goedkopere bron voor media die er al zijn: de bomen erop worden gekoppeld
+aan de ingestelde media in plaats van een tweede keer toegevoegd, en de
+schijf krijgt de voorkeur zolang ze in de lade zit.
+
+```bash
+urpm media add-cdrom              # De aangekoppelde schijf gebruiken
+urpm media add-cdrom --dry-run    # Tonen wat ze bevat, zonder te schrijven
+```
+
+Er wordt geen URL en geen aankoppelpunt gevraagd. Een schijf heeft geen
+vaste plaats, dus wat wordt opgeslagen is de schijf zelf, en de
+aankoppeling wordt elke keer opnieuw opgezocht in `/proc/mounts`;
+dezelfde opdracht werkt of een bureaubladsessie de schijf onder
+`/run/media/<gebruiker>/<label>` aankoppelde, of u ze zelf op
+`/mnt/cdrom` aankoppelde. Er wordt nooit iets voor u aangekoppeld.
+
+Media die nog niet bestaan worden aangemaakt met de eigenschappen die een
+spiegelserver ze gegeven zou hebben. Dat is wat installeren of bijwerken
+zonder enig netwerk mogelijk maakt, en daarom sluit een later toegevoegde
+spiegelserver bij precies dezelfde mediarijen aan in plaats van ze te
+verdubbelen.
+
+Een schijf wordt verwijderd als elke andere bron, met `urpm server remove
+<label>`.
 
 ### Media importeren uit een oude urpmi.cfg
 

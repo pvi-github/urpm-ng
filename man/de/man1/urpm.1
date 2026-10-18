@@ -399,6 +399,32 @@ Ziel-Mageia-Version für eigene Medien (9, 10, cauldron, ...).
 Nicht-interaktiver Modus.
 .RE
 .TP
+.B add\-cdrom \fR[\fB\-\-dry\-run\fR]
+Eine eingebundene Disc als Quelle für die darauf enthaltenen Medien
+verwenden. Verlangt weder URL noch Einbindungspunkt: eine Disc hat
+keinen stabilen Ort, gespeichert wird daher die Disc selbst, und die
+Einbindung wird bei jedem Zugriff erneut in
+.I /proc/mounts
+gesucht. Es wird nie etwas für Sie eingebunden: Disc einlegen, bei
+Bedarf selbst einbinden, dann den Befehl ausführen.
+.sp
+Eine Mageia\-DVD enthält dieselben Pakete wie die Spiegelserver, in
+denselben Versionen. Ihre Bäume werden deshalb den schon eingerichteten
+Medien zugeordnet statt erneut hinzugefügt, und die Disc wird als
+günstigere Quelle einfach bevorzugt, solange sie im Laufwerk liegt.
+Noch nicht eingerichtete Medien werden mit den Eigenschaften angelegt,
+die ein Spiegelserver ihnen gegeben hätte; genau das macht eine
+Installation oder Aktualisierung ohne Netz möglich und lässt einen
+später hinzugefügten Spiegelserver denselben Zeilen beitreten.
+.sp
+Eine Disc wird wie jede andere Quelle entfernt, mit
+.BR "urpm server remove " \fIBezeichnung\fR .
+.RS
+.TP
+.BR \-n ", " \-\-dry\-run
+Zeigen, was die Disc enthält, ohne zu schreiben.
+.RE
+.TP
 .B remove \fIName\fR ...
 Entfernt eines oder mehrere Medien. Server, deren Medienliste nach
 dem Entfernen leer ist, werden im gleichen Durchgang mit entfernt.
