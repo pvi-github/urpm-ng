@@ -90,13 +90,12 @@ Requires:       gnupg2
 # synthesis at all.
 Recommends:     python3-cffi
 Requires:       zstd
-# ``urpm build`` and ``urpm mkimage`` shell out to rpmbuild (from
-# rpm-build) and bm (the Mageia build wrapper) — without both the
-# build workflow can't proceed even one step, but the rest of the
-# CLI still works, so we mark them as Requires only on the
-# packager-facing path.  Neither pulls a heavy dep tree of its own.
+# For rpmspec, which rpm-build owns: ``urpm install -b <spec>`` reads
+# a spec's BuildRequires with ``rpmspec -q --buildrequires`` on the
+# host (see urpm.core.buildrequires).  Not for rpmbuild, which only
+# ever runs inside the build container, where the image provides it —
+# so moving this to urpm-ng-build would break ``urpm install -b``.
 Requires:       rpm-build
-Requires:       bm
 
 %description core
 Core components of urpm-ng package manager:
@@ -432,14 +431,6 @@ install -m644 data/profiles/*.yaml %{buildroot}%{_datadir}/urpm/profiles/
 # ============================================================================
 %post daemon
 /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
-# Restart urpmd on upgrade so the newly installed Python code
-# takes effect immediately instead of the previous service
-# continuing to serve stale behaviour from before the RPM swap.
-# ``try-restart`` is a no-op if urpmd was not running, which is
-# what we want (fresh install path does its own start via preset).
-if [ "$1" -ge 2 ]; then
-    /usr/bin/systemctl try-restart urpmd.service >/dev/null 2>&1 || :
-fi
 
 # --- Shorewall firewall configuration ---
 # We ship /etc/shorewall/rules.urpm-ng as an include file.
@@ -476,6 +467,10 @@ if [ -f /etc/shorewall/rules ]; then
     fi
 fi
 
+# What happens to the service, decided in one place. There used to be a
+# second try-restart block at the top of this scriptlet, doing exactly
+# this one's job a few lines earlier: urpmd was restarted twice on every
+# upgrade of the package.
 if [ $1 -eq 1 ]; then
     # First install
     /usr/bin/systemctl enable urpmd.service >/dev/null 2>&1 || :
@@ -483,7 +478,8 @@ if [ $1 -eq 1 ]; then
 fi
 
 if [ $1 -ge 2 ]; then
-    # Upgrade: restart only if was running
+    # Upgrade: restart only if it was running.  A no-op otherwise,
+    # which is what we want, since the fresh install above starts it.
     /usr/bin/systemctl try-restart urpmd.service >/dev/null 2>&1 || :
 fi
 
