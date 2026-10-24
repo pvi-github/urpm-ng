@@ -7,6 +7,7 @@ Extracts build dependencies from:
 - Auto-detect in RPM build tree (SPECS/ directory)
 """
 
+import os
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -115,8 +116,24 @@ def parse_buildrequires_from_spec(spec_path: Path) -> List[str]:
         raise FileNotFoundError(f"Spec file not found: {spec_path}")
 
     try:
-        sourcedir = Path(spec_path).parent.parent / "SOURCES"
-        cmd = ["rpmspec", "-q", "--buildrequires", "--define", f'_sourcedir {str(sourcedir)}', str(spec_path)]
+        # A spec resolves ``%include %{SOURCE1}`` against %_sourcedir,
+        # which rpm derives from $HOME.  That default is wrong for a
+        # spec sitting in an rpmbuild tree: the sources it names are
+        # next to it, not in the caller's home.  So the macro is
+        # pointed at the tree, and only there — a spec on its own has
+        # no sibling SOURCES, and overriding the macro with a
+        # directory that is not there loses the include the default
+        # would have found.  The path is made absolute first so that
+        # ``urpm build foo.spec`` run from inside SPECS/ is recognised
+        # as the build tree it is in; symlinks are deliberately left
+        # alone, since a spec linked into SPECS/ takes its sources
+        # from the tree it is linked into.
+        build_dir = Path(os.path.abspath(spec_path)).parent
+        sourcedir = build_dir.parent / "SOURCES"
+        cmd = ["rpmspec", "-q", "--buildrequires"]
+        if build_dir.name == "SPECS" and sourcedir.is_dir():
+            cmd += ["--define", f"_sourcedir {sourcedir}"]
+        cmd.append(str(spec_path))
         result = subprocess.run(
             cmd,
             capture_output=True, text=True, timeout=30,
