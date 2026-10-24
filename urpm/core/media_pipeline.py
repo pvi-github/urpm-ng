@@ -50,10 +50,12 @@ from __future__ import annotations
 import dataclasses
 import configparser
 import logging
-import re
 from typing import Callable, Optional, Tuple
 from urllib.parse import urlparse
 
+from urpm.core.release_segment import (
+    is_arch_segment, is_sources_segment, parse_release_token,
+)
 from urpm.cli.helpers.media import (
     MediaNameCollision,
     disambiguate_media_name,
@@ -160,18 +162,6 @@ class UpsertResult:
 
 
 _PLACEHOLDER_VALUES = frozenset({"unknown", "none", "null", ""})
-_KNOWN_ARCHES = frozenset({"x86_64", "i586", "i686", "aarch64",
-                           "armv7hl", "armv5tl", "ppc64le", "noarch"})
-# Bare version segment as officiels ship it — ``10``, ``11.5``,
-# ``cauldron``.
-_VERSION_RE = re.compile(r"^(?:\d+(?:\.\d+)?|cauldron)$", re.IGNORECASE)
-# Version segment with optional ``mageia`` / ``mga`` prefix — covers
-# community layouts like blogdrake (``mageia10``, ``mga10``) in
-# addition to the officiels' bare form.  Capturing group ``(1)`` is
-# the version number itself, stripped of any prefix.
-_VERSION_TOKEN_RE = re.compile(
-    r"^(?:mageia|mga)?(\d+(?:\.\d+)?|cauldron)$", re.IGNORECASE,
-)
 
 
 def _match_version_token(segment: str) -> Optional[str]:
@@ -181,11 +171,15 @@ def _match_version_token(segment: str) -> Optional[str]:
     (``mageia10``, ``mga10``) forms, and returns the version number
     (or ``'cauldron'``) as a lowercase string.  Returns ``None`` when
     the segment doesn't look like a version at all.
+
+    Unlike the CLI's namesake in :mod:`urpm.cli.helpers.media`, this
+    one accepts any release-shaped segment: the pipeline writes what
+    the URL says, and refusing a release because a hard-coded list has
+    not heard of it yet is how a tree becomes unreachable the week a
+    new one opens.
     """
-    if not segment:
-        return None
-    m = _VERSION_TOKEN_RE.match(segment)
-    return m.group(1).lower() if m else None
+    token = parse_release_token(segment)
+    return token.identity if token is not None else None
 
 
 def _is_placeholder(value: Optional[str]) -> bool:
@@ -213,20 +207,26 @@ def _split_url(url: str) -> tuple[str, str, str]:
     host = parsed.netloc
     path = parsed.path or ""
 
-    # Independent scan for version and arch — we don't require them
+    # Independent scan for version and anchor — we don't require them
     # to be adjacent.  Officiels put them consecutive
     # (``.../10/x86_64/``), blogdrake plate separates them by the
     # channel (``.../mageia10/free/x86_64/``).  Both work here.
     parts = [p for p in path.split("/") if p]
     version_idxs = [i for i, p in enumerate(parts)
                     if _match_version_token(p)]
-    arch_idxs = [i for i, p in enumerate(parts) if p in _KNOWN_ARCHES]
+    arch_idxs = [i for i, p in enumerate(parts) if is_arch_segment(p)]
+    # A source tree anchors the URL where an architecture would, and
+    # only when there is no architecture to be found: see the same
+    # reasoning in ``parse_custom_media_url``, which this function has
+    # to stay in lockstep with.
+    anchor_idxs = arch_idxs or [i for i, p in enumerate(parts)
+                                if is_sources_segment(p)]
     # Guard: exactly one of each — multiple hits on either side would
     # be ambiguous and the safer play is to leave base_path empty and
     # let the caller fall back on --custom explicit values.
-    if len(version_idxs) != 1 or len(arch_idxs) != 1:
+    if len(version_idxs) != 1 or len(anchor_idxs) != 1:
         return protocol, host, ""
-    pivot = min(version_idxs[0], arch_idxs[0])
+    pivot = min(version_idxs[0], anchor_idxs[0])
     base = "/" + "/".join(parts[:pivot]) if parts[:pivot] else ""
     return protocol, host, base
 
@@ -245,8 +245,7 @@ def split_release_arch_tail(path: str, arch: str) -> tuple[str, Optional[str]]:
     """Split a URL path into ``(server_root, url_version)``.
 
     Detects the trailing ``.../<version>/<arch>`` pair — where
-    ``<version>`` matches :data:`_VERSION_RE` (a numeric or
-    ``cauldron``) — and returns:
+    ``<version>`` is a bare numeric or ``cauldron`` — and returns:
 
     * ``server_root``: the path with that trailing pair removed
       (leading slash preserved, no trailing slash).
@@ -260,22 +259,47 @@ def split_release_arch_tail(path: str, arch: str) -> tuple[str, Optional[str]]:
     end with a recognised ``<version>/<arch>`` pair (custom
     layouts, third-party repos).  Callers must fall back to the
     release identity in that case.
+
+    A prefixed spelling (``mageia10``) is refused rather than
+    accepted, which is the one place in this module where that is the
+    right answer: the only caller feeds this function URLs from the
+    Mageia mirror API, which describes the official tree and nothing
+    else.  Storing ``mageia10`` as a ``url_version`` would hand a
+    mirror-specific spelling to code that compares it against release
+    identities.
     """
     stripped = path.rstrip("/")
     parts = [p for p in stripped.split("/") if p]
-    if len(parts) >= 2 and parts[-1] == arch and _VERSION_RE.fullmatch(parts[-2]):
-        server_root = "/" + "/".join(parts[:-2]) if parts[:-2] else ""
-        return server_root, parts[-2].lower()
-    return stripped, None
+    if len(parts) < 2 or parts[-1] != arch:
+        return stripped, None
+    token = parse_release_token(parts[-2])
+    if token is None or token.prefix:
+        return stripped, None
+    server_root = "/" + "/".join(parts[:-2]) if parts[:-2] else ""
+    return server_root, token.identity
 
 
 def _extract_arch_from_url(url: str) -> str:
     """Pull a known architecture segment from URL path, if any."""
     parsed = urlparse(url.rstrip("/"))
     for part in parsed.path.split("/"):
-        if part in _KNOWN_ARCHES:
+        if is_arch_segment(part):
             return part
     return ""
+
+
+def _is_source_tree_url(url: str) -> bool:
+    """Does *url* point at a mirror's sources rather than its binaries?
+
+    A source tree has no architecture segment to read, so the arch
+    cascade would end empty and the insertion would be refused.  The
+    media table wants one all the same, and the convention the rest of
+    the rows follow is the host's: a ``.src.rpm`` is built anywhere
+    and the column records where this machine reaches it from.
+    """
+    parsed = urlparse(url.rstrip("/"))
+    return any(is_sources_segment(part)
+               for part in parsed.path.split("/"))
 
 
 def _system_version_fallback() -> str:
@@ -359,6 +383,13 @@ def _resolve_arch(
     via_url = _extract_arch_from_url(url)
     if not _is_placeholder(via_url):
         return via_url
+    if _is_source_tree_url(url):
+        # The one case where the system answers for the URL, and it
+        # answers what the existing source media rows hold.  See
+        # :func:`_is_source_tree_url`.
+        from .rpmdb import system_arch
+
+        return system_arch()
     return ""  # no /etc-fallback for arch; caller will raise
 
 

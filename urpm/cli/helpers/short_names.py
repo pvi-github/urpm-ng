@@ -41,7 +41,7 @@ from __future__ import annotations
 from typing import Optional
 from urllib.parse import urlparse
 
-from .media import KNOWN_ARCHES, _match_version_token
+from .media import KNOWN_ARCHES, match_known_version
 
 
 # Vowels considered for the blgrk rule.  ``y`` is included because
@@ -175,7 +175,7 @@ def extract_channel(
     else:
         channel_parts = [
             p for p in parts
-            if _match_version_token(p) is None and p not in KNOWN_ARCHES
+            if match_known_version(p) is None and p not in KNOWN_ARCHES
         ]
     return "-".join(channel_parts)
 
@@ -223,10 +223,10 @@ def generate_media_names(
     version: Optional[str] = None
     arch: Optional[str] = None
     version_idxs = [i for i, p in enumerate(parts)
-                    if _match_version_token(p) is not None]
+                    if match_known_version(p) is not None]
     arch_idxs = [i for i, p in enumerate(parts) if p in KNOWN_ARCHES]
     if len(version_idxs) == 1 and len(arch_idxs) == 1:
-        version = _match_version_token(parts[version_idxs[0]])
+        version = match_known_version(parts[version_idxs[0]])
         arch = parts[arch_idxs[0]]
 
     # Reconstruct the relative_path the caller will store — pivot

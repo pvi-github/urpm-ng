@@ -30,6 +30,10 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
+from .release_segment import (
+    CAULDRON, URL_ARCH_SEGMENTS, is_32bit_arch, release_tokens,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,8 +73,12 @@ class DiscoveredMedia:
 
 
 # ── Known architectures for cross-arch detection ─────────────────────────
+#
+# Same vocabulary as the URL side, from the one list the project keeps:
+# a section path and a URL path name an architecture identically, and
+# this set used to be missing two of them.
 
-_KNOWN_ARCHES = {'x86_64', 'i586', 'i686', 'aarch64', 'armv7hl', 'noarch'}
+_KNOWN_ARCHES = URL_ARCH_SEGMENTS
 
 
 # ── Public API ───────────────────────────────────────────────────────────
@@ -223,7 +231,7 @@ def parse_media_cfg(
 
         # ── Detect architecture ──────────────────────────────────
         architecture = _detect_arch(section, info.arch)
-        is_32bit = architecture in ('i586', 'i686')
+        is_32bit = is_32bit_arch(architecture)
 
         # ── Generate short_name ──────────────────────────────────
         short_name = _make_short_name(section, architecture, info.arch)
@@ -601,25 +609,22 @@ def decompose_url(
 
     # The version segment in the URL may be bare (``10``) or prefixed
     # (``mageia10`` / ``mga10``) — community mirrors like blogdrake
-    # publish under the prefixed form.  We match segment-wise (not
-    # substring) so ``mageia10`` isn't hit inside a bare ``10`` needle,
-    # and we preserve the actual URL token so ``relative_path``
-    # reconstruction below keeps the prefix.
-    version_prefixes = ('', 'mageia', 'mga')
+    # publish under the prefixed form.  Read segment-wise by
+    # :mod:`urpm.core.release_segment`, so the actual URL token is
+    # preserved and the ``relative_path`` built below keeps the prefix.
     version_seg_idx = None
     if version:
-        candidates = {f"{p}{version}" for p in version_prefixes}
         # Freeze period: mirror URLs can still carry the ``cauldron``
         # segment while ``[media_info]`` has already bumped ``version``
         # to the next numeric (e.g. mgabiz publishes under
         # ``.../cauldron/x86_64/media/`` with ``version=11``).  Without
-        # this candidate ``decompose_url`` fails to spot the anchor
-        # segment, leaves ``base_path`` empty and folds the mirror's
-        # own prefix (``/repo/Mageia/mgabiz``) into every media's
-        # ``relative_path`` — every URL reconstruction then doubles it.
-        candidates.add('cauldron')
-        for i, seg in enumerate(parts):
-            if seg in candidates:
+        # accepting that identity too, ``decompose_url`` fails to spot
+        # the anchor segment, leaves ``base_path`` empty and folds the
+        # mirror's own prefix (``/repo/Mageia/mgabiz``) into every
+        # media's ``relative_path`` — every URL reconstruction then
+        # doubles it.
+        for i, token in release_tokens(parts):
+            if token.identity in (version, CAULDRON):
                 version_seg_idx = i
                 break
 

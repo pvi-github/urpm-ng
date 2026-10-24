@@ -20,7 +20,7 @@ correctly transposed through distupgrade).
 from __future__ import annotations
 
 from urpm.cli.helpers.media import (
-    _match_version_token as cli_match_version_token,
+    match_known_version as cli_match_version_token,
     parse_custom_media_url,
 )
 from urpm.core.distupgrade.stage1 import _try_transpose_string
@@ -98,6 +98,34 @@ class TestSplitUrl:
             "https", "ftp.blogdrake.org", "/mageia",
         )
 
+    def test_a_source_tree_anchors_the_split(self):
+        # ``SRPMS`` sits where the arch sits in the binary layout.
+        # Without it as an anchor this URL had none at all: base_path
+        # came back empty and the whole path went into the media's
+        # relative_path, which adds a second server row for a mirror
+        # already configured, this one rooted nowhere.
+        proto, host, base = _split_url(
+            "https://ftp.blogdrake.org/mageia/mageia10/free/SRPMS"
+        )
+        assert (proto, host, base) == (
+            "https", "ftp.blogdrake.org", "/mageia",
+        )
+
+    def test_the_official_source_tree_too(self):
+        proto, host, base = _split_url(
+            "https://mirror.example.org/distrib/10/SRPMS/core/release"
+        )
+        assert base == "/distrib"
+
+    def test_an_architecture_still_wins_over_a_source_segment(self):
+        # A URL that carries an arch has already said where it is
+        # anchored; the source segment is not consulted and cannot
+        # turn a working split into an ambiguous one.
+        proto, host, base = _split_url(
+            "https://mirror.example.org/distrib/10/x86_64/media/SRPMS"
+        )
+        assert base == "/distrib"
+
     def test_no_pattern_leaves_base_empty(self):
         proto, host, base = _split_url(
             "https://example.org/some/random/path"
@@ -171,6 +199,27 @@ class TestParseCustomMediaUrl:
         assert parsed["base_path"] == "/distrib"
         assert parsed["relative_path"] == "10/x86_64/media/core/release"
 
+    def test_a_source_media_is_pinned_to_its_server(self):
+        # The shape an operator types to add blogdrake's sources.  The
+        # release and the server root must come out; the arch cannot,
+        # since a source tree carries none, and the pipeline's cascade
+        # answers that one with the host's.
+        parsed = parse_custom_media_url(
+            "https://ftp.blogdrake.org/mageia/mageia10/free/SRPMS"
+        )
+        assert parsed["version"] == "10"
+        assert parsed["arch"] is None
+        assert parsed["base_path"] == "/mageia"
+        assert parsed["relative_path"] == "mageia10/free/SRPMS"
+
+    def test_the_official_source_media_too(self):
+        parsed = parse_custom_media_url(
+            "https://mirror.example.org/distrib/10/SRPMS/core/release"
+        )
+        assert parsed["version"] == "10"
+        assert parsed["base_path"] == "/distrib"
+        assert parsed["relative_path"] == "10/SRPMS/core/release"
+
     def test_no_hint_leaves_version_and_arch_none(self):
         parsed = parse_custom_media_url("file:///home/user/local/rpms")
         assert parsed["version"] is None
@@ -197,14 +246,13 @@ class TestTryTransposeString:
             "distrib/9/x86_64/media/core/release", "9", "10",
         ) == "distrib/10/x86_64/media/core/release"
 
-    def test_mageia_prefix_wins_over_mga_substring(self):
-        # Belt-and-braces : substring ``mga9`` appears inside
-        # ``mageia9``.  We want the prefixed rewrite ``mageia9`` →
-        # ``mageia10``, not a partial ``mga9`` → ``mga10`` that
-        # would leave ``mageia10`` looking like ``maga10``.
+    def test_the_long_spelling_is_rewritten_whole(self):
+        # Neither spelling contains the other (``mageia`` is not
+        # ``mga`` plus anything), so the order the prefixes are tried
+        # in is not what protects this.  What matters is the result:
+        # the segment keeps the spelling the mirror publishes under.
         result = _try_transpose_string("path/mageia9/free", "9", "10")
         assert result == "path/mageia10/free"
-        assert "maga" not in result
 
     def test_no_marker_returns_none(self):
         assert _try_transpose_string(

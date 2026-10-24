@@ -6,46 +6,41 @@ import subprocess
 import tempfile
 from urllib.parse import urlparse
 
+from urpm.core.release_segment import (
+    BUILD_ARCHES, URL_ARCH_SEGMENTS, is_sources_segment, parse_release_token,
+)
+
 # Known Mageia release versions
 KNOWN_VERSIONS = {'7', '8', '9', '10', 'cauldron'}
 
-# Known architectures
-KNOWN_ARCHES = {'x86_64', 'aarch64', 'armv7hl', 'i586', 'i686'}
-# ``parse_custom_media_url`` also accepts ``noarch`` as a valid URL
-# arch segment — community layouts (blogdrake, mgabiz…) publish
-# noarch-only channels at .../<version>/<class>/noarch/ that would
-# otherwise be rejected as "not a recognised version/arch pattern"
-# at ``urpmi.cfg`` import time.  Official Mageia URLs never carry
-# a ``/noarch/`` arch segment (their noarch RPMs are indexed inside
-# the arch-specific media), so ``parse_mageia_media_url`` keeps
-# the strict set.
-_CUSTOM_URL_ARCHES = KNOWN_ARCHES | {'noarch'}
-
-# Version segment with optional ``mageia`` / ``mga`` prefix — covers
-# community layouts like blogdrake (``mageia10``, ``mga10``) in
-# addition to the officiels' bare ``10``.  Captures the version
-# number so the caller can compare it to :data:`KNOWN_VERSIONS`.
-# Kept in sync with :data:`urpm.core.media_pipeline._VERSION_TOKEN_RE`.
-_VERSION_TOKEN_RE = re.compile(
-    r"^(?:mageia|mga)?(\d+(?:\.\d+)?|cauldron)$", re.IGNORECASE,
-)
+# Known architectures, as a URL spells them.  The list itself lives
+# in :mod:`urpm.core.release_segment`, which is also where the
+# ``noarch`` distinction is explained: official Mageia URLs never
+# carry a ``/noarch/`` segment, community layouts do publish
+# noarch-only channels, so the strict set is for
+# ``parse_mageia_media_url`` and the wider one for
+# ``parse_custom_media_url``.
+KNOWN_ARCHES = BUILD_ARCHES
+_CUSTOM_URL_ARCHES = URL_ARCH_SEGMENTS
 
 
-def _match_version_token(segment: str) -> str | None:
+def match_known_version(segment: str) -> str | None:
     """Return the version number if *segment* carries one, else None.
 
     Recognises ``10``, ``cauldron``, ``mageia10``, ``mga10`` and
     returns the numeric portion (or ``'cauldron'``) as a lowercase
     string.  Only versions in :data:`KNOWN_VERSIONS` are accepted —
     a random ``mageia42`` is rejected as noise.
+
+    The spelling is :func:`urpm.core.release_segment.parse_release_token`'s
+    business; what is a *known* release is this module's, since that
+    is the part the CLI is opinionated about.
     """
-    if not segment:
+    token = parse_release_token(segment)
+    if token is None:
         return None
-    m = _VERSION_TOKEN_RE.match(segment)
-    if not m:
-        return None
-    version = m.group(1).lower()
-    return version if version in KNOWN_VERSIONS else None
+    return token.identity if token.identity in KNOWN_VERSIONS else None
+
 
 # Known media classes
 KNOWN_CLASSES = {'core', 'nonfree', 'tainted', 'debug'}
@@ -310,25 +305,38 @@ def parse_custom_media_url(url: str) -> dict | None:
     # prefix in addition to the bare form.
     parts = [p for p in path.split('/') if p]
     version_hits = [
-        (i, _match_version_token(p)) for i, p in enumerate(parts)
-        if _match_version_token(p) is not None
+        (i, match_known_version(p)) for i, p in enumerate(parts)
+        if match_known_version(p) is not None
     ]
     arch_hits = [(i, p) for i, p in enumerate(parts) if p in _CUSTOM_URL_ARCHES]
+    # A source tree occupies the position an architecture occupies in
+    # the binary layout, so it anchors the URL the same way — but only
+    # when there is no architecture segment to be found, since a URL
+    # that carries one has already said where it is anchored.  Without
+    # this, ``.../mageia10/free/SRPMS`` had no anchor at all: version
+    # and arch came back as None and the whole path was folded into
+    # ``relative_path``, which adds a second server row for a mirror
+    # already configured, this one with an empty ``base_path``.
+    anchor_hits = arch_hits or [
+        (i, p) for i, p in enumerate(parts) if is_sources_segment(p)
+    ]
 
     # Guard : require exactly one hit on each dimension.  Multiple
     # candidates on either side means the URL is either weird or
     # third-party in a way we shouldn't guess ; the user can force
     # things via ``--version`` / ``--arch`` at that point.
-    if len(version_hits) == 1 and len(arch_hits) == 1:
+    if len(version_hits) == 1 and len(anchor_hits) == 1:
         version = version_hits[0][1]
-        arch = arch_hits[0][1]
+        # ``SRPMS`` is a tree, never an architecture: a source media
+        # carries the host's arch, which only the caller knows.
+        arch = arch_hits[0][1] if arch_hits else None
         # ── base_path / relative_path split ─────────────────────────
         # Keep in lockstep with :func:`urpm.core.media_pipeline._split_url`.
         # Pivot is whichever of the two segments comes first — for
         # official URLs that's the version, for blogdrake plate too
         # (mageia<N> before <arch>).  Everything before the pivot
         # belongs to base_path, everything at/after to relative_path.
-        pivot = min(version_hits[0][0], arch_hits[0][0])
+        pivot = min(version_hits[0][0], anchor_hits[0][0])
         base_path = '/' + '/'.join(parts[:pivot]) if pivot > 0 else ''
         relative_path = '/'.join(parts[pivot:])
     else:
