@@ -27,8 +27,8 @@ import pytest
 
 from urpm.core.database import PackageDatabase
 from urpm.core.distupgrade.stage1 import (
-    _collect_source_enabled_sections, _disable_source_media,
-    _insert_target_media, _section_key,
+    _collect_source_enabled_sections, _cross_arch_trees,
+    _disable_source_media, _insert_target_media, _section_key,
 )
 from urpm.core.distupgrade.version import ReleaseIdentity
 
@@ -46,14 +46,31 @@ media_type=official:release
 noauto=1
 """
 
+#: Le catalogue 32 bits de la cible, tel que le miroir le sert.  Il est
+#: déposé sous ``10/i586/`` et se déclare ``arch=i686`` : c'est l'alias
+#: réel de Mageia 10, mesuré sur miroir, et c'est ce que l'ancien nom
+#: d'arbre doit traverser pour retrouver ses médias.
+MEDIA_CFG_32 = """[media_info]
+version=10
+arch=i686
+
+[core/release]
+name=Core Release
+media_type=official:release
+"""
+
 
 @pytest.fixture
 def world():
-    """Une base neuve et un catalogue cible sur disque."""
+    """Une base neuve et les catalogues cibles sur disque."""
     root = pathlib.Path(tempfile.mkdtemp())
     cfg = root / "10/x86_64/media/media_info"
     cfg.mkdir(parents=True)
     (cfg / "media.cfg").write_text(MEDIA_CFG)
+    for arch in ("i586", "i686"):
+        cfg32 = root / f"10/{arch}/media/media_info"
+        cfg32.mkdir(parents=True)
+        (cfg32 / "media.cfg").write_text(MEDIA_CFG_32)
 
     db = PackageDatabase(str(root / "packages.db"))
     conn = db._get_connection()
@@ -66,14 +83,30 @@ def world():
 
 
 def _source_media(conn, name, short_name, section="core/release",
-                  is_official=1, enabled=1, version="9"):
+                  is_official=1, enabled=1, version="9", arch="x86_64"):
     conn.execute(
         "INSERT INTO media (name, short_name, is_official, mageia_version,"
         " architecture, relative_path, enabled, added_timestamp)"
-        " VALUES (?,?,?,?, 'x86_64', ?, ?, 0)",
-        (name, short_name, is_official, version,
-         f"{version}/x86_64/media/{section}", enabled))
+        " VALUES (?,?,?,?,?,?,?,0)",
+        (name, short_name, is_official, version, arch,
+         f"{version}/{arch}/media/{section}", enabled))
     conn.commit()
+
+
+def _stage1_with_32bit(db, sections=None):
+    """La même séquence, en suivant aussi l'arbre étranger.
+
+    L'ordre de la vraie fonction : les deux collectes lisent
+    ``enabled``, donc elles passent avant la désactivation.
+    """
+    if sections is None:
+        sections = _collect_source_enabled_sections(db, "9")
+    cross = _cross_arch_trees(db, "9", "x86_64")
+    _disable_source_media(db, "9")
+    return _insert_target_media(
+        db, ReleaseIdentity(identity="10", numeric="10"), "x86_64",
+        cross_arches=tuple(cross),
+        source_identity="9", source_enabled_sections=sections)
 
 
 def _stage1(db, sections=None):
@@ -110,6 +143,158 @@ class TestLaCléDHéritage:
     def test_un_chemin_sans_segment_media_n_a_pas_de_clé(self):
         # Forme d'un dépôt tiers : traité ailleurs, pas par l'héritage.
         assert _section_key("rpms/x86_64", "x86_64") is None
+
+    def test_les_deux_noms_de_l_arbre_32_bits_sont_la_même_place(self):
+        """Le défaut remonté du terrain, réduit à une ligne.
+
+        La 9 publie ``i586``, la 10 publie ``i686`` : comparées
+        littéralement, les deux ne se rencontrent jamais et les médias
+        32 bits de l'utilisateur ressortent éteints de la mise à
+        niveau.
+        """
+        assert (_section_key("9/i586/media/core/release", "i586")
+                == _section_key("10/i686/media/core/release", "i686"))
+
+
+class TestQuelsArbresÉtrangersSuivre:
+    """Le catalogue x86_64 ne mentionne aucun média 32 bits.
+
+    Mesuré : soixante et une sections, aucune en cross-arch.  Les
+    médias 32 bits viennent d'un second catalogue, que Stage 1 n'allait
+    pas chercher.
+    """
+
+    def test_un_média_32_bits_actif_donne_son_arbre(self, world):
+        db, conn = world
+        _source_media(conn, "Core Release", "core_release")
+        _source_media(conn, "Core 32bit Release", "core_release_i586",
+                      arch="i586")
+
+        assert _cross_arch_trees(db, "9", "x86_64") == ["i586"]
+
+    def test_l_architecture_de_la_machine_n_est_pas_étrangère(self, world):
+        db, conn = world
+        _source_media(conn, "Core Release", "core_release")
+
+        assert _cross_arch_trees(db, "9", "x86_64") == []
+
+    def test_ce_qui_était_éteint_n_est_pas_suivi(self, world):
+        # On ne va chercher que ce que l'utilisateur avait activé.
+        db, conn = world
+        _source_media(conn, "Core 32bit Release", "core_release_i586",
+                      arch="i586", enabled=0)
+
+        assert _cross_arch_trees(db, "9", "x86_64") == []
+
+    def test_noarch_n_est_pas_un_arbre(self, world):
+        # ``noarch`` est un contenu, pas un arbre de miroir.
+        db, conn = world
+        _source_media(conn, "Noarch", "noarch_release", arch="noarch")
+
+        assert _cross_arch_trees(db, "9", "x86_64") == []
+
+    def test_une_machine_32_bits_ne_se_suit_pas_elle_même(self, world):
+        # i586 et i686 sont la même place : sur une machine 32 bits,
+        # l'arbre natif ne doit pas être redemandé comme étranger.
+        db, conn = world
+        _source_media(conn, "Core Release", "core_release", arch="i586")
+
+        assert _cross_arch_trees(db, "9", "i686") == []
+
+
+class TestL_ArbreÉtrangerEstSuivi:
+    """Bout en bout, avec le renommage réel de l'arbre 32 bits."""
+
+    def test_les_médias_32_bits_cibles_sont_créés_et_actifs(self, world):
+        db, conn = world
+        _source_media(conn, "Core Release", "core_release")
+        _source_media(conn, "Core 32bit Release", "core_release_i586",
+                      arch="i586")
+
+        _created, _failed, skipped, cross = _stage1_with_32bit(db)
+
+        assert skipped == []
+        assert cross == []
+        # Le média 32 bits cible existe, sous le nom d'arbre de la
+        # cible, et il hérite du choix de l'utilisateur.  La paire
+        # (short_name, architecture) est ce qui identifie un média :
+        # un même nom court vit sur deux architectures.
+        rows = {(r["short_name"], r["architecture"]): r for r in conn.execute(
+            "SELECT short_name, architecture, relative_path, enabled, name"
+            " FROM media WHERE mageia_version='10'")}
+        medium = rows[("core_release", "i686")]
+        assert medium["relative_path"] == "10/i686/media/core/release"
+        assert medium["enabled"] == 1
+        # Et son nom d'affichage porte l'architecture, sans quoi deux
+        # « Core Release » se présenteraient à l'identique.
+        assert "i686" in medium["name"]
+
+    def test_le_serveur_reste_celui_de_l_arbre_natif(self, world):
+        """L'alias ne doit pas créer un second serveur dégénéré.
+
+        Entrer par ``10/i586/`` alors que le catalogue se déclare
+        ``i686`` empêcherait le découpage ``<version>/<arch>/media``,
+        et le média atterrirait sur un serveur au chemin de base vide.
+        """
+        db, conn = world
+        _source_media(conn, "Core Release", "core_release")
+        _source_media(conn, "Core 32bit Release", "core_release_i586",
+                      arch="i586")
+
+        _stage1_with_32bit(db)
+
+        servers = [dict(r) for r in conn.execute(
+            "SELECT id, base_path FROM server")]
+        assert len(servers) == 1
+        assert servers[0]["base_path"]
+
+    def test_un_seul_miroir_en_retard_ne_fait_pas_un_arbre_perdu(self,
+                                                                 world):
+        """Il suffit d'un serveur qui porte l'arbre, comme pour le natif.
+
+        Signaler chaque miroir qui ne l'a pas donnerait six lignes pour
+        un arbre pourtant retrouvé, et l'opérateur apprendrait à ne
+        plus lire ces lignes.
+        """
+        db, conn = world
+        _source_media(conn, "Core Release", "core_release")
+        _source_media(conn, "Core 32bit Release", "core_release_i586",
+                      arch="i586")
+        # Un second miroir qui ne sert que l'arbre natif.
+        bare = pathlib.Path(tempfile.mkdtemp())
+        cfg = bare / "10/x86_64/media/media_info"
+        cfg.mkdir(parents=True)
+        (cfg / "media.cfg").write_text(MEDIA_CFG)
+        conn.execute(
+            "INSERT INTO server (name, protocol, host, base_path,"
+            " is_official, enabled, priority, added_timestamp)"
+            " VALUES ('autre','file','',?,1,1,50,0)", (str(bare),))
+        conn.commit()
+
+        created, failed, _skipped, cross = _stage1_with_32bit(db)
+
+        assert len(created) == 2
+        assert failed == []
+        assert cross == []
+
+    def test_un_arbre_absent_est_nommé_et_non_fatal(self, world):
+        """Un miroir sans l'arbre étranger ne doit pas arrêter l'étape.
+
+        Sans le catalogue natif il n'y a rien vers quoi monter, et
+        l'étape s'arrête ; sans l'arbre étranger l'utilisateur perd des
+        médias, ce qui se dit.
+        """
+        db, conn = world
+        _source_media(conn, "Core Release", "core_release")
+        _source_media(conn, "Core ARM Release", "core_release_armv7hl",
+                      arch="armv7hl")
+
+        created, failed, skipped, cross = _stage1_with_32bit(db)
+
+        assert created  # l'arbre natif, lui, est passé
+        assert failed == []
+        assert skipped == []
+        assert [what for what, _reason in cross] == ["armv7hl tree"]
 
 
 class TestLHéritage:
@@ -173,7 +358,7 @@ class TestCeQuiNePeutPasÊtreCréé:
         db, conn = world
         _source_media(conn, "Core Release", "core_release", is_official=0)
 
-        _created, _failed, skipped = _stage1(db, set())
+        _created, _failed, skipped, _cross = _stage1(db, set())
 
         assert [name for name, _reason in skipped] == ["core_release"]
         assert "already taken" in skipped[0][1]

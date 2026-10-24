@@ -993,6 +993,24 @@ def _cmd_run_to(args, db, *, to_arg: str, dry_run: bool,
                     n=n_failed,
                     names=", ".join(stage1_summary["failed_servers"]))))
 
+        # A foreign-architecture tree is followed when the operator had
+        # one enabled, and its absence is never a reason to stop: it is
+        # a reason to say which media they are losing.
+        cross_failed = stage1_summary.get("cross_arch_failed") or []
+        if cross_failed:
+            print(colors.warning(ngettext(
+                "  {n} architecture tree could not be followed to "
+                "mga{tgt}:",
+                "  {n} architecture trees could not be followed to "
+                "mga{tgt}:",
+                len(cross_failed)).format(
+                    n=len(cross_failed), tgt=stage0.target.display())))
+            for what, reason in cross_failed:
+                print("      " + colors.dim(f"{what} : {reason}"))
+            print("    " + colors.dim(_(
+                "Those media stay disabled. Add the tree by hand with "
+                "'urpm media discover' once it is published.")))
+
         # Named because it decides where the download will come from,
         # and because a disc that stayed unused is exactly what the
         # operator could not see before.

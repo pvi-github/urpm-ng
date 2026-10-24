@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from ..release_segment import RELEASE_PREFIXES, arch_slot
 from ..removable import PROTOCOL as REMOVABLE_PROTOCOL
 
 if TYPE_CHECKING:
@@ -121,13 +122,16 @@ def _try_transpose_string(s: str, src: str, tgt: str) -> Optional[str]:
 
     Patterns handled, in priority order :
 
-    1. ``mageia<src>`` → ``mageia<tgt>`` — community layouts like
-       blogdrake that write the release as a prefixed segment
-       (``mageia9/free/x86_64``).  Tried before the ``mga`` variant
-       because ``mga`` is a proper substring of ``mageia`` in some
-       contexts we don't want to fold twice.
-    2. ``mga<src>`` → ``mga<tgt>`` — Mageia disttag anywhere.
-    3. Segment ``<src>`` where segments are ``/``-separated — covers
+    1. A prefixed release from :data:`RELEASE_PREFIXES`, anywhere in
+       the string : ``mageia9`` → ``mageia10`` for community layouts
+       that write the release as a prefixed segment
+       (``mageia9/free/x86_64``), ``mga9`` → ``mga10`` for the Mageia
+       disttag.  Substituted as a substring rather than a segment,
+       which is why this function also serves media names and
+       disttags and not only URLs.  First match wins ; the two
+       spellings cannot both occur in the same position since neither
+       contains the other.
+    2. Segment ``<src>`` where segments are ``/``-separated — covers
        ``/9/`` in the middle, ``9/`` at start, ``/9`` at end, and a
        bare ``9`` alone.  Matched segment-wise (not by ``str.replace``)
        so a ``9`` inside a coincidental hash or file name is left alone.
@@ -137,10 +141,10 @@ def _try_transpose_string(s: str, src: str, tgt: str) -> Optional[str]:
     source identities (``"cauldron"``) don't transpose : cauldron is
     a rolling target, N→N+1 arithmetic doesn't apply.
 
-    The *target* has to be numeric for the first two patterns and need
-    not be for the third, which is the whole difference between a
-    release number and a release name.  ``mageia9`` and ``mga9`` glue
-    the number to a prefix, and there is no ``mageiacauldron`` path on
+    The *target* has to be numeric for the first pattern and need not
+    be for the second, which is the whole difference between a release
+    number and a release name.  ``mageia9`` and ``mga9`` glue the
+    number to a prefix, and there is no ``mageiacauldron`` path on
     any mirror nor any ``.mgacauldron`` package — that tag does not
     exist and never will.  A standalone path segment is another
     matter : mirrors do serve ``/cauldron/x86_64/…``, so ``9`` →
@@ -149,12 +153,9 @@ def _try_transpose_string(s: str, src: str, tgt: str) -> Optional[str]:
     if not s or not src.isdigit():
         return None
     if tgt.isdigit():
-        prefixed_src, prefixed_tgt = f"mageia{src}", f"mageia{tgt}"
-        if prefixed_src in s:
-            return s.replace(prefixed_src, prefixed_tgt)
-        tag_src, tag_tgt = f"mga{src}", f"mga{tgt}"
-        if tag_src in s:
-            return s.replace(tag_src, tag_tgt)
+        for prefix in RELEASE_PREFIXES:
+            if f"{prefix}{src}" in s:
+                return s.replace(f"{prefix}{src}", f"{prefix}{tgt}")
     # Segment-wise bump — treats the string as ``/``-separated tokens
     # and only rewrites tokens that are exactly ``src``.  Handles
     # ``9/x86_64/...`` (leading), ``.../x86_64/9`` (trailing),
@@ -546,6 +547,15 @@ def _section_key(relative_path: str, architecture: str):
     are the same medium one release apart : what identifies it is
     ``core/release`` plus the architecture, never the version in front.
 
+    The architecture enters as a **slot**, not as a string, because
+    Mageia renamed the 32-bit tree from ``i586`` to ``i686`` between 9
+    and 10 while the media themselves did not change.  Compared
+    literally, every 32-bit medium of the target release looked like a
+    medium the machine had never had, and the user's 32-bit repositories
+    came out of the upgrade switched off.  Reported from the field, and
+    the same defect for a 32-bit machine would have switched off *all*
+    of its media.  See :func:`urpm.core.release_segment.arch_slot`.
+
     Returns ``None`` when the path carries no ``media`` segment, which
     is the shape of a third-party repository ; those are handled by
     :func:`_transpose_third_party_media`, not by the inheritance.
@@ -557,7 +567,7 @@ def _section_key(relative_path: str, architecture: str):
     if index < 0:
         return None
     return (relative_path[index + len(marker):].strip("/"),
-            architecture or "")
+            arch_slot(architecture))
 
 
 def _collect_source_enabled_sections(db: "PackageDatabase",
@@ -594,10 +604,79 @@ def _collect_source_enabled_sections(db: "PackageDatabase",
     return keys
 
 
+def _cross_arch_trees(db: "PackageDatabase",
+                      source_identity: str,
+                      system_arch: str) -> List[str]:
+    """The foreign-architecture trees the user had enabled on the source.
+
+    Mageia publishes one catalogue per architecture tree, and the
+    x86_64 one does not mention the 32-bit media at all : measured,
+    sixty-one sections and not one of them cross-arch.  So a machine
+    with ``Core 32bit Release`` enabled holds a medium that comes from
+    a second catalogue, ``…/<release>/i586/media/``, which Stage 1
+    never fetched.  The source rows were disabled like the others, no
+    target counterpart was ever created, and the operator lost their
+    32-bit repositories with nothing said.
+
+    Called BEFORE :func:`_disable_source_media`, like
+    :func:`_collect_source_enabled_sections`, since it reads
+    ``enabled``.
+
+    The architecture is returned **as the source spelled it**, because
+    that is a directory name on the mirror and we do not get to invent
+    one.  Release 10 serves ``i586`` as an alias of its ``i686`` tree,
+    so the catalogue found there declares ``arch=i686`` and the rows
+    land under the name the target release actually uses.  A mirror
+    that carries no such tree answers 404 and is reported ; guessing a
+    successor name would mean maintaining a table of architecture
+    renames, which is exactly what :func:`arch_slot` exists to avoid.
+    """
+    conn = db._get_connection()
+    rows = conn.execute("""
+        SELECT DISTINCT architecture FROM media
+        WHERE enabled = 1
+          AND is_official = 1
+          AND mageia_version = ?
+    """, (source_identity,)).fetchall()
+
+    native = arch_slot(system_arch)
+    found = []
+    for row in rows:
+        architecture = (row["architecture"] or "").strip()
+        if not architecture or architecture == "noarch":
+            continue
+        if arch_slot(architecture) == native:
+            continue
+        found.append(architecture)
+    return sorted(found)
+
+
+def _declared_arch(catalogue_url: str) -> str:
+    """The architecture a catalogue says it is for.
+
+    Asked of a foreign tree before anything is written, because a
+    release may rename one and keep the old name as an alias: release
+    10 answers ``arch=i686`` at ``…/10/i586/media/``.  Upserting
+    through the alias would hand :func:`decompose_url` a path whose
+    architecture does not match the catalogue's, the
+    ``<version>/<arch>/media`` split would not be found, and the
+    medium would land on a server row with an empty base path.  So the
+    tree is entered by the name it gives itself.
+
+    Costs one small file per server, and only on a machine that has a
+    foreign tree to follow at all.
+    """
+    from ..media_cfg import fetch_media_cfg, parse_media_cfg
+
+    info, _media = parse_media_cfg(fetch_media_cfg(catalogue_url), "")
+    return (info.arch or "").strip()
+
+
 def _insert_target_media(db: "PackageDatabase",
                          target: "ReleaseIdentity",
                          arch: str,
                          *,
+                         cross_arches: Tuple[str, ...] = (),
                          source_identity: str,
                          source_enabled_sections: set = None,
                          undo_journal: dict = None,
@@ -612,12 +691,22 @@ def _insert_target_media(db: "PackageDatabase",
     enable state ; when ``None``, the catalogue's ``noauto`` flag
     wins (the pre-v0.9 behaviour).
 
-    Returns ``(created_urls, failed_servers)`` — ``created_urls``
-    are the catalogue URLs successfully upserted, ``failed_servers``
-    the servers whose upsert raised (network error, 404, unreachable
-    mirror).  A partial success is fine : as long as one server
-    surfaced the target catalogue, downstream Stage 2 can download
-    from any of them.
+    ``cross_arches`` — foreign-architecture trees to fetch in addition
+    to ``arch``, from :func:`_cross_arch_trees`.  Their failures are
+    kept apart from the machine's own architecture and never fatal: a
+    missing 32-bit tree costs the operator their 32-bit media and is
+    worth a named warning, while a missing native catalogue means
+    there is nothing to upgrade to and stops the stage.
+
+    Returns ``(created_urls, failed_servers, skipped, cross_failed)``
+    — ``created_urls`` are the native catalogue URLs successfully
+    upserted, ``failed_servers`` the servers whose native upsert
+    raised (network error, 404, unreachable mirror), ``skipped`` the
+    native media the primitive refused with its reason, and
+    ``cross_failed`` the same two kinds of trouble for a foreign
+    architecture, as ``(what, reason)`` pairs.  A partial success is
+    fine : as long as one server surfaced the target catalogue,
+    downstream Stage 2 can download from any of them.
     """
     from ..config import build_server_url
     from ..media_pipeline import upsert_media_tree, MediaTreeError
@@ -673,9 +762,98 @@ def _insert_target_media(db: "PackageDatabase",
                              discovered.architecture)
                 in source_enabled_sections)
 
+    def _upsert_one_tree(catalogue_url: str) -> List[tuple]:
+        """Upsert the catalogue at *catalogue_url*, one arch tree.
+
+        Returns the ``(short_name, reason)`` pairs the primitive
+        refused.  Raises whatever the primitive raises : whether this
+        tree is one the stage can do without is the caller's call, not
+        this closure's.
+        """
+        result = upsert_media_tree(
+            db, catalogue_url, mode="reconcile",
+            enabled_policy=_inherit_source_enable,
+        )
+        # Capture what upsert created for the undo journal.
+        if undo_journal is not None:
+            if getattr(result, "server_was_created", False):
+                undo_journal["created_server_ids"].append(
+                    int(result.server_id))
+            for outcome in result.outcomes:
+                if outcome.action == "created" and \
+                        outcome.media_id is not None:
+                    undo_journal["created_media_ids"].append(
+                        int(outcome.media_id))
+        # Reconcile mode doesn't re-flip ``enabled`` on rows that
+        # already exist (they've been through a prior Stage 1 pass
+        # or a manual ``urpm media add``).  Explicitly re-align
+        # their enable state with the source-side user choice ;
+        # capture the pre-flip snapshot so ``--abort`` restores it.
+        if source_enabled_sections:
+            for outcome in result.outcomes:
+                row = db.get_media(outcome.media_name)
+                if not row:
+                    continue
+                want_enabled = int(
+                    _section_key(row.get("relative_path"),
+                                 row.get("architecture"))
+                    in source_enabled_sections)
+                if row.get("enabled") != want_enabled:
+                    if undo_journal is not None:
+                        # Only snapshot rows that pre-existed —
+                        # freshly-created rows will be deleted
+                        # by the undo, not restored.
+                        if outcome.action != "created":
+                            undo_journal["modified_media"].append(
+                                _snapshot_media_row(row))
+                    with db._lock:
+                        conn.execute(
+                            "UPDATE media SET enabled=? WHERE id=?",
+                            (want_enabled, row["id"]))
+                        conn.commit()
+        n_out = len(result.outcomes)
+        n_created = sum(
+            1 for o in result.outcomes if o.action == "created")
+        logger.info(
+            "stage1 : upsert %s → %d media in catalogue (%d created)",
+            catalogue_url, n_out, n_created,
+        )
+        # A target medium the primitive could not insert is an
+        # anomaly of this stage, not an internal detail : it
+        # carries the exact reason, and dropping it is how a
+        # distupgrade came to blame the resolver for a medium
+        # whose display name was taken.
+        refused = []
+        for outcome in result.outcomes:
+            if outcome.action == "skipped":
+                refused.append((outcome.short_name, outcome.reason))
+                logger.warning(
+                    "stage1 : target media %s not created : %s",
+                    outcome.short_name, outcome.reason)
+        return refused
+
     created: List[str] = []
     failed: List[str] = []
     skipped: List[tuple] = []
+    #: Foreign tree → why the last server could not serve it, and the
+    #: set of those at least one server did serve.  Kept apart so a
+    #: single lagging mirror is not reported as a lost tree.
+    cross_unreachable: dict = {}
+    cross_delivered: set = set()
+    cross_refused: dict = {}
+    # The machine's own architecture first, then whatever foreign tree
+    # the user had enabled.  The flag carries the difference in
+    # consequence : without the native catalogue there is nothing to
+    # upgrade to, without the 32-bit one the operator loses their
+    # 32-bit media and has to be told so.
+    trees = [(arch, True)] + [(extra, False) for extra in cross_arches]
+    # ``(url_segment, arch) -> the name that tree answers under``.  The
+    # answer is a property of the release, not of the mirror, so it is
+    # asked once and not once per server : a distupgrade already costs
+    # the network enough.  Keyed on the URL segment too, since a
+    # per-server ``url_version`` pin can point two servers at two
+    # different releases.
+    declared_arches: dict = {}
     for srv in servers:
         srv_dict = dict(srv)
         base_url = build_server_url(srv_dict)
@@ -697,77 +875,56 @@ def _insert_target_media(db: "PackageDatabase",
                 )
                 conn.commit()
             srv_dict["url_version"] = target.identity
-        # Target arch/version tree URL
-        catalogue_url = (
-            f"{base_url.rstrip('/')}/{url_seg}/{arch}/media/"
-        )
-        try:
-            result = upsert_media_tree(
-                db, catalogue_url, mode="reconcile",
-                enabled_policy=_inherit_source_enable,
+        for requested, is_native in trees:
+            # Target arch/version tree URL
+            segment = requested
+            catalogue_url = (
+                f"{base_url.rstrip('/')}/{url_seg}/{segment}/media/"
             )
-            # Capture what upsert created for the undo journal.
-            if undo_journal is not None:
-                if getattr(result, "server_was_created", False):
-                    undo_journal["created_server_ids"].append(
-                        int(result.server_id))
-                for outcome in result.outcomes:
-                    if outcome.action == "created" and \
-                            outcome.media_id is not None:
-                        undo_journal["created_media_ids"].append(
-                            int(outcome.media_id))
-            # Reconcile mode doesn't re-flip ``enabled`` on rows that
-            # already exist (they've been through a prior Stage 1 pass
-            # or a manual ``urpm media add``).  Explicitly re-align
-            # their enable state with the source-side user choice ;
-            # capture the pre-flip snapshot so ``--abort`` restores it.
-            if source_enabled_sections:
-                for outcome in result.outcomes:
-                    row = db.get_media(outcome.media_name)
-                    if not row:
-                        continue
-                    want_enabled = int(
-                        _section_key(row.get("relative_path"),
-                                     row.get("architecture"))
-                        in source_enabled_sections)
-                    if row.get("enabled") != want_enabled:
-                        if undo_journal is not None:
-                            # Only snapshot rows that pre-existed —
-                            # freshly-created rows will be deleted
-                            # by the undo, not restored.
-                            if outcome.action != "created":
-                                undo_journal["modified_media"].append(
-                                    _snapshot_media_row(row))
-                        with db._lock:
-                            conn.execute(
-                                "UPDATE media SET enabled=? WHERE id=?",
-                                (want_enabled, row["id"]))
-                            conn.commit()
-            created.append(catalogue_url)
-            n_out = len(result.outcomes)
-            n_created = sum(
-                1 for o in result.outcomes if o.action == "created")
-            logger.info(
-                "stage1 : upsert %s → %d media in catalogue "
-                "(%d created)",
-                catalogue_url, n_out, n_created,
-            )
-            # A target medium the primitive could not insert is an
-            # anomaly of this stage, not an internal detail : it
-            # carries the exact reason, and dropping it is how a
-            # distupgrade came to blame the resolver for a medium
-            # whose display name was taken.
-            for outcome in result.outcomes:
-                if outcome.action == "skipped":
-                    skipped.append((outcome.short_name, outcome.reason))
-                    logger.warning(
-                        "stage1 : target media %s not created : %s",
-                        outcome.short_name, outcome.reason)
-        except (MediaTreeError, Exception) as exc:  # noqa: BLE001
-            logger.warning("target-media upsert failed for %s : %s",
-                           srv_dict["name"], exc)
-            failed.append(srv_dict["name"])
-    return created, failed, skipped
+            try:
+                if not is_native:
+                    # Enter a foreign tree by the name it gives itself,
+                    # not by the one the source release used for it.
+                    cache_key = (url_seg, requested)
+                    if cache_key not in declared_arches:
+                        declared_arches[cache_key] = _declared_arch(
+                            catalogue_url)
+                    declared = declared_arches[cache_key]
+                    if declared and declared != segment:
+                        logger.info(
+                            "stage1 : %s tree answers as %s on %s",
+                            segment, declared, srv_dict["name"])
+                        segment = declared
+                        catalogue_url = (
+                            f"{base_url.rstrip('/')}/{url_seg}"
+                            f"/{segment}/media/"
+                        )
+                refused = _upsert_one_tree(catalogue_url)
+            except (MediaTreeError, Exception) as exc:  # noqa: BLE001
+                logger.warning("target-media upsert failed for %s : %s",
+                               catalogue_url, exc)
+                if is_native:
+                    failed.append(srv_dict["name"])
+                else:
+                    cross_unreachable.setdefault(requested, str(exc))
+                continue
+            if is_native:
+                created.append(catalogue_url)
+                skipped.extend(refused)
+            else:
+                cross_delivered.add(requested)
+                for short_name, reason in refused:
+                    cross_refused.setdefault(short_name, reason)
+
+    # A foreign tree needs one server that carries it, like the native
+    # one : a mirror that does not is not news, every mirror failing is.
+    cross_failed = [(f"{architecture} tree", reason)
+                    for architecture, reason in cross_unreachable.items()
+                    if architecture not in cross_delivered]
+    # A medium the primitive refused is named once : every server would
+    # refuse the same one for the same reason.
+    cross_failed += sorted(cross_refused.items())
+    return created, failed, skipped, cross_failed
 
 
 def _relink_mounted_discs(db: "PackageDatabase") -> List[tuple]:
@@ -884,6 +1041,12 @@ def run_stage1(
     # to noauto=1.
     source_enabled = _collect_source_enabled_sections(
         db, source_identity)
+    # Same « before the disable pass » constraint, same reason : both
+    # read ``enabled``, which is about to be flipped.
+    cross_arches = _cross_arch_trees(db, source_identity, arch)
+    if cross_arches:
+        logger.info("stage1 : foreign architecture tree(s) to follow : %s",
+                    ", ".join(cross_arches))
 
     # Undo journal populated by every mutating helper.  Persisted into
     # ``.state.stage1_undo`` at end of Stage 1 ; consumed by
@@ -912,8 +1075,10 @@ def run_stage1(
     # sees them with the same treatment.
     disabled_orphan.extend(tp_orphaned)
 
-    created_urls, failed_servers, skipped_media = _insert_target_media(
+    (created_urls, failed_servers, skipped_media,
+     cross_arch_failed) = _insert_target_media(
         db, target, arch,
+        cross_arches=tuple(cross_arches),
         source_identity=source_identity,
         source_enabled_sections=source_enabled,
         undo_journal=undo_journal,
@@ -951,5 +1116,10 @@ def run_stage1(
         "third_party_activated": tp_activated,
         "created_urls": created_urls,
         "failed_servers": failed_servers,
+        # Never fatal, always named : a 32-bit tree the target release
+        # or this mirror does not carry costs the operator media they
+        # had, and silence is how it went unnoticed for several
+        # releases.
+        "cross_arch_failed": cross_arch_failed,
         "linked_discs": linked_discs,
     }
