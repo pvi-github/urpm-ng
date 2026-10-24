@@ -1195,7 +1195,7 @@ urpm image make --release 10 --tag mga:10-foo --buildrequires SPECS/foo.spec
                               # `urpm erase --force --keep-orphans --sync` (herhaalbaar).
                               # Canoniek gebruik: `--exclude python3-zstandard` zodat
                               # firefox' mach niet struikelt over zijn eigen versiepin.
---urpm-ng-source auto|local|media|github
+--urpm-ng-source auto|local|media
                               # Waar urpm-ng-core vandaan komt (standaard: auto waterval)
 --urpm-ng-core <path>         # Installeer urpm-ng-core vanuit dit specifieke RPM
 --allow-disttag-mismatch      # Aanvaardt een lokaal RPM waarvan de disttag buiten het
@@ -1681,7 +1681,7 @@ Zie het onderdeel Vereisten voor de netwerkpoorten die je voor P2P-deling moet o
 De repository klonen:
 
 ```bash
-git clone https://github.com/pvi-github/urpm-ng.git
+git clone ssh://git@git.mageia.org/software/rpm/urpm-ng
 cd urpm-ng
 
 ```

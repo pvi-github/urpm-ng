@@ -13,7 +13,7 @@ Release:        %mkrel %{release}
 Summary:        Modern package manager for Mageia Linux
 License:        GPLv3+
 Group:          System/Packaging
-URL:            https://github.com/pvi-github/urpm-ng
+URL:            https://wiki.mageia.org/en/Urpm
 Source0:        %{name}-%{version}.tar.gz
 Source1:        pk-backend-urpm-%{version}.tar.gz
 

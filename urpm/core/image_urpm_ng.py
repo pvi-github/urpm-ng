@@ -8,9 +8,9 @@ Two entry points share the same decision engine:
   right after ``urpm media update`` inside the running container that
   is about to become the updated image.
 
-Both walk the same 4-rule decision tree (waterfall by default,
-overridable via the ``--urpm-ng-source={auto,local,media,github}``
-flag or completely bypassed via ``--urpm-ng-core=<path>``):
+Both walk the same decision tree (waterfall by default, overridable
+via the ``--urpm-ng-source={auto,local,media}`` flag or completely
+bypassed via ``--urpm-ng-core=<path>``):
 
 1. **Local match wins on a standalone target.**  If a RPM in
    ``rpmbuild/RPMS/`` matches ``VERSION+RELEASE+arch+disttag`` AND
@@ -26,8 +26,12 @@ flag or completely bypassed via ``--urpm-ng-core=<path>``):
    to the target (with pubkey), install urpm-ng-core from it.  The
    target now has this media configured for future updates.
 4. **No local match, no reachable host media for the target.**
-   Download the latest ``urpm-ng-core`` RPM from the project's
-   GitHub releases page and install it.
+   Nothing can be installed, and that is said plainly.  This used to
+   download the latest release from the project's GitHub page; the
+   project lives on Mageia's forge now, so that arm could only 404,
+   and reaching for a third party's API to install our own package
+   was a fragility of its own.  The message names the two ways out,
+   building locally or configuring a media that covers the target.
 
 The code is deliberately agnostic to ``mgabiz`` -- rule 3 only sees
 "a host media that provides urpm-ng-core and can be transposed to
@@ -60,14 +64,19 @@ if TYPE_CHECKING:
     from .database import PackageDatabase
 
 
-GITHUB_API = "https://api.github.com/repos/pvi-github/urpm-ng"
-
 # Valid values for the ``source=`` argument of the public entries.
+#
+# There used to be a fourth, ``github``, which downloaded the latest
+# release from the project's GitHub repository and was also the last
+# resort of the waterfall below.  The project lives on Mageia's own
+# forge now, so that arm could only ever 404 — and depending on a
+# third party's API to install our own package was a fragility of its
+# own.  What it did is covered by ``media``, from a repository we
+# publish ourselves.
 SOURCE_AUTO = "auto"
 SOURCE_LOCAL = "local"
 SOURCE_MEDIA = "media"
-SOURCE_GITHUB = "github"
-SOURCE_VALUES = (SOURCE_AUTO, SOURCE_LOCAL, SOURCE_MEDIA, SOURCE_GITHUB)
+SOURCE_VALUES = (SOURCE_AUTO, SOURCE_LOCAL, SOURCE_MEDIA)
 
 
 __all__ = [
@@ -104,10 +113,9 @@ def install_urpm_ng_core(
         mageia_release: Target Mageia release (``9``, ``10``, ``cauldron``).
         host_db: Host PackageDatabase (default DB path).  Loaded lazily
             if not provided.  Used by rule-3 detection.
-        source: Waterfall vs. pinned source.  ``auto`` walks the 4
-            rules; ``local`` / ``media`` / ``github`` skip the
-            waterfall and force that arm (error/prompt as documented
-            in the module docstring).
+        source: Waterfall vs. pinned source.  ``auto`` walks the
+            rules; ``local`` / ``media`` skip the waterfall and force
+            that arm (error as documented in the module docstring).
         explicit_rpm: Path to a specific RPM to install.  Overrides
             every waterfall rule -- treated as a hard directive.
         log: Progress printer (defaults to ``print`` so the module
@@ -164,12 +172,6 @@ def install_urpm_ng_core(
         return _install_from_host_media_in_chroot(
             chroot_dir, chroot_db, host_media, log,
         )
-    if choice == SOURCE_GITHUB:
-        log("  urpm-ng-core: falling back to GitHub release")
-        return _install_from_github_in_chroot(
-            chroot_dir, chroot_db, arch, mageia_release,
-            target_numeric, allow_disttag_mismatch, log,
-        )
     log(f"  ERROR: unexpected source decision {choice!r}")
     return 1
 
@@ -191,7 +193,7 @@ def ensure_urpm_ng_in_container(
     """Install / upgrade urpm-ng-core inside a running image container.
 
     Called by ``urpm image update`` after ``urpm media update`` on the
-    image's own media.  Walks the same 4-rule tree as
+    image's own media.  Walks the same rule tree as
     :func:`install_urpm_ng_core` -- see the module docstring.
 
     Args:
@@ -259,16 +261,6 @@ def ensure_urpm_ng_in_container(
         return _install_from_host_media_in_container(
             container, cid, host_media, log,
         )
-    if choice == SOURCE_GITHUB:
-        log("  urpm-ng-core: falling back to GitHub release")
-        # Pass ``identity`` (may be ``'cauldron'``) rather than the
-        # numeric ``release`` so :func:`_accepted_disttags` applies the
-        # cauldron relaxation.  ``target_numeric`` still carries the
-        # numeric so the disttag set resolves to real values.
-        return _install_from_github_in_container(
-            container, cid, arch, identity,
-            target_numeric, allow_disttag_mismatch, log,
-        )
     log(f"  ERROR: unexpected source decision {choice!r}")
     return 1
 
@@ -287,17 +279,22 @@ def _decide_source(
     non_interactive: bool,
     log: callable,
 ) -> str:
-    """Walk the 4-rule tree and return one of:
+    """Walk the rule tree and return one of:
 
     - ``"local"``      -- install the local RPM
     - ``"media"``      -- add the host media, install from it
-    - ``"github"``     -- download latest release from GitHub
     - ``"keep_media"`` -- target already has a media providing urpm-ng-core;
                           don't do anything urpm-ng-specific, upstream
                           ``urpm u`` handles it.
 
-    ``requested`` is the CLI flag value.  ``auto`` walks the 4 rules;
-    the other three force that arm with the documented fallback.
+    ``requested`` is the CLI flag value.  ``auto`` walks the rules;
+    the other two force that arm.
+
+    There is no remote last resort any more: when neither a local
+    build nor a reachable medium can serve the target, this raises
+    instead of reaching for a release on a third-party forge.  Saying
+    so is more useful than a download that 404s, and the operator has
+    two concrete ways out, named in the message.
     """
     target_has_media = target_media_version is not None
 
@@ -308,17 +305,13 @@ def _decide_source(
         raise _NoLocalMatchError(
             "--urpm-ng-source=local but no local RPM matches VERSION/RELEASE/arch/mga"
         )
-    if requested == SOURCE_GITHUB:
-        return SOURCE_GITHUB
     if requested == SOURCE_MEDIA:
         if host_media is not None:
             return SOURCE_MEDIA
-        # Fallback github with confirmation
-        if non_interactive or _confirm_fallback_github(log):
-            return SOURCE_GITHUB
         raise _NoLocalMatchError(
-            "--urpm-ng-source=media but host has no media for target, "
-            "and user declined GitHub fallback"
+            "--urpm-ng-source=media but the host has no media for this "
+            "target; configure one, or build urpm-ng locally and use "
+            "--urpm-ng-source=local"
         )
 
     # ── AUTO waterfall ────────────────────────────────────────────────
@@ -343,10 +336,14 @@ def _decide_source(
     if host_media is not None and _target_media_reachable(host_media, log):
         return SOURCE_MEDIA
 
-    # Rule 4: fallback github (also lands here if rule 3's target
-    # media.cfg is not reachable -- e.g. mgabiz publishes 10/x86_64
-    # but nothing for 9/aarch64).
-    return SOURCE_GITHUB
+    # Nothing left to install from.  Also lands here when rule 3's
+    # media.cfg is not reachable for this target -- a repository that
+    # publishes 10/x86_64 and nothing for 9/aarch64, say.
+    raise _NoLocalMatchError(
+        "no urpm-ng to install: no local build matches this target, and "
+        "no configured media covers it; build it locally, or add a media "
+        "that serves this release and architecture"
+    )
 
 
 class _NoLocalMatchError(RuntimeError):
@@ -751,28 +748,6 @@ def _install_from_host_media_in_chroot(
     return _install_from_chroot_media(chroot_dir, chroot_db)
 
 
-def _install_from_github_in_chroot(
-    chroot_dir: str,
-    chroot_db: "PackageDatabase",
-    arch: str,
-    mageia_release: str,
-    target_numeric: Optional[str],
-    allow_disttag_mismatch: bool,
-    log: callable,
-) -> int:
-    rpm = _download_urpm_ng_from_github(
-        arch, mageia_release, target_numeric, allow_disttag_mismatch, log)
-    if rpm is None:
-        return 1
-    try:
-        return _install_local_rpm_in_chroot(chroot_dir, chroot_db, rpm)
-    finally:
-        try:
-            rpm.unlink()
-        except OSError:
-            pass
-
-
 def _chroot_install_args(
     chroot_dir: str,
     packages: list,
@@ -938,28 +913,6 @@ def _install_from_host_media_in_container(
     return 0
 
 
-def _install_from_github_in_container(
-    container: "Container",
-    cid: str,
-    arch: str,
-    mageia_release: str,
-    target_numeric: Optional[str],
-    allow_disttag_mismatch: bool,
-    log: callable,
-) -> int:
-    rpm = _download_urpm_ng_from_github(
-        arch, mageia_release, target_numeric, allow_disttag_mismatch, log)
-    if rpm is None:
-        return 1
-    try:
-        return _install_local_rpm_in_container(container, cid, rpm, log)
-    finally:
-        try:
-            rpm.unlink()
-        except OSError:
-            pass
-
-
 # ══════════════════════════════════════════════════════════════════════
 #  User prompts
 # ══════════════════════════════════════════════════════════════════════
@@ -982,126 +935,3 @@ def _confirm_local_over_media(
     except (EOFError, KeyboardInterrupt):
         return False
     return confirm_yes(reply)
-
-
-def _confirm_fallback_github(log: callable) -> bool:
-    print(
-        _("  Host has no media providing urpm-ng-core for this target.\n"
-          "  Fall back to GitHub latest release?  [y/N] "),
-        end="",
-    )
-    try:
-        reply = input()
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return confirm_yes(reply)
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  GitHub helpers (shared between chroot + container arms)
-# ══════════════════════════════════════════════════════════════════════
-
-def _download_urpm_ng_from_github(
-    arch: str,
-    mageia_release: str,
-    target_numeric: Optional[str],
-    allow_disttag_mismatch: bool,
-    log: callable,
-) -> Optional[Path]:
-    """Fetch the latest urpm-ng-core RPM matching arch + Mageia release
-    from the project's GitHub releases and return its local path.
-    Caller owns the file and must delete it after use.
-
-    ``target_numeric`` and ``allow_disttag_mismatch`` are forwarded to
-    :func:`_github_pick_asset` so Rule 4's disttag filter follows the
-    same relaxation as Rule 1 (see :func:`_accepted_disttags`).
-    """
-    tag = _github_latest_tag(log)
-    if not tag:
-        log("  ERROR: could not resolve latest GitHub release tag")
-        return None
-    log(f"    latest tag: {tag}")
-
-    rpm_url = _github_pick_asset(
-        tag, arch, mageia_release, target_numeric, allow_disttag_mismatch, log)
-    if not rpm_url:
-        log(f"  ERROR: no urpm-ng-core RPM at {tag} for mga{mageia_release}/{arch}")
-        return None
-
-    with tempfile.NamedTemporaryFile(suffix=".rpm", delete=False) as f:
-        rpm_path = Path(f.name)
-    try:
-        log(f"    downloading {rpm_path.name} from GitHub...")
-        urllib.request.urlretrieve(rpm_url, str(rpm_path))
-    except (urllib.error.URLError, OSError) as e:
-        log(f"  ERROR: GitHub download failed: {e}")
-        try:
-            rpm_path.unlink()
-        except OSError:
-            pass
-        return None
-    return rpm_path
-
-
-def _github_latest_tag(log: callable) -> Optional[str]:
-    try:
-        with urllib.request.urlopen(f"{GITHUB_API}/releases/latest") as resp:
-            data = json.loads(resp.read())
-        return data.get("tag_name")
-    except urllib.error.HTTPError as e:
-        if e.code != 404:
-            log(f"  ERROR: GitHub /releases/latest returned HTTP {e.code}")
-            return None
-    except (urllib.error.URLError, OSError) as e:
-        log(f"  ERROR: could not reach GitHub API: {e}")
-        return None
-
-    try:
-        with urllib.request.urlopen(f"{GITHUB_API}/releases") as resp:
-            releases = json.loads(resp.read())
-    except (urllib.error.URLError, OSError) as e:
-        log(f"  ERROR: could not reach GitHub API: {e}")
-        return None
-    return releases[0].get("tag_name") if releases else None
-
-
-def _github_pick_asset(
-    tag: str,
-    arch: str,
-    mageia_release: str,
-    target_numeric: Optional[str],
-    allow_disttag_mismatch: bool,
-    log: callable,
-) -> Optional[str]:
-    """Pick the ``urpm-ng-core`` asset URL for ``tag`` that matches the
-    target arch + Mageia release.
-
-    Disttag matching goes through :func:`_accepted_disttags` — the same
-    relaxation Rule 1 (local match) already applies.  Chief consequence
-    for cauldron : the raw filter ``".mga{cauldron}."`` never matches
-    anything (cauldron RPMs carry the current numeric disttag, e.g.
-    ``.mga11.``, never ``.mgacauldron.``).  Delegating to
-    :func:`_accepted_disttags` translates the identity into the right
-    set of numeric disttags — ``{.mga11., .mga10.}`` for cauldron at
-    numeric=11 — and unblocks the fallback path.
-    """
-    try:
-        with urllib.request.urlopen(f"{GITHUB_API}/releases/tags/{tag}") as resp:
-            data = json.loads(resp.read())
-    except (urllib.error.URLError, OSError) as e:
-        log(f"  ERROR: could not fetch release {tag} details: {e}")
-        return None
-    accepted = _accepted_disttags(
-        mageia_release, target_numeric, allow_disttag_mismatch)
-    for asset in data.get("assets", []):
-        name = asset.get("name", "")
-        if not name.startswith("urpm-ng-core-"):
-            continue
-        if "-debuginfo-" in name or "-debugsource-" in name:
-            continue
-        if not (name.endswith(f".{arch}.rpm") or name.endswith(".noarch.rpm")):
-            continue
-        if accepted is not None and not any(dt in name for dt in accepted):
-            continue
-        return asset.get("browser_download_url")
-    return None

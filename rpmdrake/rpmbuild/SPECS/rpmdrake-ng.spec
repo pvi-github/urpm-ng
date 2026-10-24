@@ -9,7 +9,7 @@ Summary:        Modern graphical package manager for Mageia Linux
 Summary(fr):    Gestionnaire de paquets graphique moderne pour Mageia Linux
 License:        GPLv3+
 Group:          System/Packaging
-URL:            https://github.com/pvi-github/urpm-ng
+URL:            https://wiki.mageia.org/en/Urpm
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 

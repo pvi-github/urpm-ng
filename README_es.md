@@ -1158,7 +1158,7 @@ urpm image make --release 10 --tag mga:10-foo --buildrequires SPECS/foo.spec
                               # `urpm erase --force --keep-orphans --sync` (repetible).
                               # Uso canónico: `--exclude python3-zstandard` para que
                               # mach de firefox no tropiece con su propia restricción de versión.
---urpm-ng-source auto|local|media|github
+--urpm-ng-source auto|local|media
                               # De dónde proviene urpm-ng-core (por defecto: cascada auto)
 --urpm-ng-core <path>         # Instalar urpm-ng-core desde este RPM concreto
 --allow-disttag-mismatch      # Acepta un RPM local cuyo disttag queda fuera de la
@@ -1632,7 +1632,7 @@ Ver la sección Requisitos previos para los puertos de red que abrir para el uso
 Clona el repositorio:
 
 ```bash
-git clone https://github.com/pvi-github/urpm-ng.git
+git clone ssh://git@git.mageia.org/software/rpm/urpm-ng
 cd urpm-ng
 
 ```

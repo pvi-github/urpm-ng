@@ -79,7 +79,7 @@ $ su -c 'urpmi python3-solv python3-zstandard'
 ### 2. Clone
 
 ```bash
-git clone https://github.com/pvi-github/urpm-ng.git
+git clone ssh://git@git.mageia.org/software/rpm/urpm-ng
 
 cd urpm-ng
 ```

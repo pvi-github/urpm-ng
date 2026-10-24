@@ -863,11 +863,10 @@ Elimina \fIPKG\fR de la imagen final mediante
 Uso canónico: \fB\-\-exclude python3\-zstandard\fR para que el
 \fBmach\fR de firefox no tropiece con su propia restricción de versión.
 .TP
-.B \-\-urpm\-ng\-source " " auto|local|media|github
+.B \-\-urpm\-ng\-source " " auto|local|media
 De dónde proviene \fBurpm\-ng\-core\fR: \fBauto\fR (cascada por defecto:
-local > media del host > github), \fBlocal\fR (fuerza RPM local),
-\fBmedia\fR (fuerza media del host con fallback a github), \fBgithub\fR
-(fuerza la release de GitHub).
+coincidencia local > media del host), \fBlocal\fR (fuerza RPM local),
+\fBmedia\fR (fuerza media del host).
 .TP
 .BR \-\-urpm\-ng\-core " " \fIruta_rpm\fR
 Instala \fBurpm\-ng\-core\fR desde este RPM específico, anulando
@@ -1158,7 +1157,7 @@ su razón. Comprobación scriptable:
 .BR urpmd (8),
 .BR rpm (8),
 .SH ERRORES
-Informe de errores en https://github.com/pvi-github/urpm-ng/issues
+Informe de errores en https://bugs.mageia.org/
 .SH AUTORES
 Pascal Vilarem (Maat) y colaboradores.
 .SH COPYRIGHT

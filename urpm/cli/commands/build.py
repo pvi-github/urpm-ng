@@ -822,10 +822,10 @@ def _phase1_bootstrap_chroot(
                 return 1
 
         # urpm-ng-core: cadré in SPEC_IMAGE_URPM_NG_INCLUSION.
-        # Three modes tried in order (dev-local > repo-backed > github
-        # fallback); the code lives in ``urpm.core.image_urpm_ng`` so
-        # this branch stays a one-liner and ``urpm image make`` remains
-        # agnostic to which media urpm-ng lives in today.
+        # Two modes tried in order (dev-local > repo-backed); the code
+        # lives in ``urpm.core.image_urpm_ng`` so this branch stays a
+        # one-liner and ``urpm image make`` remains agnostic to which
+        # media urpm-ng lives in today.
         print(_("  Installing urpm-ng-core..."))
         from ...core.image_urpm_ng import install_urpm_ng_core
         if install_urpm_ng_core(

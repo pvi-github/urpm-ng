@@ -1153,11 +1153,10 @@ Canonical use: \fB\-\-exclude python3\-zstandard\fR so firefox's
 \fBmach\fR does not trip on its own version pin against the
 system-installed one.
 .TP
-.B \-\-urpm\-ng\-source " " auto|local|media|github
+.B \-\-urpm\-ng\-source " " auto|local|media
 Where \fBurpm\-ng\-core\fR comes from: \fBauto\fR (default waterfall:
-local match > host media > github), \fBlocal\fR (force local RPM),
-\fBmedia\fR (force host media with github fallback), \fBgithub\fR
-(force GitHub release).
+local match > host media), \fBlocal\fR (force a local RPM),
+\fBmedia\fR (force a host media).
 .TP
 .BR \-\-urpm\-ng\-core " " \fIrpm_path\fR
 Install \fBurpm\-ng\-core\fR from this specific RPM file, overriding
@@ -1462,7 +1461,7 @@ reason. Scriptable check:
 .BR urpmd (8),
 .BR rpm (8),
 .SH BUGS
-Report bugs at https://github.com/pvi-github/urpm-ng/issues
+Report bugs at https://bugs.mageia.org/
 .SH AUTHORS
 Pascal Vilarem (Maât) and contributors.
 .SH COPYRIGHT

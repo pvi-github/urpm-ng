@@ -863,11 +863,10 @@ Verwijdert \fIPKG\fR uit het uiteindelijke image via
 Canoniek gebruik: \fB\-\-exclude python3\-zstandard\fR zodat firefox'
 \fBmach\fR niet struikelt over zijn eigen versiepin.
 .TP
-.B \-\-urpm\-ng\-source " " auto|local|media|github
+.B \-\-urpm\-ng\-source " " auto|local|media
 Waar \fBurpm\-ng\-core\fR vandaan komt: \fBauto\fR (standaard waterval:
-lokaal > host-media > github), \fBlocal\fR (forceer lokaal RPM),
-\fBmedia\fR (forceer host-media met github-terugval), \fBgithub\fR
-(forceer GitHub-release).
+lokale match > host-media), \fBlocal\fR (forceer lokaal RPM),
+\fBmedia\fR (forceer host-media).
 .TP
 .BR \-\-urpm\-ng\-core " " \fIrpm_pad\fR
 Installeer \fBurpm\-ng\-core\fR vanuit dit specifieke RPM, met voorrang
@@ -1160,7 +1159,7 @@ hun reden. Scripttest:
 .BR urpmd (8),
 .BR rpm (8),
 .SH FOUTEN
-Meld fouten op https://github.com/pvi-github/urpm-ng/issues
+Meld fouten op https://bugs.mageia.org/
 .SH AUTEURS
 Pascal Vilarem (Maât) en bijdragers.
 .SH COPYRIGHT

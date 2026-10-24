@@ -38,7 +38,7 @@ rpmdrake-ng = "rpmdrake.qt.main:main"
 
 [project.urls]
 Homepage = "https://mageia.org"
-Repository = "https://github.com/mageia/urpm-ng"
+Repository = "ssh://git@git.mageia.org/software/rpm/urpm-ng"
 
 [tool.setuptools.packages.find]
 where = ["."]

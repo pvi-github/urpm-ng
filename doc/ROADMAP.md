@@ -178,7 +178,7 @@ urpm-ng est un projet ouvert. Toute contribution est la bienvenue : code, tests,
 traduction, retours d'experience, signalement de bugs ou de coquilles dans la
 documentation -- il n'y a pas de contribution trop petite.
 
-- **Code source** : [github.com/pvi-github/urpm-ng](https://github.com/pvi-github/urpm-ng)
+- **Code source** : `ssh://git@git.mageia.org/software/rpm/urpm-ng`
 - **Conventions de developpement** : voir `CLAUDE.md` a la racine du projet
 - **Architecture technique** : voir `doc/ARCHITECTURE.md`
 - **Tests** : voir `doc/TESTING.md`

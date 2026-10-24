@@ -78,8 +78,8 @@
 
   <icon type="stock">urpm-ng</icon>
 
-  <url type="homepage">https://github.com/pvi-github/urpm-ng</url>
-  <url type="bugtracker">https://github.com/pvi-github/urpm-ng/issues</url>
+  <url type="homepage">https://wiki.mageia.org/en/Urpm</url>
+  <url type="bugtracker">https://bugs.mageia.org/</url>
 
   <project_license>GPL-2.0-or-later</project_license>
   <metadata_license>CC0-1.0</metadata_license>

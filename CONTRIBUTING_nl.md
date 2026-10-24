@@ -12,7 +12,7 @@ Vijf paden, van het lichtste tot het zwaarste. Kies dat wat bij je beschikbare t
 
 Het meest nuttige dat een nieuwkomer kan doen. Installeer urpm-ng op je machine (volg het onderdeel *Installation* van [`README.md`](README.md) voor de huidige RPM-instructies), gebruik het een paar dagen voor wat je normaal met ``urpmi`` doet, en meld alles dat je verrast heeft — een crash, een verkeerde melding, een ontbrekende vertaling, een workflow die stroef, repetitief of onnatuurlijk aanvoelde.
 
-- Waar melden: **GitHub issues** op <https://github.com/pvi-github/urpm-ng/issues>.
+- Waar melden: het **Mageia-Bugzilla** op <https://bugs.mageia.org/>.
 - Vermeld ten minste:
   - De Mageia-versie (``cat /etc/mageia-release``).
   - De architectuur (``uname -m``).
@@ -55,7 +55,7 @@ Twee build-paden. Het **eenvoudige** gebruikt ``bm`` (de ``build-mageia``-wrappe
 Op een verse Mageia-machine is ``urpmi`` aanwezig maar ``sudo`` misschien niet geconfigureerd — de klassieke ``su -c``-vorm werkt overal:
 
 ```sh
-git clone https://github.com/pvi-github/urpm-ng.git
+git clone ssh://git@git.mageia.org/software/rpm/urpm-ng
 cd urpm-ng
 
 # De buildtool (bm) plus elke BuildRequires die de spec declareert.
@@ -152,7 +152,7 @@ Loop deze checklist door voor je een pull request opent:
 
 ## Waar ons te bereiken
 
-- **Issues & PRs**: <https://github.com/pvi-github/urpm-ng>
+- **Projectpagina**: <https://wiki.mageia.org/en/Urpm>
 - **Direct contact — Matrix**: [@maat_:matrix.org](https://matrix.to/#/@maat_:matrix.org)
 
 ## Waar de code woont

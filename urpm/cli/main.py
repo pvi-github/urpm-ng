@@ -827,12 +827,11 @@ Examples:
     )
     image_make.add_argument(
         '--urpm-ng-source',
-        choices=['auto', 'local', 'media', 'github'],
+        choices=['auto', 'local', 'media'],
         default='auto',
         help=_('Where urpm-ng-core comes from: auto (waterfall: local '
-               'match > host media > github), local (force local RPM), '
-               'media (force host media, fall back to github with '
-               'confirmation), github (force GitHub release).  Default: auto.'),
+               'match > host media), local (force a local RPM), '
+               'media (force a host media).  Default: auto.'),
     )
     image_make.add_argument(
         '--urpm-ng-core',
@@ -899,12 +898,11 @@ Examples:
     )
     image_update.add_argument(
         '--urpm-ng-source',
-        choices=['auto', 'local', 'media', 'github'],
+        choices=['auto', 'local', 'media'],
         default='auto',
         help=_('Where to source urpm-ng-core upgrades: auto (waterfall), '
-               'local (force local RPM), media (force host media, fall '
-               'back to github with confirmation), github (force '
-               'GitHub release).  Default: auto.'),
+               'local (force a local RPM), media (force a host media).  '
+               'Default: auto.'),
     )
     image_update.add_argument(
         '--urpm-ng-core',
