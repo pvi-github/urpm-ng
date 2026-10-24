@@ -160,6 +160,19 @@ def _render_urpmi_sync(entry: TriggeredHook,
                                              tgt=report.target_release)))
             for name in report.disabled:
                 lines.append("      " + name)
+        # A local medium is moved like any other, but its new path can
+        # only be checked when it is mounted.  Named and left on: a
+        # disc out of the drive needs the disc, not an edit.
+        if report.absent:
+            lines.append("    " + colors.warning(ngettext(
+                "{n} local medium now points at a path that is not there:",
+                "{n} local media now point at paths that are not there:",
+                len(report.absent)).format(n=len(report.absent))))
+            for name in report.absent:
+                lines.append("      " + name)
+            lines.append("      " + colors.dim(_(
+                "A disc medium only needs its disc mounted; otherwise "
+                "the path is to be corrected by hand.")))
     return lines
 
 

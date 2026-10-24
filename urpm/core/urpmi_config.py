@@ -7,14 +7,23 @@ the release the machine just left, which is a defect an operator meets
 the first time they type ``urpmi``.
 
 A release reaches a URL in more than one shape, and we do not know how
-many exist.  Two are handled, both measured on real configurations:
+many exist.  Three are handled, all measured on real configurations:
 
 * the release as a **path segment**, ``…/distrib/9/x86_64/media/…`` —
   the form URL-direct entries use;
 * the release inside the **mirror API filename**,
   ``mirrorlist: http://mirrors.mageia.org/api/mageia.9.x86_64.list`` —
   the form ``urpmi.addmedia --distrib`` leaves behind, and by far the
-  most common on an ordinary install.
+  most common on an ordinary install;
+* the same path segment inside a **bare local path**,
+  ``DVD_Core /media/9/x86_64/media/core`` — what urpmi writes for a
+  medium it reaches through the filesystem rather than the network.
+  It carries no scheme, so the obvious « a URL is a token containing
+  ``://`` » test walked straight past it: a disc medium came out of a
+  release upgrade neither moved nor reported, which is the worst of
+  the outcomes available.  A bare path is read as a URL on a block
+  header, where urpmi puts the medium's own address, and nowhere else:
+  ``removable: /dev/sr0`` names a device, not a medium.
 
 Only ``$MIRRORLIST`` genuinely repairs itself: urpmi resolves that one
 through ``/etc/product.id``, which comes from ``mageia-release``, which
@@ -45,6 +54,8 @@ from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
+from .release_segment import is_release_position, release_tokens
+
 logger = logging.getLogger(__name__)
 
 #: urpmi's configuration.  Hard-coded on purpose: the hook verb that
@@ -55,12 +66,6 @@ URPMI_CFG = Path("/etc/urpmi/urpmi.cfg")
 
 #: Written beside the original before the first rewrite.
 BACKUP_SUFFIX = ".urpm-ng.bak"
-
-#: The segment that follows the architecture in a binary media URL.
-_MEDIA_SEGMENT = "media"
-
-#: The architecture's stand-in in a source media URL.
-_SRPMS_SEGMENT = "SRPMS"
 
 
 @dataclass
@@ -84,40 +89,45 @@ class SyncReport:
     #: ``ignore`` so urpmi stops failing on them, and named because
     #: putting them back is a manual job.
     disabled: List[str] = field(default_factory=list)
+    #: Media we moved whose new path is not on the filesystem right
+    #: now.  Named, never switched off: a disc that is not in the
+    #: drive is absent without being gone, and marking it ``ignore``
+    #: would turn « insert the disc » into « edit the configuration ».
+    absent: List[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
         return self.rewritten > 0
 
 
-def _release_forms(release: str) -> tuple:
-    """The spellings a release takes as a path segment.
+def _is_media_url(token: str, *, bare_paths: bool) -> bool:
+    """Is this token the address of a medium?
 
-    The canonical tree uses the bare number (``/10/``).  Community
-    mirrors that carry several distributions side by side prefix it
-    (``/mageia10/``, ``/mga10/``), and urpmi is happy with either since
-    it only ever concatenates.
+    A scheme is the usual marker.  ``bare_paths`` additionally accepts
+    an absolute path, which is how urpmi declares a medium it reads
+    from the filesystem; the caller turns it on for a block header and
+    leaves it off everywhere else, so a device path in the body of a
+    block stays what it is.
     """
-    return (release, f"mageia{release}", f"mga{release}")
-
-
-def _is_release_position(segments: List[str], index: int) -> bool:
-    """Is the segment at ``index`` the release, or a number that looks like one?
-
-    Position decides, not the value.  A Mageia media URL always spells
-    out ``<release>/<arch>/media/...`` for binaries and
-    ``<release>/SRPMS/...`` for sources, so a segment is the release
-    when what follows it has that shape.  Without the check, a mirror
-    published under ``/mirrors/10/mageia/distrib/9/...`` would have its
-    own directory renamed on a 10 to 11 upgrade, and the operator would
-    be left with a configuration pointing nowhere.
-    """
-    following = segments[index + 1:]
-    if not following:
-        return False
-    if following[0] == _SRPMS_SEGMENT:
+    if "://" in token:
         return True
-    return len(following) > 1 and following[1] == _MEDIA_SEGMENT
+    return bare_paths and token.startswith("/")
+
+
+def _local_target(url: str) -> Optional[Path]:
+    """The filesystem path a medium address points at, or ``None``.
+
+    Both shapes urpmi accepts for a local medium answer here: the bare
+    path it writes itself, and the ``file://`` form an administrator
+    may have typed.  Everything else travels by network and is checked
+    by asking the server.
+    """
+    if url.startswith("/"):
+        return Path(url)
+    parts = urlsplit(url)
+    if parts.scheme == "file" and not parts.netloc:
+        return Path(parts.path)
+    return None
 
 
 def _move_url(url: str, source_release: str, target_release: str) -> tuple:
@@ -127,18 +137,24 @@ def _move_url(url: str, source_release: str, target_release: str) -> tuple:
     a path segment, and only the path is ours to touch.  A query string
     or a host that happens to contain the release number stays as it
     is, because it never reaches the segment list.
+
+    Which segment is the release, and how the mirror spells it, are
+    :mod:`urpm.core.release_segment`'s business: a community layout
+    writes ``mageia9`` where the official tree writes ``9``, and the
+    rewrite has to give back the first spelling to the first mirror.
     """
     parts = urlsplit(url)
     if not parts.path:
         return url, 0
 
-    forms = _release_forms(source_release)
     segments = parts.path.split("/")
     moved = 0
-    for index, segment in enumerate(segments):
-        if segment not in forms or not _is_release_position(segments, index):
+    for index, token in release_tokens(segments):
+        if token.identity != source_release:
             continue
-        segments[index] = segment.replace(source_release, target_release)
+        if not is_release_position(segments, index):
+            continue
+        segments[index] = token.respelled(target_release)
         moved += 1
 
     if not moved:
@@ -146,19 +162,20 @@ def _move_url(url: str, source_release: str, target_release: str) -> tuple:
     return urlunsplit(parts._replace(path="/".join(segments))), moved
 
 
-def _move_line(line: str, source_release: str, target_release: str) -> tuple:
+def _move_line(line: str, source_release: str, target_release: str,
+               *, bare_paths: bool = False) -> tuple:
     """Return ``(line, moved)``, touching only the URLs it carries.
 
     A medium's header line is ``<escaped name> <url> {``, so the name
     is on the same line as the URL and must come out untouched: an
     administrator who called a medium ``Core 9`` keeps that name.
-    Tokens are told apart by carrying a scheme, which the name never
-    does and ``$MIRRORLIST`` never does either.
+    Tokens are told apart by :func:`_is_media_url`, which a name never
+    satisfies and ``$MIRRORLIST`` never satisfies either.
     """
     moved = 0
     tokens = line.split(" ")
     for index, token in enumerate(tokens):
-        if "://" not in token:
+        if not _is_media_url(token, bare_paths=bare_paths):
             continue
         new_token, n = _move_url(token, source_release, target_release)
         if n:
@@ -222,17 +239,26 @@ def _move_mirrorlist_line(line: str, source_release: str,
     return line.replace(value, moved_value, 1), moved
 
 
-def _mentions_release(line: str, source_release: str) -> bool:
+def _mentions_release(line: str, source_release: str,
+                      *, bare_paths: bool = False) -> bool:
     """Does a URL on this line still name the release we left?
 
     Deliberately loose, and used only to decide whether to *report* an
     entry.  ``$MIRRORLIST`` is excluded because it is not stale, it is
     resolved elsewhere.
+
+    A release glued to a prefix, ``mageia9``, is surrounded by letters
+    and the neighbour test below cannot see it.  That is on purpose
+    and no longer costs anything: :func:`_move_url` moves every
+    prefixed spelling it finds, so such an entry never reaches the
+    reporting stage.  Before it did, and the operator was told nothing
+    about a medium nobody had moved, which is the worst of the two
+    outcomes.
     """
     for token in line.split(" "):
-        # ``$MIRRORLIST`` carries no scheme, so it never reaches the
+        # ``$MIRRORLIST`` is not an address, so it never reaches the
         # test below and is never reported as stale.
-        if "://" not in token:
+        if not _is_media_url(token, bare_paths=bare_paths):
             continue
         for index in _positions_of(token, source_release):
             before = token[index - 1] if index else "/"
@@ -256,13 +282,16 @@ def _medium_name(header: str) -> str:
     """The display name from a block header, spaces unescaped.
 
     A header is ``<escaped name> [url] {``.  The URL, when there is
-    one, is the last token carrying a scheme; what remains is the name
-    urpmi shows and the one an operator recognises.
+    one, is the token holding the medium's address; what remains is the
+    name urpmi shows and the one an operator recognises.  A local
+    medium's bare path counts as that address, or the name reported for
+    a disc read ``DVD_Core /media/9/x86_64/media/core``.
     """
     body = header.strip()
     if body.endswith("{"):
         body = body[:-1].rstrip()
-    tokens = [t for t in body.split(" ") if "://" not in t]
+    tokens = [t for t in body.split(" ")
+              if not _is_media_url(t, bare_paths=True)]
     return " ".join(t for t in tokens if t).replace("\\ ", " ").replace(
         "\\", "")
 
@@ -301,7 +330,7 @@ def _http_status(url: str, timeout: float = 5.0) -> Optional[int]:
         return None
 
 
-def _direct_urls(line: str) -> List[str]:
+def _direct_urls(line: str, *, bare_paths: bool = False) -> List[str]:
     """The URL tokens a line carries, mirror lists excluded.
 
     Only a medium pinned to one server can go missing on its own: the
@@ -311,7 +340,8 @@ def _direct_urls(line: str) -> List[str]:
     """
     if line.strip().startswith(_MIRRORLIST_KEY):
         return []
-    return [token for token in line.split(" ") if "://" in token]
+    return [token for token in line.split(" ")
+            if _is_media_url(token, bare_paths=bare_paths)]
 
 
 def sync_urpmi_config(source_release: str, target_release: str,
@@ -371,7 +401,12 @@ def sync_urpmi_config(source_release: str, target_release: str,
         newline = line[len(body):]
         stripped = body.strip()
 
-        if stripped.endswith("{"):
+        # A bare path is a medium's address on a header line, and a
+        # device or a directory option anywhere else.  The distinction
+        # is positional, and this loop is the only place that knows it.
+        is_header = stripped.endswith("{")
+
+        if is_header:
             name, moved_here, stale_here = _medium_name(body), 0, False
             ignored_here, header_at, moved_urls = False, len(lines), []
         elif stripped == "ignore":
@@ -379,14 +414,16 @@ def sync_urpmi_config(source_release: str, target_release: str,
             # nothing to check, nothing to say.
             ignored_here = True
 
-        new_body, moved = _move_line(body, source_release, target_release)
+        new_body, moved = _move_line(body, source_release, target_release,
+                                     bare_paths=is_header)
         new_body, moved_list = _move_mirrorlist_line(
             new_body, source_release, target_release)
         moved += moved_list
-        if not moved and _mentions_release(body, source_release):
+        if not moved and _mentions_release(body, source_release,
+                                           bare_paths=is_header):
             stale_here = True
         if moved:
-            moved_urls += _direct_urls(new_body)
+            moved_urls += _direct_urls(new_body, bare_paths=is_header)
         rewritten += moved
         moved_here += moved
         lines.append(new_body + newline)
@@ -417,8 +454,18 @@ def sync_urpmi_config(source_release: str, target_release: str,
     # to learn by asking about them.
     check = probe if probe is not None else _http_status
     for header_at, medium, urls in reversed(to_check):
+        # A local medium is asked of the filesystem, and the answer is
+        # read differently: an absent path is reported, never switched
+        # off.  The medium may simply be a disc nobody has inserted,
+        # and ``ignore`` would make that an edit instead of a gesture.
+        local = [path for path in (_local_target(url) for url in urls)
+                 if path is not None]
+        if any(not (path / _SYNTHESIS).exists() for path in local):
+            report.absent.append(medium)
+
         missing = any(
-            check(url.rstrip("/") + "/" + _SYNTHESIS) == 404 for url in urls)
+            check(url.rstrip("/") + "/" + _SYNTHESIS) == 404
+            for url in urls if _local_target(url) is None)
         if not missing:
             continue
         # Switched off rather than left to fail, and named because
@@ -426,6 +473,7 @@ def sync_urpmi_config(source_release: str, target_release: str,
         lines.insert(header_at + 1, _IGNORE_LINE + "\n")
         report.disabled.append(medium)
     report.disabled.reverse()
+    report.absent.reverse()
 
     try:
         backup = path.with_suffix(path.suffix + BACKUP_SUFFIX)

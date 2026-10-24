@@ -134,6 +134,47 @@ class TestWhatTheRewriteMoves:
 
         assert "/mga10/x86_64/media/" in path.read_text(encoding="utf-8")
 
+    def test_a_community_plate_moves_even_without_the_official_shape(
+            self, tmp_path):
+        # Measured on a real configuration.  blogdrake publishes
+        # ``/mageia9/<channel>/<arch>``: the release is prefixed and
+        # what follows it is the channel, so the shape test that
+        # protects a bare number found nothing and the entry stayed on
+        # mga9 after the upgrade.  It was not even reported, since a
+        # number glued to letters is invisible to the stale scan, so
+        # the operator was told nothing about a medium nobody moved.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "BDK\\ Free https://ftp.blogdrake.org/mageia/mageia9/free/x86_64"
+            " {\n}\n"
+            "BDK\\ Sources https://ftp.blogdrake.org/mageia/mageia9/free/SRPMS"
+            " {\n}\n", encoding="utf-8")
+
+        # Answered rather than asked: these are real hostnames, and
+        # whether blogdrake has opened its next release is not what
+        # this test is about.
+        report = sync_urpmi_config("9", "10", path=path,
+                                   probe=lambda url, **kwargs: 200)
+
+        text = path.read_text(encoding="utf-8")
+        assert "/mageia10/free/x86_64" in text
+        assert "/mageia10/free/SRPMS" in text
+        assert report.rewritten == 2
+        assert report.unhandled == []
+
+    def test_a_prefixed_segment_keeps_the_mirrors_spelling(self, tmp_path):
+        # ``mga9`` must become ``mga10`` and not ``10``: the prefix is
+        # part of that mirror's layout.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "Plate https://mir.example.org/pub/mga9/free/x86_64 {\n}\n",
+            encoding="utf-8")
+
+        sync_urpmi_config("9", "10", path=path,
+                          probe=lambda url, **kwargs: 200)
+
+        assert "/pub/mga10/free/x86_64" in path.read_text(encoding="utf-8")
+
     def test_the_count_is_what_actually_moved(self, cfg):
         report = sync_urpmi_config("9", "10", path=cfg)
 
@@ -488,6 +529,131 @@ class TestAMediumThatWasNeverPublished:
         assert report.backup is not None
 
 
+class TestAMediumOnTheFilesystem:
+    """A medium urpmi reads from a path, not from a server.
+
+    Reported from the field: after a release upgrade, ``urpmq
+    --list-url`` still answered ``DVD_Core /media/9/x86_64/media/core``
+    while our own media table had long moved to ``10``.  Such an entry
+    carries no scheme, and the rule that recognised an address by its
+    ``://`` walked past it three times over: not moved, not checked,
+    and not even reported as left behind.
+    """
+
+    def test_a_disc_declared_by_path_reaches_the_new_release(self, tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "DVD_Core /media/9/x86_64/media/core {\n"
+            "  removable: /dev/sr0\n}\n", encoding="utf-8")
+
+        report = sync_urpmi_config("9", "10", path=path)
+
+        assert report.rewritten == 1
+        assert "DVD_Core /media/10/x86_64/media/core {" in path.read_text(
+            encoding="utf-8")
+
+    def test_the_device_of_a_disc_is_not_an_address(self, tmp_path):
+        # A bare path is read as an address on a header line only.
+        # ``removable:`` names the drive, and a drive is not a medium.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "DVD_Core /media/9/x86_64/media/core {\n"
+            "  removable: /dev/sr0\n}\n", encoding="utf-8")
+
+        sync_urpmi_config("9", "10", path=path)
+
+        assert "  removable: /dev/sr0\n" in path.read_text(encoding="utf-8")
+
+    def test_a_mount_point_with_no_release_is_left_where_it_is(self,
+                                                               tmp_path):
+        # A pressed disc carries one release, in the plastic: its tree
+        # sits at ``<arch>/media/…`` with no release level to move.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            "DVD /media/cdrom/x86_64/media/core {\n}\n", encoding="utf-8")
+
+        report = sync_urpmi_config("9", "10", path=path)
+
+        assert report.rewritten == 0
+        assert report.unhandled == []
+        assert "/media/cdrom/x86_64/media/core" in path.read_text(
+            encoding="utf-8")
+
+    def test_the_name_reported_is_the_name_alone(self, tmp_path):
+        # ``/media/9/dvd`` names the release outside the official shape,
+        # so no rule can move it and the operator is told.  The name in
+        # that line used to carry the path along with it.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text("DVD_Core /media/9/dvd/core {\n}\n", encoding="utf-8")
+
+        report = sync_urpmi_config("9", "10", path=path)
+
+        assert report.unhandled == ["DVD_Core"]
+
+    def test_a_path_that_is_there_is_not_reported(self, tmp_path):
+        tree = tmp_path / "10/x86_64/media/core/media_info"
+        tree.mkdir(parents=True)
+        (tree / "synthesis.hdlist.cz").write_bytes(b"")
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            f"DVD_Core {tmp_path}/9/x86_64/media/core {{\n}}\n",
+            encoding="utf-8")
+
+        report = sync_urpmi_config("9", "10", path=path)
+
+        assert report.rewritten == 1
+        assert report.absent == []
+
+    def test_a_path_that_is_not_there_is_named_and_kept(self, tmp_path):
+        # The disc may simply not be in the drive.  Marking it
+        # ``ignore`` would turn « insert the disc » into « edit the
+        # configuration », so it is named and left on.
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            f"DVD_Core {tmp_path}/9/x86_64/media/core {{\n}}\n",
+            encoding="utf-8")
+
+        report = sync_urpmi_config("9", "10", path=path)
+
+        assert report.absent == ["DVD_Core"]
+        assert report.disabled == []
+        after = path.read_text(encoding="utf-8")
+        assert "ignore" not in after
+        assert f"{tmp_path}/10/x86_64/media/core" in after
+
+    def test_a_local_medium_is_never_asked_of_the_network(self, tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            f"DVD_Core {tmp_path}/9/x86_64/media/core {{\n}}\n",
+            encoding="utf-8")
+        calls = []
+
+        def probe(url, **kwargs):
+            calls.append(url)
+            return 404
+
+        sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert calls == []
+
+    def test_the_file_url_form_is_read_as_a_path_too(self, tmp_path):
+        path = tmp_path / "urpmi.cfg"
+        path.write_text(
+            f"DVD_Core file://{tmp_path}/9/x86_64/media/core {{\n}}\n",
+            encoding="utf-8")
+        calls = []
+
+        def probe(url, **kwargs):
+            calls.append(url)
+            return 404
+
+        report = sync_urpmi_config("9", "10", path=path, probe=probe)
+
+        assert report.absent == ["DVD_Core"]
+        assert report.disabled == []
+        assert calls == []
+
+
 class TestTheReportSeparatesItsLists:
     """An entry we could not move and one we switched off are not the same."""
 
@@ -515,6 +681,18 @@ class TestTheReportSeparatesItsLists:
             target_release="10", rewritten=2))
 
         assert "disabled" not in text
+
+    def test_an_absent_local_medium_has_its_own_heading(self):
+        # It was moved and left on, which is neither « left alone » nor
+        # « disabled » : the operator has a gesture to make, not an edit.
+        text = self._rendered(SyncReport(
+            path=Path("/etc/urpmi/urpmi.cfg"), source_release="9",
+            target_release="10", rewritten=1, absent=["DVD_Core"]))
+
+        assert "disabled" not in text
+        assert "left alone" not in text
+        assert text.index("not there") < text.index("DVD_Core")
+        assert "disc" in text
 
 
 class TestTheRealConfigurationOfATestMachine:
