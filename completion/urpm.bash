@@ -164,11 +164,16 @@ _urpm_profile_names() {
 # 2. Constants
 # ─────────────────────────────────────────────────────────────
 
-# Global flags accepted before or alongside any subcommand.
+# Global flags, accepted before the subcommand.
 _URPM_GLOBAL_FLAGS="--help -h --version -V --verbose -v --quiet -q \
-    --nocolor --root --urpm-root --dev"
+    --nocolor --root --urpm-root --rootless --allow-no-root"
 
-# display_parent — inherited by ~21 read-only / reporting commands.
+# display_parent — the reporting flags.  They sit on the top-level
+# reporting commands and on the *parent* of a subcommand group, never
+# on the subcommands themselves: ``urpm media --json list`` is
+# accepted, ``urpm media list --json`` is not.  Offering them after
+# the subcommand, which this file used to do for 45 of them, completes
+# straight into "unrecognized arguments".
 _URPM_DISPLAY_FLAGS="--json --flat --show-all"
 
 # debug_parent — inherited by install / download / update / upgrade.
@@ -220,19 +225,32 @@ _urpm_install() {
             COMPREPLY=($(compgen -W "$_URPM_CONFIG_POLICY_CHOICES" -- "$cur"))
             return
             ;;
-        --allow-arch)
+        --allow-arch|--arch)
             COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+            return
+            ;;
+        --enablemedia|--disablemedia)
+            _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            return
+            ;;
+        --download-dir)
+            _filedir -d
             return
             ;;
         --buildrequires|--builddeps|--br|-b)
             _filedir '@(spec|src.rpm)'
             return
             ;;
+        --check|--prefer|--debug|--watched)
+            return  # Free text.
+            ;;
     esac
 
     local install_opts="--auto -y --test --force --reinstall --download-only
         --nodeps --nosignature --noscripts --without-recommends --with-suggests
-        --prefer --all --no-peers --only-peers --allow-arch --sync --config-policy
+        --prefer --all --no-peers --only-peers --allow-arch --arch --check
+        --enablemedia --disablemedia --download-dir --sync --no-readme
+        --no-atomic --config-policy
         --buildrequires --builddeps --br -b --install-src"
 
     if [[ "$cur" == -* ]]; then
@@ -252,10 +270,17 @@ _urpm_erase() {
             COMPREPLY=($(compgen -W "$_URPM_ERASE_DEBUG_CHOICES" -- "$cur"))
             return
             ;;
+        --arch)
+            COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+            return
+            ;;
+        --check)
+            return  # Free text.
+            ;;
     esac
 
     local erase_opts="--auto -y --test --force --auto-orphans --keep-orphans
-        --erase-recommends --keep-suggests --debug --sync"
+        --erase-recommends --keep-suggests --debug --arch --check --sync"
 
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "$erase_opts $_URPM_DISPLAY_FLAGS" -- "$cur"))
@@ -274,15 +299,27 @@ _urpm_upgrade() {
             COMPREPLY=($(compgen -W "$_URPM_CONFIG_POLICY_CHOICES" -- "$cur"))
             return
             ;;
-        --allow-arch)
+        --allow-arch|--arch)
             COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
             return
+            ;;
+        --enablemedia|--disablemedia)
+            _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            return
+            ;;
+        --download-dir)
+            _filedir -d
+            return
+            ;;
+        --check|--debug|--watched)
+            return  # Free text.
             ;;
     esac
 
     local upgrade_opts="--auto -y --test --force --download-only --nosignature
         --noerase-orphans --with-recommends --with-suggests --no-peers
-        --only-peers --allow-arch --sync --config-policy"
+        --only-peers --allow-arch --arch --check --enablemedia --disablemedia
+        --download-dir --resume --atomic --sync --config-policy"
 
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "$upgrade_opts $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
@@ -293,23 +330,36 @@ _urpm_upgrade() {
 
 _urpm_update() {
     # Top-level `update` is a shortcut for `media update`; it takes a
-    # media name (optional, default = all) and only one extra flag.
+    # media name (optional, default = all) and only one extra flag,
+    # which is ``--force`` and never was ``--files``.  Both commands
+    # share the short ``-f``, which is how the long name drifted here
+    # without anyone noticing.
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--files $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
+        COMPREPLY=($(compgen -W "--force -f $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
     else
         _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
     fi
 }
 
 _urpm_autoremove() {
+    # No ``--dry-run`` here: the command asks before it removes, and
+    # ``--interactive`` is what arbitrates package by package.
+    case "$prev" in
+        --filter)
+            return  # Free text (an expression).
+            ;;
+    esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--auto -y --dry-run $_URPM_DISPLAY_FLAGS" -- "$cur"))
+        COMPREPLY=($(compgen -W "--auto -y --interactive -i --orphans -o \
+            --kernels -k --faildeps -f --all -a --filter \
+            --buildrequires --builddeps --br -b \
+            $_URPM_DISPLAY_FLAGS" -- "$cur"))
     fi
 }
 
 _urpm_cleandeps() {
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--auto -y --dry-run $_URPM_DISPLAY_FLAGS" -- "$cur"))
+        COMPREPLY=($(compgen -W "--auto -y $_URPM_DISPLAY_FLAGS" -- "$cur"))
     fi
 }
 
@@ -319,6 +369,9 @@ _urpm_cleandeps() {
 _URPM_RELEASE_CHOICES="8 9 10 cauldron"
 # Container runtime choices for mkimage / build.
 _URPM_RUNTIME_CHOICES="docker podman"
+# Where an image takes urpm-ng-core from.  A closed choice list in
+# argparse, which lost its github arm when the project left GitHub.
+_URPM_NG_SOURCE_CHOICES="auto local media"
 
 _urpm_download() {
     # download / dl — install-like flag set minus install-only flags.
@@ -365,18 +418,25 @@ _urpm_distupgrade() {
             _filedir
             return
             ;;
+        --debug|--watched)
+            return  # Free text.
+            ;;
     esac
+    # ``--show-all`` without the rest of display_parent, and a
+    # ``--debug`` that takes a component rather than being a switch.
     local distupgrade_opts="--to --yes -y --auto --dry-run
-        --export-plan --resume --continue --abort"
+        --export-plan --resume --continue --abort --show-all
+        --debug --watched"
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$distupgrade_opts $_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
+        COMPREPLY=($(compgen -W "$distupgrade_opts" -- "$cur"))
     fi
 }
 
 # recover — reconcile transactions interrupted by crash / SIGKILL.
-# No positional args, no options.
+# No positional args, and no options at all: it inherits neither
+# display_parent nor debug_parent.
 _urpm_recover() {
-    COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS $_URPM_DEBUG_FLAGS" -- "$cur"))
+    :
 }
 
 _urpm_init() {
@@ -401,7 +461,11 @@ _urpm_init() {
 }
 
 _urpm_cleanup() {
-    : # No flags, no positionals — relies on --urpm-root from global flags.
+    # No positionals.  The root to clean up comes from the global
+    # --urpm-root, which is why this command looked flagless.
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--dry-run --legacy-scriptlets" -- "$cur"))
+    fi
 }
 
 _urpm_hold() {
@@ -452,7 +516,13 @@ _urpm_skip() {
             ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--file $_URPM_DISPLAY_FLAGS" -- "$cur"))
+        # ``--file`` belongs to the three subcommands, not to ``skip``
+        # itself, so it is only offered once one is named.
+        if [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "--file $_URPM_DISPLAY_FLAGS" -- "$cur"))
+        fi
     elif [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$skip_subcmds" -- "$cur"))
     elif [[ "${words[2]}" == add ]]; then
@@ -508,12 +578,17 @@ _urpm_mkimage() {
             _filedir -d
             return
             ;;
-        --tag|-t|--packages|-p)
-            return  # Free text.
+        --addmedia|--tag|-t|--packages|-p)
+            return  # Free text, two words for --addmedia (NAME URL).
+            ;;
+        --buildrequires|--br)
+            _filedir '@(spec|src.rpm)'
+            return
             ;;
     esac
     COMPREPLY=($(compgen -W "--release -r --tag -t --profile --arch \
-        --packages -p --runtime --keep-chroot --workdir -w" -- "$cur"))
+        --packages -p --runtime --keep-chroot --workdir -w \
+        --addmedia --import-key --buildrequires --br" -- "$cur"))
 }
 
 _urpm_build() {
@@ -534,18 +609,34 @@ _urpm_build() {
             COMPREPLY=($(compgen -W "1 2 4 6 8 12 16" -- "$cur"))
             return
             ;;
-        --with-rpms|-w)
-            return  # Free text glob pattern.
+        --with-rpms|-w|--subrel|--with|--without|--build-memory)
+            return  # Free text.
             ;;
         --net-isolation)
             COMPREPLY=($(compgen -W "auto strict off" -- "$cur"))
+            return
+            ;;
+        --rpmmacros)
+            _filedir
+            return
+            ;;
+        --enablemedia|--disablemedia)
+            _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
+            return
+            ;;
+        --build-cpus)
+            COMPREPLY=($(compgen -W "1 2 4 6 8 12 16" -- "$cur"))
             return
             ;;
     esac
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--image -i --output -o --with-rpms -w \
             --runtime --parallel -j --keep-container --no-update \
-            --net-isolation --nocheck --auto -y" -- "$cur"))
+            --net-isolation --nocheck --auto -y \
+            --enablemedia --disablemedia --subrel --rpmmacros \
+            --stop-on-fail --rollback-between-builds --rbb \
+            --build-cpus --build-memory --strict-memory --full-throttle \
+            --with-network --with --without" -- "$cur"))
     else
         _filedir '@(spec|src.rpm)'
     fi
@@ -563,7 +654,8 @@ _urpm_image() {
     local sub="${words[2]}"
     case "$sub" in
         make|m)
-            # Same options as mkimage + --buildrequires.
+            # Same options as mkimage, plus the ones that only make
+            # sense for an image urpm-ng itself will live in.
             case "$prev" in
                 --release|-r)
                     COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
@@ -581,6 +673,14 @@ _urpm_image() {
                     COMPREPLY=($(compgen -W "$_URPM_RUNTIME_CHOICES" -- "$cur"))
                     return
                     ;;
+                --urpm-ng-source)
+                    COMPREPLY=($(compgen -W "$_URPM_NG_SOURCE_CHOICES" -- "$cur"))
+                    return
+                    ;;
+                --urpm-ng-core)
+                    _filedir rpm
+                    return
+                    ;;
                 --workdir|-w)
                     _filedir -d
                     return
@@ -589,26 +689,59 @@ _urpm_image() {
                     _filedir '@(spec|src.rpm)'
                     return
                     ;;
-                --tag|-t|--packages|-p)
-                    return  # Free text.
+                --exclude|-x)
+                    COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
+                    return
+                    ;;
+                --addmedia|--tag|-t|--packages|-p)
+                    return  # Free text, two words for --addmedia.
                     ;;
             esac
             COMPREPLY=($(compgen -W "--release -r --tag -t --profile --arch \
                 --packages -p --runtime --keep-chroot --workdir -w \
-                --buildrequires --br" -- "$cur"))
+                --buildrequires --br --addmedia --import-key \
+                --urpm-ng-source --urpm-ng-core --allow-disttag-mismatch \
+                --forward-proxy --no-forward-proxy --exclude -x" -- "$cur"))
             ;;
         update|u)
+            case "$prev" in
+                --runtime)
+                    COMPREPLY=($(compgen -W "$_URPM_RUNTIME_CHOICES" -- "$cur"))
+                    return
+                    ;;
+                --urpm-ng-source)
+                    COMPREPLY=($(compgen -W "$_URPM_NG_SOURCE_CHOICES" -- "$cur"))
+                    return
+                    ;;
+                --urpm-ng-core)
+                    _filedir rpm
+                    return
+                    ;;
+            esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--runtime" -- "$cur"))
+                COMPREPLY=($(compgen -W "--runtime --urpm-ng-source \
+                    --urpm-ng-core --allow-disttag-mismatch" -- "$cur"))
             fi
             # Positional is a tag — free text.
             ;;
         list|l|ls)
+            case "$prev" in
+                --runtime)
+                    COMPREPLY=($(compgen -W "$_URPM_RUNTIME_CHOICES" -- "$cur"))
+                    return
+                    ;;
+            esac
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--runtime" -- "$cur"))
             fi
             ;;
         delete|d|rm)
+            case "$prev" in
+                --runtime)
+                    COMPREPLY=($(compgen -W "$_URPM_RUNTIME_CHOICES" -- "$cur"))
+                    return
+                    ;;
+            esac
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--force -f --runtime" -- "$cur"))
             fi
@@ -662,7 +795,8 @@ _urpm_find() {
             ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--available -a --installed -i --limit -l $_URPM_DISPLAY_FLAGS" -- "$cur"))
+        COMPREPLY=($(compgen -W "--available -a --installed -i --limit -l \
+            --all-versions $_URPM_DISPLAY_FLAGS" -- "$cur"))
     fi
 }
 
@@ -693,9 +827,12 @@ _urpm_depends() {
             return  # Free text (CSV of preferred alternatives).
             ;;
     esac
+    # Neither depends nor rdepends inherits display_parent: they print
+    # a tree of their own and offering --json here only completes into
+    # an error.
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--tree --all -a --legacy --prefer \
-            --pager --no-libs --depth --legend $_URPM_DISPLAY_FLAGS" -- "$cur"))
+            --pager --no-libs --depth --legend --hide-uninstalled" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
@@ -711,7 +848,8 @@ _urpm_rdepends() {
             ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--tree --all -a --depth --hide-uninstalled --legend $_URPM_DISPLAY_FLAGS" -- "$cur"))
+        COMPREPLY=($(compgen -W "--tree --all -a --depth --hide-uninstalled \
+            --legend" -- "$cur"))
     else
         COMPREPLY=($(compgen -W "$(_urpm_available_packages)" -- "$cur"))
     fi
@@ -739,9 +877,14 @@ _urpm_why() {
 # ── State management ─────────────────────────────────────────
 
 _urpm_mark() {
+    # The three subcommands declare no flag of their own, and
+    # display_parent sits on ``mark`` itself, so the reporting flags
+    # are only offered where they are accepted.
     local mark_subcmds="manual m explicit auto a dep show s list"
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        if [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        fi
     elif [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$mark_subcmds" -- "$cur"))
     elif [[ "${words[2]}" =~ ^(manual|m|explicit|auto|a|dep)$ ]]; then
@@ -794,7 +937,12 @@ _urpm_media() {
 update u set s import discover disc autoconfig auto ac seed-info link"
 
     if [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$media_subcmds" -- "$cur"))
+        if [[ "$cur" == -* ]]; then
+            # display_parent sits on `media`, never on a subcommand.
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$media_subcmds" -- "$cur"))
+        fi
         return
     fi
 
@@ -802,48 +950,58 @@ update u set s import discover disc autoconfig auto ac seed-info link"
     case "$sub" in
         list|l|ls)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--all -a $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--all -a" -- "$cur"))
             fi
             ;;
         add|a)
             case "$prev" in
-                --name|--custom|--version) return ;;
+                --name|--shortname|--version) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--name --custom --update --disabled \
---auto -y --import-key --allow-unsigned --version $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--name --shortname --custom \
+--update --disabled --auto -y --import-key --allow-unsigned \
+--version" -- "$cur"))
             fi
             ;;
         add-cdrom)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -n $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -n" -- "$cur"))
             fi
             ;;
         remove|r)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--all --distupgraded --auto -y \
-$_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--all --distupgraded --auto -y" -- "$cur"))
             else
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
             ;;
         enable|e|disable|d|seed-info)
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
-            else
+            # These three take a medium and nothing else.
+            if [[ "$cur" != -* ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
             ;;
         update|u)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--files -f --no-appstream $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--force -f --no-appstream" -- "$cur"))
             else
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
             ;;
         import)
+            case "$prev" in
+                --release|-r)
+                    COMPREPLY=($(compgen -W "$_URPM_RELEASE_CHOICES" -- "$cur"))
+                    return
+                    ;;
+                --arch)
+                    COMPREPLY=($(compgen -W "$_URPM_ARCH_CHOICES" -- "$cur"))
+                    return
+                    ;;
+            esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--replace --auto -y $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--replace --release -r --arch \
+--auto -y" -- "$cur"))
             else
                 _filedir 'cfg'
             fi
@@ -855,6 +1013,8 @@ $_URPM_DISPLAY_FLAGS" -- "$cur"))
                     return
                     ;;
                 --replication)
+                    # Not a closed list in argparse, just the policies
+                    # the code knows about.
                     COMPREPLY=($(compgen -W "none on_demand seed" -- "$cur"))
                     return
                     ;;
@@ -863,9 +1023,8 @@ $_URPM_DISPLAY_FLAGS" -- "$cur"))
                     ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--all -a --shared --replication \
---seeds --quota --retention --priority --sync-files --no-sync-files \
-$_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--shared --replication \
+--seeds --quota --retention --priority" -- "$cur"))
             else
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
@@ -883,7 +1042,7 @@ $_URPM_DISPLAY_FLAGS" -- "$cur"))
             esac
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--release -r --arch --dry-run -n \
---no-nonfree --no-tainted $_URPM_DISPLAY_FLAGS" -- "$cur"))
+--no-nonfree --no-tainted" -- "$cur"))
             fi
             ;;
         discover|disc)
@@ -895,13 +1054,11 @@ $_URPM_DISPLAY_FLAGS" -- "$cur"))
             # NOT add $_URPM_DEBUG_FLAGS here.
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--with --without --sources --debug \
---dry-run -n $_URPM_DISPLAY_FLAGS" -- "$cur"))
+--import-keys --dry-run -n" -- "$cur"))
             fi
             ;;
         link)
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
-            elif [[ $cword -eq 3 ]]; then
+            if [[ "$cur" != -* && $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
             # Subsequent positionals are +server/-server — no dynamic list.
@@ -910,11 +1067,18 @@ $_URPM_DISPLAY_FLAGS" -- "$cur"))
 }
 
 _urpm_server() {
+    # ``status``, ``unblacklist`` and ``ack-blacklist`` were accepted by
+    # the CLI and never offered here.
     local server_subcmds="list l ls add a remove r rm enable e disable d \
-priority test t ip-mode stats autoconfig auto"
+priority test t ip-mode stats status unblacklist ack-blacklist \
+autoconfig auto"
 
     if [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$server_subcmds" -- "$cur"))
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$server_subcmds" -- "$cur"))
+        fi
         return
     fi
 
@@ -922,7 +1086,7 @@ priority test t ip-mode stats autoconfig auto"
     case "$sub" in
         list|l|ls)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--all -a $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--all -a" -- "$cur"))
             fi
             ;;
         add|a)
@@ -930,24 +1094,24 @@ priority test t ip-mode stats autoconfig auto"
                 --priority|-p) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--priority -p --disabled --custom $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--priority -p --disabled \
+--custom" -- "$cur"))
             fi
             # Positionals are NAME URL — no dynamic list possible.
             ;;
-        remove|r|rm|enable|e|disable|d|stats|test|t|priority)
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
-            elif [[ $cword -eq 3 ]]; then
+        remove|r|rm|enable|e|disable|d|stats|test|t|priority|status|unblacklist|ack-blacklist)
+            # None of these declares a flag; they all take a server.
+            if [[ "$cur" != -* && $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
             fi
             ;;
         ip-mode)
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
-            elif [[ $cword -eq 3 ]]; then
-                _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
-            elif [[ $cword -eq 4 ]]; then
-                COMPREPLY=($(compgen -W "auto ipv4 ipv6 dual" -- "$cur"))
+            if [[ "$cur" != -* ]]; then
+                if [[ $cword -eq 3 ]]; then
+                    _urpm_compreply_from_lines "$cur" < <(_urpm_server_names)
+                elif [[ $cword -eq 4 ]]; then
+                    COMPREPLY=($(compgen -W "auto ipv4 ipv6 dual" -- "$cur"))
+                fi
             fi
             ;;
         autoconfig|auto)
@@ -958,7 +1122,7 @@ priority test t ip-mode stats autoconfig auto"
                     ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -n --release -r $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -n --release -r" -- "$cur"))
             fi
             ;;
     esac
@@ -969,7 +1133,11 @@ _urpm_mirror() {
 enable-version clean sync rate-limit"
 
     if [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$mirror_subcmds" -- "$cur"))
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$mirror_subcmds" -- "$cur"))
+        fi
         return
     fi
 
@@ -977,57 +1145,53 @@ enable-version clean sync rate-limit"
     case "$sub" in
         clean)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -n $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -n" -- "$cur"))
             fi
             ;;
         sync)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--latest-only $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--latest-only" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_media_names)
             fi
             ;;
         rate-limit)
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
-            elif [[ $cword -eq 3 ]]; then
+            if [[ "$cur" != -* && $cword -eq 3 ]]; then
                 COMPREPLY=($(compgen -W "on off" -- "$cur"))
             fi
             ;;
-        *)
-            # Flagless subcommands still inherit display_parent.
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
-            fi
-            ;;
     esac
+    # The remaining subcommands declare no flag of their own, and
+    # display_parent is on `mirror` itself, so there is nothing to
+    # offer past this point.
 }
 
 _urpm_cache() {
     local cache_subcmds="info clean flush rebuild stats"
 
     if [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$cache_subcmds" -- "$cur"))
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$cache_subcmds" -- "$cur"))
+        fi
         return
     fi
 
     case "${words[2]}" in
         clean)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -n --auto -y --verbose -v $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -n --auto -y \
+--verbose -v" -- "$cur"))
             fi
             ;;
         flush)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run -n --auto -y $_URPM_DISPLAY_FLAGS" -- "$cur"))
-            fi
-            ;;
-        *)
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--dry-run -n --auto -y" -- "$cur"))
             fi
             ;;
     esac
+    # info, rebuild and stats take nothing.
 }
 
 _urpm_config() {
@@ -1035,10 +1199,16 @@ _urpm_config() {
 show gnome-auto-upgrades gau discover-auto-upgrades dau \
 packagekit-auto-upgrades pau edit"
     local auto_upgrade_choices="yes no true false on off"
+    # The list / add / remove trio that both blacklist and redlist
+    # take.  Named so the alignment test can read it.
+    local config_list_subcmds="list ls add a remove rm"
 
-    # config has no flags of its own, but inherits display_parent.
+    # None of the subcommands declares a flag, and display_parent is on
+    # `config` itself, so the reporting flags are offered there only.
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        if [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        fi
         return
     fi
 
@@ -1051,7 +1221,7 @@ packagekit-auto-upgrades pau edit"
     case "$sub" in
         blacklist|bl|redlist|rl)
             if [[ $cword -eq 3 ]]; then
-                COMPREPLY=($(compgen -W "list ls add a remove rm" -- "$cur"))
+                COMPREPLY=($(compgen -W "$config_list_subcmds" -- "$cur"))
                 return
             fi
             local subsub="${words[3]}"
@@ -1089,8 +1259,11 @@ packagekit-auto-upgrades pau edit"
 
 _urpm_key() {
     local key_subcmds="list ls l import i add remove rm del"
+    # Same shape as config: the flags are on `key`, not on its verbs.
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        if [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        fi
     elif [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$key_subcmds" -- "$cur"))
     elif [[ $cword -eq 3 && "${words[2]}" =~ ^(import|i|add)$ ]]; then
@@ -1104,23 +1277,25 @@ _urpm_peer() {
 unblacklist unbl unblock clean"
 
     if [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$peer_subcmds" -- "$cur"))
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$peer_subcmds" -- "$cur"))
+        fi
         return
     fi
 
     local sub="${words[2]}"
     case "$sub" in
         list|ls)
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
-            fi
+            : # Takes nothing of its own.
             ;;
         downloads|dl)
             case "$prev" in
                 --limit|-n) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--limit -n $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--limit -n" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
             fi
@@ -1130,7 +1305,7 @@ unblacklist unbl unblock clean"
                 --port|-p|--reason|-r) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--port -p --reason -r $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--port -p --reason -r" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
             fi
@@ -1140,7 +1315,7 @@ unblacklist unbl unblock clean"
                 --port|-p) return ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--port -p $_URPM_DISPLAY_FLAGS" -- "$cur"))
+                COMPREPLY=($(compgen -W "--port -p" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
             fi
@@ -1159,14 +1334,20 @@ unblacklist unbl unblock clean"
 }
 
 _urpm_appstream() {
+    # appstream inherits no display_parent, unlike the other groups.
     local appstream_subcmds="generate gen status merge init-distro"
 
     if [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$appstream_subcmds" -- "$cur"))
+        if [[ "$cur" != -* ]]; then
+            COMPREPLY=($(compgen -W "$appstream_subcmds" -- "$cur"))
+        fi
         return
     fi
 
     case "${words[2]}" in
+        status)
+            : # Takes nothing.
+            ;;
         generate|gen)
             case "$prev" in
                 --output|-o) _filedir; return ;;
@@ -1187,6 +1368,71 @@ _urpm_appstream() {
         init-distro)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--force -f" -- "$cur"))
+            fi
+            ;;
+    esac
+}
+
+# ── Commands that had no handler at all ──────────────────────
+#
+# All three were offered as top-level verbs and routed nowhere, so a
+# TAB after them completed filenames.  `system` even has subcommands.
+
+_urpm_audit() {
+    : # No subcommand, no flag, no positional.
+}
+
+_urpm_genmedia() {
+    # Builds the metadata of a media tree from the RPMs in a
+    # directory, which is its one positional.
+    case "$prev" in
+        --media-info-dir)
+            _filedir -d
+            return
+            ;;
+        --hdlist-filter|--synthesis-filter|--xml-info-filter)
+            return  # Free text (a filter expression).
+            ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--media-info-dir --hdlist-filter \
+            --synthesis-filter --xml-info-filter --no-hdlist --no-md5sum \
+            --xml-info --appstream-info --clean --versioned \
+            --allow-empty-media --nolock --no-bad-rpm --mageia-tree \
+            --verbose -v" -- "$cur"))
+    else
+        _filedir -d
+    fi
+}
+
+_urpm_system() {
+    # export / import of a machine's whole urpm state.
+    local system_subcmds="export import"
+
+    if [[ $cword -eq 2 ]]; then
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=($(compgen -W "$_URPM_DISPLAY_FLAGS" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$system_subcmds" -- "$cur"))
+        fi
+        return
+    fi
+
+    case "${words[2]}" in
+        export)
+            if [[ "$prev" == "--to" ]]; then
+                _filedir
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--to" -- "$cur"))
+            fi
+            ;;
+        import)
+            if [[ "$prev" == "--from" ]]; then
+                _filedir
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--from --yes -y --no-backup \
+                    --dry-run --merge-media --force --allow-incoherent \
+                    --preserve-hw" -- "$cur"))
             fi
             ;;
     esac
@@ -1217,7 +1463,7 @@ _urpm() {
         install|i)                              _urpm_install ;;
         erase|e)                                _urpm_erase ;;
         upgrade|u)                              _urpm_upgrade ;;
-        update|up)                              _urpm_update ;;
+        update)                                 _urpm_update ;;
         distupgrade)                            _urpm_distupgrade ;;
         recover)                                _urpm_recover ;;
         download|dl)                            _urpm_download ;;
@@ -1245,6 +1491,10 @@ _urpm() {
         recommends|whatrecommends|suggests|whatsuggests)
                                                 _urpm_recommends_family ;;
         why)                                    _urpm_why ;;
+
+        audit)                                  _urpm_audit ;;
+        genmedia)                               _urpm_genmedia ;;
+        system)                                 _urpm_system ;;
 
         mark)                                   _urpm_mark ;;
         history|h)                              _urpm_history ;;
