@@ -650,6 +650,22 @@ def _cmd_autoremove_interactive(
         signal.signal(signal.SIGINT, original_handler)
 
 
+def _resolve_installed_specs(packages):
+    """Pair each spec the operator typed with the Name it designates.
+
+    The second element is ``None`` when nothing installed answers to
+    it.  Every spelling rpm prints is accepted, so a spec pasted out of
+    ``rpm -q`` or ``rpm -qa`` names its package instead of being
+    reported absent — see
+    :func:`urpm.core.rpmdb.resolve_installed`.
+
+    Raises when the rpm bindings are missing, which the callers turn
+    into their own message.
+    """
+    from ...core import rpmdb
+    return [(spec, rpmdb.resolve_installed(spec)) for spec in packages]
+
+
 def cmd_mark(args, db: 'PackageDatabase') -> int:
     """Handle mark command - mark packages as manual or auto-installed."""
     from .. import colors
@@ -673,25 +689,22 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
         already_manual = []
         not_installed = []
 
-        # Check which packages are installed.  rpmdb access via
-        # urpm.core.rpmdb — never open a librpm handle in the parent
-        # (module contract).  Comparison is case-insensitive because
-        # the ``unrequested`` table stores lowercased names.
+        # rpmdb access via urpm.core.rpmdb — never open a librpm handle
+        # in the parent (module contract).  The ``unrequested`` table
+        # stores lowercased names, hence the comparison below.
         try:
-            from ...core import rpmdb
-            installed = {n.lower() for n in rpmdb.list_installed_names()}
+            resolved = _resolve_installed_specs(packages)
         except Exception:
             print(colors.error(_("Error: rpm module not available")))
             return 1
 
-        for pkg in packages:
-            pkg_lower = pkg.lower()
-            if pkg_lower not in installed:
-                not_installed.append(pkg)
-            elif pkg_lower not in unrequested:
-                already_manual.append(pkg)
+        for spec, name in resolved:
+            if name is None:
+                not_installed.append(spec)
+            elif name.lower() not in unrequested:
+                already_manual.append(name)
             else:
-                marked.append(pkg)
+                marked.append(name)
 
         if not_installed:
             print(colors.warning(_("Not installed: {packages}").format(packages=', '.join(not_installed))))
@@ -718,20 +731,18 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
         # rpmdb access via urpm.core.rpmdb — never open a librpm
         # handle in the parent (module contract).
         try:
-            from ...core import rpmdb
-            installed = {n.lower() for n in rpmdb.list_installed_names()}
+            resolved = _resolve_installed_specs(packages)
         except Exception:
             print(colors.error(_("Error: rpm module not available")))
             return 1
 
-        for pkg in packages:
-            pkg_lower = pkg.lower()
-            if pkg_lower not in installed:
-                not_installed.append(pkg)
-            elif pkg_lower in unrequested:
-                already_auto.append(pkg)
+        for spec, name in resolved:
+            if name is None:
+                not_installed.append(spec)
+            elif name.lower() in unrequested:
+                already_auto.append(name)
             else:
-                marked.append(pkg)
+                marked.append(name)
 
         if not_installed:
             print(colors.warning(_("Not installed: {packages}").format(packages=', '.join(not_installed))))
@@ -762,20 +773,30 @@ def cmd_mark(args, db: 'PackageDatabase') -> int:
             print(colors.error(_("Error: rpm module not available")))
             return 1
 
-        packages = args.packages if args.packages else sorted(installed.keys())
+        # With arguments, each one is resolved like the mutating
+        # subcommands do; without, the whole installed set is listed
+        # and there is nothing to resolve.
+        if args.packages:
+            try:
+                entries = _resolve_installed_specs(args.packages)
+            except Exception:
+                print(colors.error(_("Error: rpm module not available")))
+                return 1
+        else:
+            entries = [(name, name)
+                       for _lower, name in sorted(installed.items())]
 
         manual_count = 0
         auto_count = 0
 
-        for pkg in packages:
-            pkg_lower = pkg.lower()
-            if pkg_lower not in installed:
-                print(f"{pkg}: {colors.warning(_('not installed'))}")
-            elif pkg_lower in unrequested:
-                print(f"{installed[pkg_lower]}: {colors.info(_('auto'))}")
+        for spec, name in entries:
+            if name is None:
+                print(f"{spec}: {colors.warning(_('not installed'))}")
+            elif name.lower() in unrequested:
+                print(f"{name}: {colors.info(_('auto'))}")
                 auto_count += 1
             else:
-                print(f"{installed[pkg_lower]}: {colors.success(_('manual'))}")
+                print(f"{name}: {colors.success(_('manual'))}")
                 manual_count += 1
 
         if not args.packages:

@@ -431,6 +431,77 @@ def query_by_name(name: str, root: str = "/") -> List[InstalledPkg]:
         return [_pkg_from_hdr(h) for h in ts.dbMatch("name", name)]
 
 
+@_cached
+def query_by_label(label: str, root: str = "/") -> List[InstalledPkg]:
+    """Every installed build the spelling ``label`` designates.
+
+    ``label`` is any spelling rpm itself prints: a plain Name, the
+    ``name-version-release`` that ``rpm -q`` gives on Mageia, a full
+    NEVRA, or either of those carrying the epoch.  An operator pastes
+    whichever their last command produced, and all of them have to
+    reach the package they name.
+
+    The resolution is rpm's own ``RPMDBI_LABEL`` index, the one
+    ``rpm -q`` looks through, so the string is never parsed here.  That
+    is what makes it correct rather than merely convenient: Mageia
+    ships Names shaped exactly like a name-version-release —
+    ``kernel-desktop-devel-6.18.22-1.mga10``, ``lua-rpm-macros-1``,
+    ``xmltex-20020625`` — and no syntactic rule can tell those from a
+    versioned spelling.  rpm can, having indexed both.
+
+    See the module contract : rpmdb access via ``open_ts`` context
+    manager, closes explicitly.  One indexed lookup rather than a walk,
+    so naming a precise build costs less than naming a package, not
+    more.
+
+    Returns:
+        The matching builds, empty when the spelling names nothing
+        installed.  A Name with several builds on the machine
+        (``kernel``) answers with all of them; a precise spelling
+        narrows to the one.
+    """
+    if not label:
+        return []
+    import rpm
+    with open_ts(root) as ts:
+        return [_pkg_from_hdr(h)
+                for h in ts.dbMatch(rpm.RPMDBI_LABEL, label)]
+
+
+@_cached
+def _names_by_lowercase(root: str = "/") -> Dict[str, str]:
+    """``lowercased Name -> Name as the database stores it``."""
+    return {name.lower(): name for name in list_installed_names(root=root)}
+
+
+def resolve_installed(token: str, root: str = "/") -> Optional[str]:
+    """The Name of the installed package ``token`` designates, or None.
+
+    This is what a command consumes when an operator hands it a
+    package: whatever they pasted, the answer is one Name or nothing.
+    Every spelling rpm prints is accepted through
+    :func:`query_by_label`, which is why ``urpm mark auto $(rpm -qa |
+    grep firefox)`` works at all.
+
+    A Name in the wrong case falls back to a case-insensitive match,
+    because rpm's index is case-sensitive and Names are too
+    (``perl-Git`` against ``perl-git``) while an operator typing by
+    hand should not have to care.  That tolerance covers Names alone:
+    a versioned spelling has to be in rpm's casing, since there the
+    matching is rpm's index and not ours, and nobody types those by
+    hand.
+
+    Returns the casing the database stores, never the caller's, so the
+    name can go straight into a table or a message.
+    """
+    if not token:
+        return None
+    hits = query_by_label(token, root=root)
+    if hits:
+        return hits[0].name
+    return _names_by_lowercase(root=root).get(token.lower())
+
+
 def _nevra_spellings(pkg: InstalledPkg) -> Set[str]:
     """Every way the same installed build can legitimately be written.
 
