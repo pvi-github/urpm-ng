@@ -666,6 +666,35 @@ def _resolve_installed_specs(packages):
     return [(spec, rpmdb.resolve_installed(spec)) for spec in packages]
 
 
+def _hold_targets(packages):
+    """Pair each spec with the installed build a hold would freeze.
+
+    Returns ``(spec, name, evr)`` triples.  ``name`` is ``None`` when
+    nothing installed answers to the spec, which is the one case
+    ``hold add`` must refuse: :meth:`~urpm.core.resolver.Resolver.
+    _add_hold_locks` only locks names that are installed, so a hold
+    recorded under any other spelling protects nothing while the list
+    shows it as active.
+
+    ``evr`` is ``None`` when several builds answer to the name
+    (``kernel``): the lock is posted on the name, so recording one of
+    them would misrepresent what it covers.
+
+    Raises when the rpm bindings are missing, which the caller reports.
+    """
+    from ...core import rpmdb
+    targets = []
+    for spec in packages:
+        name = rpmdb.resolve_installed(spec)
+        if name is None:
+            targets.append((spec, None, None))
+            continue
+        builds = rpmdb.query_by_name(name)
+        evr = builds[0].evr if len(builds) == 1 else None
+        targets.append((spec, name, evr))
+    return targets
+
+
 def cmd_mark(args, db: 'PackageDatabase') -> int:
     """Handle mark command - mark packages as manual or auto-installed."""
     from .. import colors
@@ -836,13 +865,39 @@ def _hold_list(args, db: 'PackageDatabase') -> int:
         print(_("No packages are held."))
         return 0
 
+    # What is installed now, so a hold can say when the build it froze
+    # is no longer the one on the machine.  urpm cannot move a locked
+    # package, but an ``rpm -U`` behind its back can, and a hold that
+    # predates a release upgrade ends up pointing at a build that is
+    # gone.  Optional: the list still prints without the bindings.
+    try:
+        from ...core import rpmdb
+    except ImportError:
+        rpmdb = None
+
     print(_("Held packages ({count}):").format(count=len(holds)) + "\n")
     for hold in holds:
         ts = datetime.fromtimestamp(hold['added_timestamp'])
         reason = f" - {hold['reason']}" if hold['reason'] else ""
-        print(f"  {colors.warning(hold['package_name'])}{reason}")
-        print("    " + _("(held since {date})").format(
-            date=ts.strftime('%Y-%m-%d %H:%M')))
+        name = hold['package_name']
+        evr = hold.get('held_evr')
+        print(f"  {colors.warning(name)}{reason}")
+        if evr:
+            print("    " + _("(frozen at {evr}, held since {date})").format(
+                evr=evr, date=ts.strftime('%Y-%m-%d %H:%M')))
+        else:
+            print("    " + _("(held since {date})").format(
+                date=ts.strftime('%Y-%m-%d %H:%M')))
+        if rpmdb is None:
+            continue
+        installed = {build.evr for build in rpmdb.query_by_name(name)}
+        if not installed:
+            print("    " + colors.warning(_(
+                "no longer installed, so this hold protects nothing")))
+        elif evr and evr not in installed:
+            print("    " + colors.warning(_(
+                "the installed build is now {evr}").format(
+                    evr=", ".join(sorted(installed)))))
     return 0
 
 
@@ -852,14 +907,32 @@ def _hold_add(args, db: 'PackageDatabase') -> int:
 
     require_privileges(action_id="org.mageia.urpm.media-manage")
 
+    # A hold freezes an installed build, so the spec has to name one.
+    # Recording anything else was a silent no-op: a lock is only posted
+    # for a name that is installed, and the list showed the hold as
+    # active all the same.
+    try:
+        targets = _hold_targets(args.packages)
+    except Exception:
+        print(colors.error(_("Error: rpm module not available")))
+        return 1
+
     added = []
     already_held = []
+    not_installed = []
 
-    for pkg in args.packages:
-        if db.add_hold(pkg, getattr(args, "reason", None)):
-            added.append(pkg)
+    for spec, name, evr in targets:
+        if name is None:
+            not_installed.append(spec)
+        elif db.add_hold(name, getattr(args, "reason", None), evr=evr):
+            added.append(name)
         else:
-            already_held.append(pkg)
+            already_held.append(name)
+
+    if not_installed:
+        print(colors.warning(_(
+            "Not installed, so nothing to hold: {packages}"
+        ).format(packages=', '.join(not_installed))))
 
     if already_held:
         print(_("Already held: {packages}").format(

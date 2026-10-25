@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.7.11\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-10-22 00:05+0200\n"
+"POT-Creation-Date: 2026-10-25 18:36+0100\n"
 "PO-Revision-Date: 2026-05-09 13:20+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -2645,7 +2645,7 @@ msgstr "Interrotto"
 msgid "Error: {error}"
 msgstr "Errore: {error}"
 
-#: urpm/cli/display.py:168 urpm/cli/commands/depends.py:1247
+#: urpm/cli/display.py:168 urpm/cli/commands/depends.py:1244
 #, python-brace-format
 msgid "and {count} more"
 msgstr "e altri {count}"
@@ -2938,7 +2938,7 @@ msgstr "Installare i pacchetti raccomandati? [S/n] "
 #: urpm/cli/commands/media.py:1200 urpm/cli/commands/media.py:2723
 #: urpm/cli/commands/cache.py:104 urpm/cli/commands/history.py:297
 #: urpm/cli/commands/history.py:762 urpm/cli/commands/config.py:480
-#: urpm/cli/commands/peer.py:207 urpm/cli/commands/cleanup.py:947
+#: urpm/cli/commands/peer.py:207 urpm/cli/commands/cleanup.py:1041
 #: urpm/cli/commands/build.py:1095 urpm/cli/helpers/suggests.py:141
 #: urpm/cli/helpers/suggests.py:158
 msgid ""
@@ -3021,7 +3021,7 @@ msgstr ""
 #: urpm/cli/commands/cache.py:101 urpm/cli/commands/cache.py:314
 #: urpm/cli/commands/history.py:294 urpm/cli/commands/history.py:759
 #: urpm/cli/commands/config.py:477 urpm/cli/commands/peer.py:204
-#: urpm/cli/commands/depends.py:111 urpm/cli/commands/cleanup.py:944
+#: urpm/cli/commands/depends.py:112 urpm/cli/commands/cleanup.py:1038
 #: urpm/cli/commands/build.py:1099 urpm/cli/helpers/alternatives.py:424
 #: urpm/cli/helpers/alternatives.py:564 urpm/cli/helpers/alternatives.py:949
 #: urpm/cli/helpers/alternatives.py:1048 urpm/cli/helpers/alternatives.py:1117
@@ -3356,14 +3356,14 @@ msgstr[1] "Disinstallazione di {count} pacchetti..."
 
 #: urpm/cli/commands/remove.py:240 urpm/cli/commands/history.py:318
 #: urpm/cli/commands/history.py:783 urpm/cli/commands/cleanup.py:343
-#: urpm/cli/commands/cleanup.py:591 urpm/cli/commands/cleanup.py:1018
+#: urpm/cli/commands/cleanup.py:591 urpm/cli/commands/cleanup.py:1112
 #: urpm/cli/commands/_install_pipeline.py:169
 msgid "  RPM database is locked by another process."
 msgstr "  Il database RPM è bloccato da un altro processo."
 
 #: urpm/cli/commands/remove.py:241 urpm/cli/commands/history.py:319
 #: urpm/cli/commands/history.py:784 urpm/cli/commands/cleanup.py:344
-#: urpm/cli/commands/cleanup.py:592 urpm/cli/commands/cleanup.py:1019
+#: urpm/cli/commands/cleanup.py:592 urpm/cli/commands/cleanup.py:1113
 #: urpm/cli/commands/_install_pipeline.py:171
 msgid "  Waiting for lock... (Ctrl+C to cancel)"
 msgstr "  In attesa del lock... (Ctrl+C per annullare)"
@@ -3371,12 +3371,12 @@ msgstr "  In attesa del lock... (Ctrl+C per annullare)"
 #: urpm/cli/commands/remove.py:330 urpm/cli/commands/history.py:353
 #: urpm/cli/commands/history.py:545 urpm/cli/commands/history.py:818
 #: urpm/cli/commands/cleanup.py:376 urpm/cli/commands/cleanup.py:622
-#: urpm/cli/commands/cleanup.py:1056
+#: urpm/cli/commands/cleanup.py:1150
 #: urpm/cli/commands/_install_pipeline.py:209
 msgid "done"
 msgstr "fatto"
 
-#: urpm/cli/commands/remove.py:333 urpm/cli/commands/cleanup.py:1059
+#: urpm/cli/commands/remove.py:333 urpm/cli/commands/cleanup.py:1153
 msgid "Erase failed:"
 msgstr "Disinstallazione fallita:"
 
@@ -3388,7 +3388,7 @@ msgstr "  Utilizzare --force per ignorare i problemi di dipendenze"
 msgid "Erase interrupted"
 msgstr "Disinstallazione interrotta"
 
-#: urpm/cli/commands/remove.py:347 urpm/cli/commands/cleanup.py:1072
+#: urpm/cli/commands/remove.py:347 urpm/cli/commands/cleanup.py:1166
 #, python-brace-format
 msgid "{count} package erased"
 msgid_plural "{count} packages erased"
@@ -3438,7 +3438,7 @@ msgstr "(sarebbe reso obsoleto da {pkg})"
 msgid "Use '{cmd}' to allow changes."
 msgstr "Utilizzare '{cmd}' per consentire le modifiche."
 
-#: urpm/cli/commands/upgrade.py:195 urpm/cli/commands/query.py:476
+#: urpm/cli/commands/upgrade.py:195 urpm/cli/commands/query.py:484
 msgid "All packages are up to date."
 msgstr "Tutti i pacchetti sono aggiornati."
 
@@ -4727,92 +4727,92 @@ msgstr ""
 "  Utilizzare --unavailable per elencare i pacchetti non presenti in alcun "
 "media"
 
-#: urpm/cli/commands/query.py:111
+#: urpm/cli/commands/query.py:118
 #, python-brace-format
 msgid "No packages found for '{pattern}'"
 msgstr "Nessun pacchetto trovato per '{pattern}'"
 
-#: urpm/cli/commands/query.py:214
+#: urpm/cli/commands/query.py:222
 #, python-brace-format
 msgid "{count} package found"
 msgid_plural "{count} packages found"
 msgstr[0] "{count} pacchetto trovato"
 msgstr[1] "{count} pacchetti trovati"
 
-#: urpm/cli/commands/query.py:229 urpm/cli/commands/query.py:567
-#: urpm/cli/commands/depends.py:85 urpm/cli/commands/depends.py:186
+#: urpm/cli/commands/query.py:237 urpm/cli/commands/query.py:575
+#: urpm/cli/commands/depends.py:86 urpm/cli/commands/depends.py:187
 #, python-brace-format
 msgid "Package '{package}' not found"
 msgstr "Pacchetto '{package}' non trovato"
 
-#: urpm/cli/commands/query.py:232
+#: urpm/cli/commands/query.py:240
 msgid "Name:"
 msgstr "Nome:"
 
-#: urpm/cli/commands/query.py:233
+#: urpm/cli/commands/query.py:241
 msgid "Version:"
 msgstr "Versione:"
 
-#: urpm/cli/commands/query.py:234
+#: urpm/cli/commands/query.py:242
 msgid "Architecture:"
 msgstr "Architettura:"
 
-#: urpm/cli/commands/query.py:235 urpm/cli/commands/cache.py:21
+#: urpm/cli/commands/query.py:243 urpm/cli/commands/cache.py:21
 #: urpm/cli/commands/cache.py:187
 msgid "Size:"
 msgstr "Dimensione:"
 
-#: urpm/cli/commands/query.py:243 urpm/cli/commands/cache.py:25
+#: urpm/cli/commands/query.py:251 urpm/cli/commands/cache.py:25
 msgid "Media:"
 msgstr "Media:"
 
-#: urpm/cli/commands/query.py:246
+#: urpm/cli/commands/query.py:254
 msgid "Group:"
 msgstr "Gruppo:"
 
-#: urpm/cli/commands/query.py:248 urpm/cli/commands/media.py:1892
+#: urpm/cli/commands/query.py:256 urpm/cli/commands/media.py:1892
 msgid "Summary:"
 msgstr "Riassunto:"
 
-#: urpm/cli/commands/query.py:252
+#: urpm/cli/commands/query.py:260
 #, python-brace-format
 msgid "Requires ({count}):"
 msgstr "Richiede ({count}):"
 
-#: urpm/cli/commands/query.py:258
+#: urpm/cli/commands/query.py:266
 #, python-brace-format
 msgid "Recommends ({count}):"
 msgstr "Raccomanda ({count}):"
 
-#: urpm/cli/commands/query.py:264
+#: urpm/cli/commands/query.py:272
 #, python-brace-format
 msgid "Suggests ({count}):"
 msgstr "Suggerisce ({count}):"
 
-#: urpm/cli/commands/query.py:270
+#: urpm/cli/commands/query.py:278
 #, python-brace-format
 msgid "Provides ({count}):"
 msgstr "Fornisce ({count}):"
 
-#: urpm/cli/commands/query.py:276
+#: urpm/cli/commands/query.py:284
 #, python-brace-format
 msgid "Conflicts ({count}):"
 msgstr "In conflitto ({count}):"
 
-#: urpm/cli/commands/query.py:282
+#: urpm/cli/commands/query.py:290
 #, python-brace-format
 msgid "Obsoletes ({count}):"
 msgstr "Rende obsoleti ({count}):"
 
-#: urpm/cli/commands/query.py:328
+#: urpm/cli/commands/query.py:336
 msgid "Files: not available (no media context)"
 msgstr "File: non disponibili (nessun contesto media)"
 
-#: urpm/cli/commands/query.py:332
+#: urpm/cli/commands/query.py:340
 msgid "Files: not available (media missing)"
 msgstr "File: non disponibili (media mancante)"
 
-#: urpm/cli/commands/query.py:341
+#: urpm/cli/commands/query.py:349
 #, python-brace-format
 msgid ""
 "Files: not available (media '{name}' not synced — run 'urpm media update "
@@ -4821,7 +4821,7 @@ msgstr ""
 "File: non disponibili (media «{name}» non sincronizzato — eseguire «urpm "
 "media update {name}»)"
 
-#: urpm/cli/commands/query.py:360
+#: urpm/cli/commands/query.py:368
 #, python-brace-format
 msgid ""
 "Files: NEVRA '{nevra}' not found in '{name}'.files.xml.lzma (metadata drift;"
@@ -4830,12 +4830,12 @@ msgstr ""
 "File: NEVRA «{nevra}» non trovato in «{name}».files.xml.lzma (metadati "
 "disallineati; provare «urpm media update {name}»)"
 
-#: urpm/cli/commands/query.py:368
+#: urpm/cli/commands/query.py:376
 #, python-brace-format
 msgid "Files ({count}):"
 msgstr "File ({count}):"
 
-#: urpm/cli/commands/query.py:385
+#: urpm/cli/commands/query.py:393
 msgid ""
 "Changelog: available only for installed packages (would need to fetch the "
 "RPM header otherwise)."
@@ -4843,119 +4843,120 @@ msgstr ""
 "Registro delle modifiche: disponibile solo per pacchetti installati "
 "(altrimenti sarebbe necessario scaricare l'intestazione RPM)."
 
-#: urpm/cli/commands/query.py:394
+#: urpm/cli/commands/query.py:402
 msgid "Changelog: rpm query failed"
 msgstr "Registro delle modifiche: interrogazione rpm fallita"
 
-#: urpm/cli/commands/query.py:397
+#: urpm/cli/commands/query.py:405
 msgid "Changelog:"
 msgstr "Registro delle modifiche:"
 
-#: urpm/cli/commands/query.py:438 urpm/cli/commands/_install_pipeline.py:252
+#: urpm/cli/commands/query.py:446 urpm/cli/commands/_install_pipeline.py:252
 #, python-brace-format
 msgid "{count} package installed"
 msgid_plural "{count} packages installed"
 msgstr[0] "{count} pacchetto installato"
 msgstr[1] "{count} pacchetti installati"
 
-#: urpm/cli/commands/query.py:442 urpm/cli/commands/cleanup.py:684
-#: urpm/cli/commands/cleanup.py:724 urpm/cli/commands/cleanup.py:762
+#: urpm/cli/commands/query.py:450 urpm/cli/commands/cleanup.py:727
+#: urpm/cli/commands/cleanup.py:765 urpm/cli/commands/cleanup.py:802
+#: urpm/cli/commands/cleanup.py:812 urpm/cli/commands/cleanup.py:917
 msgid "Error: rpm module not available"
 msgstr "Errore: modulo rpm non disponibile"
 
-#: urpm/cli/commands/query.py:457
+#: urpm/cli/commands/query.py:465
 #, python-brace-format
 msgid "{count} package available"
 msgid_plural "{count} packages available"
 msgstr[0] "{count} pacchetto disponibile"
 msgstr[1] "{count} pacchetti disponibili"
 
-#: urpm/cli/commands/query.py:466
+#: urpm/cli/commands/query.py:474
 msgid "Checking for updates..."
 msgstr "Controllo degli aggiornamenti..."
 
-#: urpm/cli/commands/query.py:470
+#: urpm/cli/commands/query.py:478
 msgid "Error checking updates:"
 msgstr "Errore durante il controllo degli aggiornamenti:"
 
-#: urpm/cli/commands/query.py:483
+#: urpm/cli/commands/query.py:491
 #, python-brace-format
 msgid "{count} package can be upgraded"
 msgid_plural "{count} packages can be upgraded"
 msgstr[0] "{count} pacchetto può essere aggiornato"
 msgstr[1] "{count} pacchetti possono essere aggiornati"
 
-#: urpm/cli/commands/query.py:510
+#: urpm/cli/commands/query.py:518
 #, python-brace-format
 msgid "{count} packages ({installed} installed)"
 msgstr "{count} pacchetti ({installed} installati)"
 
-#: urpm/cli/commands/query.py:570
+#: urpm/cli/commands/query.py:578
 #, python-brace-format
 msgid "Package {name} provides ({count}):"
 msgstr "Il pacchetto {name} fornisce ({count}):"
 
-#: urpm/cli/commands/query.py:682
+#: urpm/cli/commands/query.py:690
 #, python-brace-format
 msgid "No package provides '{capability}'"
 msgstr "Nessun pacchetto fornisce '{capability}'"
 
-#: urpm/cli/commands/query.py:693 urpm/cli/commands/query.py:988
+#: urpm/cli/commands/query.py:701 urpm/cli/commands/query.py:996
 msgid "Installed:"
 msgstr "Installati:"
 
-#: urpm/cli/commands/query.py:706
+#: urpm/cli/commands/query.py:714
 msgid "Available:"
 msgstr "Disponibile:"
 
-#: urpm/cli/commands/query.py:739
+#: urpm/cli/commands/query.py:747
 msgid "No media are enabled."
 msgstr "Nessun media è abilitato."
 
-#: urpm/cli/commands/query.py:746
+#: urpm/cli/commands/query.py:754
 #, python-brace-format
 msgid "None of the {total} enabled media has a file index on disk."
 msgstr "Nessuno dei {total} media abilitati ha un indice dei file su disco."
 
-#: urpm/cli/commands/query.py:750
+#: urpm/cli/commands/query.py:758
 #, python-brace-format
 msgid "{count} medium of {total} could not be searched:"
 msgid_plural "{count} media of {total} could not be searched:"
 msgstr[0] "{count} media su {total} non è stato esplorato:"
 msgstr[1] "{count} media su {total} non sono stati esplorati:"
 
-#: urpm/cli/commands/query.py:759
+#: urpm/cli/commands/query.py:767
 msgid "Run 'urpm media update' to fetch the missing file indexes."
 msgstr "Eseguire 'urpm media update' per recuperare gli indici mancanti."
 
-#: urpm/cli/commands/query.py:896
+#: urpm/cli/commands/query.py:904
 msgid "file index not downloaded"
 msgstr "indice dei file non scaricato"
 
-#: urpm/cli/commands/query.py:900
+#: urpm/cli/commands/query.py:908
 #, python-brace-format
 msgid "file index unreadable ({reason})"
 msgstr "indice dei file illeggibile ({reason})"
 
-#: urpm/cli/commands/query.py:905
+#: urpm/cli/commands/query.py:913
 msgid "medium carries no files"
 msgstr "il media non contiene alcun file"
 
-#: urpm/cli/commands/query.py:924
+#: urpm/cli/commands/query.py:932
 #, python-brace-format
 msgid "No package contains '{pattern}'"
 msgstr "Nessun pacchetto contiene '{pattern}'"
 
-#: urpm/cli/commands/query.py:979
+#: urpm/cli/commands/query.py:987
 #, python-brace-format
 msgid "({count} more)"
 msgstr "({count} altri)"
 
-#: urpm/cli/commands/query.py:1002
+#: urpm/cli/commands/query.py:1010
 msgid "Available (not installed):"
 msgstr "Disponibili (non installati):"
 
-#: urpm/cli/commands/query.py:1010
+#: urpm/cli/commands/query.py:1018
 #, python-brace-format
 msgid "{count} files hidden (use --show-all to see all)"
 msgstr "{count} file nascosti (utilizzare --show-all per vederli tutti)"
@@ -8043,197 +8044,197 @@ msgstr "Utilizzo: on, off oppure N/min (es. 60/min)"
 msgid "Invalid setting: {setting}"
 msgstr "Impostazione non valida: {setting}"
 
-#: urpm/cli/commands/depends.py:87 urpm/cli/commands/depends.py:188
+#: urpm/cli/commands/depends.py:88 urpm/cli/commands/depends.py:189
 #, python-brace-format
 msgid "{package}: no dependencies"
 msgstr "{package}: nessuna dipendenza"
 
-#: urpm/cli/commands/depends.py:90
+#: urpm/cli/commands/depends.py:91
 #, python-brace-format
 msgid "Dependencies of {package} ({count}):"
 msgstr "Dipendenze di {package} ({count}):"
 
-#: urpm/cli/commands/depends.py:133 urpm/cli/commands/depends.py:657
+#: urpm/cli/commands/depends.py:134 urpm/cli/commands/depends.py:658
 msgid "Depth: unlimited (--all)"
 msgstr "Profondità: illimitata (--all)"
 
-#: urpm/cli/commands/depends.py:137 urpm/cli/commands/depends.py:661
+#: urpm/cli/commands/depends.py:138 urpm/cli/commands/depends.py:662
 #, python-brace-format
 msgid "Depth: {n} levels (use --depth N or --all for more)"
 msgstr "Profondità: {n} livelli (usa --depth N o --all per di più)"
 
-#: urpm/cli/commands/depends.py:152
+#: urpm/cli/commands/depends.py:153
 #, python-brace-format
 msgid "All dependencies of {package}: {count} package"
 msgid_plural "All dependencies of {package}: {count} packages"
 msgstr[0] "Tutte le dipendenze di {package}: {count} pacchetto"
 msgstr[1] "Tutte le dipendenze di {package}: {count} pacchetti"
 
-#: urpm/cli/commands/depends.py:177
+#: urpm/cli/commands/depends.py:178
 #, python-brace-format
 msgid "Dependencies of {package}: {count} package"
 msgid_plural "Dependencies of {package}: {count} packages"
 msgstr[0] "Dipendenze di {package}: {count} pacchetto"
 msgstr[1] "Dipendenze di {package}: {count} pacchetti"
 
-#: urpm/cli/commands/depends.py:194
+#: urpm/cli/commands/depends.py:195
 #, python-brace-format
 msgid "Alternatives ({count} capabilities with choices):"
 msgstr "Alternative ({count} capability con scelte):"
 
-#: urpm/cli/commands/depends.py:202 urpm/cli/helpers/alternatives.py:1030
+#: urpm/cli/commands/depends.py:203 urpm/cli/helpers/alternatives.py:1030
 #: urpm/cli/helpers/alternatives.py:1100
 msgid "required by"
 msgstr "richiesto da"
 
-#: urpm/cli/commands/depends.py:297 urpm/cli/commands/depends.py:306
+#: urpm/cli/commands/depends.py:298 urpm/cli/commands/depends.py:307
 msgid "Legend:"
 msgstr "Legenda:"
 
-#: urpm/cli/commands/depends.py:298
+#: urpm/cli/commands/depends.py:299
 msgid "depends on (dependency arrow)"
 msgstr "dipende da (freccia di dipendenza)"
 
-#: urpm/cli/commands/depends.py:299
+#: urpm/cli/commands/depends.py:300
 msgid "already listed above (cycle)"
 msgstr "già elencato sopra (ciclo)"
 
-#: urpm/cli/commands/depends.py:300
+#: urpm/cli/commands/depends.py:301
 msgid "deeper dependencies exist (max depth)"
 msgstr "esistono dipendenze più profonde (profondità massima)"
 
-#: urpm/cli/commands/depends.py:307
+#: urpm/cli/commands/depends.py:308
 msgid "is required by (reverse dependency)"
 msgstr "è richiesto da (dipendenza inversa)"
 
-#: urpm/cli/commands/depends.py:308
+#: urpm/cli/commands/depends.py:309
 msgid "already expanded above (truncated)"
 msgstr "già espanso sopra (troncato)"
 
-#: urpm/cli/commands/depends.py:640
+#: urpm/cli/commands/depends.py:641
 #, python-brace-format
 msgid "No package depends on '{package}'"
 msgstr "Nessun pacchetto dipende da '{package}'"
 
-#: urpm/cli/commands/depends.py:705
+#: urpm/cli/commands/depends.py:706
 #, python-brace-format
 msgid "All packages that depend on {package}: {count}"
 msgstr "Tutti i pacchetti che dipendono da {package}: {count}"
 
-#: urpm/cli/commands/depends.py:713
+#: urpm/cli/commands/depends.py:714
 #, python-brace-format
 msgid "Packages that depend on {package}: {count}"
 msgstr "Pacchetti che dipendono da {package}: {count}"
 
-#: urpm/cli/commands/depends.py:854
+#: urpm/cli/commands/depends.py:855
 #, python-brace-format
 msgid "({count} packages, max depth reached)"
 msgstr "({count} pacchetti, profondità massima raggiunta)"
 
-#: urpm/cli/commands/depends.py:892
+#: urpm/cli/commands/depends.py:893
 #, python-brace-format
 msgid "{package}: no recommends"
 msgstr "{package}: nessuna raccomandazione"
 
-#: urpm/cli/commands/depends.py:895
+#: urpm/cli/commands/depends.py:896
 #, python-brace-format
 msgid "Packages recommended by {package}: {count}"
 msgstr "Pacchetti raccomandati da {package}: {count}"
 
-#: urpm/cli/commands/depends.py:955
+#: urpm/cli/commands/depends.py:956
 #, python-brace-format
 msgid "No package recommends '{package}'"
 msgstr "Nessun pacchetto raccomanda '{package}'"
 
-#: urpm/cli/commands/depends.py:958
+#: urpm/cli/commands/depends.py:959
 #, python-brace-format
 msgid "Packages that recommend {package}: {count}"
 msgstr "Pacchetti che raccomandano {package}: {count}"
 
-#: urpm/cli/commands/depends.py:976
+#: urpm/cli/commands/depends.py:977
 #, python-brace-format
 msgid "{package}: no suggests"
 msgstr "{package}: nessun suggerimento"
 
-#: urpm/cli/commands/depends.py:979
+#: urpm/cli/commands/depends.py:980
 #, python-brace-format
 msgid "Packages suggested by {package}: {count}"
 msgstr "Pacchetti suggeriti da {package}: {count}"
 
-#: urpm/cli/commands/depends.py:1037
+#: urpm/cli/commands/depends.py:1038
 #, python-brace-format
 msgid "No package suggests '{package}'"
 msgstr "Nessun pacchetto suggerisce '{package}'"
 
-#: urpm/cli/commands/depends.py:1040
+#: urpm/cli/commands/depends.py:1041
 #, python-brace-format
 msgid "Packages that suggest {package}: {count}"
 msgstr "Pacchetti che suggeriscono {package}: {count}"
 
-#: urpm/cli/commands/depends.py:1063
+#: urpm/cli/commands/depends.py:1064
 msgid "rpm module not available"
 msgstr "modulo rpm non disponibile"
 
-#: urpm/cli/commands/depends.py:1081
+#: urpm/cli/commands/depends.py:1078
 #, python-brace-format
 msgid "Package '{package}' is not installed"
 msgstr "Il pacchetto '{package}' non è installato"
 
-#: urpm/cli/commands/depends.py:1092
+#: urpm/cli/commands/depends.py:1089
 #, python-brace-format
 msgid "build dependency of {source}"
 msgstr "dipendenza di compilazione di {source}"
 
-#: urpm/cli/commands/depends.py:1094
+#: urpm/cli/commands/depends.py:1091
 msgid "This package can be removed with: urpm autoremove --buildrequires"
 msgstr ""
 "Questo pacchetto può essere rimosso con: urpm autoremove --buildrequires"
 
-#: urpm/cli/commands/depends.py:1099
+#: urpm/cli/commands/depends.py:1096
 msgid "explicitly installed"
 msgstr "installato esplicitamente"
 
-#: urpm/cli/commands/depends.py:1109
+#: urpm/cli/commands/depends.py:1106
 msgid "orphan"
 msgstr "orfano"
 
-#: urpm/cli/commands/depends.py:1110
+#: urpm/cli/commands/depends.py:1107
 msgid "(no explicit package requires it)"
 msgstr "(nessun pacchetto esplicito lo richiede)"
 
-#: urpm/cli/commands/depends.py:1111
+#: urpm/cli/commands/depends.py:1108
 msgid "This package can be removed with: urpm autoremove --orphans"
 msgstr "Questo pacchetto può essere rimosso con: urpm autoremove --orphans"
 
-#: urpm/cli/commands/depends.py:1120
+#: urpm/cli/commands/depends.py:1117
 msgid "R"
 msgstr "R"
 
-#: urpm/cli/commands/depends.py:1120
+#: urpm/cli/commands/depends.py:1117
 msgid "required"
 msgstr "richiesto"
 
-#: urpm/cli/commands/depends.py:1122
+#: urpm/cli/commands/depends.py:1119
 msgid "r"
 msgstr "r"
 
-#: urpm/cli/commands/depends.py:1122
+#: urpm/cli/commands/depends.py:1119
 msgid "recommended"
 msgstr "raccomandato"
 
-#: urpm/cli/commands/depends.py:1124
+#: urpm/cli/commands/depends.py:1121
 msgid "s"
 msgstr "s"
 
-#: urpm/cli/commands/depends.py:1124
+#: urpm/cli/commands/depends.py:1121
 msgid "suggested"
 msgstr "suggerito"
 
-#: urpm/cli/commands/depends.py:1135
+#: urpm/cli/commands/depends.py:1132
 msgid "kept by Supplements"
 msgstr "mantenuto per Supplements"
 
-#: urpm/cli/commands/depends.py:1136
+#: urpm/cli/commands/depends.py:1133
 msgid ""
 "This package is triggered by a Supplements relationship from another "
 "installed package."
@@ -8241,25 +8242,25 @@ msgstr ""
 "Questo pacchetto è attivato da una relazione Supplements proveniente da un "
 "altro pacchetto installato."
 
-#: urpm/cli/commands/depends.py:1181
+#: urpm/cli/commands/depends.py:1178
 msgid "kept by weak dependency chain"
 msgstr "mantenuto da una catena di dipendenze deboli"
 
-#: urpm/cli/commands/depends.py:1204
+#: urpm/cli/commands/depends.py:1201
 msgid "installed as dependency"
 msgstr "installato come dipendenza"
 
-#: urpm/cli/commands/depends.py:1214
+#: urpm/cli/commands/depends.py:1211
 #, python-brace-format
 msgid "By {packages} explicit package(s):"
 msgstr "Da {packages} pacchetto/i esplicito/i:"
 
-#: urpm/cli/commands/depends.py:1238
+#: urpm/cli/commands/depends.py:1235
 #, python-brace-format
 msgid "(via {chain})"
 msgstr "(via {chain})"
 
-#: urpm/cli/commands/depends.py:1242
+#: urpm/cli/commands/depends.py:1239
 msgid "Also required by (no explicit package in chain):"
 msgstr "Anche richiesto da (nessun pacchetto esplicito nella catena):"
 
@@ -8349,13 +8350,13 @@ msgstr ""
 "Niente da rimuovere."
 
 #: urpm/cli/commands/cleanup.py:210 urpm/cli/commands/cleanup.py:473
-#: urpm/cli/commands/cleanup.py:983
+#: urpm/cli/commands/cleanup.py:1077
 #, python-brace-format
 msgid "BLOCKED ({count})"
 msgstr "BLOCCATI ({count})"
 
 #: urpm/cli/commands/cleanup.py:210 urpm/cli/commands/cleanup.py:474
-#: urpm/cli/commands/cleanup.py:984
+#: urpm/cli/commands/cleanup.py:1078
 msgid "critical system packages:"
 msgstr "pacchetti critici del sistema:"
 
@@ -8366,17 +8367,17 @@ msgstr ""
 "inutilizzabile)"
 
 #: urpm/cli/commands/cleanup.py:218 urpm/cli/commands/cleanup.py:480
-#: urpm/cli/commands/cleanup.py:988
+#: urpm/cli/commands/cleanup.py:1082
 #, python-brace-format
 msgid "WARNING ({count})"
 msgstr "AVVISO ({count})"
 
 #: urpm/cli/commands/cleanup.py:218 urpm/cli/commands/cleanup.py:481
-#: urpm/cli/commands/cleanup.py:989
+#: urpm/cli/commands/cleanup.py:1083
 msgid "generally useful packages:"
 msgstr "pacchetti generalmente utili:"
 
-#: urpm/cli/commands/cleanup.py:222 urpm/cli/commands/cleanup.py:994
+#: urpm/cli/commands/cleanup.py:222 urpm/cli/commands/cleanup.py:1088
 msgid ""
 "\n"
 "  Remove these warned packages anyway? [y/N] "
@@ -8385,12 +8386,12 @@ msgstr ""
 "  Rimuovere comunque questi pacchetti segnalati? [s/N] "
 
 #: urpm/cli/commands/cleanup.py:227 urpm/cli/commands/cleanup.py:490
-#: urpm/cli/commands/cleanup.py:998
+#: urpm/cli/commands/cleanup.py:1092
 msgid "  Warned packages will be kept"
 msgstr "  I pacchetti segnalati saranno mantenuti"
 
 #: urpm/cli/commands/cleanup.py:229 urpm/cli/commands/cleanup.py:492
-#: urpm/cli/commands/cleanup.py:1000
+#: urpm/cli/commands/cleanup.py:1094
 msgid ""
 "\n"
 "  Warned packages will be kept"
@@ -8398,7 +8399,7 @@ msgstr ""
 "\n"
 "  I pacchetti segnalati saranno mantenuti"
 
-#: urpm/cli/commands/cleanup.py:248 urpm/cli/commands/cleanup.py:1005
+#: urpm/cli/commands/cleanup.py:248 urpm/cli/commands/cleanup.py:1099
 msgid ""
 "\n"
 "Nothing safe to remove."
@@ -8439,7 +8440,7 @@ msgstr "{label} ({count}):"
 msgid "Disk space to free: {size}"
 msgstr "Spazio su disco da liberare: {size}"
 
-#: urpm/cli/commands/cleanup.py:283 urpm/cli/commands/cleanup.py:942
+#: urpm/cli/commands/cleanup.py:283 urpm/cli/commands/cleanup.py:1036
 msgid ""
 "\n"
 "Remove these packages? [y/N] "
@@ -8448,7 +8449,8 @@ msgstr ""
 "Rimuovere questi pacchetti? [s/N] "
 
 #: urpm/cli/commands/cleanup.py:322 urpm/cli/commands/cleanup.py:577
-#: urpm/cli/commands/cleanup.py:963 urpm/cli/commands/_install_pipeline.py:151
+#: urpm/cli/commands/cleanup.py:1057
+#: urpm/cli/commands/_install_pipeline.py:151
 msgid ""
 "\n"
 "\n"
@@ -8459,7 +8461,8 @@ msgstr ""
 "Interruzione forzata!"
 
 #: urpm/cli/commands/cleanup.py:328 urpm/cli/commands/cleanup.py:583
-#: urpm/cli/commands/cleanup.py:969 urpm/cli/commands/_install_pipeline.py:156
+#: urpm/cli/commands/cleanup.py:1063
+#: urpm/cli/commands/_install_pipeline.py:156
 msgid ""
 "\n"
 "\n"
@@ -8531,135 +8534,154 @@ msgstr ""
 "\n"
 "Non resta nulla da rimuovere."
 
-#: urpm/cli/commands/cleanup.py:697 urpm/cli/commands/cleanup.py:737
+#: urpm/cli/commands/cleanup.py:739 urpm/cli/commands/cleanup.py:777
 #, python-brace-format
 msgid "Not installed: {packages}"
 msgstr "Non installati: {packages}"
 
-#: urpm/cli/commands/cleanup.py:700
+#: urpm/cli/commands/cleanup.py:742
 #, python-brace-format
 msgid "Already manual: {packages}"
 msgstr "Già manuali: {packages}"
 
-#: urpm/cli/commands/cleanup.py:704
+#: urpm/cli/commands/cleanup.py:746
 #, python-brace-format
 msgid "Marked as manual: {packages}"
 msgstr "Marcati come manuali: {packages}"
 
-#: urpm/cli/commands/cleanup.py:705
+#: urpm/cli/commands/cleanup.py:747
 msgid "These packages are now protected from autoremove."
 msgstr "Questi pacchetti sono ora protetti da autoremove."
 
-#: urpm/cli/commands/cleanup.py:740
+#: urpm/cli/commands/cleanup.py:780
 #, python-brace-format
 msgid "Already auto: {packages}"
 msgstr "Già automatici: {packages}"
 
-#: urpm/cli/commands/cleanup.py:744
+#: urpm/cli/commands/cleanup.py:784
 #, python-brace-format
 msgid "Marked as auto: {packages}"
 msgstr "Marcati come automatici: {packages}"
 
-#: urpm/cli/commands/cleanup.py:745
+#: urpm/cli/commands/cleanup.py:785
 msgid "These packages can now be autoremoved if no longer needed."
 msgstr ""
 "Questi pacchetti possono ora essere rimossi da autoremove se non più "
 "necessari."
 
-#: urpm/cli/commands/cleanup.py:773
+#: urpm/cli/commands/cleanup.py:823
 msgid "not installed"
 msgstr "non installato"
 
-#: urpm/cli/commands/cleanup.py:775
+#: urpm/cli/commands/cleanup.py:825
 msgid "auto"
 msgstr "auto"
 
-#: urpm/cli/commands/cleanup.py:778
+#: urpm/cli/commands/cleanup.py:828
 msgid "manual"
 msgstr "manuale"
 
-#: urpm/cli/commands/cleanup.py:782
+#: urpm/cli/commands/cleanup.py:832
 #, python-brace-format
 msgid "Total: {manual} manual, {auto} auto"
 msgstr "Totale: {manual} manuali, {auto} automatici"
 
-#: urpm/cli/commands/cleanup.py:787
+#: urpm/cli/commands/cleanup.py:837
 msgid "Usage: urpm mark <manual|auto|show> [packages...]"
 msgstr "Utilizzo: urpm mark <manual|auto|show> [pacchetti...]"
 
-#: urpm/cli/commands/cleanup.py:815
+#: urpm/cli/commands/cleanup.py:865
 msgid "No packages are held."
 msgstr "Nessun pacchetto è bloccato."
 
-#: urpm/cli/commands/cleanup.py:818
+#: urpm/cli/commands/cleanup.py:878
 #, python-brace-format
 msgid "Held packages ({count}):"
 msgstr "Pacchetti bloccati ({count}):"
 
-#: urpm/cli/commands/cleanup.py:823
+#: urpm/cli/commands/cleanup.py:886
+#, python-brace-format
+msgid "(frozen at {evr}, held since {date})"
+msgstr "(fissato a {evr}, bloccato dal {date})"
+
+#: urpm/cli/commands/cleanup.py:889
 #, python-brace-format
 msgid "(held since {date})"
 msgstr "(bloccato dal {date})"
 
-#: urpm/cli/commands/cleanup.py:844
+#: urpm/cli/commands/cleanup.py:896
+msgid "no longer installed, so this hold protects nothing"
+msgstr "non è più installato, quindi questo blocco non protegge nulla"
+
+#: urpm/cli/commands/cleanup.py:899
+#, python-brace-format
+msgid "the installed build is now {evr}"
+msgstr "la build installata è ora {evr}"
+
+#: urpm/cli/commands/cleanup.py:934
+#, python-brace-format
+msgid "Not installed, so nothing to hold: {packages}"
+msgstr "Non installato, quindi niente da bloccare: {packages}"
+
+#: urpm/cli/commands/cleanup.py:938
 #, python-brace-format
 msgid "Already held: {packages}"
 msgstr "Già bloccati: {packages}"
 
-#: urpm/cli/commands/cleanup.py:848
+#: urpm/cli/commands/cleanup.py:942
 #, python-brace-format
 msgid "Held: {packages}"
 msgstr "Bloccati: {packages}"
 
-#: urpm/cli/commands/cleanup.py:850
+#: urpm/cli/commands/cleanup.py:944
 msgid ""
 "These packages will be protected from upgrades and obsoletes replacement."
 msgstr ""
 "Questi pacchetti saranno protetti dagli aggiornamenti e dalle sostituzioni "
 "per obsolete."
 
-#: urpm/cli/commands/cleanup.py:872
+#: urpm/cli/commands/cleanup.py:966
 #, python-brace-format
 msgid "Not held: {packages}"
 msgstr "Non bloccati: {packages}"
 
-#: urpm/cli/commands/cleanup.py:875
+#: urpm/cli/commands/cleanup.py:969
 #, python-brace-format
 msgid "Unheld: {packages}"
 msgstr "Sbloccati: {packages}"
 
-#: urpm/cli/commands/cleanup.py:877
+#: urpm/cli/commands/cleanup.py:971
 msgid "These packages can now be upgraded and replaced by obsoletes."
 msgstr ""
 "Questi pacchetti possono ora essere aggiornati e sostituiti da obsolete."
 
-#: urpm/cli/commands/cleanup.py:893
+#: urpm/cli/commands/cleanup.py:987
 msgid "Note: the grammar changed, this is now `urpm hold remove`."
 msgstr "Nota: la sintassi è cambiata, ora si scrive «urpm hold remove»."
 
-#: urpm/cli/commands/cleanup.py:910
+#: urpm/cli/commands/cleanup.py:1004
 msgid "No interrupted transactions found"
 msgstr "Nessuna transazione interrotta trovata"
 
-#: urpm/cli/commands/cleanup.py:923
+#: urpm/cli/commands/cleanup.py:1017
 msgid "No orphan dependencies to clean"
 msgstr "Nessuna dipendenza orfana da pulire"
 
-#: urpm/cli/commands/cleanup.py:935
+#: urpm/cli/commands/cleanup.py:1029
 #, python-brace-format
 msgid ""
 "Found {count} orphan dependencies from {trans} interrupted transaction(s):"
 msgstr ""
 "Trovate {count} dipendenze orfane da {trans} transazione/i interrotta/e:"
 
-#: urpm/cli/commands/cleanup.py:1025
+#: urpm/cli/commands/cleanup.py:1119
 #, python-brace-format
 msgid "Erasing {count} orphan dependency..."
 msgid_plural "Erasing {count} orphan dependencies..."
 msgstr[0] "Disinstallazione di {count} dipendenza orfana..."
 msgstr[1] "Disinstallazione di {count} dipendenze orfane..."
 
-#: urpm/cli/commands/cleanup.py:1066
+#: urpm/cli/commands/cleanup.py:1160
 #, python-brace-format
 msgid "Erase interrupted after {count} packages"
 msgstr "Disinstallazione interrotta dopo {count} pacchetti"
@@ -9722,44 +9744,44 @@ msgstr "Errore: permesso negato in scrittura su {path}"
 msgid "Error writing config: {error}"
 msgstr "Errore di scrittura della configurazione: {error}"
 
-#: urpm/cli/helpers/package.py:269
+#: urpm/cli/helpers/package.py:290
 #, python-brace-format
 msgid "Warning: '{pkg}' is only provided by {provider}"
 msgstr "Attenzione: '{pkg}' è fornito solo da {provider}"
 
-#: urpm/cli/helpers/package.py:270
+#: urpm/cli/helpers/package.py:291
 #, python-brace-format
 msgid "but you have {installed} installed."
 msgstr "ma hai installato {installed}."
 
-#: urpm/cli/helpers/package.py:271
+#: urpm/cli/helpers/package.py:292
 msgid "This will likely cause conflicts!"
 msgstr "Questo causerà probabilmente dei conflitti!"
 
-#: urpm/cli/helpers/package.py:273
+#: urpm/cli/helpers/package.py:294
 msgid "Aborting (use explicit package name to force)"
 msgstr "Annullamento (usare il nome esplicito del pacchetto per forzare)"
 
-#: urpm/cli/helpers/package.py:276
+#: urpm/cli/helpers/package.py:297
 msgid "Install anyway? [y/N] "
 msgstr "Installare comunque? [s/N] "
 
-#: urpm/cli/helpers/package.py:291
+#: urpm/cli/helpers/package.py:312
 #, python-brace-format
 msgid "Multiple providers for '{pkg}':"
 msgstr "Più fornitori per '{pkg}':"
 
-#: urpm/cli/helpers/package.py:294 urpm/cli/helpers/package.py:326
+#: urpm/cli/helpers/package.py:315 urpm/cli/helpers/package.py:347
 #: urpm/cli/helpers/suggests.py:136
 msgid "All"
 msgstr "Tutti"
 
-#: urpm/cli/helpers/package.py:297 urpm/cli/helpers/package.py:329
+#: urpm/cli/helpers/package.py:318 urpm/cli/helpers/package.py:350
 #: urpm/cli/helpers/suggests.py:139
 msgid "Choice [1]: "
 msgstr "Scelta [1]: "
 
-#: urpm/cli/helpers/package.py:323
+#: urpm/cli/helpers/package.py:344
 #, python-brace-format
 msgid "Multiple installed families provide '{pkg}':"
 msgstr "Più famiglie installate forniscono '{pkg}':"
@@ -10516,6 +10538,14 @@ msgstr "scaricamento fallito"
 #: urpm/core/transaction_queue.py:1058
 msgid "Waiting for scriptlets to complete..."
 msgstr "In attesa del completamento degli scriptlet..."
+
+#: urpm/core/database.py:1255
+msgid ""
+"[urpm] a database upgrade is pending; run any urpm command as root to apply "
+"it"
+msgstr ""
+"[urpm] è in attesa un aggiornamento della banca dati; esegui un qualsiasi "
+"comando urpm come root per applicarlo"
 
 #: urpm/core/needs_restart.py:287
 #, python-brace-format

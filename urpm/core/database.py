@@ -31,6 +31,7 @@ from .db import (
 # Safe at import time: rpmdb.py pulls in librpm lazily, so database.py
 # stays importable on a machine without python3-rpm.
 from .rpmdb import rpmdb_signature
+from ..i18n import _
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ class InstalledRpm(NamedTuple):
 
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 38
+SCHEMA_VERSION = 39
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -455,6 +456,10 @@ CREATE TABLE IF NOT EXISTS held_packages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     package_name TEXT NOT NULL UNIQUE,  -- exact package name (not pattern)
     reason TEXT,                        -- user note for why it's held
+    held_evr TEXT,                      -- build frozen when the hold was set,
+                                        -- NULL when several were installed
+                                        -- under that name (the lock is on the
+                                        -- name, so naming one would lie)
     added_timestamp INTEGER NOT NULL
 );
 
@@ -1059,6 +1064,7 @@ MIGRATIONS = {
     # test fixtures seed a DB at v29-v35 without the server tables and
     # let the chain replay every hop up to the current version.
     37: (38, ""),
+    38: (39, ""),
 }
 
 
@@ -1195,6 +1201,17 @@ class PackageDatabase(
             except Exception:
                 pass
 
+        # The mirror case: a read-only consumer cannot migrate what it
+        # reads, the file being root-owned in mode 644, so the schema
+        # moves on the first privileged command and not before.  Say
+        # so, rather than leave the operator to meet a missing column
+        # in a query and wonder.
+        if self.read_only:
+            try:
+                self._warn_pending_migration()
+            except Exception:
+                pass
+
     @staticmethod
     def _infer_urpm_root(db_path: Path) -> Optional[str]:
         """Guess the chroot root a DB lives under.
@@ -1215,6 +1232,28 @@ class PackageDatabase(
             return None
         root = str(Path(*parts[:-4]) if parts[:-4] else Path("/"))
         return None if root == "/" else root
+
+    def _warn_pending_migration(self) -> None:
+        """Say that the schema is behind the code, once, on stderr.
+
+        Only ever called in read-only mode, where applying the
+        migration is not an option.  Silent when the version matches,
+        and silent when the database is *ahead* of the code: that is
+        the operator having downgraded urpm, which
+        :meth:`_init_schema` reports for a writer and about which a
+        reader can do nothing useful.
+        """
+        import sys
+        try:
+            row = self.conn.execute(
+                "SELECT version FROM schema_info"
+            ).fetchone()
+        except sqlite3.Error:
+            return
+        if not row or row[0] >= SCHEMA_VERSION:
+            return
+        print(_("[urpm] a database upgrade is pending; run any urpm "
+                "command as root to apply it"), file=sys.stderr)
 
     def _warn_orphaned_transactions(self) -> None:
         """Emit a stderr warning for each orphaned ``running`` row."""
@@ -1553,6 +1592,8 @@ class PackageDatabase(
                     self._migrate_v36_to_v37_drop_mageia_version(logger)
                 elif version == 37 and to_version == 38:
                     self._migrate_v37_to_v38_server_media_path(logger)
+                elif version == 38 and to_version == 39:
+                    self._migrate_v38_to_v39_held_evr(logger)
                 version = to_version
             except sqlite3.Error as e:
                 logger.error(f"Migration v{version} -> v{to_version} failed: {e}")
@@ -1565,6 +1606,40 @@ class PackageDatabase(
                 raise RuntimeError(f"Database migration failed: {e}")
 
         logger.info(f"Database schema is now at version {SCHEMA_VERSION}")
+
+    def _migrate_v38_to_v39_held_evr(self, logger):
+        """Record which build a hold froze.
+
+        A hold locks the installed build in place, and until now only
+        the name was kept, so neither the operator nor the code could
+        say what had been pinned or notice that the package had moved
+        anyway.  The column is added rather than the table recreated:
+        the holds are the operator's own decisions and must survive the
+        upgrade that adds the column.
+
+        Existing rows keep ``NULL``, which reads as "pinned, build
+        unknown" — true of every hold set before this.
+
+        Skips silently when ``held_packages`` doesn't exist yet, and
+        when the column is already there: test fixtures seed a database
+        at schema v29-v35 with a partial schema that predates the hold
+        table, then let the chain replay every hop up to the current
+        version.
+        """
+        exists = self.conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='held_packages'"
+        ).fetchone()
+        if not exists:
+            logger.debug("v39: held_packages absent, nothing to alter")
+            return
+        columns = {row[1] for row in
+                   self.conn.execute("PRAGMA table_info(held_packages)")}
+        if "held_evr" in columns:
+            logger.debug("v39: held_packages.held_evr already present")
+            return
+        self.conn.execute(
+            "ALTER TABLE held_packages ADD COLUMN held_evr TEXT")
 
     def _migrate_v37_to_v38_server_media_path(self, logger):
         """Add the per-(server, media) layout column.

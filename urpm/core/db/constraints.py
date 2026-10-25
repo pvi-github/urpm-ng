@@ -89,12 +89,21 @@ class ConstraintsMixin:
     # Package holds (prevent upgrades and obsoletes replacement)
     # =========================================================================
 
-    def add_hold(self, package_name: str, reason: str = None) -> bool:
+    def add_hold(self, package_name: str, reason: str = None,
+                 evr: str = None) -> bool:
         """Add a hold on a package.
 
         Args:
-            package_name: Exact package name to hold
+            package_name: Exact package name to hold, as the rpmdb
+                spells it.  The caller resolves whatever the operator
+                typed before coming here: a lock is only posted for a
+                name that is installed, so a name this table invents
+                protects nothing.
             reason: Optional reason for the hold
+            evr: Version-release of the build being frozen, when one
+                build answers to that name.  ``None`` when several do,
+                since the lock is posted on the name and naming one of
+                them would misrepresent what it covers.
 
         Returns:
             True if hold was added, False if already held
@@ -102,9 +111,10 @@ class ConstraintsMixin:
         try:
             with self._conn_write() as conn:
                 conn.execute("""
-                    INSERT INTO held_packages (package_name, reason, added_timestamp)
-                    VALUES (?, ?, ?)
-                """, (package_name, reason, int(time.time())))
+                    INSERT INTO held_packages
+                        (package_name, reason, held_evr, added_timestamp)
+                    VALUES (?, ?, ?, ?)
+                """, (package_name, reason, evr, int(time.time())))
                 conn.commit()
                 return True
         except sqlite3.IntegrityError:
@@ -134,14 +144,40 @@ class ConstraintsMixin:
             return cursor.fetchone() is not None
 
     def list_holds(self) -> List[Dict]:
-        """List all held packages."""
+        """List all held packages.
+
+        Answers without ``held_evr``, the column schema v39 adds, when
+        the database has not been migrated yet.  That is not a
+        tolerance for its own sake: the file is root-owned in mode 644
+        and the schema moves on the first privileged command, so a
+        normal user running ``urpm hold list`` reads a database they
+        cannot migrate and must still get their list.  The frozen
+        build then reads as unknown, which is what it is for any hold
+        set before the column existed.
+
+        :meth:`PackageDatabase._warn_pending_migration` is what tells
+        the operator the upgrade is waiting.
+        """
         with self._conn_read() as conn:
-            cursor = conn.execute("""
-                SELECT package_name, reason, added_timestamp
-                FROM held_packages
-                ORDER BY package_name
-            """)
-            return [dict(row) for row in cursor]
+            try:
+                cursor = conn.execute("""
+                    SELECT package_name, reason, held_evr, added_timestamp
+                    FROM held_packages
+                    ORDER BY package_name
+                """)
+                return [dict(row) for row in cursor]
+            except sqlite3.OperationalError:
+                cursor = conn.execute("""
+                    SELECT package_name, reason, added_timestamp
+                    FROM held_packages
+                    ORDER BY package_name
+                """)
+                holds = []
+                for row in cursor:
+                    hold = dict(row)
+                    hold["held_evr"] = None
+                    holds.append(hold)
+                return holds
 
     def get_held_packages_set(self) -> Set[str]:
         """Get set of all held package names (for fast lookup)."""
