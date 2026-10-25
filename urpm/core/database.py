@@ -3065,26 +3065,65 @@ class PackageDatabase(
 
         return pkg
 
-    def get_package_smart(self, identifier: str) -> Optional[Dict]:
-        """Get a package by name or NEVRA.
+    def resolve_spelling(self, token: str) -> Optional[str]:
+        """The name of the package ``token`` names, or None.
 
-        If identifier looks like a NEVRA (contains version pattern),
-        try exact NEVRA match first, then fall back to name.
+        An operator pastes whatever their last command printed, and rpm
+        prints several spellings of one package: a plain Name, the
+        ``name-version-release`` that ``rpm -q`` gives on Mageia, a
+        full NEVRA.  All of them have to reach the package they name.
+
+        The arbitration is a query and not a parse, and it has to be.
+        Mageia ships Names shaped exactly like a name-version-release —
+        ``kernel-desktop-devel-6.18.22-1.mga10``, ``lua-rpm-macros-1``,
+        ``xmltex-20020625`` — so no syntactic rule can tell those from
+        a versioned spelling.  Among the token itself and every prefix
+        of it ending before a hyphen, the longest one the catalogue
+        carries wins, which gives a whole Name precedence over the
+        reading that would treat its tail as a version.
+
+        The version in a spelling therefore narrows the search without
+        ever breaking it: a build the media do not carry still resolves
+        to its name, and the caller decides what to do from there.
+
+        No release filter is applied: this answers what a name is, not
+        which row to use, and :meth:`get_package` filters when it looks
+        the name up.
         """
-        import re
-        # Check if it looks like a NEVRA
-        if re.search(r'-\d+[.:]', identifier):
-            # Try NEVRA first
-            pkg = self.get_package_by_nevra(identifier)
-            if pkg:
-                return pkg
-            # Extract name and try that
-            match = re.match(r'^(.+?)-\d+[.:]', identifier)
-            if match:
-                return self.get_package(match.group(1))
+        if not token:
             return None
-        else:
-            return self.get_package(identifier)
+        candidates = [token]
+        head = token
+        while "-" in head:
+            head = head.rsplit("-", 1)[0]
+            candidates.append(head)
+        lowered = tuple(candidate.lower() for candidate in candidates)
+        placeholders = ",".join("?" * len(lowered))
+        with self._conn_read() as conn:
+            row = conn.execute(f"""
+                SELECT name FROM packages
+                WHERE name_lower IN ({placeholders})
+                ORDER BY length(name_lower) DESC
+                LIMIT 1
+            """, lowered).fetchone()
+        return row["name"] if row else None
+
+    def get_package_smart(self, identifier: str) -> Optional[Dict]:
+        """Get a package from any spelling of it.
+
+        The spelling is resolved to a name by
+        :meth:`resolve_spelling`; when the operator named a precise
+        build and the catalogue carries it, that build answers so the
+        caller reports the version asked about rather than the latest.
+        """
+        name = self.resolve_spelling(identifier)
+        if not name:
+            return None
+        if name != identifier:
+            exact = self.get_package_by_nevra(identifier)
+            if exact:
+                return exact
+        return self.get_package(name)
 
     def get_packages_by_names(self, names: List[str]) -> List[Dict]:
         """Batch resolve names to their installed and available faces.

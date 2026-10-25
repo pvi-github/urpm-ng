@@ -105,10 +105,17 @@ def cmd_search(args, db: 'PackageDatabase') -> int:
         return 1
 
     ops = PackageOperations(db)
-    results = ops.search_packages(args.pattern, search_provides=True)
+    # A pattern pasted out of ``rpm -q`` names one package rather than
+    # describing a search, and the full-text index has nothing to match
+    # a version against.  When the catalogue recognises the spelling,
+    # the search runs on the name it resolved to; a real pattern, a
+    # glob or a capability resolves to nothing and is searched as
+    # typed.
+    pattern = db.resolve_spelling(args.pattern) or args.pattern
+    results = ops.search_packages(pattern, search_provides=True)
 
     if not results:
-        print(colors.warning(_("No packages found for '{pattern}'").format(pattern=args.pattern)))
+        print(colors.warning(_("No packages found for '{pattern}'").format(pattern=pattern)))
         return 1
 
     # ANSI codes without reset for proper nesting
@@ -163,7 +170,8 @@ def cmd_search(args, db: 'PackageDatabase') -> int:
 
         return name, None
 
-    pattern = args.pattern
+    # ``pattern`` is what the search actually ran on, resolved above,
+    # so the highlighting marks what matched.
 
     for pkg in results:
         pkg_name = pkg['name']
@@ -530,18 +538,18 @@ def cmd_provides(args, db: 'PackageDatabase') -> int:
         import rpm as _rpm
 
         with rpmdb.open_ts() as ts:
-            # Try exact name first
-            for hdr in ts.dbMatch('name', pkg_name):
-                # If NEVRA was given, check it matches
+            # rpm's own label index takes any spelling rpm prints: a
+            # plain Name, the name-version-release of ``rpm -q``, or a
+            # full NEVRA.  Asking it is what lets a pasted spec reach
+            # its package, and it narrows to the exact build when one
+            # was named, which is what the equality check it replaces
+            # was doing by hand for the NEVRA case only.
+            for hdr in ts.dbMatch(_rpm.RPMDBI_LABEL, package):
                 version = hdr[_rpm.RPMTAG_VERSION]
                 release = hdr[_rpm.RPMTAG_RELEASE]
                 arch = hdr[_rpm.RPMTAG_ARCH] or 'noarch'
-                nevra = f"{pkg_name}-{version}-{release}.{arch}"
-
-                if package != pkg_name and nevra != package:
-                    continue  # NEVRA doesn't match
-
-                found_name = nevra
+                found_name = (f"{hdr[_rpm.RPMTAG_NAME]}-{version}-"
+                              f"{release}.{arch}")
                 prov_names = hdr[_rpm.RPMTAG_PROVIDENAME] or []
                 prov_versions = hdr[_rpm.RPMTAG_PROVIDEVERSION] or []
 

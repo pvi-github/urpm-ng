@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from ..helpers.package import (
     extract_pkg_name as _extract_pkg_name,
     pick_arch_for_lookup,
+    resolve_spec,
     resolve_target_arch,
     system_arch,
 )
@@ -33,7 +34,7 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
     from .. import colors
 
     package = args.package
-    pkg_name = _extract_pkg_name(package)
+    pkg_name = resolve_spec(db, package)
     show_tree = getattr(args, 'tree', False)
     legacy = getattr(args, 'legacy', False)
     show_all = getattr(args, 'all', False)
@@ -82,13 +83,13 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
         if not requires:
             pkg = db.get_package_smart(package)
             if not pkg:
-                print(_("Package '{package}' not found").format(package=package))
+                print(_("Package '{package}' not found").format(package=pkg_name))
                 return 1
-            print(_("{package}: no dependencies").format(package=package))
+            print(_("{package}: no dependencies").format(package=pkg_name))
             return 0
 
         print(_("Dependencies of {package} ({count}):").format(
-            package=package, count=len(requires)))
+            package=pkg_name, count=len(requires)))
         for cap in sorted(requires):
             print(f"  {cap}")
         return 0
@@ -152,7 +153,7 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
                 "All dependencies of {package}: {count} package",
                 "All dependencies of {package}: {count} packages",
                 len(dep_names)
-            ).format(package=package, count=len(dep_names)) + "\n")
+            ).format(package=pkg_name, count=len(dep_names)) + "\n")
             for name in dep_names:
                 print(f"  {name}")
     else:
@@ -177,15 +178,15 @@ def cmd_depends(args, db: 'PackageDatabase') -> int:
                 "Dependencies of {package}: {count} package",
                 "Dependencies of {package}: {count} packages",
                 len(direct_deps)
-            ).format(package=package, count=len(direct_deps)) + "\n")
+            ).format(package=pkg_name, count=len(direct_deps)) + "\n")
             for dep in direct_deps:
                 print(f"  {dep}")
         elif not result.alternatives:
             pkg = db.get_package_smart(package)
             if not pkg:
-                print(_("Package '{package}' not found").format(package=package))
+                print(_("Package '{package}' not found").format(package=pkg_name))
                 return 1
-            print(_("{package}: no dependencies").format(package=package))
+            print(_("{package}: no dependencies").format(package=pkg_name))
 
         # Show unresolved alternatives
         if result.alternatives:
@@ -595,7 +596,7 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
     from ...core.resolver import Resolver
 
     package = args.package
-    pkg_name = _extract_pkg_name(package)
+    pkg_name = resolve_spec(db, package)
     show_tree = getattr(args, 'tree', False)
     show_all = getattr(args, 'all', False)
     # Read ``--hide-uninstalled`` once at the top so it applies to
@@ -637,7 +638,7 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
     direct_rdeps = get_rdeps(pkg_name)
 
     if not direct_rdeps:
-        print(_("No package depends on '{package}'").format(package=package))
+        print(_("No package depends on '{package}'").format(package=pkg_name))
         return 0
 
     def format_pkg(name: str) -> str:
@@ -672,7 +673,7 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
 
         print(f"{format_pkg(package)}")
         _print_rdep_tree(direct_rdeps, get_rdeps, installed_pkgs, unrequested_pkgs,
-                         visited={package}, prefix="", max_depth=max_depth,
+                         visited={pkg_name}, prefix="", max_depth=max_depth,
                          hide_uninstalled=hide_uninstalled, reachable_cache=reachable_cache)
         if getattr(args, 'legend', False):
             _print_rdepends_legend(colors)
@@ -684,7 +685,7 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
         from collections import deque
 
         all_rdeps = set()
-        visited = {package}
+        visited = {pkg_name}
         queue = deque()
         for r in direct_rdeps:
             if r not in visited:
@@ -703,7 +704,7 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
         if hide_uninstalled:
             all_rdeps = {r for r in all_rdeps if r in installed_pkgs}
         print(_("All packages that depend on {package}: {count}").format(
-            package=package, count=len(all_rdeps)) + "\n")
+            package=pkg_name, count=len(all_rdeps)) + "\n")
         for rdep in sorted(all_rdeps):
             print(f"  {format_pkg(rdep)}")
     else:
@@ -711,7 +712,7 @@ def cmd_rdepends(args, db: 'PackageDatabase') -> int:
         rdeps_shown = ([r for r in direct_rdeps if r in installed_pkgs]
                        if hide_uninstalled else direct_rdeps)
         print(_("Packages that depend on {package}: {count}").format(
-            package=package, count=len(rdeps_shown)) + "\n")
+            package=pkg_name, count=len(rdeps_shown)) + "\n")
         for rdep in rdeps_shown:
             print(f"  {format_pkg(rdep)}")
 
@@ -883,16 +884,16 @@ def cmd_recommends(args, db: 'PackageDatabase') -> int:
     from ...core.resolver import Resolver
 
     package = args.package
-    pkg_name = _extract_pkg_name(package)
+    pkg_name = resolve_spec(db, package)
 
     resolver = Resolver(db)
     recommends = resolver.get_package_recommends(pkg_name)
 
     if not recommends:
-        print(_("{package}: no recommends").format(package=package))
+        print(_("{package}: no recommends").format(package=pkg_name))
         return 0
 
-    print(_("Packages recommended by {package}: {count}").format(package=package, count=len(recommends)) + "\n")
+    print(_("Packages recommended by {package}: {count}").format(package=pkg_name, count=len(recommends)) + "\n")
     for rec in sorted(recommends):
         # Get providers for this capability
         providers = resolver.get_providers(rec.split()[0], include_installed=True)
@@ -907,7 +908,7 @@ def cmd_recommends(args, db: 'PackageDatabase') -> int:
 def cmd_whatrecommends(args, db: 'PackageDatabase') -> int:
     """Handle whatrecommends command - show packages that recommend a package."""
     package = args.package
-    pkg_name = _extract_pkg_name(package)
+    pkg_name = resolve_spec(db, package)
     # Pin the lookup to the target arch so multi-arch systems don't pick
     # up the foreign-arch row whose sonames lack the ``(64bit)`` suffix.
     # Without this, ``whatrecommends lib64fuse2`` on x86_64 may return
@@ -952,10 +953,10 @@ def cmd_whatrecommends(args, db: 'PackageDatabase') -> int:
         pass
 
     if not results:
-        print(_("No package recommends '{package}'").format(package=package))
+        print(_("No package recommends '{package}'").format(package=pkg_name))
         return 0
 
-    print(_("Packages that recommend {package}: {count}").format(package=package, count=len(results)) + "\n")
+    print(_("Packages that recommend {package}: {count}").format(package=pkg_name, count=len(results)) + "\n")
     for name in sorted(results):
         print(f"  {name}")
 
@@ -967,16 +968,16 @@ def cmd_suggests(args, db: 'PackageDatabase') -> int:
     from ...core.resolver import Resolver
 
     package = args.package
-    pkg_name = _extract_pkg_name(package)
+    pkg_name = resolve_spec(db, package)
 
     resolver = Resolver(db)
     suggests = resolver.get_package_suggests(pkg_name)
 
     if not suggests:
-        print(_("{package}: no suggests").format(package=package))
+        print(_("{package}: no suggests").format(package=pkg_name))
         return 0
 
-    print(_("Packages suggested by {package}: {count}").format(package=package, count=len(suggests)) + "\n")
+    print(_("Packages suggested by {package}: {count}").format(package=pkg_name, count=len(suggests)) + "\n")
     for sug in sorted(suggests):
         # Get providers for this capability
         providers = resolver.get_providers(sug.split()[0], include_installed=True)
@@ -991,7 +992,7 @@ def cmd_suggests(args, db: 'PackageDatabase') -> int:
 def cmd_whatsuggests(args, db: 'PackageDatabase') -> int:
     """Handle whatsuggests command - show packages that suggest a package."""
     package = args.package
-    pkg_name = _extract_pkg_name(package)
+    pkg_name = resolve_spec(db, package)
     # See ``cmd_whatrecommends`` — same multi-arch pitfall: the foreign
     # i686 row of a Mageia ``lib64*`` package carries plain sonames
     # without the ``(64bit)`` suffix, so a naive ``db.get_package`` on a
@@ -1034,10 +1035,10 @@ def cmd_whatsuggests(args, db: 'PackageDatabase') -> int:
         pass
 
     if not results:
-        print(_("No package suggests '{package}'").format(package=package))
+        print(_("No package suggests '{package}'").format(package=pkg_name))
         return 0
 
-    print(_("Packages that suggest {package}: {count}").format(package=package, count=len(results)) + "\n")
+    print(_("Packages that suggest {package}: {count}").format(package=pkg_name, count=len(results)) + "\n")
     for name in sorted(results):
         print(f"  {name}")
 
@@ -1063,23 +1064,19 @@ def cmd_why(args, db: 'PackageDatabase') -> int:
         print(_("rpm module not available"))
         return 1
 
-    # Resolve the user-typed string to an installed Name.  The literal
-    # input wins whenever it matches the rpmdb directly: Mageia ABI-
-    # versioned packages (``lib64polkit1-devel-127``,
+    # Resolve what the operator typed to an installed Name: a plain
+    # Name, the ``name-version-release`` ``rpm -q`` prints, or a full
+    # NEVRA pasted from another command's output.  rpm's own label
+    # index arbitrates, which is what keeps a Mageia Name that embeds
+    # numbers, a date or a kernel version (``lib64polkit1-devel-127``,
     # ``lua-rpm-macros-1``, ``xmltex-20020625``,
-    # ``kernel-desktop-devel-6.18.22-1.mga10``) embed numbers / dates /
-    # kernel versions in their Name and must not be split as if those
-    # suffixes were a NEVRA's Version-Release.  Only fall back to
-    # ``extract_pkg_name`` if the literal does not match the rpmdb —
-    # that handles the case where the user pastes a full NEVRA copied
-    # from another command's output.
-    if package in installed_pkgs:
-        pkg_name = package
-    else:
-        pkg_name = _extract_pkg_name(package)
-        if pkg_name not in installed_pkgs:
-            print(_("Package '{package}' is not installed").format(package=package))
-            return 1
+    # ``kernel-desktop-devel-6.18.22-1.mga10``) from being split as if
+    # its suffix were a Version-Release.  The question is about an
+    # installed package, so the rpmdb answers it and not the media.
+    pkg_name = rpmdb.resolve_installed(package)
+    if pkg_name is None:
+        print(_("Package '{package}' is not installed").format(package=pkg_name))
+        return 1
 
     # Get the list of auto-installed packages
     resolver = Resolver(db)

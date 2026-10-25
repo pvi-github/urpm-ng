@@ -106,6 +106,27 @@ def extract_pkg_name(package: str) -> str:
     return name
 
 
+def resolve_spec(db: 'PackageDatabase', spec: str) -> str:
+    """The catalogue's name for what the operator typed.
+
+    :func:`extract_pkg_name` answers the spellings that can be read off
+    the string alone: a plain name, or a NEVRA with its ``.arch``
+    suffix.  What it cannot answer is the one ``rpm -q`` prints on
+    Mageia, ``name-version-release`` with no architecture, because a
+    Mageia Name can have that exact shape —
+    ``kernel-desktop-devel-6.18.22-1.mga10`` is a Name.  No syntactic
+    rule can tell those apart, so the catalogue is asked instead,
+    through :meth:`PackageDatabase.resolve_spelling`.
+
+    Falls back to the syntactic reading when the catalogue carries
+    nothing under any spelling of ``spec``: a capability
+    (``pkgconfig(foo)``), a glob, a version constraint or a plain
+    typo must keep reaching the caller's own "not found" message,
+    naming what the operator typed.
+    """
+    return db.resolve_spelling(spec) or extract_pkg_name(spec)
+
+
 def pick_arch_for_lookup(pkg: str, target_arch: str) -> str:
     """Pick the architecture hint for a DB lookup of ``pkg``.
 
