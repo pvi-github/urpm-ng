@@ -40,9 +40,19 @@ def system_pool():
 
 
 def _rpm_size(name):
-    out = subprocess.run(["rpm", "-q", "--qf", "%{SIZE}", name],
-                         capture_output=True, text=True).stdout.strip()
-    return int(out) if out.isdigit() else None
+    """Installed size of every build of *name*, as rpm reports it.
+
+    The format carries its own newline because a name can have two
+    builds installed at once: rpm holds both for the length of an
+    upgrade, and without the separator their sizes come back
+    concatenated into one absurd number that ``isdigit`` accepts
+    happily.  Summing is the faithful reference, the plan erasing by
+    name and therefore taking both.
+    """
+    out = subprocess.run(["rpm", "-q", "--qf", "%{SIZE}\n", name],
+                         capture_output=True, text=True).stdout
+    sizes = [int(line) for line in out.split() if line.isdigit()]
+    return sum(sizes) if sizes else None
 
 
 class TestAnInstalledPackageHasAWeight:
