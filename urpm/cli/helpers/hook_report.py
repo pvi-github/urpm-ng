@@ -15,6 +15,7 @@ whatever the init is, so the advice does not quietly assume systemd.
 
 from __future__ import annotations
 
+import os
 from typing import Any, List, Sequence, Tuple
 
 from .. import colors
@@ -40,11 +41,72 @@ def run_post_operation_hooks(ops, transaction_id: int,
             does not distinguish, which every rule then matches.
     """
     triggered = ops.hooks_triggered_by(transaction_id, operation)
-    if not triggered:
-        return  # the common case: no rule on the machine matched
+    if triggered:
+        for line in render_hooks(triggered, ops.run_hooks(triggered)):
+            print(line)
 
-    for line in render_hooks(triggered, ops.run_hooks(triggered)):
+    for line in defer_post_exit_actions(ops, transaction_id, operation):
         print(line)
+
+
+def defer_post_exit_actions(ops, transaction_id: int,
+                            operation: str = "") -> List[str]:
+    """Hand the ``after-exit`` rules to a child that outlives us.
+
+    Those rules exist for actions this process cannot carry out at all:
+    it cannot see the code that has just replaced its own, nor let go
+    of the database it holds for the length of the operation.  See
+    SPEC_POST_TRANSACTION_HOOKS §5.1 and :mod:`urpm.core.after_exit`.
+
+    Each one is written into the history before the child is forked,
+    because once this command has returned there is no screen left to
+    report on: the line is the account the operator can come back to.
+    The lines are announced here so nobody is surprised by something
+    happening after the prompt came back.
+
+    Never raises: a deferred action is one whose loss is recoverable,
+    which is the invariant that lets this be best-effort.
+    """
+    from ...core.hooks import Moment
+
+    try:
+        triggered = ops.hooks_triggered_by(transaction_id, operation,
+                                           moment=Moment.AFTER_EXIT)
+    except Exception:  # noqa: BLE001 - a rule file must not break this
+        return []
+    if not triggered:
+        return []
+
+    waiting = []
+    for entry in triggered:
+        subject = sorted(entry.subjects)[0] if entry.subjects else ""
+        try:
+            action_id = ops.db.record_deferred_action(
+                transaction_id, entry.hook.identifier, entry.hook.action,
+                subject=subject or None)
+        except Exception:  # noqa: BLE001
+            continue
+        waiting.append((action_id, entry.hook.action, subject))
+
+    if not waiting:
+        return []
+
+    from ...core.after_exit import spawn
+    from ...core.transaction_queue import released_children
+
+    # Not this process alone: under smart sync it answered the operator
+    # while the child it delegated the operation to went on with the
+    # scriptlets, keeping the database open.  An action that needs the
+    # machine really free has to outlive that one too.
+    if spawn(waiting, pids=(os.getpid(),) + released_children()) is None:
+        return []
+
+    lines = ["  " + colors.dim(ngettext(
+        "{n} action will run once this command has finished:",
+        "{n} actions will run once this command has finished:",
+        len(waiting)).format(n=len(waiting)))]
+    lines += [f"      {verb}" for _id, verb, _subject in waiting]
+    return lines
 
 
 def render_hooks(triggered: Sequence[TriggeredHook],

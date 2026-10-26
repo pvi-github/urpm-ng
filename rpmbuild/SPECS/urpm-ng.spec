@@ -75,6 +75,15 @@ BuildArch:      noarch
 Obsoletes:      %{name}-core < %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 Provides:       %{name}-core = %{?epoch:%{epoch}:}%{version}-%{pkgrelfull}
 
+# Schema this code expects of the package database.  Watched by the
+# shipped rule data/usr/lib/urpm/hooks.d/70-db-schema.cfg, which has a
+# fresh interpreter migrate the database once this urpm has exited:
+# the process that installs this package cannot do it, holding both
+# the old modules and the database itself.
+# Kept equal to urpm.core.database.SCHEMA_VERSION by
+# urpm/tests/test_db_schema_capability.py.
+Provides:       urpm-db-schema = 40
+
 Requires:       python3-solv
 Requires:       python3-rpm
 Requires:       python3-zstandard

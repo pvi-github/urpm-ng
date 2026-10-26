@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.4.1\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-10-25 18:36+0100\n"
+"POT-Creation-Date: 2026-10-25 20:16+0100\n"
 "PO-Revision-Date: 2026-02-28 16:49+0100\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -10269,42 +10269,49 @@ msgstr ""
 "una actualización de distribución Mageia está en la etapa «{stage}» (transacción interrumpida).\n"
 "Continúe con `urpm distupgrade --resume`, o abandónela con `urpm distupgrade --abort`."
 
-#: urpm/cli/helpers/hook_report.py:81
+#: urpm/cli/helpers/hook_report.py:99
+#, python-brace-format
+msgid "{n} action will run once this command has finished:"
+msgid_plural "{n} actions will run once this command has finished:"
+msgstr[0] "{n} acción se ejecutará cuando termine esta orden:"
+msgstr[1] "{n} acciones se ejecutarán cuando termine esta orden:"
+
+#: urpm/cli/helpers/hook_report.py:137
 #, python-brace-format
 msgid "This service is running replaced code: {services}"
 msgid_plural "These services are running replaced code: {services}"
 msgstr[0] "Este servicio está ejecutando código reemplazado: {services}"
 msgstr[1] "Estos servicios están ejecutando código reemplazado: {services}"
 
-#: urpm/cli/helpers/hook_report.py:85
+#: urpm/cli/helpers/hook_report.py:141
 msgid "Restart it when convenient:"
 msgid_plural "Restart them when convenient:"
 msgstr[0] "Reinícielo cuando le convenga:"
 msgstr[1] "Reinícielos cuando le convenga:"
 
-#: urpm/cli/helpers/hook_report.py:102
+#: urpm/cli/helpers/hook_report.py:158
 #, python-brace-format
 msgid "Rule {rule} asked for a restart without naming a service"
 msgstr "La regla {rule} pide un reinicio sin indicar ningún servicio"
 
-#: urpm/cli/helpers/hook_report.py:123
+#: urpm/cli/helpers/hook_report.py:179
 #, python-brace-format
 msgid "Could not move urpmi's media to Mageia {tgt}: {reason}"
 msgstr "No se han podido pasar los medios de urpmi a Mageia {tgt}: {reason}"
 
-#: urpm/cli/helpers/hook_report.py:130
+#: urpm/cli/helpers/hook_report.py:186
 #, python-brace-format
 msgid "urpmi: {n} medium URL moved to Mageia {tgt}"
 msgid_plural "urpmi: {n} media URLs moved to Mageia {tgt}"
 msgstr[0] "urpmi: {n} URL de medio pasada a Mageia {tgt}"
 msgstr[1] "urpmi: {n} URL de medios pasadas a Mageia {tgt}"
 
-#: urpm/cli/helpers/hook_report.py:136
+#: urpm/cli/helpers/hook_report.py:192
 #, python-brace-format
 msgid "urpmi's previous configuration kept as {path}"
 msgstr "configuración anterior de urpmi conservada como {path}"
 
-#: urpm/cli/helpers/hook_report.py:143
+#: urpm/cli/helpers/hook_report.py:199
 #, python-brace-format
 msgid "{n} entry still names Mageia {src} and was left alone:"
 msgid_plural "{n} entries still name Mageia {src} and were left alone:"
@@ -10312,7 +10319,7 @@ msgstr[0] "{n} entrada sigue nombrando a Mageia {src} y se ha dejado intacta:"
 msgstr[1] ""
 "{n} entradas siguen nombrando a Mageia {src} y se han dejado intactas:"
 
-#: urpm/cli/helpers/hook_report.py:155
+#: urpm/cli/helpers/hook_report.py:211
 #, python-brace-format
 msgid "{n} medium has nothing published for Mageia {tgt} and was disabled:"
 msgid_plural ""
@@ -10322,14 +10329,14 @@ msgstr[0] ""
 msgstr[1] ""
 "{n} medios no tienen nada publicado para Mageia {tgt} y se han desactivado:"
 
-#: urpm/cli/helpers/hook_report.py:168
+#: urpm/cli/helpers/hook_report.py:224
 #, python-brace-format
 msgid "{n} local medium now points at a path that is not there:"
 msgid_plural "{n} local media now point at paths that are not there:"
 msgstr[0] "{n} medio local apunta ahora a una ruta que no está:"
 msgstr[1] "{n} medios locales apuntan ahora a rutas que no están:"
 
-#: urpm/cli/helpers/hook_report.py:174
+#: urpm/cli/helpers/hook_report.py:230
 msgid ""
 "A disc medium only needs its disc mounted; otherwise the path is to be "
 "corrected by hand."
@@ -10337,27 +10344,27 @@ msgstr ""
 "Un medio en disco solo necesita su disco montado; si no, la ruta debe "
 "corregirse a mano."
 
-#: urpm/cli/helpers/hook_report.py:187
+#: urpm/cli/helpers/hook_report.py:243
 #, python-brace-format
 msgid "not restarting {service} (context = distupgrade)"
 msgstr "no se reinicia {service} (contexto: distupgrade)"
 
-#: urpm/cli/helpers/hook_report.py:192
+#: urpm/cli/helpers/hook_report.py:248
 #, python-brace-format
 msgid "{service} restarted"
 msgstr "{service} reiniciado"
 
-#: urpm/cli/helpers/hook_report.py:196
+#: urpm/cli/helpers/hook_report.py:252
 #, python-brace-format
 msgid "{service} was not running, left alone"
 msgstr "{service} no estaba en ejecución, se deja como está"
 
-#: urpm/cli/helpers/hook_report.py:201
+#: urpm/cli/helpers/hook_report.py:257
 #, python-brace-format
 msgid "Cannot restart {service}: no service command on this system"
 msgstr "No se puede reiniciar {service}: no hay orden service en este sistema"
 
-#: urpm/cli/helpers/hook_report.py:205
+#: urpm/cli/helpers/hook_report.py:261
 #, python-brace-format
 msgid "Could not restart {service}, try: service {service} restart"
 msgstr "No se pudo reiniciar {service}, pruebe: service {service} restart"
@@ -10511,7 +10518,7 @@ msgstr "descarga fallida"
 msgid "Waiting for scriptlets to complete..."
 msgstr "Esperando a que los scriptlets terminen..."
 
-#: urpm/core/database.py:1255
+#: urpm/core/database.py:1297
 msgid ""
 "[urpm] a database upgrade is pending; run any urpm command as root to apply "
 "it"
