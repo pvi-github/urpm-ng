@@ -15,6 +15,7 @@ whatever the init is, so the advice does not quietly assume systemd.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, List, Sequence, Tuple
 
@@ -22,6 +23,8 @@ from .. import colors
 from ...i18n import _, ngettext
 from ...core.hooks import Action, TriggeredHook
 from ...core.init_system import Result
+
+logger = logging.getLogger(__name__)
 
 
 def run_post_operation_hooks(ops, transaction_id: int,
@@ -65,7 +68,11 @@ def defer_post_exit_actions(ops, transaction_id: int,
     happening after the prompt came back.
 
     Never raises: a deferred action is one whose loss is recoverable,
-    which is the invariant that lets this be best-effort.
+    which is the invariant that lets this be best-effort.  But every
+    way of giving one up is logged, and that was learnt the hard way:
+    the first version swallowed in silence, an action went missing on
+    the D-Bus path, and nothing anywhere said why.  Something taken as
+    root that declines to act owes an explanation.
     """
     from ...core.hooks import Moment
 
@@ -73,8 +80,11 @@ def defer_post_exit_actions(ops, transaction_id: int,
         triggered = ops.hooks_triggered_by(transaction_id, operation,
                                            moment=Moment.AFTER_EXIT)
     except Exception:  # noqa: BLE001 - a rule file must not break this
+        logger.exception("could not read the deferred rules")
         return []
     if not triggered:
+        logger.debug("no deferred rule fired for transaction %s",
+                     transaction_id)
         return []
 
     waiting = []
@@ -85,6 +95,8 @@ def defer_post_exit_actions(ops, transaction_id: int,
                 transaction_id, entry.hook.identifier, entry.hook.action,
                 subject=subject or None)
         except Exception:  # noqa: BLE001
+            logger.exception("could not record the deferred action of "
+                             "rule %s", entry.hook.identifier)
             continue
         waiting.append((action_id, entry.hook.action, subject))
 
@@ -99,6 +111,8 @@ def defer_post_exit_actions(ops, transaction_id: int,
     # scriptlets, keeping the database open.  An action that needs the
     # machine really free has to outlive that one too.
     if spawn(waiting, pids=(os.getpid(),) + released_children()) is None:
+        logger.warning("no watcher could be forked; %d deferred action(s) "
+                       "stay recorded and uncarried", len(waiting))
         return []
 
     lines = ["  " + colors.dim(ngettext(

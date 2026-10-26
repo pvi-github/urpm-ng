@@ -342,6 +342,28 @@ class TestTheWiring:
         assert lines == []
         assert calls == []
 
+    def test_every_way_of_giving_up_says_why(self, db_path, monkeypatch,
+                                             caplog):
+        """Silence cost a whole evening of guessing.
+
+        An action went missing on the D-Bus path and no log anywhere
+        said which of the three steps had declined, because the first
+        version swallowed without a word.  Something taken as root that
+        decides not to act owes an explanation.
+        """
+        import logging
+
+        database = PackageDatabase(db_path=db_path)
+        ops = self._Ops(database, raises=True)
+        try:
+            with caplog.at_level(logging.DEBUG):
+                self._defer(ops, monkeypatch)
+        finally:
+            database.close()
+
+        assert any("deferred" in record.message
+                   for record in caplog.records), caplog.text
+
     def test_a_refused_fork_promises_nothing(self, db_path, monkeypatch):
         # Announcing an action that will not happen would be worse than
         # silence: the line stays in the history as the record.
