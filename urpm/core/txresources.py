@@ -175,6 +175,58 @@ def _remove_cgroup(group: Path) -> None:
         pass
 
 
+#: Where a process we mean to outlive urpm goes to escape being swept
+#: up with it.  A sibling of :data:`CGROUP_NAME` rather than the same
+#: directory: this one carries no weights, so a deferred action is not
+#: throttled like bulk I/O, and it leaves the transaction's cgroup free
+#: to be removed by whoever leaves it last.
+DETACHED_CGROUP_NAME = "urpm-detached"
+
+
+def leave_unit_cgroup(name: str = DETACHED_CGROUP_NAME) -> Optional[Path]:
+    """Move the calling process out of whatever cgroup it was started in.
+
+    A process forked from a systemd unit stays in that unit's cgroup:
+    ``fork`` inherits it, ``setsid`` detaches the session and the
+    controlling terminal but changes no cgroup, and ``exec`` changes
+    only the program.  So when the unit stops, a ``KillMode`` of
+    ``control-group`` -- the default, and what ``urpm-dbus.service``
+    has -- signals every process in that cgroup, ours included.
+
+    Measured the 2026-10-26: a deferred action handed over by the D-Bus
+    service recorded its waiting line and was then killed before it
+    could act, at the very instant it was meant to, since what it waits
+    for is that service going away.  The same action from the command
+    line completed every time.
+
+    Membership is all we need here, so unlike :func:`_join_cgroup` this
+    asks for no controller and sets no weight; a cgroup at the root of
+    the hierarchy is outside any unit's subtree, which is the whole
+    point.  Best-effort by design: on a machine with no cgroup v2, or
+    no unit to be swept up with, there is nothing to escape.
+
+    The directory is left behind once empty, unlike the transaction's:
+    a process cannot remove the cgroup it is in, and here there is
+    nobody outside to do it, every process concerned being one that
+    deliberately outlived its parent.  An empty cgroup costs nothing
+    and the next deferred action moves into the same one.
+
+    Returns the cgroup joined, or ``None`` if we stayed put.
+    """
+    root = CGROUP_ROOT
+    if not (root / "cgroup.controllers").exists():
+        return None
+
+    group = root / name
+    try:
+        group.mkdir(exist_ok=True)
+        (group / "cgroup.procs").write_text(str(os.getpid()))
+    except OSError as exc:
+        logger.debug("cannot leave the unit cgroup for %s : %s", group, exc)
+        return None
+    return group
+
+
 def _nice_and_ioprio() -> str:
     """The fallback: what the transaction has always done.
 

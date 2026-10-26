@@ -255,3 +255,100 @@ def test_the_transaction_child_uses_this_module(fake_cgroup):
 
     assert (created_group(fake_cgroup) / "cgroup.procs").read_text() \
         == str(os.getpid())
+
+
+# ── Leaving the cgroup urpm was started in ──────────────────────────────
+
+
+def test_a_detached_process_joins_a_cgroup_of_its_own(fake_cgroup):
+    """Membership is the whole point, and it is a sibling, not a share.
+
+    The transaction's cgroup carries weights meant for bulk I/O and is
+    removed by whoever leaves it last; a deferred action belongs in
+    neither of those arrangements.
+    """
+    group = txresources.leave_unit_cgroup()
+
+    assert group == fake_cgroup / txresources.DETACHED_CGROUP_NAME
+    assert (group / "cgroup.procs").read_text() == str(os.getpid())
+    assert not (group / "io.weight").exists()
+
+
+def test_leaving_asks_for_no_controller(fake_cgroup):
+    """A root that delegates nothing still lets a process be moved.
+
+    ``_join_cgroup`` refuses that root because its weights would mean
+    nothing without the controllers.  Here there are no weights, so
+    refusing would give up the only thing being asked for.
+    """
+    (fake_cgroup / "cgroup.subtree_control").write_text("\n")
+
+    assert txresources.leave_unit_cgroup() is not None
+
+
+def test_no_cgroup_v2_leaves_the_process_where_it_is(no_cgroup):
+    """Nothing to escape: no hierarchy means no unit to be swept up by."""
+    assert txresources.leave_unit_cgroup() is None
+
+
+def test_an_unwritable_hierarchy_is_tolerated(fake_cgroup, monkeypatch):
+    """Best-effort, by the invariant of §5.1.
+
+    A deferred action whose loss is recoverable must never turn into a
+    crash in the forked child of an operation that succeeded.
+    """
+    def refuse(*_args, **_kwargs):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(txresources.Path, "mkdir", refuse)
+
+    assert txresources.leave_unit_cgroup() is None
+
+
+def test_the_fresh_interpreter_leaves_before_it_waits(monkeypatch,
+                                                      tmp_path):
+    """Order: the escape comes first, or it comes too late.
+
+    What this process waits for is the service going away, and stopping
+    that service is what kills everything left in its cgroup.  Escaping
+    after the wait would mean escaping after being killed.
+    """
+    from urpm.core import after_exit
+
+    done = []
+    monkeypatch.setattr(txresources, "leave_unit_cgroup",
+                        lambda: done.append("left"))
+    monkeypatch.setattr(after_exit, "_wait_for_exit",
+                        lambda _pids: done.append("waited"))
+    monkeypatch.setattr(after_exit, "_perform",
+                        lambda *_a: done.append("acted") or True)
+
+    after_exit.main(["run", str(tmp_path / "db.sqlite"), "", "1",
+                     "migrate-db", "40"])
+
+    assert done[:2] == ["left", "waited"]
+
+
+def test_the_pre_exec_child_imports_nothing(monkeypatch):
+    """The hazard this whole module exists to avoid, turned inward.
+
+    A forked child shares its parent's ``sys.modules``, loaded before
+    rpm replaced the files on disk, while anything imported fresh comes
+    from the new ones.  An import added to the child -- or to this
+    module's header, which the lazy first import reads from the new
+    files -- mixes the two versions.  That happened the 2026-10-26: a
+    header import of a function only the new code had broke the post
+    operation phase of the very upgrade that shipped it.
+
+    So the escape belongs to the fresh interpreter, and this keeps the
+    child's own code free of imports rather than trusting a comment.
+    """
+    import inspect
+
+    from urpm.core import after_exit
+
+    source = inspect.getsource(after_exit.spawn)
+    offending = [line.strip() for line in source.splitlines()
+                 if line.strip().startswith(("import ", "from "))]
+
+    assert not offending, offending

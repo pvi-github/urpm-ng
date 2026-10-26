@@ -112,6 +112,12 @@ def spawn(waiting: Sequence[Tuple[int, str, str]],
     # costs the most.  SQLite opens them ``O_CLOEXEC``, so the exec
     # closes all three, and the fresh interpreter then waits with
     # nothing of ours in hand and nothing of ours in memory.
+    # Nothing is imported here, and that is a rule rather than a
+    # preference: this child shares the parent's ``sys.modules``, whose
+    # entries were loaded before rpm replaced the files on disk, while
+    # anything imported fresh is read from the new ones.  Mixing the two
+    # is the very hazard this module exists to avoid, and it bit once,
+    # the 2026-10-26, from a module-level import added right here.
     try:
         os.setsid()  # survive the session the caller was started from
         devnull = os.open(os.devnull, os.O_RDWR)
@@ -225,6 +231,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pids = [int(pid) for pid in pids_raw.split(",") if pid]
     except ValueError:
         return 2
+
+    # Out of the cgroup this was forked into, before the wait.  Under a
+    # systemd unit, stopping it signals every process in its cgroup by
+    # default, and what this process waits for *is* that unit going
+    # away: it would be killed at the exact moment it is meant to act.
+    # Measured the 2026-10-26, see
+    # :func:`urpm.core.txresources.leave_unit_cgroup`.
+    from .txresources import leave_unit_cgroup
+
+    leave_unit_cgroup()
 
     _wait_for_exit(pids)
 
