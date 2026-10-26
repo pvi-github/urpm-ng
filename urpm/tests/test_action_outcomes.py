@@ -294,7 +294,15 @@ HISTORY_SITES = (
     "urpm/core/distupgrade/stage3.py",
     "urpm/cli/commands/remove.py",
     "urpm/cli/commands/_install_pipeline.py",
+    "urpm/dbus/service.py",
 )
+
+#: The methods that actually hand a transaction to rpm.  A module that
+#: calls one of these and then closes the transaction owns a verdict.
+_RUNS_A_TRANSACTION = frozenset({
+    "execute_install", "execute_upgrade", "execute_erase",
+    "resilient_install", "resilient_upgrade",
+})
 
 
 class TestEveryHistoryWriterWritesTheVerdict:
@@ -312,6 +320,37 @@ class TestEveryHistoryWriterWritesTheVerdict:
             f"{path} no longer records the transaction at all"
         assert "record_action_outcomes" in calls, \
             f"{path} records scriptlet output but no per-package verdict"
+
+    def test_whoever_runs_a_transaction_writes_its_verdict(self):
+        """The guard the list above cannot be: it finds the sites itself.
+
+        The D-Bus service slipped past every check there was, and for a
+        reason worth keeping: it wrote neither the scriptlet output nor
+        the verdict, so a rule looking for « what was written alongside
+        the scriptlets » had nothing to notice.  An upgrade driven from
+        Discover therefore left all its rows at ``planned`` and fired no
+        post-operation rule at all, while the same upgrade from the
+        command line behaved.
+
+        So the question is asked the other way round: who hands a
+        transaction to rpm and then closes it?  Whoever does owes a
+        verdict, and this finds them without a list to maintain.
+        """
+        offenders = []
+        for path in (REPO / "urpm").rglob("*.py"):
+            if path.name.startswith("test_") or path.name == "operations.py":
+                continue
+            calls = _calls_in(str(path.relative_to(REPO)))
+            if not (calls & _RUNS_A_TRANSACTION):
+                continue
+            if "complete_transaction" not in calls:
+                continue  # it runs one but leaves the closing to someone else
+            if "record_action_outcomes" not in calls:
+                offenders.append(str(path.relative_to(REPO)))
+
+        assert offenders == [], (
+            "these run a transaction, close it, and never say how each "
+            "package ended: " + ", ".join(offenders))
 
     def test_no_other_module_records_scriptlets_alone(self):
         offenders = []

@@ -21,6 +21,23 @@ from urpm.dbus import service as service_module
 from urpm.dbus.service import UrpmDBusService, _code_fingerprint
 
 
+class _Invocation:
+    """Enough of a GDBus invocation to be answered or refused."""
+
+    def __init__(self):
+        self.errors = []
+        self.returned = []
+
+    def return_dbus_error(self, name, message):
+        self.errors.append((name, message))
+
+    def return_error_literal(self, domain, code, message):
+        self.errors.append((domain, message))
+
+    def return_value(self, value):
+        self.returned.append(value)
+
+
 @pytest.fixture
 def code_tree(tmp_path):
     """A miniature package tree standing in for the installed code."""
@@ -84,8 +101,10 @@ class TestStopWhenReplaced:
 
         scheduled = []
         from gi.repository import GLib
-        monkeypatch.setattr(GLib, 'idle_add',
-                            lambda fn, **kw: scheduled.append((fn, kw)))
+        monkeypatch.setattr(GLib, 'timeout_add_seconds',
+                            lambda delay, fn, **kw: scheduled.append(
+                                (fn, delay)) or len(scheduled))
+        monkeypatch.setattr(GLib, 'source_remove', lambda tag: None)
         return instance, scheduled
 
     def test_untouched_code_means_staying(self, monkeypatch):
@@ -103,20 +122,28 @@ class TestStopWhenReplaced:
         assert len(scheduled) == 1
         assert scheduled[0][0] == instance._stop_for_new_code
 
-    def test_it_yields_to_the_reply_already_queued(self, monkeypatch):
-        """_emit_complete and _return_invocation queue at default priority.
+    def test_it_waits_out_the_calls_already_dispatched_to_us(self,
+                                                             monkeypatch):
+        """Ordering by priority was not enough, and the bus says why.
 
-        Ordering by priority rather than by a timer is what makes the
-        client's answer reach it before the process goes away.
+        Captured on a live machine the 2026-10-25: packagekitd sent
+        ``GetUpdates`` to our **unique** connection name five
+        milliseconds before our own ``ReleaseName``, so the call was
+        already in our queue and no release could reroute it.  We quit
+        without answering and Discover got
+        ``org.freedesktop.DBus.Error.NoReply: Message recipient
+        disconnected from message bus without replying``.
+
+        Handing the public name back still matters for a client that
+        resolves it afterwards; it is powerless against a proxy that
+        addresses us directly.  So the stop waits for a quiet window
+        instead of racing the queue.
         """
-        from gi.repository import GLib
-
         instance, scheduled = self._service(monkeypatch, 'after')
 
         instance._stop_if_code_replaced()
 
-        assert scheduled[0][1]['priority'] == GLib.PRIORITY_LOW
-        assert GLib.PRIORITY_LOW > GLib.PRIORITY_DEFAULT_IDLE
+        assert scheduled[0][1] == service_module.STOP_QUIET_SECONDS
 
     def test_a_transaction_still_running_defers_the_stop(self, monkeypatch):
         """Leaving mid-transaction is the very thing being fixed."""
@@ -126,6 +153,84 @@ class TestStopWhenReplaced:
         instance._stop_if_code_replaced()
 
         assert scheduled == []
+
+
+class TestTheQuietWindow:
+    """A call that reaches us after the decision is still answered.
+
+    The decision to step aside cannot unsend what is already on its way
+    to our own connection name, so the window exists to serve it.  Each
+    incoming call pushes the departure back; a ceiling keeps a chatty
+    client from pinning us here for ever, since the point of going is to
+    pick up the code that just landed.
+    """
+
+    @staticmethod
+    def _service(monkeypatch):
+        instance = UrpmDBusService()
+        instance._code_at_startup = 'before'
+        monkeypatch.setattr(service_module, '_code_fingerprint',
+                            lambda *a, **kw: 'after')
+
+        armed, removed = [], []
+        from gi.repository import GLib
+        monkeypatch.setattr(GLib, 'timeout_add_seconds',
+                            lambda delay, fn, **kw: armed.append((fn, delay))
+                            or len(armed))
+        monkeypatch.setattr(GLib, 'source_remove', removed.append)
+        return instance, armed, removed
+
+    def test_an_incoming_call_pushes_the_departure_back(self, monkeypatch):
+        instance, armed, removed = self._service(monkeypatch)
+        instance._stop_if_code_replaced()
+
+        instance._postpone_stop()
+
+        assert len(armed) == 2, "the window was not re-armed"
+        assert removed, "the previous window was left running"
+
+    def test_a_call_before_any_decision_arms_nothing(self, monkeypatch):
+        # The common case, and it must cost nothing: the service is not
+        # going anywhere.
+        instance, armed, _removed = self._service(monkeypatch)
+
+        instance._postpone_stop()
+
+        assert armed == []
+
+    def test_the_ceiling_stops_pushing(self, monkeypatch):
+        instance, armed, _removed = self._service(monkeypatch)
+        instance._stop_if_code_replaced()
+        instance._stop_deadline = 0.0  # as if the ceiling were reached
+
+        instance._postpone_stop()
+
+        assert len(armed) == 1, "a late call must not postpone past the cap"
+
+    def test_every_method_call_goes_through_the_postponement(self,
+                                                             monkeypatch):
+        """The wiring, not the logic: one entry point, one call.
+
+        A window nothing re-arms is the defect with extra steps, and
+        nothing else in the file would say so.
+        """
+        instance, _armed, _removed = self._service(monkeypatch)
+        pushed = []
+        monkeypatch.setattr(instance, '_postpone_stop',
+                            lambda: pushed.append(True))
+
+        instance._on_method_call(None, ':1.1', service_module.OBJECT_PATH,
+                                 service_module.INTERFACE_NAME,
+                                 'NoSuchMethod', None, _Invocation())
+
+        assert pushed, "a method call did not postpone the departure"
+
+    def test_the_window_is_short_and_the_ceiling_is_not(self):
+        # Short enough that an operator does not wait on us, long
+        # enough to cover a queue that was five milliseconds ahead.
+        assert 1 <= service_module.STOP_QUIET_SECONDS <= 10
+        assert service_module.STOP_MAX_SECONDS >= (
+            3 * service_module.STOP_QUIET_SECONDS)
 
 
 class TestStopForNewCode:

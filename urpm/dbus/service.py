@@ -54,6 +54,16 @@ _CODE_ROOT = Path(__file__).resolve().parent.parent
 #: rpm's per-cpio-block callbacks reached three thousand a second.
 _PROGRESS_MIN_INTERVAL = 0.1
 
+#: Quiet time, in seconds, before the service steps aside once its own
+#: code has been replaced.  It exists to serve the calls already
+#: dispatched to our connection name when the decision was taken: those
+#: cannot be rerouted by handing the public name back, and a client that
+#: gets no answer reports a failure for an operation that succeeded.
+STOP_QUIET_SECONDS = 3
+#: Ceiling on that waiting, so a client that keeps calling cannot keep
+#: us running the code a transaction has just replaced.
+STOP_MAX_SECONDS = 30
+
 
 def _code_fingerprint(root: Path = _CODE_ROOT) -> frozenset:
     """Fingerprint the service's own code as it currently sits on disk.
@@ -132,6 +142,11 @@ class UrpmDBusService:
         # Kept so the name can be handed back before we go, rather than
         # dropped by the process dying.  See ``_stop_for_new_code``.
         self._bus_name_owner_id = None
+        # The pending departure: the timer id of the quiet window, and
+        # the point past which an incoming call no longer postpones it.
+        # See ``_stop_if_code_replaced``.
+        self._stop_window_id = None
+        self._stop_deadline = 0.0
         self._active_operations = {}
         self._cancel_requested = False
         self._lock = threading.Lock()
@@ -199,6 +214,23 @@ class UrpmDBusService:
             })
         return entries
 
+    def _record_outcome(self, transaction_id, result) -> None:
+        """Write what the transaction did, before it is closed.
+
+        Two things, from the same queue result: the scriptlet output,
+        and the verdict of every package, read back from the rpm
+        database rather than from rpm's callback.
+
+        Neither was written here, and the cost was invisible by
+        construction: the history kept the ``planned`` rows it had
+        opened with, so every post-operation rule evaluated its
+        condition against nothing and none could fire.  An operation
+        driven from Discover therefore ran no rule at all, where the
+        same one from the command line ran them.
+        """
+        self._ops.record_scriptlet_output(transaction_id, result)
+        self._ops.record_action_outcomes(transaction_id, result)
+
     def _hook_advice(self, transaction_id, operation):
         """Which post-operation rules fired, and which packages asked.
 
@@ -249,6 +281,25 @@ class UrpmDBusService:
         except Exception:  # noqa: BLE001 — never fail a done operation
             logger.exception("a post-operation rule went wrong")
 
+    def _defer_after_exit(self, transaction_id, operation) -> None:
+        """Hand the ``after-exit`` rules to a watcher that outlives us.
+
+        The second moment of the same mechanism: rules whose action
+        this process cannot carry out at all, because it cannot see the
+        code that just replaced its own nor let go of the database it
+        holds.  See SPEC_POST_TRANSACTION_HOOKS §5.1.
+
+        Called for its effect, the lines it prints being of no use
+        here: nobody is reading a terminal, and the account of a
+        deferred action lands in the history by design.
+        """
+        from ..cli.helpers.hook_report import defer_post_exit_actions
+
+        try:
+            defer_post_exit_actions(self._ops, transaction_id, operation)
+        except Exception:  # noqa: BLE001 — never fail a done operation
+            logger.exception("could not defer a post-operation rule")
+
     def _stop_if_code_replaced(self):
         """Step aside when the transaction just replaced this service's code.
 
@@ -276,14 +327,50 @@ class UrpmDBusService:
         if _code_fingerprint() == self._code_at_startup:
             return
 
+        logger.info("own code replaced on disk, stopping to pick it up")
+        # A quiet window rather than a priority, and the bus says why.
+        # Captured the 2026-10-25: packagekitd sent ``GetUpdates`` to our
+        # **unique** connection name five milliseconds before our own
+        # ``ReleaseName``, so the call was already in our queue and no
+        # release could reroute it; we quit without answering and
+        # Discover reported ``NoReply: Message recipient disconnected
+        # from message bus without replying``.  Ordering our departure
+        # after the reply we owe is therefore not enough: we also owe
+        # the calls already dispatched to us, and those we cannot see
+        # coming.  So we leave once nobody has called for a while, the
+        # window being re-armed by :meth:`_postpone_stop` on every
+        # incoming call, under a ceiling so a chatty client cannot keep
+        # us on the old code for ever.
+        self._stop_deadline = time.monotonic() + STOP_MAX_SECONDS
+        self._arm_stop_window()
+
+    def _arm_stop_window(self) -> None:
+        """Schedule the departure for ``STOP_QUIET_SECONDS`` from now."""
         from gi.repository import GLib
 
-        logger.info("own code replaced on disk, stopping to pick it up")
-        # PRIORITY_LOW, so the completion signal and the method reply,
-        # both queued at PRIORITY_DEFAULT_IDLE by _emit_complete and
-        # _return_invocation, are dispatched first.  Ordering by
-        # priority rather than by a timer keeps this deterministic.
-        GLib.idle_add(self._stop_for_new_code, priority=GLib.PRIORITY_LOW)
+        self._stop_window_id = GLib.timeout_add_seconds(
+            STOP_QUIET_SECONDS, self._stop_for_new_code)
+
+    def _postpone_stop(self) -> None:
+        """Push the departure back, a call having just come in.
+
+        Called from the one place every method call goes through.  Does
+        nothing until the service has decided to step aside, which is
+        the common case and has to cost nothing.
+
+        Stops pushing once the ceiling is reached: the reason for going
+        is to run the code that just landed, and a client that keeps
+        talking must not keep us on the old one indefinitely.
+        """
+        if not self._stop_window_id:
+            return
+        if time.monotonic() >= self._stop_deadline:
+            return
+
+        from gi.repository import GLib
+
+        GLib.source_remove(self._stop_window_id)
+        self._arm_stop_window()
 
     def _stop_for_new_code(self):
         """Hand the name back, flush what is still owed, then end the loop.
@@ -303,6 +390,9 @@ class UrpmDBusService:
         """
         from gi.repository import Gio
 
+        # The window has fired, so its source is gone: forget the id
+        # before anything can try to remove it a second time.
+        self._stop_window_id = None
         owner_id, self._bus_name_owner_id = self._bus_name_owner_id, None
         if owner_id is not None:
             try:
@@ -944,6 +1034,7 @@ class UrpmDBusService:
                 return
 
             self._ops.mark_dependencies(resolver, actions)
+            self._record_outcome(transaction_id, result)
             self._ops.complete_transaction(transaction_id)
             self._ops.notify_urpmd_cache_invalidate()
 
@@ -964,6 +1055,7 @@ class UrpmDBusService:
             self._emit_complete(op_id, True, msg)
             self._return_invocation(invocation, True, msg)
             self._run_hooks_after_reply(triggered)
+            self._defer_after_exit(transaction_id, Operation.INSTALL)
             logger.info(f"_run_install: done")
 
         except Exception as e:
@@ -1046,6 +1138,7 @@ class UrpmDBusService:
                 self._return_invocation(invocation, False, errors or "Removal failed")
                 return
 
+            self._record_outcome(transaction_id, result)
             self._ops.complete_transaction(transaction_id)
 
             msg = f"Removed {len(remove_names)} package(s)"
@@ -1165,6 +1258,7 @@ class UrpmDBusService:
                 return
 
             self._ops.mark_dependencies(resolver, actions)
+            self._record_outcome(transaction_id, result)
             self._ops.complete_transaction(transaction_id)
             self._ops.notify_urpmd_cache_invalidate()
 
@@ -1185,6 +1279,7 @@ class UrpmDBusService:
             self._emit_complete(op_id, True, msg)
             self._return_invocation(invocation, True, msg)
             self._run_hooks_after_reply(triggered)
+            self._defer_after_exit(transaction_id, Operation.UPGRADE)
 
         except Exception as e:
             logger.exception(f"Upgrade failed: {e}")
@@ -1447,6 +1542,11 @@ class UrpmDBusService:
     def _on_method_call(self, connection, sender, object_path, interface_name,
                         method_name, parameters, invocation):
         """Handle incoming D-Bus method calls."""
+        # Somebody is still talking to us: if a departure is pending,
+        # push it back so this call gets its answer.  The call that
+        # exposed this arrived five milliseconds before our own
+        # ``ReleaseName``; see ``_stop_if_code_replaced``.
+        self._postpone_stop()
         try:
             from gi.repository import GLib
 

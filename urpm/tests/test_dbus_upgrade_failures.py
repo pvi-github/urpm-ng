@@ -78,6 +78,15 @@ class _Ops:
     def abort_transaction(self, transaction_id):
         self.calls.append('abort_transaction')
 
+    def record_scriptlet_output(self, transaction_id, queue_result):
+        self.calls.append('record_scriptlet_output')
+
+    def record_action_outcomes(self, transaction_id, queue_result, root="/"):
+        # Recorded like the rest so the order can be asserted: the
+        # verdict is owed before the transaction is closed, since the
+        # post-operation rules read it back from the history.
+        self.calls.append('record_action_outcomes')
+
     def complete_transaction(self, transaction_id):
         self.calls.append('complete_transaction')
 
@@ -171,6 +180,48 @@ def test_an_upgrade_that_works_still_reports_success(monkeypatch):
     assert 'complete_transaction' in ops.calls
     assert 'abort_transaction' not in ops.calls
     assert "Upgraded 1 package(s)" in message
+
+
+def test_the_deferred_rules_are_handed_over_too(monkeypatch):
+    """Both moments, on this path as on the other.
+
+    The service has its own post-operation phase, for a good reason:
+    it names the rules before the reply and acts on them after.  The
+    cost is that an improvement made on one path does not reach the
+    other, and the deferred moment was the second time that happened.
+    """
+    from urpm.dbus import service as service_module
+
+    handed = []
+    monkeypatch.setattr(
+        "urpm.cli.helpers.hook_report.defer_post_exit_actions",
+        lambda ops, transaction_id, operation: handed.append(
+            (transaction_id, operation)) or [])
+
+    _run_upgrade(monkeypatch, [_action("urpm-ng-core")],
+                 download_items=["urpm-ng-core.rpm"],
+                 downloaded_paths=["/var/cache/urpm/rpms/urpm-ng-core.rpm"])
+
+    assert handed == [(42, service_module.Operation.UPGRADE)]
+
+
+def test_the_verdict_is_written_before_the_transaction_is_closed(monkeypatch):
+    """Order, not mere presence.
+
+    The post-operation rules read each package's verdict back from the
+    history, so a verdict written after the close would be read by
+    nobody -- which is how an operation driven from Discover came to
+    fire no rule at all while the same one from the command line did.
+    """
+    _completed, ops = _run_upgrade(
+        monkeypatch, [_action("urpm-ng-core")],
+        download_items=["urpm-ng-core.rpm"],
+        downloaded_paths=["/var/cache/urpm/rpms/urpm-ng-core.rpm"])
+
+    assert (ops.calls.index('record_action_outcomes')
+            < ops.calls.index('complete_transaction'))
+    assert (ops.calls.index('execute_upgrade')
+            < ops.calls.index('record_action_outcomes'))
 
 
 def test_an_empty_queue_is_not_read_as_a_failure(monkeypatch):
