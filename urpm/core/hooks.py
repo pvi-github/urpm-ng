@@ -83,12 +83,44 @@ VENDOR_HOOKS_DIR = Path("/usr/lib/urpm/hooks.d")
 #: same name.
 ADMIN_HOOKS_DIR = Path("/etc/urpm/hooks.d")
 
-#: Prefix of the section header naming the phase.  Only one phase exists
-#: today; TX-Shield will bring the entry side, and the header is what
-#: will tell the two apart at a glance.
+#: Prefix of the section header naming the phase.  TX-Shield will bring
+#: the entry side, and the header is what will tell them apart at a
+#: glance.
 COMPLETION_PREFIX = "on-completion:"
 
 _SUFFIX = ".cfg"
+
+
+class Moment:
+    """When a rule acts.  Carried by the section header, read first.
+
+    What defines this mechanism is the moment, not the detection, so
+    the moment is the first thing in a rule file rather than a key
+    buried among the others.  See SPEC_POST_TRANSACTION_HOOKS §4.1 for
+    why, and §5.1 for the second value.
+
+    ``ON_COMPLETION`` is after the operation is committed, recorded,
+    and the caller served, inside the urpm process.  That is already
+    enough to aim at a service, including the one running the
+    transaction.
+
+    ``AFTER_EXIT`` is once that process is gone.  Two things escape the
+    first moment by construction: the process cannot see the code that
+    has just replaced its own, having imported its modules before rpm
+    wrote them, and it cannot let go of the database it holds for the
+    length of the operation.  Both are needed to migrate urpm's own
+    schema, which is this moment's first client.
+    """
+
+    ON_COMPLETION = "on-completion"
+    AFTER_EXIT = "after-exit"
+
+    ALL = (ON_COMPLETION, AFTER_EXIT)
+
+
+#: ``section prefix -> moment``, built from the vocabulary so a new
+#: moment cannot be added without the loader learning to read it.
+_MOMENT_PREFIXES = {f"{moment}:": moment for moment in Moment.ALL}
 
 
 class Operation:
@@ -137,8 +169,18 @@ class Action:
     REPORT = "report"
     RESTART_SERVICE = "restart-service"
     SYNC_URPMI_CONFIG = "sync-urpmi-config"
+    MIGRATE_DB = "migrate-db"
 
-    ALL = (REPORT, RESTART_SERVICE, SYNC_URPMI_CONFIG)
+    ALL = (REPORT, RESTART_SERVICE, SYNC_URPMI_CONFIG, MIGRATE_DB)
+
+    #: Verbs that only exist once the acting process is gone, see
+    #: :class:`Moment`.  ``migrate-db`` replaces urpm's own schema, and
+    #: the process evaluating these rules imported its modules before
+    #: rpm replaced them: its idea of the expected version is the old
+    #: one, and it holds the very database the action has to alter.  A
+    #: rule asking for it at the immediate moment is refused at load
+    #: time rather than accepted and found powerless.
+    DEFERRED_ONLY = (MIGRATE_DB,)
 
     #: Verbs that must not be carried out while a release change is
     #: only half in place.  Restarting a service under a session that
@@ -171,6 +213,7 @@ class Hook:
     service: str = ""
     only_on_full_success: bool = False
     on: FrozenSet[str] = frozenset()
+    moment: str = Moment.ON_COMPLETION
     source: Optional[Path] = None
 
     def matches(self, outcome: "OperationOutcome") -> bool:
@@ -295,14 +338,22 @@ def load_hooks(vendor_dir: Path = VENDOR_HOOKS_DIR,
 
 
 def hooks_for(outcome: OperationOutcome,
-              hooks: Iterable[Hook]) -> List[TriggeredHook]:
+              hooks: Iterable[Hook],
+              moment: str = Moment.ON_COMPLETION) -> List[TriggeredHook]:
     """Select the rules a finished operation satisfies, in order.
 
     Each one comes back with its subjects already resolved, so nothing
     downstream has to hold on to the outcome.
+
+    ``moment`` selects one phase and never both: the two are carried out
+    by different code at different times, and handing a deferred rule to
+    the immediate runner would perform it at the one moment it was
+    written to avoid.  The default is the immediate phase, so every
+    caller that predates the second one keeps its behaviour.
     """
     return [TriggeredHook(hook, hook.subjects(outcome), outcome.operation)
-            for hook in hooks if hook.matches(outcome)]
+            for hook in hooks
+            if hook.moment == moment and hook.matches(outcome)]
 
 
 def _files_to_read(vendor_dir: Path, admin_dir: Path) -> List[Path]:
@@ -367,12 +418,15 @@ def _read_file(path: Path, report: LoadReport) -> None:
         return
 
     for section in parser.sections():
-        if not section.startswith(COMPLETION_PREFIX):
+        moment = next((value for prefix, value in _MOMENT_PREFIXES.items()
+                       if section.startswith(prefix)), None)
+        if moment is None:
             # Another phase, or a typo.  Not ours to judge, not ours to
             # run: leave it alone rather than guess.
             continue
-        identifier = section[len(COMPLETION_PREFIX):].strip()
-        hook, refusal = _build_hook(identifier, parser[section], path)
+        identifier = section[len(moment) + 1:].strip()
+        hook, refusal = _build_hook(identifier, parser[section], path,
+                                    moment)
         if hook is None:
             logger.warning("ignoring hook [%s] in %s: %s",
                            section, path, refusal)
@@ -381,7 +435,8 @@ def _read_file(path: Path, report: LoadReport) -> None:
             report.hooks.append(hook)
 
 
-def _build_hook(identifier: str, values, source: Path
+def _build_hook(identifier: str, values, source: Path,
+                moment: str = Moment.ON_COMPLETION
                 ) -> Tuple[Optional[Hook], str]:
     """Turn one parsed section into a rule, or say why it cannot be."""
     if not identifier:
@@ -401,6 +456,13 @@ def _build_hook(identifier: str, values, source: Path
         # we cannot do must not silently become something else.
         return None, (f"unknown action {action!r}, expected one of "
                       + ", ".join(Action.ALL))
+
+    if action in Action.DEFERRED_ONLY and moment != Moment.AFTER_EXIT:
+        # Refused rather than silently moved: the administrator asked
+        # for a moment at which the verb cannot work, and guessing a
+        # different one for them would hide the mistake.
+        return None, (f"action {action!r} only exists under "
+                      f"[{Moment.AFTER_EXIT}:...], see its vocabulary")
 
     raw_on = values.get("on", "").replace(",", " ").split()
     unknown = [o for o in raw_on if o not in Operation.ALL]
@@ -422,6 +484,7 @@ def _build_hook(identifier: str, values, source: Path
         service=values.get("service", "").strip(),
         only_on_full_success=_as_bool(values.get("only-on-full-success")),
         on=frozenset(raw_on),
+        moment=moment,
         source=source,
     ), ""
 

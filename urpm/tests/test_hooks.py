@@ -398,3 +398,135 @@ class TestOrdering:
         report = load_hooks(*dirs)
 
         assert [h.identifier for h in report.hooks] == ["alpha", "zulu"]
+
+
+def _deferred_rule(identifier, watch="urpm-db-schema", **extra):
+    lines = [f"[after-exit:{identifier}]", f"watch = {watch}"]
+    lines += [f"{key.replace('_', '-')} = {value}"
+              for key, value in extra.items()]
+    return "\n".join(lines) + "\n"
+
+
+class TestTheTwoMoments:
+    """SPEC_POST_TRANSACTION_HOOKS §5.1.
+
+    What defines this mechanism is the moment it acts, and there are
+    two: once the operation is committed and the caller served, still
+    inside the urpm process, and once that process is gone.  The second
+    exists because an action aimed at urpm's own code or at the
+    database urpm holds cannot be carried out by urpm itself.
+
+    The moment is carried by the section header, as §4.1 requires, so
+    it is the first thing read.
+    """
+
+    def test_a_rule_is_immediate_by_default(self, dirs, trusted):
+        vendor, _admin = dirs
+        (vendor / "50.cfg").write_text(_rule("declared-restarts"))
+
+        hook = load_hooks(*dirs).hooks[0]
+
+        assert hook.moment == hooks.Moment.ON_COMPLETION
+
+    def test_an_after_exit_section_is_read(self, dirs, trusted):
+        vendor, _admin = dirs
+        (vendor / "70.cfg").write_text(
+            _deferred_rule("db-schema", action=Action.MIGRATE_DB))
+
+        hooks_read = load_hooks(*dirs).hooks
+
+        assert [h.identifier for h in hooks_read] == ["db-schema"]
+        assert hooks_read[0].moment == hooks.Moment.AFTER_EXIT
+
+    def test_both_moments_live_in_one_file(self, dirs, trusted):
+        vendor, _admin = dirs
+        (vendor / "50.cfg").write_text(
+            _rule("restarts") + _deferred_rule("schema",
+                                               action=Action.MIGRATE_DB))
+
+        by_id = {h.identifier: h.moment for h in load_hooks(*dirs).hooks}
+
+        assert by_id == {"restarts": hooks.Moment.ON_COMPLETION,
+                         "schema": hooks.Moment.AFTER_EXIT}
+
+    def test_an_unknown_phase_is_still_left_alone(self, dirs, trusted):
+        # Not ours to judge, not ours to run: TX-Shield will own an
+        # entry phase one day and its sections must not be rejected
+        # noisily by a version that predates it.
+        vendor, _admin = dirs
+        (vendor / "50.cfg").write_text("[on-start:future]\nwatch = x\n")
+
+        report = load_hooks(*dirs)
+
+        assert report.hooks == []
+        assert report.rejected == []
+
+
+class TestSelectingOneMoment:
+    """The two phases are carried out by different code, at different
+    times, so a selection names one and never both."""
+
+    def _both(self):
+        return [Hook("restarts", "cap"),
+                Hook("schema", "cap", action=Action.MIGRATE_DB,
+                     moment=hooks.Moment.AFTER_EXIT)]
+
+    def test_the_immediate_phase_leaves_the_deferred_rule_alone(self):
+        fired = hooks_for(_declared("cap", "svc"), self._both())
+
+        assert [t.hook.identifier for t in fired] == ["restarts"]
+
+    def test_the_deferred_phase_takes_only_its_own(self):
+        fired = hooks_for(_declared("cap", "svc"), self._both(),
+                          moment=hooks.Moment.AFTER_EXIT)
+
+        assert [t.hook.identifier for t in fired] == ["schema"]
+
+    def test_the_default_is_the_immediate_phase(self):
+        # Every caller written before the second moment existed keeps
+        # its behaviour without being touched.
+        assert (hooks_for(_declared("cap", "svc"), self._both())
+                == hooks_for(_declared("cap", "svc"), self._both(),
+                             moment=hooks.Moment.ON_COMPLETION))
+
+
+class TestAVerbThatOnlyExistsDeferred:
+    """``migrate-db`` cannot be carried out by the process it concerns.
+
+    It replaces urpm's own schema, and the process evaluating the rules
+    imported its modules before rpm replaced them: its own idea of the
+    expected version is the old one.  So the verb is refused at the
+    immediate moment rather than accepted and found useless.
+    """
+
+    def test_it_is_accepted_after_exit(self, dirs, trusted):
+        vendor, _admin = dirs
+        (vendor / "70.cfg").write_text(
+            _deferred_rule("db-schema", action=Action.MIGRATE_DB))
+
+        assert len(load_hooks(*dirs).hooks) == 1
+
+    def test_it_is_refused_on_completion(self, dirs, trusted):
+        vendor, _admin = dirs
+        (vendor / "70.cfg").write_text(
+            _rule("db-schema", watch="urpm-db-schema",
+                  action=Action.MIGRATE_DB))
+
+        report = load_hooks(*dirs)
+
+        assert report.hooks == []
+        assert len(report.rejected) == 1
+        assert "after-exit" in report.rejected[0][1]
+
+    def test_the_other_verbs_stay_available_at_both(self, dirs, trusted):
+        vendor, _admin = dirs
+        (vendor / "50.cfg").write_text(
+            _deferred_rule("late-restart", watch="restart-on-completion",
+                           action=Action.RESTART_SERVICE))
+
+        assert len(load_hooks(*dirs).hooks) == 1
+
+    def test_the_vocabulary_declares_the_restriction(self):
+        assert Action.MIGRATE_DB in Action.ALL
+        assert Action.MIGRATE_DB in Action.DEFERRED_ONLY
+        assert Action.RESTART_SERVICE not in Action.DEFERRED_ONLY

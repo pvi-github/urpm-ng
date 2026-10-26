@@ -983,7 +983,8 @@ class PackageOperations:
     # =========================================================================
 
     def hooks_triggered_by(self, transaction_id,
-                           operation: str = "") -> List["TriggeredHook"]:
+                           operation: str = "",
+                           moment: str = "") -> List["TriggeredHook"]:
         """Which rules a finished transaction satisfies. Decides, does nothing.
 
         The condition is matched against what the transaction **really**
@@ -995,20 +996,27 @@ class PackageOperations:
         Args:
             transaction_id: The transaction as recorded by
                 :meth:`begin_transaction`.
+            operation: What the whole command was, from
+                :class:`~urpm.core.hooks.Operation`.
+            moment: Which phase to select, from
+                :class:`~urpm.core.hooks.Moment`.  Empty means the
+                immediate one, so a caller written before the deferred
+                phase existed keeps its behaviour.
 
         Returns:
             The matching rules, in load order, each paired with the
             services it applies to. Empty when no rule fires, which is
             the common case.
         """
-        from .hooks import hooks_for, load_hooks
+        from .hooks import Moment, hooks_for, load_hooks
 
         report = load_hooks()
         if not report.hooks:
             return []
 
         outcome = self._operation_outcome(transaction_id, operation)
-        return hooks_for(outcome, report.hooks)
+        return hooks_for(outcome, report.hooks,
+                         moment=moment or Moment.ON_COMPLETION)
 
     def run_hooks(self, triggered: Iterable["TriggeredHook"]
                   ) -> List[Tuple["TriggeredHook", List[Any]]]:
