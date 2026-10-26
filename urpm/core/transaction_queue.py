@@ -618,6 +618,23 @@ def _header_name(hdr) -> str:
     return str(raw) if raw is not None else ""
 
 
+def released_children() -> Tuple[int, ...]:
+    """The children urpm handed an operation to and stopped waiting for.
+
+    Under smart sync the parent returns to its caller as soon as the
+    extractions are over, while the child goes on with the scriptlets
+    and the triggers, and keeps the package database open as it does.
+    Anything that has to happen once the machine is really free has to
+    outlive those, not merely the process that answered the operator —
+    see :mod:`urpm.core.after_exit`.
+
+    A snapshot, taken under the lock: the set itself keeps changing as
+    children are reaped.
+    """
+    with _UNREAPED_LOCK:
+        return tuple(_UNREAPED_CHILDREN)
+
+
 def _carry_attempts(result: 'OperationResult',
                     msg: QueueProgressMessage) -> None:
     """Move the per-package outcome fields from a message onto a result.
@@ -1889,6 +1906,43 @@ class TransactionQueue:
                 remaining.append(p)
         return remaining
 
+    def _install_done_message(self, op: QueuedOperation,
+                              elements_done: int,
+                              elements_total: int) -> QueueProgressMessage:
+        """The message that marks the end of the extractions.
+
+        It carries two things the parent cannot obtain later, and for
+        the same reason: under smart sync the parent releases at the
+        next phase and never reads ``op_done``.
+
+        The READMEs, which is why this message was introduced.  And
+        what rpm was asked to do, which is what lets the parent judge
+        each package against the rpmdb and write the history.  Without
+        it ``record_action_outcomes`` has nothing to judge, every
+        planned row stays ``planned``, and since the post-operation
+        rules match on ``done`` none of them can fire at all.
+
+        Sent even when there is no README to carry: that condition used
+        to gate the whole message, so a transaction without one told
+        the parent nothing.  A path that ran no transaction leaves the
+        attempt lists empty, which is what tells the parent to leave
+        the history alone -- a ``--test`` looks exactly like that.
+        """
+        return QueueProgressMessage(
+            msg_type='progress',
+            operation_id=op.operation_id,
+            name='',
+            # Extractions are done, erases may not be : report where we
+            # actually are, not a 100% the transaction has not reached.
+            current=elements_done,
+            total=elements_total,
+            phase='install_done',
+            readme_messages=self._collect_readme_messages(op),
+            attempted=sorted(self._name_by_path.values()),
+            attempted_erases=sorted(self._erased_names),
+            callback_reasons=dict(self._callback_reasons),
+        )
+
     def _finalize_success_pipe(
         self,
         op: 'QueuedOperation',
@@ -2195,25 +2249,14 @@ class TransactionQueue:
                     # triggers start.  In smart sync the parent releases at
                     # the first SCRIPT_START; sending readmes here ensures
                     # the parent has them before breaking out of the loop.
-                    if packages_done[0] == total:
-                        readme_data_early = self._collect_readme_messages(op)
-                        if readme_data_early and not pipe_state['closed']:
-                            try:
-                                pipe_state['file'].write(QueueProgressMessage(
-                                    msg_type='progress',
-                                    operation_id=op.operation_id,
-                                    name='',
-                                    # Extractions are done, erases may not
-                                    # be : report where we actually are,
-                                    # not a 100% the transaction has not
-                                    # reached.
-                                    current=elements_done[0],
-                                    total=elements_total,
-                                    phase='install_done',
-                                    readme_messages=readme_data_early,
+                    if packages_done[0] == total and not pipe_state['closed']:
+                        try:
+                            pipe_state['file'].write(
+                                self._install_done_message(
+                                    op, elements_done[0], elements_total,
                                 ).to_json() + "\n")
-                            except (BrokenPipeError, OSError):
-                                pipe_state['closed'] = True
+                        except (BrokenPipeError, OSError):
+                            pipe_state['closed'] = True
                 return
 
             # ── ELEM_PROGRESS: fires at start of each pkg (install + erase) ──
