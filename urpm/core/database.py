@@ -127,7 +127,7 @@ class InstalledRpm(NamedTuple):
 
 
 # Schema version - increment when schema changes
-SCHEMA_VERSION = 39
+SCHEMA_VERSION = 40
 
 # Extended schema with media, config, history tables
 SCHEMA = """
@@ -430,6 +430,28 @@ CREATE TABLE IF NOT EXISTS history_scriptlets (
     FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_hs_history ON history_scriptlets(history_id);
+
+-- Post-operation actions nobody watched happen (v40+).  A rule at the
+-- `after-exit` moment acts once the urpm process is gone, so there is
+-- no screen left to write to: the parent records the waiting line
+-- before it goes and whoever carries the action out completes it.
+-- See SPEC_POST_TRANSACTION_HOOKS §5.1.
+CREATE TABLE IF NOT EXISTS history_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    history_id INTEGER NOT NULL,
+    rule TEXT NOT NULL,          -- the rule's identifier, for the operator
+    action TEXT NOT NULL,        -- the verb, from urpm.core.hooks.Action
+    subject TEXT,                -- what it applies to; NULL when the rule
+                                 -- named none and the capability carried none
+    status TEXT NOT NULL,        -- 'deferred' | 'done' | 'failed'
+    recorded_at INTEGER NOT NULL,
+    finished_at INTEGER,
+    detail TEXT,                 -- what came of it: the only account the
+                                 -- operator will ever get of this action
+    FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ha_history ON history_actions(history_id);
+CREATE INDEX IF NOT EXISTS idx_ha_status ON history_actions(status);
 
 -- Configuration
 CREATE TABLE IF NOT EXISTS config (
@@ -1065,6 +1087,26 @@ MIGRATIONS = {
     # let the chain replay every hop up to the current version.
     37: (38, ""),
     38: (39, ""),
+    39: (40, """
+        -- Migration v39 -> v40: the waiting line of a deferred action.
+        -- Pure CREATE: nothing to carry over, and an operator's
+        -- history is left untouched.
+        CREATE TABLE IF NOT EXISTS history_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id INTEGER NOT NULL,
+            rule TEXT NOT NULL,
+            action TEXT NOT NULL,
+            subject TEXT,
+            status TEXT NOT NULL,
+            recorded_at INTEGER NOT NULL,
+            finished_at INTEGER,
+            detail TEXT,
+            FOREIGN KEY (history_id) REFERENCES history(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ha_history
+            ON history_actions(history_id);
+        CREATE INDEX IF NOT EXISTS idx_ha_status ON history_actions(status);
+    """),
 }
 
 

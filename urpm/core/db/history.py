@@ -196,6 +196,90 @@ class HistoryMixin:
             """, (transaction_id, pkg_name, script_type, status,
                   started_at, finished_at, exit_code, output))
 
+    def record_deferred_action(self, transaction_id: int, rule: str,
+                               action: str,
+                               subject: Optional[str] = None) -> int:
+        """Note that an action is owed, and return the line's id.
+
+        A rule at the ``after-exit`` moment is carried out once this
+        process is gone (SPEC_POST_TRANSACTION_HOOKS §5.1), so the
+        operator will not see it happen: the line is written here while
+        there is still someone to write it, and completed later by
+        :meth:`complete_deferred_action`.
+
+        Args:
+            transaction_id: Transaction ID from :meth:`begin_transaction`.
+            rule: The rule's identifier, so the operator can tell which
+                file asked for this.
+            action: The verb, from :class:`urpm.core.hooks.Action`.
+            subject: What the action applies to, when the rule or the
+                watched capability named one.
+
+        Returns:
+            The line's id, which is what the acting side needs to
+            complete it.
+        """
+        with self._conn_write() as conn:
+            cursor = conn.execute("""
+                INSERT INTO history_actions
+                  (history_id, rule, action, subject, status, recorded_at)
+                VALUES (?, ?, ?, ?, 'deferred', ?)
+            """, (transaction_id, rule, action, subject, int(time.time())))
+            conn.commit()
+            return cursor.lastrowid
+
+    def complete_deferred_action(self, action_id: int, status: str,
+                                 detail: Optional[str] = None) -> bool:
+        """Say what became of a deferred action.
+
+        Args:
+            action_id: The line as returned by
+                :meth:`record_deferred_action`.
+            status: ``'done'`` or ``'failed'``.
+            detail: What happened, in one line.  On a failure this is
+                the only account the operator will ever get, nobody
+                having been there to watch.
+
+        Returns:
+            ``False`` when the line is gone, which is not an error: the
+            acting side can outlive a history the operator has pruned.
+        """
+        with self._conn_write() as conn:
+            cursor = conn.execute("""
+                UPDATE history_actions
+                   SET status = ?, detail = ?, finished_at = ?
+                 WHERE id = ?
+            """, (status, detail, int(time.time()), action_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def list_deferred_actions(self, transaction_id: Optional[int] = None,
+                              status: Optional[str] = None) -> List[Dict]:
+        """The deferred actions of one transaction, or of all of them.
+
+        ``status='failed'`` is what a later command asks for: an action
+        that went wrong after everyone stopped looking has to surface
+        somewhere, and this is the only place it was written down.
+        """
+        clauses = []
+        params: List = []
+        if transaction_id is not None:
+            clauses.append("history_id = ?")
+            params.append(transaction_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._conn_read() as conn:
+            cursor = conn.execute(f"""
+                SELECT id, history_id, rule, action, subject, status,
+                       recorded_at, finished_at, detail
+                  FROM history_actions
+                  {where}
+                 ORDER BY id
+            """, tuple(params))
+            return [dict(row) for row in cursor]
+
     def get_scriptlet_output(self, transaction_id: int) -> List[Dict]:
         """Retrieve scriptlet events + legacy output for a transaction.
 
