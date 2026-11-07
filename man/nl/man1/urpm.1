@@ -75,6 +75,17 @@ Eén item per regel (scriptvriendelijk).
 .B \-\-show-all ", " \-a
 Toont alle items zonder afkapping. Bij install/upgrade wordt ook de
 afwijsreden per pakket in best-effort-modus volledig getoond.
+.TP
+.B \-\-rootless
+Werkt zonder root-rechten: slaat de \fBeuid=0\fR-controle over en
+leidt rpm via \fBpodman unshare\fR, zodat een gewone gebruiker een
+installatie in een eigen chroot kan uitvoeren (meestal
+\fB\-\-root ~/een\-chroot\fR). Wordt intern gebruikt door
+\fBurpm image make\fR en \fBurpm build\fR; hier blootgelegd om
+dezelfde stappen bij het debuggen met de hand over te doen, of om op
+een chroot door te werken zonder een volledige
+\fBmkimage\fR-ronde. \fB\-\-allow\-no\-root\fR is een overgeërfde
+alias.
 .SH COMMANDO'S
 .SS Pakketinstallatie en -verwijdering
 .TP
@@ -165,6 +176,28 @@ Sta extra architecturen toe naast de systeemarchitectuur en noarch.
 Kan herhaald worden. Standaard worden alleen pakketten voor de systeemarchitectuur
 (bijv. x86_64) en noarch meegenomen. Gebruik deze optie om 32-bits pakketten op een
 64-bits systeem te installeren (bijv. \fB\-\-allow\-arch i686\fR voor wine of steam).
+.TP
+.B \-\-enablemedia " " \fImedium\fR
+Schakelt een normaal uitgeschakeld medium in, alleen voor deze
+transactie. Herhaalbaar, of met komma's gescheiden. Het medium blijft
+daarna uitgeschakeld.
+.TP
+.B \-\-disablemedia " " \fImedium\fR
+Negeert een ingeschakeld medium, alleen voor deze transactie.
+Herhaalbaar, of met komma's gescheiden.
+.TP
+.B \-\-download\-dir " " \fImap\fR
+Schrijft de gedownloade RPM's naar \fImap\fR in plaats van de
+standaardcache. Gaat voor op de instelling
+\fBdownload.payload_dir\fR.
+.TP
+.B \-\-check " " \fInamen\fR
+Voert integriteitscontroles uit zodra de transactie klaar is. Met
+komma's gescheiden, of \fBall\fR. Beschikbaar: \fBlinks\fR.
+.TP
+.B \-\-no\-readme
+Toont de README-notities na installatie niet. Gebruikt door
+\fBmkimage\fR en \fBimage update\fR, waar niemand ze leest.
 .RE
 .TP
 .B e|erase \fIpakket\fR ...
@@ -176,6 +209,18 @@ Geen bevestigingsvraag.
 .TP
 .B \-\-auto\-orphans
 Verwijder ook verweesde afhankelijkheden.
+.TP
+.B \-\-check " " \fInamen\fR
+Voert integriteitscontroles uit zodra de transactie klaar is. Met
+komma's gescheiden, of \fBall\fR. Beschikbaar: \fBlinks\fR.
+.TP
+.B \-\-erase\-recommends
+Verwijdert ook pakketten die alleen door de blijvende pakketten worden
+aanbevolen.
+.TP
+.B \-\-keep\-suggests
+Houdt de pakketten die door de blijvende pakketten worden
+voorgesteld.
 .RE
 .TP
 .B autoremove
@@ -201,6 +246,17 @@ Alle bovenstaande selectoren.
 .TP
 .BR \-y ", " \-\-auto
 Geen bevestigingsvraag.
+.TP
+.BR \-i ", " \-\-interactive
+Sorteert de wezen één voor één: houden, verwijderen of overslaan.
+Groepeert ze naar aard (restanten van een eerdere versie,
+SONAME-sublibraries, userland) en neemt combineerbare filters aan.
+Impliceert \fB\-\-orphans\fR.
+.TP
+.B \-\-filter " " \fIexpr\fR
+Filterexpressie voor \fB\-\-interactive\fR, herhaalbaar of met
+komma's gescheiden: \fBdisttag=mga9\fR, \fBkind=sublib\fR,
+\fBsize>10M\fR, \fBinstalled<30d\fR, \fBname~=^lib64.*\fR.
 .RE
 .TP
 .B distupgrade \fR[\fB\-\-to \fIversion\fR]
@@ -229,6 +285,26 @@ eigen oordeel. Naast de schatting, nooit erin, staat een aangeraden
 marge van 10% van het geïnstalleerde beslag voor wat geen enkel pakket
 aangeeft \(em de opnieuw aangemaakte initramfs, de lettertype- en
 pictogramcaches.
+.sp
+Een met
+.B "urpm media add-cdrom"
+aangemelde schijf wordt over de versiewissel meegenomen: zodra de
+media van de doelversie bestaan, wordt elke boom die de schijf
+aanbiedt gekoppeld aan het medium dat erbij past, en komen de
+pakketten van de schijf in plaats van van het netwerk. Dat maakt een
+bijwerking zonder enige verbinding mogelijk, omdat de schijf dan de
+enige bron van haar media is.
+.sp
+Alleen een door de beheerder aangemelde schijf wordt gebruikt: een
+schijf die slechts aangekoppeld is, blijft ongemoeid in plaats van
+achter zijn rug te worden ingelijfd. En de schijf voegt zich bij media
+die al bestaan, zij maakt er nooit een aan: de persing in de lade is
+een schijf van versie N+1, en haar catalogus media laten aanmaken zou
+die over de inhoud van de doelversie laten beslissen, met inbegrip van
+de secties die de beheerder opzettelijk heeft weggelaten. Een boom
+zonder tegenhanger wordt overgeslagen, en dat wordt in het logboek
+gezegd. En een onleesbare schijf laat de versiewissel evenmin
+mislukken: de spiegels alleen zijn genoeg om door te gaan.
 .RS
 .TP
 .B \-\-to \fIversion\fR
@@ -264,8 +340,8 @@ stroomuitval.
 Werk alleen mediametadata bij (apt-stijl). Werkt geen pakketten bij.
 .RS
 .TP
-.B \-\-files
-Synchroniseer ook files.xml voor media met sync_files ingeschakeld.
+.B \-\-force
+Ververst ook de media waarvan de metadata onveranderd lijken.
 .RE
 .TP
 .B u|upgrade \fR[\fIpakket\fR ...]
@@ -283,11 +359,42 @@ Download alleen van LAN-peers, geen upstream-mirrors.
 .TP
 .B \-\-allow\-arch " " \fIarch\fR
 Sta extra architecturen toe (bijv. \fB\-\-allow\-arch i686\fR).
+.TP
+.B \-\-enablemedia " " \fImedium\fR
+Schakelt een normaal uitgeschakeld medium in, alleen voor deze
+transactie. Herhaalbaar, of met komma's gescheiden. Het medium blijft
+daarna uitgeschakeld.
+.TP
+.B \-\-disablemedia " " \fImedium\fR
+Negeert een ingeschakeld medium, alleen voor deze transactie.
+Herhaalbaar, of met komma's gescheiden.
+.TP
+.B \-\-download\-dir " " \fImap\fR
+Schrijft de gedownloade RPM's naar \fImap\fR in plaats van de
+standaardcache. Gaat voor op de instelling
+\fBdownload.payload_dir\fR.
+.TP
+.B \-\-check " " \fInamen\fR
+Voert integriteitscontroles uit zodra de transactie klaar is. Met
+komma's gescheiden, of \fBall\fR. Beschikbaar: \fBlinks\fR.
+.TP
+.B \-\-noerase\-orphans
+Houdt de verweesde afhankelijkheden, in plaats van ze na de
+bijwerking te verwijderen.
 .RE
 .SS Pakketinformatie
 .TP
-.B q|query \fIpatroon\fR
-Zoek pakketten op naam of beschrijving. Aliassen: \fBs\fR, \fBsearch\fR.
+.B search \fIpatroon\fR
+Zoek pakketten op naam of beschrijving. Aliassen: \fBs\fR, \fBq\fR,
+\fBquery\fR.
+.RS
+.TP
+.B \-\-unavailable
+Somt de geïnstalleerde pakketten op die geen enkel ingesteld medium
+nog aanbiedt. Hoe een restant van een eerdere versie eruitziet, en wat
+.B autoremove
+aanbiedt op te ruimen.
+.RE
 .TP
 .B show \fIpakket\fR [\fB\-\-files\fR] [\fB\-\-changelog\fR]
 Toon gedetailleerde pakketinformatie. Met \fB\-\-files\fR wordt ook de
@@ -319,13 +426,22 @@ Zoek alleen in beschikbare pakketten (vereist files.xml-synchronisatie).
 Beperk resultaten tot N overeenkomsten.
 .PP
 Standaard wordt gezocht in zowel geïnstalleerde als beschikbare pakketten.
-Zoeken in beschikbare pakketten vereist het inschakelen van files.xml-synchronisatie via
-\fBurpm media set \-\-all \-\-sync-files\fR gevolgd door
-\fBurpm media update \-\-files\fR.
+Zoeken in beschikbare pakketten heeft de bestandsindex nodig, die
+.B urpm media update
+zelf synchroniseert zodra het medium er een aanbiedt: er is niets in
+te schakelen.
+.\" Tot 0.7.x stond hier « urpm media set --all --sync-files gevolgd
+.\" door urpm media update --files ». Geen van beide opties bestaat
+.\" nog: files.xml.lzma komt met elke media-bijwerking mee.
 .PP
 Ingeschakelde media waarvan de bestandsindex ontbreekt, onleesbaar of
 leeg is, worden na de resultaten met de reden vermeld: een leeg
 antwoord wordt zo niet aangezien voor een volledige zoekopdracht.
+.TP
+.B \-\-all\-versions
+Toont elke versie van elke overeenkomst. Standaard wordt alleen de
+hoogste versie van elk pakket afgedrukt, die een installatie zou
+brengen.
 .RE
 .TP
 .B depends \fIpakket\fR
@@ -334,6 +450,24 @@ Toon pakketafhankelijkheden.
 .TP
 .B \-\-legend
 Toon symboollegenda na de boomweergave.
+.TP
+.B \-\-tree
+Toont het resultaat als recursieve boom.
+.TP
+.B \-\-depth " " \fIN\fR
+Maximale boomdiepte, standaard 5; \fB\-\-all\fR heft de grens op.
+.TP
+.B \-\-hide\-uninstalled
+Toont alleen de al geïnstalleerde afhankelijkheden.
+.TP
+.B \-\-no\-libs
+Verbergt bibliotheekpakketten (\fBlib*\fR, \fBglibc\fR) in de boom.
+.TP
+.B \-\-legacy
+Toont de ruwe capabilities, zoals \fBurpmq\fR deed.
+.TP
+.B \-\-pager
+Toont lange uitvoer paginagewijs via \fBless\fR.
 .RE
 .TP
 .B rdepends \fIpakket\fR
@@ -342,6 +476,15 @@ Toon omgekeerde afhankelijkheden.
 .TP
 .B \-\-legend
 Toon symboollegenda na de boomweergave.
+.TP
+.B \-\-tree
+Toont het resultaat als recursieve boom.
+.TP
+.B \-\-depth " " \fIN\fR
+Maximale boomdiepte, standaard 5; \fB\-\-all\fR heft de grens op.
+.TP
+.B \-\-hide\-uninstalled
+Toont alleen de geïnstalleerde pakketten in de boom.
 .RE
 .TP
 .B why \fIpakket\fR
@@ -433,14 +576,19 @@ Verwijder één of meerdere media. Elke server waarvan de medialijst
 na verwijdering leeg blijft wordt in dezelfde beweging weggehaald.
 .RS
 .TP
-.B \-\-all
-Verwijder alle geconfigureerde media. Vraagt om bevestiging, tenzij
-\fB\-y\fR / \fB\-\-auto\fR wordt meegegeven. Niet te combineren met
-een expliciete lijst namen.
-.TP
 .BR \-y ", " \-\-auto
 Slaat de bevestiging over (geldt zowel voor de benoemde modus als
 voor \fB\-\-all\fR).
+.TP
+.B \-\-distupgraded
+Verwijdert elk mga N-medium dat
+.B distupgrade
+door zijn mga N+1-tegenhanger heeft vervangen (regels met
+.BR disabled_by=distupgrade ).
+Verweesde regels van derden, zonder tegenhanger in het doel, blijven
+staan. Niet samen met
+.B \-\-all
+of een uitdrukkelijke namenlijst te gebruiken.
 .RE
 .TP
 .B enable \fInaam\fR
@@ -453,13 +601,20 @@ Schakel een medium uit.
 Werk mediametadata bij (parallel).
 .RS
 .TP
-.B \-\-files
-Synchroniseer ook files.xml voor media met sync_files ingeschakeld. Vereist om
-\fBurpm find\fR in beschikbare pakketten te laten zoeken.
+.B \-\-force
+Ververst ook de media waarvan de metadata onveranderd lijken.
+.TP
+.B \-\-no\-appstream
+Slaat de synchronisatie van de AppStream-catalogus over.
 .RE
 .TP
 .B import
 Importeer mediaconfiguratie van urpmi.
+.RS
+.TP
+.B \-\-replace
+Overschrijft de bestaande media in plaats van zich erbij te voegen.
+.RE
 .TP
 .B link \fInaam\fR \fI+server\fR|\fI-server\fR ...
 Koppel of ontkoppel servers aan een medium. Gebruik +server om toe te voegen, -server om te verwijderen.
@@ -486,16 +641,11 @@ Aantal dagen om gecachte pakketten te bewaren.
 .TP
 .B \-\-priority \fIN\fR
 Mediaprioriteit (hoger = voorkeur).
-.TP
-.B \-\-sync\-files
-Schakel automatische files.xml-synchronisatie in voor dit medium. Vereist om
-\fBurpm find\fR in beschikbare pakketten te laten zoeken.
-.TP
-.B \-\-no\-sync\-files
-Schakel automatische files.xml-synchronisatie uit.
-.TP
-.BR \-a ", " \-\-all
-Pas instelling toe op alle ingeschakelde media (gebruik met \fB\-\-sync\-files\fR of \fB\-\-no\-sync\-files\fR).
+.\" Tot 0.7.x bood dit blok ook --sync-files, --no-sync-files en een
+.\" --all dat ze op alle media toepaste. Alle drie zijn verdwenen: de
+.\" bestandsindex komt nu met elke media-bijwerking mee zodra het
+.\" medium er een aanbiedt. Elke instelling hierboven betreft alleen
+.\" het genoemde medium.
 .RE
 .TP
 .B autoconfig \fB\-\-release\fR \fIversie\fR
@@ -543,6 +693,11 @@ Neem SRPMS-media op (standaard uitgesloten).
 .TP
 .B \-\-debug
 Neem debug-media op (standaard uitgesloten).
+.TP
+.B \-\-import\-keys
+Loopt elk gevonden medium door, haalt zijn openbare GPG-sleutel op en
+biedt aan elke afzonderlijke sleutel te importeren voordat er iets
+naar de database wordt geschreven.
 .RE
 .RE
 .TP
@@ -612,6 +767,11 @@ Lijst ontdekte peers en downloadstatistieken.
 .TP
 .B blacklist \fIhost\fR
 Blokkeer een peer.
+.RS
+.TP
+.BR \-p ", " \-\-port " " \fIpoort\fR
+Blokkeert een bepaalde poort van de peer in plaats van de hele host.
+.RE
 .TP
 .B unblacklist \fIhost\fR
 Deblokkeer een peer.
@@ -634,6 +794,20 @@ Toon cachestatistieken.
 .TP
 .B history \fR[\fIN\fR]
 Toon transactiegeschiedenis. Standaard: laatste 10 transacties.
+.RS
+.TP
+.BR \-i ", " \-\-install
+Toont alleen de installatietransacties.
+.TP
+.BR \-d ", " \-\-detail " " \fIID\fR
+Toont de details van transactie \fIID\fR.
+.TP
+.BR \-r ", " \-\-remove
+Toont alleen de verwijderingstransacties.
+.TP
+.B \-\-delete \fIID\fR ...
+Verwijdert transacties uit de geschiedenis.
+.RE
 .TP
 .B rollback \fIspec\fR
 Draai transacties terug.
@@ -720,7 +894,111 @@ Somt de gemaskeerde regels op.
 Leest en schrijft een andere lijst dan
 .IR /etc/urpmi/skip.list .
 .RE
+.SS Systeemprofielen
+.TP
+.B system export \fR[\fB\-\-to \fIpad\fR]
+Schrijft de huidige staat van de machine als JSON: haar media, haar
+servers, haar geïnstalleerde pakketten en wat uitdrukkelijk is
+gevraagd. Standaardbestemming
+.IR ~/system\-<machine>\-<UTC\-tijdstempel>.json .
+.TP
+.B system import \fR[\fIbestand\fR]
+Brengt deze machine nader bij een profiel dat door
+.B "system export"
+is geschreven. Media en servers worden vervangen, pakketten die het
+profiel niet aanbiedt worden verwijderd en die het wel aanbiedt worden
+geïnstalleerd. Eerst wordt een back-up van de huidige staat genomen,
+zodat de stap kan worden teruggedraaid.
+.RS
+.TP
+.B \-\-from " " \fIpad\fR
+Leest het profiel uit \fIpad\fR in plaats van uit het positionele
+argument.
+.TP
+.B \-\-merge\-media
+Houdt de lokale media en servers waarover het profiel niets zegt.
+Standaard worden ze vervangen, lokale toevoegingen inbegrepen.
+.TP
+.B \-\-no\-backup
+Slaat de automatische back-up van de huidige staat over.
+.TP
+.B \-\-preserve\-hw
+Houdt de hardwaregebonden pakketten (DKMS-modules, X11-drivers,
+gasthulpmiddelen, firmware, microcode), ook wanneer het profiel ze
+niet aanbiedt. Interactief wordt dezelfde bescherming aangeboden als
+een vraag met ja als standaardantwoord; deze optie is de tegenhanger
+daarvan voor \fB\-\-auto\fR. Zij voorkomt de klassieke mislukking
+waarbij een gekloond profiel de \fBvboxvideo\fR-, \fBiwlwifi\fR- of
+\fBnvidia\fR-driver van de doelmachine verwijdert, de distupgrade
+daarna een nieuwe kernel brengt, niets de DKMS-modules herbouwt, en de
+grafische stapel weg is.
+.TP
+.B \-\-allow\-incoherent
+Geeft het profiel letterlijk weer, ook wanneer daardoor behouden
+pakketten met onvervulde afhankelijkheden achterblijven. Slaat het
+afhankelijkheidsvangnet over en drukt de verwijderingen door met
+\fBurpm erase \-\-force\fR, waarmee rpm's eigen voorcontrole wordt
+omzeild. Bedoeld om een fout trouw na te bootsen: het resulterende
+systeem zal gebroken afhankelijkheden hebben.
+.RE
 .SS Initialisatie en downloaden
+.TP
+.B cleanup
+Koppelt de bestandssystemen (\fI/dev\fR, \fI/proc\fR ...) af die
+\fBurpm init\fR eerder in een chroot met \fB\-\-urpm\-root\fR heeft
+aangekoppeld. Te gebruiken na het werk in de chroot.
+.RS
+.TP
+.B \-\-legacy\-scriptlets
+Brengt de scriptletuitvoer van oude transacties over naar de tabel die
+deze versie leest
+.RI ( history_scriptlet_output
+naar
+.IR history_scriptlets ).
+Eenmalig, en alleen nuttig bij een database van voor de wissel.
+.RE
+.TP
+.B readme \fR[\fIopties\fR]
+Toont de README-berichten die voor transacties zijn vastgelegd (in de
+stijl van Mageia's \fIREADME.urpmi\fR / \fIREADME.upgrade\fR).
+.RS
+.TP
+.B \-\-last
+Toont het README van de meest recente transactie (standaard).
+.TP
+.BR \-t ", " \-\-transaction " " \fIID\fR
+Toont het README van een bepaalde transactie.
+.TP
+.BR \-l ", " \-\-list
+Somt de transacties op die README-berichten hebben.
+.RE
+.TP
+.B appstream \fIsubcommando\fR
+Beheert de AppStream-metadata voor softwarecentra (KDE Discover, GNOME
+Software).
+.RS
+.TP
+.B generate \fR[\fB\-\-output\fR \fIbestand\fR] [\fB\-\-no\-compress\fR] [\fB\-\-media\fR \fInaam\fR]
+Genereert de AppStream-catalogus uit de pakketdatabase.
+Standaarduitvoer is
+.IR /var/cache/swcatalog/xml/mageia-{version}.xml.gz .
+.TP
+.B merge \fR[\fB\-\-refresh\fR]
+Voegt de AppStream-bestanden per medium samen in de verenigde
+catalogus; \fB\-\-refresh\fR ververst daarnaast de AppStream-cache van
+het systeem.
+.TP
+.B sync \fR[\fImedium\fR] [\fB\-\-latest-only\fR]
+Dwingt de replicatiesynchronisatie van de media met replicatiebeleid
+\fBseed\fR. \fB\-\-latest-only\fR houdt alleen de nieuwste versie van
+elk pakket (kleiner, als een dvd).
+.RE
+.TP
+.B progress \fR[\fB\-\-watch\fR]
+Toont de voortgang van een lopende bewerking die elders is gestart
+(door de service of door PackageKit). Zonder argumenten wordt de
+huidige staat afgedrukt en gestopt. Met \fB\-\-watch\fR / \fB\-w\fR
+wordt doorlopend gevolgd tot het einde.
 .TP
 .B init \fR[\fB\-\-release\fR \fIversie\fR] [\fB\-\-mirrorlist\fR \fIurl\fR]
 Initialiseer urpm met standaard Mageia-media. Test mirrors en configureert de beste.
@@ -731,6 +1009,9 @@ Mageia-versie (bijv. 10, cauldron).
 .TP
 .B \-\-urpm\-root " " \fIpad\fR
 Initialiseer in een chroot-map.
+.TP
+.B \-\-no\-sync
+Stelt de media in maar slaat de eerste metadatasynchronisatie over.
 .RE
 .TP
 .B genmedia \fIrpms_map\fR
@@ -744,10 +1025,34 @@ clients aanbiedt. Apart verpakt als
 om de basisinstallatie van de client licht te houden.
 .RS
 .TP
-.B \-\-incremental
-Slaat RPM's over waarvan de SHA-256 sinds de vorige run niet is
-veranderd (de toestandcache staat in
-.IR rpms_map/.genhdlist/state.json ).
+.B \-\-clean
+Bouwt alles opnieuw. RPM's waarvan de SHA-256 sinds de vorige ronde
+niet is veranderd worden standaard overgeslagen, dank zij de
+toestandscache in
+.IR rpms_dir/.genhdlist/state.json ;
+deze optie negeert die cache.
+.\" Tot 0.7.x was het omgekeerd: een optie --incremental om dat
+.\" overslaan te vragen. Het overslaan is de standaard geworden, en
+.\" --clean heft het op.
+.TP
+.B \-\-media\-info\-dir \fImap\fR
+Waar de metadata worden geschreven (standaard:
+.IR rpms_dir/media_info ).
+.TP
+.B \-\-mageia\-tree
+Doorloopt een Mageia-boom, per sectie en per type, in plaats van een
+platte map.
+.TP
+.B \-\-versioned
+Zet een tijdstempel voor de geproduceerde bestanden.
+.TP
+.B \-\-nolock
+Vergrendelt
+.IR media_info/
+niet.
+.TP
+.B \-\-no\-bad\-rpm
+Slaat onleesbare RPM's over in plaats van erop te falen.
 .TP
 .B \-\-no\-hdlist
 Schrijft het bestand
@@ -812,6 +1117,16 @@ Download alleen van LAN-peers, geen upstream-mirrors.
 .TP
 .B \-\-allow\-arch " " \fIarch\fR
 Sta extra architecturen toe (bijv. \fB\-\-allow\-arch i686\fR).
+.TP
+.B \-\-from\-file \fIbestand\fR
+Leest pakketaanduidingen uit
+.I bestand
+(één per regel, lege regels en regels die met
+.B #
+beginnen worden genegeerd) en voegt ze bij de positionele argumenten.
+Te combineren met
+.B urpm distupgrade \-\-export\-plan
+om de cache van een buur vooraf te vullen.
 .RE
 .SS Containerbuildsysteem
 .TP
@@ -886,6 +1201,19 @@ mirror voor het effectieve numeriek; \fB\-\-release cauldron:11\fR zet
 cauldron vast met een expliciet numeriek doel, werkt offline en
 overheerst de mirror wanneer diens \fBmedia.cfg\fR achterloopt tijdens
 een flip-venster.
+.TP
+.BR \-\-addmedia " " \fInaam\fR " " \fIurl\fR
+Voegt in fase 2 een eigen medium toe in de image. Herhaalbaar.
+.TP
+.B \-\-forward\-proxy
+Geeft de proxyomgeving van de host (\fBhttp_proxy\fR,
+\fBHTTPS_PROXY\fR, \fBno_proxy\fR, alle schrijfwijzen) door aan de
+chroot van de image, die anders in een hermetische omgeving loopt.
+Volgt standaard de sleutel \fBforward_proxy\fR uit de sectie
+\fB[image]\fR, die van huis uit onwaar is. In te schakelen wanneer de
+machine de Mageia-spiegels alleen via een uitgaande HTTP-proxy
+bereikt. \fB\-\-no\-forward\-proxy\fR dwingt het uitschakelen af
+tegen de configuratie in.
 .RE
 .TP
 .B update \fItag\fR [\fB\-\-runtime\fR \fIruntime\fR]
@@ -1043,6 +1371,17 @@ RAM per cc1plus).
 Bronnen kunnen .src.rpm- of .spec-bestanden zijn. Voor .spec-bestanden worden
 bronnen automatisch gekopieerd uit de map SOURCES/ (ondersteunt workspace/SPECS/
 en workspace/SOURCES/ indelingen).
+.TP
+.BR \-\-rollback\-between\-builds ", " \-\-rbb
+Draait de BuildRequires van elke spec na de bouw terug, zodat de
+volgende van dezelfde gedeelde basis vertrekt. De basisopzet
+(\fBurpm upgrade\fR, installatie van \fBrpm\-build\fR) blijft
+behouden; alleen de specifieke afhankelijkheden van elke spec worden
+teruggedraaid. Standaard uit.
+.TP
+.B \-\-stop\-on\-fail
+Stopt de keten bij de eerste mislukte spec in plaats van de overige te
+proberen (standaard: doorgaan).
 .RE
 .SH BESTANDEN
 .TP

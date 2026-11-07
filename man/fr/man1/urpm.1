@@ -75,6 +75,16 @@ Un élément par ligne (lisible par script).
 .B \-\-show-all ", " \-a
 Affiche tous les éléments sans troncature. Sur install/upgrade,
 développe aussi la raison de rejet par paquet en mode best-effort.
+.TP
+.B \-\-rootless
+Fonctionne sans les droits root : contourne le contrôle \fBeuid=0\fR et
+fait passer rpm par \fBpodman unshare\fR, afin qu'un utilisateur
+ordinaire puisse mener une installation dans un chroot qui lui
+appartient (typiquement \fB\-\-root ~/un\-chroot\fR). Utilisé en
+interne par \fBurpm image make\fR et \fBurpm build\fR ; exposé ici
+pour refaire les mêmes étapes à la main en déboguant, ou pour itérer
+sur un chroot sans repasser par un cycle \fBmkimage\fR complet.
+\fB\-\-allow\-no\-root\fR est un alias hérité.
 .SH COMMANDES
 .SS Installation et suppression de paquets
 .TP
@@ -169,6 +179,27 @@ Peut être répété. Par défaut, seuls les paquets correspondant à l'architec
 32 bits sur un système 64 bits (ex: \fB\-\-allow\-arch i686\fR pour wine ou steam).
 Distincte de l'option parente \fB\-\-arch\fR qui définit l'architecture
 cible elle-même.
+.TP
+.B \-\-enablemedia " " \fImedia\fR
+Active un média normalement désactivé, pour cette transaction
+seulement. Répétable, ou séparé par des virgules. Le média reste
+désactivé ensuite.
+.TP
+.B \-\-disablemedia " " \fImedia\fR
+Ignore un média activé, pour cette transaction seulement. Répétable,
+ou séparé par des virgules.
+.TP
+.B \-\-download\-dir " " \fIrepertoire\fR
+Écrit les RPM téléchargés dans \fIrepertoire\fR au lieu du cache par
+défaut. Prime sur le réglage \fBdownload.payload_dir\fR.
+.TP
+.B \-\-check " " \fInoms\fR
+Lance des contrôles d'intégrité une fois la transaction terminée.
+Séparés par des virgules, ou \fBall\fR. Disponible : \fBlinks\fR.
+.TP
+.B \-\-no\-readme
+N'affiche pas les notes README d'après-installation. Utilisé par
+\fBmkimage\fR et \fBimage update\fR, où personne ne les lit.
 .RE
 .TP
 .B e|erase \fIpaquet\fR ...
@@ -205,6 +236,10 @@ Active la sortie de debug pour le résolveur et/ou la transaction.
 .B \-\-sync
 Attend la fin de tous les triggers de désinstallation avant de
 retourner.
+.TP
+.B \-\-check " " \fInoms\fR
+Lance des contrôles d'intégrité une fois la transaction terminée.
+Séparés par des virgules, ou \fBall\fR. Disponible : \fBlinks\fR.
 .RE
 .TP
 .B autoremove
@@ -230,6 +265,17 @@ Tous les sélecteurs ci-dessus.
 .TP
 .BR \-y ", " \-\-auto
 Pas de confirmation.
+.TP
+.BR \-i ", " \-\-interactive
+Trie les orphelins un par un : garder, supprimer ou passer. Les
+regroupe par nature (reliquats d'une version précédente,
+sous-bibliothèques SONAME, espace utilisateur) et accepte des filtres
+composables. Implique \fB\-\-orphans\fR.
+.TP
+.B \-\-filter " " \fIexpr\fR
+Expression de filtre pour \fB\-\-interactive\fR, répétable ou séparée
+par des virgules : \fBdisttag=mga9\fR, \fBkind=sublib\fR,
+\fBsize>10M\fR, \fBinstalled<30d\fR, \fBname~=^lib64.*\fR.
 .RE
 .TP
 .B distupgrade \fR[\fB\-\-to \fIversion\fR]
@@ -258,6 +304,25 @@ porte le cache de téléchargement se voit imputer les RPM restants ; un
 dedans, figure une marge conseillée de 10 % de l'empreinte installée
 pour ce qu'aucun paquet ne déclare \(em l'initramfs régénéré, les caches
 de polices et d'icônes.
+.sp
+Un disque déclaré par
+.B "urpm media add-cdrom"
+est repris après le changement de version : dès que les médias de la
+version cible existent, chaque arborescence que le disque porte est
+rattachée à celui qui lui correspond, et les paquets viennent du
+disque au lieu du réseau. C'est ce qui rend possible une mise à niveau
+sans aucune connexion, le disque étant alors la seule source de ses
+médias.
+.sp
+Seul un disque déclaré par l'opérateur est utilisé : un disque
+simplement monté est laissé tranquille plutôt qu'embarqué à son insu.
+Et le disque rejoint des médias qui existent déjà, il n'en crée
+jamais : le pressage dans le lecteur est un disque de la version N+1,
+et laisser son catalogue créer des médias lui ferait décider du
+contenu de la version cible, sections que l'opérateur a choisi
+d'écarter comprises. Une arborescence sans équivalent est ignorée, en
+le disant dans le journal. Et un disque illisible ne fait pas échouer
+le changement de version : les miroirs seuls suffisent à continuer.
 .RS
 .TP
 .B \-\-to \fIversion\fR
@@ -293,8 +358,8 @@ coupure secteur.
 Met à jour les métadonnées des médias uniquement (style apt). Ne met pas à jour les paquets.
 .RS
 .TP
-.B \-\-files
-Synchronise aussi files.xml pour les médias avec sync_files activé.
+.B \-\-force
+Rafraîchit même les médias dont les métadonnées semblent inchangées.
 .RE
 .TP
 .B u|upgrade \fR[\fIpaquet\fR ...]
@@ -350,11 +415,37 @@ Autorise des architectures supplémentaires (ex: \fB\-\-allow\-arch i686\fR).
 .TP
 .B \-\-sync
 Attend la fin de tous les post-triggers avant de retourner.
+.TP
+.B \-\-enablemedia " " \fImedia\fR
+Active un média normalement désactivé, pour cette transaction
+seulement. Répétable, ou séparé par des virgules. Le média reste
+désactivé ensuite.
+.TP
+.B \-\-disablemedia " " \fImedia\fR
+Ignore un média activé, pour cette transaction seulement. Répétable,
+ou séparé par des virgules.
+.TP
+.B \-\-download\-dir " " \fIrepertoire\fR
+Écrit les RPM téléchargés dans \fIrepertoire\fR au lieu du cache par
+défaut. Prime sur le réglage \fBdownload.payload_dir\fR.
+.TP
+.B \-\-check " " \fInoms\fR
+Lance des contrôles d'intégrité une fois la transaction terminée.
+Séparés par des virgules, ou \fBall\fR. Disponible : \fBlinks\fR.
 .RE
 .SS Informations sur les paquets
 .TP
-.B q|query \fImotif\fR
-Recherche des paquets par nom ou description. Alias : \fBs\fR, \fBsearch\fR.
+.B search \fImotif\fR
+Recherche des paquets par nom ou description. Alias : \fBs\fR,
+\fBq\fR, \fBquery\fR.
+.RS
+.TP
+.B \-\-unavailable
+Liste les paquets installés qu'aucun média configuré ne porte plus.
+À quoi ressemble un reliquat d'une version précédente, et ce que
+.B autoremove
+propose de balayer.
+.RE
 .TP
 .B show \fIpaquet\fR [\fB\-\-files\fR] [\fB\-\-changelog\fR]
 Affiche les détails d'un paquet. Avec \fB\-\-files\fR, affiche également
@@ -385,15 +476,26 @@ Recherche uniquement dans les paquets disponibles (nécessite la sync files.xml)
 .BR \-l ", " \-\-limit " " \fIN\fR
 Limite les résultats a N correspondances.
 .PP
-Par défaut, recherche dans les paquets installés et disponibles.
-La recherche dans les paquets disponibles nécessite d'activer la sync files.xml via
-\fBurpm media set \-\-all \-\-sync-files\fR puis
-\fBurpm media update \-\-files\fR.
+Par défaut, recherche dans les paquets installés et disponibles. La
+recherche dans les paquets disponibles a besoin de l'index de
+fichiers, que
+.B urpm media update
+synchronise de lui-même dès que le média en propose un : il n'y a rien
+à activer.
+.\" Jusqu'en 0.7.x ce passage indiquait « urpm media set --all
+.\" --sync-files puis urpm media update --files ». Aucune de ces deux
+.\" options n'existe plus : files.xml.lzma accompagne désormais chaque
+.\" mise à jour de média.
 .PP
 Les médias activés dont l'index de fichiers est absent, illisible ou
 vide sont listés après les résultats, avec le motif : une réponse
 vide ne peut ainsi pas être prise pour une recherche ayant couvert
 tous les médias.
+.TP
+.B \-\-all\-versions
+Affiche toutes les versions de chaque correspondance. Par défaut seule
+la plus haute version de chaque paquet est imprimée, celle qu'une
+installation apporterait.
 .RE
 .TP
 .B depends \fIpaquet\fR
@@ -402,6 +504,26 @@ Affiche les dépendances d'un paquet.
 .TP
 .B \-\-legend
 Affiche la légende des symboles après l'arbre.
+.TP
+.B \-\-tree
+Affiche le résultat en arbre récursif.
+.TP
+.B \-\-depth " " \fIN\fR
+Profondeur maximale de l'arbre, 5 par défaut ; \fB\-\-all\fR lève la
+limite.
+.TP
+.B \-\-hide\-uninstalled
+N'affiche que les dépendances déjà installées.
+.TP
+.B \-\-no\-libs
+Masque les paquets de bibliothèques (\fBlib*\fR, \fBglibc\fR) dans
+l'arbre.
+.TP
+.B \-\-legacy
+Affiche les capacités brutes, comme le faisait \fBurpmq\fR.
+.TP
+.B \-\-pager
+Pagine les sorties longues avec \fBless\fR.
 .RE
 .TP
 .B rdepends \fIpaquet\fR
@@ -410,6 +532,16 @@ Affiche les dépendances inverses.
 .TP
 .B \-\-legend
 Affiche la légende des symboles après l'arbre.
+.TP
+.B \-\-tree
+Affiche le résultat en arbre récursif.
+.TP
+.B \-\-depth " " \fIN\fR
+Profondeur maximale de l'arbre, 5 par défaut ; \fB\-\-all\fR lève la
+limite.
+.TP
+.B \-\-hide\-uninstalled
+N'affiche que les paquets installés dans l'arbre.
 .RE
 .TP
 .B why \fIpaquet\fR
@@ -522,6 +654,16 @@ explicite de noms.
 .BR \-y ", " \-\-auto
 Passe outre la confirmation (utilisable aussi bien en mode nommé
 qu'avec \fB\-\-all\fR).
+.TP
+.B \-\-distupgraded
+Supprime tous les médias mga N que
+.B distupgrade
+a remplacés par leur équivalent mga N+1 (lignes portant
+.BR disabled_by=distupgrade ).
+Les lignes tierces orphelines, sans équivalent dans la cible, sont
+laissées en place. Incompatible avec
+.B \-\-all
+et avec une liste de noms explicite.
 .RE
 .TP
 .B enable \fInom\fR
@@ -531,12 +673,19 @@ Active un média.
 Désactive un média.
 .TP
 .B update \fR[\fInom\fR]
-Met à jour les métadonnées (en parallèle).
+Met à jour les métadonnées (en parallèle). L'index de fichiers
+.RI ( files.xml.lzma )
+et le catalogue AppStream suivent dès que le média les propose : ni
+l'un ni l'autre n'est à demander, et c'est cet index qui permet à
+.B urpm find
+de chercher parmi les paquets non installés.
 .RS
 .TP
-.B \-\-files
-Synchronise aussi les files.xml pour les médias avec sync_files activé. Requis pour
-que \fBurpm find\fR recherche dans les paquets disponibles.
+.B \-\-force
+Rafraîchit même les médias dont les métadonnées semblent inchangées.
+.TP
+.B \-\-no\-appstream
+Passe la synchronisation du catalogue AppStream.
 .RE
 .TP
 .B import \fR[\fIfichier\fR]
@@ -562,7 +711,7 @@ Modifie les paramètres d'un média.
 .B \-\-shared \fIyes\fR|\fIno\fR
 Active/désactive le partage de ce média avec les pairs.
 .TP
-.B \-\-réplication \fIpolicy\fR
+.B \-\-replication \fIpolitique\fR
 Politique de réplication : none, on_demand, seed.
 .TP
 .B \-\-seeds \fIsections\fR
@@ -576,17 +725,12 @@ Jours de conservation des paquets en cache.
 .TP
 .B \-\-priority \fIN\fR
 Priorité du média (plus haut = préféré).
-.TP
-.B \-\-sync\-files
-Active la synchronisation automatique de files.xml pour ce média. Requis pour que
-\fBurpm find\fR recherche dans les paquets disponibles.
-.TP
-.B \-\-no\-sync\-files
-Désactive la synchronisation automatique de files.xml.
-.TP
-.BR \-a ", " \-\-all
-Applique le réglage à tous les médias activés (utiliser avec \fB\-\-sync\-files\fR ou \fB\-\-no\-sync\-files\fR).
 .RE
+.\" Jusqu'en 0.7.x ce bloc proposait aussi --sync-files,
+.\" --no-sync-files et un --all qui les appliquait à tous les médias.
+.\" Les trois ont disparu : l'index de fichiers accompagne désormais
+.\" chaque mise à jour de média dès que celui-ci en propose un. Chaque
+.\" réglage ci-dessus porte sur le seul média nommé.
 .TP
 .B autoconfig \fB\-\-release\fR \fIversion\fR
 Ajoute automatiquement les médias officiels Mageia pour une release. Alias : \fBauto\fR, \fBac\fR.
@@ -633,6 +777,11 @@ Inclut les médias SRPMS (exclus par défaut).
 .TP
 .B \-\-debug
 Inclut les médias debug (exclus par défaut).
+.TP
+.B \-\-import\-keys
+Parcourt chaque média découvert, récupère sa clé publique GPG et
+propose d'importer chacune des clés distinctes avant d'écrire quoi que
+ce soit dans la base.
 .RE
 .RE
 .TP
@@ -943,6 +1092,52 @@ Liste les entrées masquées.
 Lit et écrit une liste autre que
 .IR /etc/urpmi/skip.list .
 .RE
+.SS Profils système
+.TP
+.B system export \fR[\fB\-\-to \fIchemin\fR]
+Écrit l'état courant de la machine en JSON : ses médias, ses serveurs,
+ses paquets installés et ce qui a été demandé explicitement.
+Destination par défaut
+.IR ~/system\-<machine>\-<horodatage\-UTC>.json .
+.TP
+.B system import \fR[\fIfichier\fR]
+Rapproche cette machine d'un profil écrit par
+.BR "system export" .
+Les médias et les serveurs sont remplacés, les paquets que le profil
+ne porte pas sont supprimés et ceux qu'il porte sont installés. Une
+sauvegarde de l'état courant est prise d'abord, pour pouvoir revenir
+en arrière.
+.RS
+.TP
+.B \-\-from " " \fIchemin\fR
+Lit le profil dans \fIchemin\fR plutôt que dans l'argument positionnel.
+.TP
+.B \-\-merge\-media
+Conserve les médias et serveurs locaux dont le profil ne parle pas.
+Par défaut ils sont remplacés, y compris les ajouts locaux.
+.TP
+.B \-\-no\-backup
+Passe la sauvegarde automatique de l'état courant.
+.TP
+.B \-\-preserve\-hw
+Conserve les paquets liés au matériel (modules DKMS, pilotes X11,
+outils d'invité, micrologiciels, microcode) même quand le profil ne
+les porte pas. En interactif la même protection est proposée par une
+question dont la réponse par défaut est oui ; ce drapeau en est
+l'équivalent pour \fB\-\-auto\fR. Il évite l'échec classique où un
+profil cloné supprime le pilote \fBvboxvideo\fR, \fBiwlwifi\fR ou
+\fBnvidia\fR de la machine cible, où le distupgrade apporte ensuite un
+noyau neuf, où rien ne reconstruit les modules DKMS, et où la pile
+graphique a disparu.
+.TP
+.B \-\-allow\-incoherent
+Reproduit le profil à la lettre même quand cela laisse des paquets
+conservés avec des dépendances non satisfaites. Court-circuite le
+filet de rattrapage des dépendances et force les suppressions par
+\fBurpm erase \-\-force\fR, contournant le contrôle préalable de rpm.
+Destiné à reproduire fidèlement une anomalie : le système obtenu aura
+des dépendances cassées.
+.RE
 .SS Initialisation et téléchargement
 .TP
 .B init \fR[\fIoptions\fR]
@@ -979,6 +1174,16 @@ Démonte les systèmes de fichiers (\fI/dev\fR, \fI/proc\fR ...)
 montés précédemment par \fBurpm init\fR dans un chroot
 \fB\-\-urpm\-root\fR. À utiliser après avoir terminé le travail dans
 le chroot.
+.RS
+.TP
+.B \-\-legacy\-scriptlets
+Reprend la sortie des scriptlets des anciennes transactions dans la
+table que cette version lit
+.RI ( history_scriptlet_output
+vers
+.IR history_scriptlets ).
+Ponctuel, et utile seulement sur une base antérieure au changement.
+.RE
 .TP
 .B update \fR[\fImedia\fR]
 Raccourci de premier niveau pour \fBurpm media update\fR : rafraîchit
@@ -1041,10 +1246,32 @@ Empaqueté séparément dans
 pour ne pas alourdir l'installation cliente de base.
 .RS
 .TP
-.B \-\-incremental
-Ignore les RPMs dont le SHA-256 n'a pas changé depuis le dernier run (le
-cache d'état se trouve dans
-.IR repertoire_rpms/.genhdlist/state.json ).
+.B \-\-clean
+Reconstruit tout. Les RPM dont l'empreinte SHA-256 n'a pas changé
+depuis la passe précédente sont ignorés par défaut, grâce au cache
+d'état de
+.IR repertoire_rpms/.genhdlist/state.json ;
+cette option ignore ce cache.
+.\" Jusqu'en 0.7.x c'était l'inverse : une option --incremental pour
+.\" demander ce saut. Le saut est devenu le défaut, --clean l'annule.
+.TP
+.B \-\-media\-info\-dir \fIrepertoire\fR
+Où écrire les métadonnées (par défaut :
+.IR repertoire_rpms/media_info ).
+.TP
+.B \-\-mageia\-tree
+Parcourt une arborescence Mageia, par section et par type, au lieu
+d'un répertoire plat.
+.TP
+.B \-\-versioned
+Préfixe les fichiers produits par un horodatage.
+.TP
+.B \-\-nolock
+Ne verrouille pas
+.IR media_info/ .
+.TP
+.B \-\-no\-bad\-rpm
+Ignore les RPM illisibles au lieu d'échouer dessus.
 .TP
 .B \-\-no\-hdlist
 N'écrit pas le fichier
@@ -1110,6 +1337,15 @@ Télécharge uniquement depuis les pairs LAN, pas de miroirs upstream.
 .TP
 .B \-\-allow\-arch " " \fIarch\fR
 Autorise des architectures supplémentaires (ex: \fB\-\-allow\-arch i686\fR).
+.TP
+.B \-\-from\-file \fIfichier\fR
+Lit les identifiants de paquets dans
+.I fichier
+(un par ligne, lignes vides et lignes commençant par
+.B #
+ignorées) et les ajoute aux arguments positionnels. À associer à
+.B urpm distupgrade \-\-export\-plan
+pour préremplir le cache d'un pair voisin.
 .RE
 .SS Systeme de build en conteneurs
 .TP
@@ -1186,6 +1422,19 @@ effectif ; \fB\-\-release cauldron:11\fR épingle cauldron avec un
 numérique cible explicite, fonctionne hors ligne, et prime sur le miroir
 quand le \fBmedia.cfg\fR côté serveur est en retard pendant une fenêtre
 de flip.
+.TP
+.BR \-\-addmedia " " \fInom\fR " " \fIurl\fR
+Ajoute un média personnalisé dans l'image, en phase 2. Répétable.
+.TP
+.B \-\-forward\-proxy
+Transmet l'environnement de mandataire de l'hôte (\fBhttp_proxy\fR,
+\fBHTTPS_PROXY\fR, \fBno_proxy\fR, toutes les graphies) dans le chroot
+de l'image, qui tourne sinon dans un environnement hermétique. Suit
+par défaut la clé \fBforward_proxy\fR de la section \fB[image]\fR,
+fausse à l'origine. À activer quand la machine n'atteint les miroirs
+Mageia qu'à travers un mandataire HTTP sortant.
+\fB\-\-no\-forward\-proxy\fR force la désactivation contre la
+configuration.
 .RE
 .TP
 .B update \fItag\fR [\fB\-\-runtime\fR \fIruntime\fR]
@@ -1345,6 +1594,17 @@ moins de RAM par cc1plus).
 Les sources peuvent être des fichiers .src.rpm ou .spec. Pour les fichiers .spec,
 les sources sont automatiquement copiées depuis le répertoire SOURCES/ (supporte
 les arborescences workspace/SPECS/ et workspace/SOURCES/).
+.TP
+.BR \-\-rollback\-between\-builds ", " \-\-rbb
+Défait les BuildRequires de chaque spec après sa construction, pour
+que la suivante reparte de la même base partagée. La mise en place de
+base (\fBurpm upgrade\fR, installation de \fBrpm\-build\fR) est
+conservée ; seules les dépendances propres à chaque spec sont
+défaites. Inactif par défaut.
+.TP
+.B \-\-stop\-on\-fail
+Arrête la chaîne au premier spec en échec au lieu d'essayer les
+suivants (par défaut : continuer).
 .RE
 .SH FICHIERS
 .TP
