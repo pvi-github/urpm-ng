@@ -143,6 +143,12 @@ the syntax.
 
 # urpm - Command Line Interface
 
+What follows covers the common use of each command. The complete
+reference is the manual page, which documents every command and every
+option, including the ones this README leaves out: `man urpm`. It is
+maintained in the same seven languages, so it reads in the language of
+the session.
+
 ## Global Options
 
 These options apply to most commands and are placed before the subcommand:
@@ -427,6 +433,16 @@ Before anything is downloaded, the plan is measured against every filesystem tha
 The filesystem carrying `/usr` is charged what the incoming packages occupy minus what the departing ones give back, plus one batch caught between its writes and its commit, plus the packages still in use whose space only comes back with the last batches. The one carrying the download cache is charged the RPMs still to fetch. Where `/var` is a separate partition the two get separate verdicts; on a single filesystem they still are not added, because each batch's RPMs are deleted as soon as it installs, so the cache drains as the new files arrive and the peak is the larger of the two.
 
 Beside that estimate — never inside it — sits a recommended headroom of 10% of the installed footprint, for what no package declares: the regenerated initramfs, the font and icon caches. Folding it into the requirement turned a measurement into a verdict. Blocks a filesystem reserves for root are not counted as available. If the margin is thin or the filesystem plainly too small, you get the figures and the commands that free space where it is actually missing, and you decide.
+
+**With no network, from a DVD.** A disc declared beforehand with
+`urpm media add-cdrom` is carried across the repository switchover: once
+the media of the target release exist, each tree the disc carries is
+attached to the one that matches it, so the packages come off the disc
+instead of the network. That is what makes the migration possible with no
+connection at all. Only a disc the operator declared is used, never one
+that merely happens to be mounted, and a disc that cannot be read does not
+fail the upgrade: the mirrors alone carry on. The rules are in
+`man urpm`.
 
 ## Search and Query
 
@@ -724,6 +740,10 @@ added later joins the very same media rows instead of duplicating them.
 
 A disc is removed like any other source, with `urpm server remove
 <label>`.
+
+The same disc also serves a distribution upgrade, provided it is
+declared before the upgrade starts: see the distribution-upgrade section
+above.
 
 ### Import media from a legacy urpmi.cfg
 
@@ -1503,8 +1523,8 @@ client install.
 From a directory of RPM files:
 
 ```bash
-urpm genmedia /path/to/rpms          # Default: full generation
-urpm genmedia /path/to/rpms --incremental   # Skip RPMs whose SHA-256 has not changed
+urpm genmedia /path/to/rpms          # Default: skip the RPMs whose SHA-256 has not changed
+urpm genmedia /path/to/rpms --clean         # Regenerate everything, cache ignored
 urpm genmedia /path/to/rpms --no-hdlist     # Skip the hdlist.cz output
 urpm genmedia /path/to/rpms --xml-info      # Force regeneration of XML info files
 urpm genmedia /path/to/rpms --appstream-info  # Generate AppStream catalog

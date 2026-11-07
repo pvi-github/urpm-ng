@@ -147,6 +147,12 @@ la sintassi.
 
 # urpm - Interfaccia a riga di comando
 
+Quello che segue copre l'uso corrente di ogni comando. Il riferimento
+completo è la pagina di manuale, che documenta tutti i comandi e tutte le
+opzioni, comprese quelle che questo README tralascia: `man urpm`. È
+mantenuta nelle stesse sette lingue, quindi si legge nella lingua della
+sessione.
+
 ## Opzioni globali
 
 Queste opzioni si applicano alla maggior parte dei comandi e vanno prima del sottocomando:
@@ -227,6 +233,15 @@ Al filesystem che ospita `/usr` viene imputato quanto occupano i pacchetti in ar
 
 Accanto a quella stima — mai dentro — sta un margine consigliato del 10% dell'impronta installata, per ciò che nessun pacchetto dichiara: l'initramfs rigenerata, le cache di font e icone. Includerlo nel fabbisogno trasformava una misura in un verdetto. I blocchi che un filesystem riserva a root non contano come disponibili. Se il margine è risicato o il filesystem chiaramente troppo piccolo, si ottengono le cifre e i comandi che liberano spazio dove manca davvero, e si decide.
 
+**Senza rete, da un DVD.** Un disco dichiarato in precedenza con
+`urpm media add-cdrom` viene ripreso al momento del passaggio dei
+repository: appena i media della release di destinazione esistono, ogni
+albero che il disco porta è collegato a quello che gli corrisponde, e i
+pacchetti arrivano dal disco invece che dalla rete. È questo che rende la
+migrazione possibile senza alcuna connessione. Viene usato solo un disco
+dichiarato dall'operatore, mai uno semplicemente montato, e un disco
+illeggibile non fa fallire l'aggiornamento: i mirror da soli bastano a
+continuare. Le regole sono in `man urpm`.
 
 ## Transazioni atomiche vs best-effort
 
@@ -736,6 +751,10 @@ stesse righe di media invece di duplicarle.
 
 Un disco si rimuove come qualunque altra fonte, con `urpm server remove
 <etichetta>`.
+
+Lo stesso disco serve anche a un aggiornamento di distribuzione,
+purché sia dichiarato prima che questo inizi: vedere la sezione
+sull'aggiornamento di distribuzione più sopra.
 
 ### Importare i media da un urpmi.cfg legacy
 
@@ -1476,8 +1495,8 @@ urpm appstream init-distro --force   # Sovrascrivi un metainfo esistente
 A partire da una directory di file RPM:
 
 ```bash
-urpm genmedia /path/to/rpms          # Default: generazione completa
-urpm genmedia /path/to/rpms --incremental   # Salta gli RPM il cui SHA-256 non è cambiato
+urpm genmedia /path/to/rpms          # Default: salta gli RPM il cui SHA-256 non è cambiato
+urpm genmedia /path/to/rpms --clean         # Rigenera tutto, ignorando la cache
 urpm genmedia /path/to/rpms --no-hdlist     # Salta l'output hdlist.cz
 urpm genmedia /path/to/rpms --xml-info      # Forza la rigenerazione dei file XML info
 urpm genmedia /path/to/rpms --appstream-info  # Genera il catalogo AppStream

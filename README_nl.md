@@ -145,6 +145,11 @@ via een `media.cfg` wordt gepubliceerd. Zie het onderdeel
 
 # urpm - Opdrachtregel-interface
 
+Wat volgt dekt het gewone gebruik van elke opdracht. De volledige
+referentie is de handleidingspagina, die elke opdracht en elke optie
+beschrijft, ook die dit README weglaat: `man urpm`. Ze wordt in dezelfde
+zeven talen onderhouden en leest dus in de taal van de sessie.
+
 ## Globale opties
 
 Deze opties gelden voor de meeste commando's en staan vóór het subcommando:
@@ -225,6 +230,16 @@ Aan het bestandssysteem met `/usr` wordt toegerekend wat de binnenkomende pakket
 
 Naast die schatting — nooit erin — staat een aangeraden marge van 10% van het geïnstalleerde beslag, voor wat geen enkel pakket aangeeft: de opnieuw aangemaakte initramfs, de lettertype- en pictogramcaches. Die in de behoefte verrekenen maakte van een meting een oordeel. De blokken die een bestandssysteem voor root reserveert, tellen niet als beschikbaar. Is de marge krap of het bestandssysteem ronduit te klein, dan krijgt u de cijfers en de commando's die ruimte vrijmaken waar die werkelijk ontbreekt, en beslist u zelf.
 
+**Zonder netwerk, vanaf een dvd.** Een schijf die vooraf met
+`urpm media add-cdrom` is aangemeld, wordt over de omschakeling van de
+pakketbronnen heen meegenomen: zodra de media van de doelrelease bestaan,
+wordt elke boom op de schijf aan het passende medium gekoppeld, en komen
+de pakketten van de schijf in plaats van van het netwerk. Dat is wat de
+migratie zonder enige verbinding mogelijk maakt. Alleen een door de
+beheerder aangemelde schijf wordt gebruikt, nooit een die enkel
+aangekoppeld is, en een onleesbare schijf laat de upgrade niet mislukken:
+de spiegelservers alleen brengen ze tot een einde. De regels staan in
+`man urpm`.
 
 ## Atomische vs best-effort-transacties
 
@@ -735,6 +750,10 @@ verdubbelen.
 
 Een schijf wordt verwijderd als elke andere bron, met `urpm server remove
 <label>`.
+
+Dezelfde schijf dient ook voor een distributie-upgrade, op voorwaarde
+dat ze aangemeld is voordat die begint: zie de sectie over de
+distributie-upgrade hierboven.
 
 ### Media importeren uit een oude urpmi.cfg
 
@@ -1500,8 +1519,8 @@ de basis-clientinstallatie niet groeit.
 Vanuit een map met RPM-bestanden:
 
 ```bash
-urpm genmedia /path/to/rpms          # Standaard: volledige generatie
-urpm genmedia /path/to/rpms --incremental   # RPMs overslaan waarvan de SHA-256 niet is gewijzigd
+urpm genmedia /path/to/rpms          # Standaard: RPMs overslaan waarvan de SHA-256 niet is gewijzigd
+urpm genmedia /path/to/rpms --clean         # Alles opnieuw genereren, cache genegeerd
 urpm genmedia /path/to/rpms --no-hdlist     # De hdlist.cz-uitvoer overslaan
 urpm genmedia /path/to/rpms --xml-info      # Regeneratie van XML-info-bestanden forceren
 urpm genmedia /path/to/rpms --appstream-info  # AppStream-catalogus genereren
