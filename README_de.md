@@ -1098,7 +1098,14 @@ Ohne Argument gibt jeder Unterbefehl die aktuelle Einstellung aus. Diese Hooks s
 urpm config show              # Effektive Konfiguration aus allen *.cfg zeigen
 urpm config edit              # urpm.cfg in $EDITOR öffnen
 urpm config edit 00-urpmi-compat   # Ein bestimmtes Drop-in öffnen
+urpm config show-all yes      # Lange Listen vorgabemäßig vollständig ausgeben
 ```
+
+`show-all` setzt den Schlüssel `[display] show_all`, der entscheidet, ob
+lange Listen vollständig oder gekürzt herauskommen. Er gilt systemweit, ein
+Schlüssel für alle Befehle, die kürzen, und `--no-show-all` gibt auf einer
+Maschine, auf der er gesetzt ist, einen gekürzten Aufruf zurück. Siehe
+`man urpm`.
 
 ### Server-Auswahl
 

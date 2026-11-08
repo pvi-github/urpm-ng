@@ -70,9 +70,18 @@ di interrogazione e di elenco.
 .B \-\-flat
 Un elemento per riga (adatto agli script).
 .TP
-.B \-\-show-all ", " \-a
-Mostra tutti gli elementi senza troncare. Su install/upgrade espande inoltre
-il motivo di esclusione di ciascun pacchetto in modalità best-effort.
+.BR \-\-show\-all ", " \-\-no\-show\-all ", " \-a
+Mostra tutti gli elementi senza troncare, o li tronca di nuovo. Su
+install/upgrade la forma piena espande inoltre il motivo di esclusione
+di ciascun pacchetto in modalità best-effort.
+.sp
+La chiave di configurazione
+.B [display] show_all
+decide quale delle due è il default; è falsa all'installazione. Su una
+macchina dove è impostata ogni elenco esce intero e
+.B \-\-no\-show\-all
+è il ritorno indietro per una sola esecuzione. Vedere
+.BR "urpm config show\-all" .
 .TP
 .B \-\-rootless
 Funziona senza i diritti di root: salta il controllo \fBeuid=0\fR e fa
@@ -1014,6 +1023,17 @@ autonomo.
 .B packagekit-auto-upgrades \fR[\fIyes\fR|\fIno\fR]
 Consente o impedisce il percorso di aggiornamento offline di PackageKit.
 .TP
+.B show-all \fR[\fIyes\fR|\fIno\fR]
+Mostra o imposta se gli elenchi lunghi escono interi. Scrive la chiave
+.B [display] show_all
+in
+.IR /etc/urpm/conf.d/90\-local.cfg ,
+numerato sopra i file che il pacchetto installa perché un default
+fornito non possa mascherarla. Senza valore riporta lo stato e i file
+da cui proviene. L'impostazione vale per tutto il sistema: urpm non ha
+una configurazione per utente, e una sola chiave copre tutti i comandi
+che troncano.
+.TP
 .B show
 Mostra la configurazione effettiva risultante dall'unione di tutti i
 drop-in di \fI/etc/urpm/conf.d/*.cfg\fR.
@@ -1632,6 +1652,20 @@ in
 controlla l'aggiunta automatica dei mirror e il filtraggio geografico
 (country_blacklist, country_whitelist, continent_blacklist,
 continent_whitelist, auto_add).
+La sezione
+.B [display]
+porta
+.BR show_all ,
+che decide se gli elenchi lunghi escono interi.
+.TP
+.I /etc/urpm/conf.d/90\-local.cfg
+Scritto dai verbi
+.B urpm config
+che impostano una chiave di questo formato. Numerato sopra tutti i
+file forniti perché un default non mascheri l'effetto di un comando;
+un
+.I 99\-*.cfg
+scritto a mano vince ancora su di lui.
 .TP
 .I /etc/bash_completion.d/urpm
 Script di completamento per bash.

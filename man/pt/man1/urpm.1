@@ -71,9 +71,18 @@ consulta e listagem.
 .B \-\-flat
 Um item por linha (legível por scripts).
 .TP
-.B \-\-show-all ", " \-a
-Mostra todos os itens sem truncar. Em install/upgrade, expande também
-a razão de descarte por pacote em modo best-effort.
+.BR \-\-show\-all ", " \-\-no\-show\-all ", " \-a
+Mostra todos os itens sem truncar, ou volta a truncá-los. Em
+install/upgrade, a forma completa expande também a razão de descarte
+por pacote em modo best-effort.
+.sp
+A chave de configuração
+.B [display] show_all
+decide qual das duas é a predefinição; está falsa de origem. Numa
+máquina onde está posta, cada lista sai inteira e
+.B \-\-no\-show\-all
+é o caminho de volta para uma só execução. Ver
+.BR "urpm config show\-all" .
 .TP
 .B \-\-rootless
 Funciona sem privilégios de root: salta a verificação \fBeuid=0\fR e
@@ -1389,6 +1398,20 @@ em
 .I 10\-server.cfg
 controla a adição automática de espelhos e a filtragem geográfica
 (country_blacklist, country_whitelist, continent_blacklist, continent_whitelist, auto_add).
+A secção
+.B [display]
+transporta
+.BR show_all ,
+que decide se as listas longas saem inteiras.
+.TP
+.I /etc/urpm/conf.d/90\-local.cfg
+Escrito pelos verbos
+.B urpm config
+que põem uma chave deste formato. Numerado acima de todos os ficheiros
+que o pacote instala para que uma predefinição não tape o efeito de um
+comando; um
+.I 99\-*.cfg
+escrito à mão ainda ganha sobre ele.
 .TP
 .I /etc/bash_completion.d/urpm
 Script de completação Bash.

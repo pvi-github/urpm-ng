@@ -70,9 +70,18 @@ commands.
 .B \-\-flat
 One item per line (script-friendly).
 .TP
-.B \-\-show-all ", " \-a
-Show all items without truncation. On install/upgrade, also expands
-the per-package skip reason in best-effort mode.
+.BR \-\-show\-all ", " \-\-no\-show\-all ", " \-a
+Show all items without truncation, or truncate them again. On
+install/upgrade, the full form also expands the per-package skip
+reason in best-effort mode.
+.sp
+Which of the two is the default is the
+.B [display] show_all
+config key, false out of the box. On a machine where it is set, every
+list comes out whole and
+.B \-\-no\-show\-all
+is the way back for one run. See
+.BR "urpm config show\-all" .
 .TP
 .B \-\-rootless
 Work without root: skip the \fBeuid=0\fR check and route rpm through
@@ -1004,6 +1013,16 @@ Allow or disallow KDE Discover to install upgrades autonomously.
 .B packagekit-auto-upgrades \fR[\fIyes\fR|\fIno\fR]
 Allow or disallow the PackageKit offline-update path.
 .TP
+.B show-all \fR[\fIyes\fR|\fIno\fR]
+Show or set whether long lists are printed whole. Writes the
+.B [display] show_all
+key to
+.IR /etc/urpm/conf.d/90\-local.cfg ,
+numbered above the files the package ships so a shipped default cannot
+shadow it. Without a value, reports the state and the files it was
+read from. The setting is system\-wide: urpm has no per\-user
+configuration, and a single key covers every command that truncates.
+.TP
 .B show
 Show the effective configuration as merged from all
 \fI/etc/urpm/conf.d/*.cfg\fR drop-ins.
@@ -1619,6 +1638,20 @@ section in
 .I 10\-server.cfg
 controls automatic mirror addition and geographic filtering
 (country_blacklist, country_whitelist, continent_blacklist, continent_whitelist, auto_add).
+The
+.B [display]
+section carries
+.BR show_all ,
+which decides whether long lists are printed whole.
+.TP
+.I /etc/urpm/conf.d/90\-local.cfg
+Written by the
+.B urpm config
+verbs that set a key of this format. Numbered above every shipped
+drop-in so a command's effect is not shadowed by a default; a
+hand-written
+.I 99\-*.cfg
+still wins over it.
 .TP
 .I /etc/bash_completion.d/urpm
 Bash completion script.

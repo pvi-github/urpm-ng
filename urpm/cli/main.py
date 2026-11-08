@@ -391,8 +391,12 @@ def create_parser() -> argparse.ArgumentParser:
     )
     display_parent.add_argument(
         '--show-all',
-        action='store_true',
-        help=_('Show all items without truncation')
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=_('Show all items without truncation. Defaults to the '
+               '[display] show_all config key (false out of the box); '
+               'pass --no-show-all to truncate again on a machine '
+               'where that key is set.')
     )
 
     # Parent parser for debug options (inherited by install/upgrade/etc.)
@@ -1365,11 +1369,13 @@ See doc/SPEC_DISTUPGRADE.md for the full contract.
     )
     distupgrade_parser.add_argument(
         '--show-all',
-        action='store_true',
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help=_('Show the full plan (installs, upgrades, removes, '
                'orphans...) without truncation to the first ~10 lines '
                'per bucket.  Handy on export-plan runs and for review '
-               'before the Stage 2 confirmation prompt.'),
+               'before the Stage 2 confirmation prompt.  Defaults to '
+               'the [display] show_all config key.'),
     )
     distupgrade_parser.add_argument(
         '-y', '--yes', '--auto', dest='auto', action='store_true',
@@ -2811,6 +2817,17 @@ Set auto_add = false to disable all automatic server addition.
         help=_('yes/no (show current if omitted)')
     )
 
+    # config show-all
+    show_all_parser = config_subparsers.add_parser(
+        'show-all', aliases=['sa'],
+        help=_('Print long lists whole by default ([display] show_all)')
+    )
+    show_all_parser.add_argument(
+        'show_all_value', nargs='?',
+        choices=['yes', 'no', 'true', 'false', 'on', 'off'],
+        help=_('yes/no (show current if omitted)')
+    )
+
     edit_parser = config_subparsers.add_parser(
         'edit', help=_('Edit config file with $EDITOR')
     )
@@ -2989,8 +3006,10 @@ Set auto_add = false to disable all automatic server addition.
     )
     peer_clean.add_argument(
         '--show-all', '-a',
-        action='store_true',
-        help=_('Show all files (do not truncate list)')
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=_('Show all files (do not truncate list). Defaults to the '
+               '[display] show_all config key.')
     )
 
     # =========================================================================
@@ -3097,6 +3116,24 @@ def cmd_not_implemented(args, db: PackageDatabase) -> int:
     return 1
 
 
+def _resolve_show_all(args) -> bool:
+    """Whether long lists should be printed whole.
+
+    ``--show-all`` / ``--no-show-all`` is a tri-state: ``None`` means
+    the operator said nothing, in which case the ``[display] show_all``
+    config key decides.  A missing config file or an unreadable one
+    leaves the historical behaviour, which is to truncate.
+    """
+    asked = getattr(args, 'show_all', None)
+    if asked is not None:
+        return bool(asked)
+    try:
+        from ..core.settings import get_settings
+        return get_settings().display.show_all
+    except Exception:  # noqa: BLE001 — a broken config must not stop urpm
+        return False
+
+
 # =============================================================================
 # Main entry point
 # =============================================================================
@@ -3146,14 +3183,18 @@ def main(argv=None) -> int:
     from . import colors
     colors.init(nocolor=getattr(args, 'nocolor', False))
 
-    # Initialize display mode
+    # Initialize display mode.  The effective show_all is resolved here
+    # and nowhere else: a command that re-reads args.show_all would see
+    # None when the flag was not passed and silently ignore the config
+    # key, which is how half the commands would end up truncating while
+    # the other half did not.  Commands ask display.get_show_all().
     from . import display
     if getattr(args, 'json', False):
         display.init(mode='json', show_all=True)  # JSON always shows all
     elif getattr(args, 'flat', False):
         display.init(mode='flat', show_all=True)  # Flat always shows all
     else:
-        display.init(mode='columns', show_all=getattr(args, 'show_all', False))
+        display.init(mode='columns', show_all=_resolve_show_all(args))
 
     # Get database path based on --urpm-root
     from ..core.config import get_db_path

@@ -192,8 +192,7 @@ def cmd_peer(args, db: 'PackageDatabase') -> int:
         # Confirm deletion
         if not args.yes:
             print("\n" + _("Files to delete:"))
-            show_all = getattr(args, 'show_all', False)
-            display.print_package_list([str(p) for p in existing], max_lines=10, show_all=show_all)
+            display.print_package_list([str(p) for p in existing], max_lines=10)
 
             try:
                 response = input("\n" + ngettext(

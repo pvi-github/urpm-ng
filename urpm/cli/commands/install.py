@@ -526,7 +526,7 @@ def cmd_install(args, db: 'PackageDatabase') -> int:
     from .. import display as _display
     _display.print_skipped_jobs(
         list(result.skipped or []),
-        show_all=getattr(args, 'show_all', False),
+        show_all=_display.get_show_all(),
         command_hint="urpm install",
         operation="install",
     )
@@ -1151,6 +1151,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
     from ...core.download import Downloader, DownloadItem
     from ...core.config import get_base_dir
     from .. import colors
+    from .. import display
 
     # Set up debug if requested
     _debug = getattr(args, 'debug', None) or ''
@@ -1332,7 +1333,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
             # download what the peer's pool DOES know.  Otherwise the
             # user asked explicitly for those packages by name and a
             # miss is a real failure.
-            show_all = getattr(args, 'show_all', False)
+            show_all = display.get_show_all()
             preview = not_found if show_all else not_found[:10]
             if _plan_best_effort:
                 print(colors.warning(_(
@@ -1410,7 +1411,7 @@ def cmd_download(args, db: 'PackageDatabase') -> int:
 
     # Show summary
     print(colors.info("\n" + _("Packages to download ({count}):").format(count=len(install_actions))))
-    show_all = getattr(args, 'show_all', False)
+    show_all = display.get_show_all()
     preview = install_actions if show_all else install_actions[:20]
     for action in preview:
         size_str = format_size(action.size) if action.size else "?"

@@ -1569,11 +1569,14 @@ def _render_stage4_report(summary: dict, *, db=None, auto: bool = False) -> None
             "Third-party media without a mga{tgt} equivalent "
             "({n}) - disabled:").format(
                 n=len(orphan_media), tgt=version_to)))
-        for m in orphan_media[:10]:
+        # Truncated like every other list, and lifted by the same
+        # switch: this loop used to cut at ten whatever was asked.
+        shown = orphan_media if display.get_show_all() else orphan_media[:10]
+        for m in shown:
             print(f"    {colors.warning(m['name'])}")
-        if len(orphan_media) > 10:
+        if len(shown) < len(orphan_media):
             print(colors.dim(_(
-                "    (+ {n} more)").format(n=len(orphan_media) - 10)))
+                "    (+ {n} more)").format(n=len(orphan_media) - len(shown))))
         print(colors.dim(_(
             "    Wait for a maintainer rebuild, or `urpm media "
             "remove <short_name>`.")))

@@ -184,7 +184,7 @@ def cmd_upgrade(args, db: 'PackageDatabase') -> int:
     from .. import display as _display
     _display.print_skipped_jobs(
         list(result.skipped or []),
-        show_all=getattr(args, 'show_all', False),
+        show_all=_display.get_show_all(),
         command_hint="urpm upgrade",
         operation="upgrade",
     )

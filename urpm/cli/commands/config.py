@@ -31,7 +31,11 @@ def cmd_config(args) -> int:
         print(_("  gnome-auto-upgrades     Control GNOME Software auto-updates"))
         print(_("  discover-auto-upgrades  Control KDE Discover auto-updates"))
         print(_("  packagekit-auto-upgrades  Control PackageKit offline auto-updates"))
+        print(_("  show-all                Print long lists whole by default"))
         return 1
+
+    if args.config_cmd in ('show-all', 'sa'):
+        return _cmd_show_all(args)
 
     # Handle auto-upgrade policy commands
     if args.config_cmd in ('gnome-auto-upgrades', 'gau'):
@@ -284,6 +288,57 @@ def _cmd_config_edit(args) -> int:
         return 1
 
     return subprocess.call([editor, str(target)])
+
+
+def _cmd_show_all(args) -> int:
+    """Read or set ``[display] show_all``.
+
+    With no value, report the state and where it comes from, since the
+    answer to "why is my output truncated" is usually which file won.
+    With a value, write the managed drop-in and say so, so the operator
+    knows which file to look at later.
+    """
+    from ...core.settings import (
+        MANAGED_DROP_IN, get_settings, reload_settings, set_setting,
+    )
+    from ...auth.privileges import require_privileges
+
+    value = getattr(args, 'show_all_value', None)
+
+    if value is None:
+        settings = get_settings()
+        if settings.display.show_all:
+            print(_("show-all: on, long lists are printed whole"))
+        else:
+            print(_("show-all: off, long lists are truncated "
+                    "(the default)"))
+        if settings._loaded_files:
+            print(_("  configuration read from: {files}").format(
+                files=", ".join(str(f) for f in settings._loaded_files)))
+        else:
+            print(_("  no configuration file found, built-in default"))
+        return 0
+
+    require_privileges(action_id="org.mageia.urpm.media-manage")
+
+    enabled = value in ('yes', 'true', 'on', '1')
+    try:
+        target = set_setting("display", "show_all", enabled,
+                             config_dir=get_settings()._config_dir)
+    except OSError as exc:
+        print(_("Cannot write {file}: {error}").format(
+            file=MANAGED_DROP_IN, error=exc))
+        return 1
+    reload_settings()
+
+    if enabled:
+        print(_("show-all: on, long lists are printed whole. Pass "
+                "--no-show-all for a truncated run."))
+    else:
+        print(_("show-all: off, long lists are truncated. Pass "
+                "--show-all for a full run."))
+    print(_("  written to {path}").format(path=target))
+    return 0
 
 
 def _cmd_auto_upgrade_policy(args, target: str) -> int:

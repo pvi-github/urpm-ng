@@ -41,6 +41,7 @@ def _parse_date(date_str: str) -> int:
 def cmd_history(args, db: 'PackageDatabase') -> int:
     """Handle history command."""
     from .. import colors
+    from .. import display
 
     def _color_action(action):
         """Color an action string."""
@@ -133,7 +134,7 @@ def cmd_history(args, db: 'PackageDatabase') -> int:
         if trans['dependencies']:
             dep_count = len(trans['dependencies'])
             print("\n  " + colors.bold(_("Dependencies ({count}):").format(count=dep_count)) + " ")
-            show_all = getattr(args, 'show_all', False)
+            show_all = display.get_show_all()
             deps_to_show = trans['dependencies'] if show_all else trans['dependencies'][:20]
             for p in deps_to_show:
                 action = p['action']

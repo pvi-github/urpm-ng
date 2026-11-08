@@ -1123,7 +1123,13 @@ Zonder argument toont elk subcommando de huidige instelling. Deze hooks schakele
 urpm config show              # Effectieve configuratie uit alle *.cfg-bestanden tonen
 urpm config edit              # urpm.cfg in $EDITOR openen
 urpm config edit 00-urpmi-compat   # Een specifieke drop-in openen
+urpm config show-all yes      # Lange lijsten standaard volledig uitvoeren
 ```
+
+`show-all` zet de sleutel `[display] show_all`, die beslist of lange
+lijsten volledig of afgekapt uitkomen. Hij geldt voor het hele systeem, één
+sleutel voor elke opdracht die afkapt, en `--no-show-all` geeft op een
+machine waar hij aan staat een afgekapte uitvoering terug. Zie `man urpm`.
 
 ### Serverselectie
 

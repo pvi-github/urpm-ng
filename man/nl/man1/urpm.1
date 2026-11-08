@@ -72,9 +72,19 @@ list-commando's.
 .B \-\-flat
 Eén item per regel (scriptvriendelijk).
 .TP
-.B \-\-show-all ", " \-a
-Toont alle items zonder afkapping. Bij install/upgrade wordt ook de
-afwijsreden per pakket in best-effort-modus volledig getoond.
+.BR \-\-show\-all ", " \-\-no\-show\-all ", " \-a
+Toont alle items zonder afkapping, of kapt ze weer af. Bij
+install/upgrade toont de volledige vorm ook de afwijsreden per pakket
+in best-effort-modus volledig.
+.sp
+De configuratiesleutel
+.B [display] show_all
+beslist welke van de twee de standaard is; na installatie staat hij op
+onwaar. Op een machine waar hij gezet is, komt elke lijst volledig uit
+en is
+.B \-\-no\-show\-all
+de weg terug voor één uitvoering. Zie
+.BR "urpm config show\-all" .
 .TP
 .B \-\-rootless
 Werkt zonder root-rechten: slaat de \fBeuid=0\fR-controle over en
@@ -1405,6 +1415,20 @@ in
 .I 10\-server.cfg
 regelt het automatisch toevoegen van mirrors en geografische filtering
 (country_blacklist, country_whitelist, continent_blacklist, continent_whitelist, auto_add).
+De sectie
+.B [display]
+draagt
+.BR show_all ,
+die beslist of lange lijsten volledig uitkomen.
+.TP
+.I /etc/urpm/conf.d/90\-local.cfg
+Geschreven door de
+.B urpm config
+subcommando's die een sleutel van dit formaat zetten. Boven alle
+meegeleverde drop-ins genummerd, zodat geen standaardwaarde het effect
+van een opdracht verbergt; een handgeschreven
+.I 99\-*.cfg
+wint nog steeds van hem.
 .TP
 .I /etc/bash_completion.d/urpm
 Bash-aanvulscript.

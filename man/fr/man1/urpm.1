@@ -72,9 +72,19 @@ de requête et de listing.
 .B \-\-flat
 Un élément par ligne (lisible par script).
 .TP
-.B \-\-show-all ", " \-a
-Affiche tous les éléments sans troncature. Sur install/upgrade,
-développe aussi la raison de rejet par paquet en mode best-effort.
+.BR \-\-show\-all ", " \-\-no\-show\-all ", " \-a
+Affiche tous les éléments sans troncature, ou les tronque à nouveau.
+Sur install/upgrade, la forme pleine développe aussi la raison de
+rejet par paquet en mode best-effort.
+.sp
+La clé de configuration
+.B [display] show_all
+décide laquelle des deux est le défaut ; elle est fausse à
+l'installation. Sur une machine où elle est posée, toutes les listes
+sortent entières et
+.B \-\-no\-show\-all
+est le retour en arrière pour une seule exécution. Voir
+.BR "urpm config show\-all" .
 .TP
 .B \-\-rootless
 Fonctionne sans les droits root : contourne le contrôle \fBeuid=0\fR et
@@ -1010,6 +1020,17 @@ autonome.
 .B packagekit-auto-upgrades \fR[\fIyes\fR|\fIno\fR]
 Autorise ou non le chemin offline-update de PackageKit.
 .TP
+.B show-all \fR[\fIyes\fR|\fIno\fR]
+Affiche ou règle si les listes longues sortent entières. Écrit la clé
+.B [display] show_all
+dans
+.IR /etc/urpm/conf.d/90\-local.cfg ,
+numéroté au-dessus des fichiers livrés par le paquet pour qu'un défaut
+livré ne puisse pas la masquer. Sans valeur, rapporte l'état et les
+fichiers d'où il vient. Le réglage vaut pour tout le système : urpm
+n'a pas de configuration par utilisateur, et une seule clé couvre
+toutes les commandes qui tronquent.
+.TP
 .B show
 Affiche la configuration effective fusionnée depuis tous les
 \fI/etc/urpm/conf.d/*.cfg\fR.
@@ -1628,6 +1649,20 @@ dans
 .I 10\-server.cfg
 contrôle l'ajout automatique de miroirs et le filtrage géographique
 (country_blacklist, country_whitelist, continent_blacklist, continent_whitelist, auto_add).
+La section
+.B [display]
+porte
+.BR show_all ,
+qui décide si les listes longues sortent entières.
+.TP
+.I /etc/urpm/conf.d/90\-local.cfg
+Écrit par les verbes
+.B urpm config
+qui posent une clé de ce format. Numéroté au-dessus de tous les
+fichiers livrés pour qu'un défaut ne masque pas l'effet d'une
+commande ; un
+.I 99\-*.cfg
+écrit à la main l'emporte encore sur lui.
 .TP
 .I /etc/bash_completion.d/urpm
 Script de completion Bash.

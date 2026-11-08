@@ -268,6 +268,32 @@ class ImageSettings:
 
 
 @dataclass
+class DisplaySettings:
+    """``[display]`` — how much of a long list reaches the terminal."""
+
+    show_all: bool = False
+    """Never truncate a list, as if ``--show-all`` were always passed.
+
+    Out of the box urpm cuts long enumerations: the first twenty lines
+    of an install plan, the first ten unavailable names, three lines of
+    reason per dropped package, twenty dependencies of a history entry,
+    five files per package in ``urpm find``, about ten lines per bucket
+    of a distupgrade plan.  ``--show-all`` lifts the cut for one run.
+
+    An operator who always wants the whole thing has to remember the
+    flag on every command, which is the kind of preference that belongs
+    in a file rather than in a habit.  Turning this on makes the full
+    output the default, and ``--no-show-all`` is then the way back to a
+    truncated run.
+
+    One key covers every one of those cuts: they are all the same
+    question asked by different commands, and a per-command key would
+    multiply the configuration without telling the operator anything
+    the commands do not already tell them.
+    """
+
+
+@dataclass
 class Settings:
     """Top-level urpm-ng settings, assembled from config files."""
 
@@ -277,6 +303,7 @@ class Settings:
     daemon: DaemonSettings = field(default_factory=DaemonSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
     image: ImageSettings = field(default_factory=ImageSettings)
+    display: DisplaySettings = field(default_factory=DisplaySettings)
 
     # Path that was actually loaded (for diagnostics / ``urpm config show``)
     _config_dir: Path = field(default=SYSTEM_CONFIG_DIR, repr=False)
@@ -490,6 +517,15 @@ def _apply(cp: configparser.ConfigParser, settings: Settings) -> None:
             except ValueError:
                 pass
 
+    # [display]
+    if cp.has_section("display"):
+        for key, raw in cp.items("display"):
+            try:
+                if key == "show_all":
+                    settings.display.show_all = _as_bool(raw)
+            except ValueError:
+                pass
+
 
 # ─── Public API ─────────────────────────────────────────────────────────
 
@@ -531,6 +567,70 @@ def reload_settings() -> Settings:
     global _cached_settings
     _cached_settings = load_settings()
     return _cached_settings
+
+
+#: Drop-in the ``urpm config`` verbs write to.  Numbered above every
+#: file the package ships (``00-urpmi-compat``, ``10-server``,
+#: ``20-daemon``) so a value an operator set with a command is not
+#: shadowed by a shipped default.  A hand-written ``99-*.cfg`` still
+#: wins over it, which is what the drop-in order is for.
+MANAGED_DROP_IN = "90-local.cfg"
+
+
+def set_setting(section: str, key: str, value, config_dir: Path = None) -> Path:
+    """Persist ``key = value`` under ``[section]`` and return the file.
+
+    Writes to :data:`MANAGED_DROP_IN` rather than to ``urpm.cfg``: a
+    key written to the main file can be overridden by any drop-in, and
+    a command that reports success while something else decides the
+    value is worse than no command.
+
+    Keys already in the drop-in are preserved, including those of other
+    sections, so two verbs writing two keys do not undo each other.
+    Comments in the file are not: configparser does not keep them, and
+    the file carries a header saying it is generated.
+
+    The caller is responsible for :func:`reload_settings` if it needs
+    the new value in the same process; the cache is not invalidated
+    here, so that a failed write cannot leave a stale cache behind.
+
+    Args:
+        section: INI section, created if absent.
+        key: INI key within *section*.
+        value: ``bool`` is written as ``true`` / ``false``, anything
+            else through ``str()``.
+        config_dir: override the config directory (for testing).
+
+    Returns:
+        The path written.
+
+    Raises:
+        OSError: the directory or the file cannot be written.
+    """
+    if config_dir is None:
+        config_dir = _find_config_dir()
+    target = config_dir / "conf.d" / MANAGED_DROP_IN
+
+    cp = configparser.ConfigParser()
+    if target.exists():
+        cp.read(target)
+    if not cp.has_section(section):
+        cp.add_section(section)
+    cp.set(section, key,
+           str(value).lower() if isinstance(value, bool) else str(value))
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Written by urpm config. Safe to edit by hand, but a urpm",
+        "# config verb rewrites this file and drops any comment added.",
+        "",
+    ]
+    for name in cp.sections():
+        lines.append(f"[{name}]")
+        lines.extend(f"{k} = {v}" for k, v in cp.items(name))
+        lines.append("")
+    target.write_text("\n".join(lines))
+    return target
 
 
 def format_settings(settings: Settings = None) -> str:
@@ -581,5 +681,9 @@ def format_settings(settings: Settings = None) -> str:
     lines.append(f"country_whitelist = {', '.join(settings.server.country_whitelist)}")
     lines.append(f"continent_blacklist = {', '.join(settings.server.continent_blacklist)}")
     lines.append(f"continent_whitelist = {', '.join(settings.server.continent_whitelist)}")
+
+    lines.append("")
+    lines.append("[display]")
+    lines.append(f"show_all = {str(settings.display.show_all).lower()}")
 
     return "\n".join(lines)

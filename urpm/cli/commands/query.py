@@ -771,12 +771,13 @@ def _report_unsearched_media(unsearched: list, enabled_count: int) -> None:
 def cmd_find(args, db: 'PackageDatabase') -> int:
     """Handle find command - find packages containing a file (like urpmf)."""
     from .. import colors
+    from .. import display
     from collections import OrderedDict
 
     pattern = args.pattern
     search_available = getattr(args, 'available', False)
     search_installed = getattr(args, 'installed', False)
-    show_all = getattr(args, 'show_all', False)
+    show_all = display.get_show_all()
 
     # Limit files per package (--show-all shows all)
     FILES_PER_PKG = 5 if not show_all else 0  # 0 = unlimited

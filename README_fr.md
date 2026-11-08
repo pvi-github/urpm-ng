@@ -1075,7 +1075,13 @@ Sans argument, chaque sous-commande affiche le réglage courant. Ces hooks toggl
 urpm config show              # Afficher la config effective depuis tous les *.cfg
 urpm config edit              # Ouvrir urpm.cfg dans $EDITOR
 urpm config edit 00-urpmi-compat   # Ouvrir un drop-in spécifique
+urpm config show-all yes      # Sortir les listes longues entières par défaut
 ```
+
+`show-all` pose la clé `[display] show_all`, qui décide si les listes
+longues sortent entières ou tronquées. Elle vaut pour tout le système, une
+seule clé pour toutes les commandes qui tronquent, et `--no-show-all` rend
+une exécution tronquée sur une machine où elle est posée. Voir `man urpm`.
 
 ### Sélection de serveur
 

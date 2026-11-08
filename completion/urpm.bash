@@ -174,7 +174,7 @@ _URPM_GLOBAL_FLAGS="--help -h --version -V --verbose -v --quiet -q \
 # accepted, ``urpm media list --json`` is not.  Offering them after
 # the subcommand, which this file used to do for 45 of them, completes
 # straight into "unrecognized arguments".
-_URPM_DISPLAY_FLAGS="--json --flat --show-all"
+_URPM_DISPLAY_FLAGS="--json --flat --show-all --no-show-all"
 
 # debug_parent — inherited by install / download / update / upgrade.
 _URPM_DEBUG_FLAGS="--debug --watched"
@@ -425,7 +425,8 @@ _urpm_distupgrade() {
     # ``--show-all`` without the rest of display_parent, and a
     # ``--debug`` that takes a component rather than being a switch.
     local distupgrade_opts="--to --yes -y --auto --dry-run
-        --export-plan --resume --continue --abort --show-all
+        --export-plan --resume --continue --abort
+        --show-all --no-show-all
         --debug --watched"
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "$distupgrade_opts" -- "$cur"))
@@ -1197,7 +1198,7 @@ _urpm_cache() {
 _urpm_config() {
     local config_subcmds="blacklist bl redlist rl kernel-keep kk version-mode vm \
 show gnome-auto-upgrades gau discover-auto-upgrades dau \
-packagekit-auto-upgrades pau edit"
+packagekit-auto-upgrades pau show-all sa edit"
     local auto_upgrade_choices="yes no true false on off"
     # The list / add / remove trio that both blacklist and redlist
     # take.  Named so the alignment test can read it.
@@ -1242,6 +1243,12 @@ packagekit-auto-upgrades pau edit"
             fi
             ;;
         gnome-auto-upgrades|gau|discover-auto-upgrades|dau|packagekit-auto-upgrades|pau)
+            if [[ $cword -eq 3 ]]; then
+                COMPREPLY=($(compgen -W "$auto_upgrade_choices" -- "$cur"))
+            fi
+            ;;
+        show-all|sa)
+            # Same yes/no vocabulary as the auto-upgrade verbs.
             if [[ $cword -eq 3 ]]; then
                 COMPREPLY=($(compgen -W "$auto_upgrade_choices" -- "$cur"))
             fi
@@ -1325,7 +1332,8 @@ unblacklist unbl unblock clean"
             # and does NOT inherit display_parent — do not add
             # $_URPM_DISPLAY_FLAGS here.
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--yes -y --show-all -a" -- "$cur"))
+                COMPREPLY=($(compgen -W "--yes -y --show-all --no-show-all -a" \
+                    -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
                 _urpm_compreply_from_lines "$cur" < <(_urpm_peer_hosts)
             fi

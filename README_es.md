@@ -1086,7 +1086,13 @@ Sin argumento, cada subcomando imprime el ajuste actual. Estos hooks conmutan lo
 urpm config show              # Mostrar la config efectiva desde todos los *.cfg
 urpm config edit              # Abrir urpm.cfg en $EDITOR
 urpm config edit 00-urpmi-compat   # Abrir un drop-in concreto
+urpm config show-all yes      # Imprimir las listas largas enteras por defecto
 ```
+
+`show-all` pone la clave `[display] show_all`, que decide si las listas
+largas salen enteras o truncadas. Vale para todo el sistema, una sola clave
+para todas las órdenes que truncan, y `--no-show-all` devuelve una ejecución
+truncada en una máquina donde está puesta. Véase `man urpm`.
 
 ### Selección de servidor
 

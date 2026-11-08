@@ -72,9 +72,19 @@ Listenbefehlen.
 .B \-\-flat
 Ein Eintrag pro Zeile (skripttauglich).
 .TP
-.B \-\-show-all ", " \-a
-Zeigt alle Einträge ohne Kürzung. Bei install/upgrade wird zudem die
-Ablehnungsbegründung pro Paket im best-effort-Modus vollständig angezeigt.
+.BR \-\-show\-all ", " \-\-no\-show\-all ", " \-a
+Zeigt alle Einträge ohne Kürzung, oder kürzt sie wieder. Bei
+install/upgrade zeigt die volle Form zudem die Ablehnungsbegründung
+pro Paket im best-effort-Modus vollständig an.
+.sp
+Welche der beiden die Vorgabe ist, entscheidet der
+Konfigurationsschlüssel
+.BR "[display] show_all" ,
+der nach der Installation falsch ist. Auf einer Maschine, auf der er
+gesetzt ist, kommt jede Liste vollständig heraus, und
+.B \-\-no\-show\-all
+ist der Weg zurück für einen einzelnen Aufruf. Siehe
+.BR "urpm config show\-all" .
 .TP
 .B \-\-rootless
 Arbeitet ohne Root-Rechte: überspringt die \fBeuid=0\fR-Prüfung und
@@ -1407,6 +1417,20 @@ in
 steuert das automatische Hinzufügen von Spiegeln und die geografische
 Filterung (country_blacklist, country_whitelist, continent_blacklist,
 continent_whitelist, auto_add).
+Der Abschnitt
+.B [display]
+trägt
+.BR show_all ,
+der entscheidet, ob lange Listen vollständig herauskommen.
+.TP
+.I /etc/urpm/conf.d/90\-local.cfg
+Von den
+.B urpm config
+Unterbefehlen geschrieben, die einen Schlüssel dieses Formats setzen.
+Über allen mitgelieferten Drop-ins numeriert, damit keine Vorgabe die
+Wirkung eines Befehls verdeckt; ein handgeschriebenes
+.I 99\-*.cfg
+gewinnt weiterhin über ihn.
 .TP
 .I /etc/bash_completion.d/urpm
 Bash-Vervollständigungsskript.

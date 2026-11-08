@@ -1112,7 +1112,13 @@ is enforced separately by the `urpm-ng-desktop` package.
 urpm config show              # Show effective configuration from all *.cfg files
 urpm config edit              # Open urpm.cfg in $EDITOR
 urpm config edit 00-urpmi-compat   # Open a specific drop-in
+urpm config show-all yes      # Print long lists whole by default
 ```
+
+`show-all` sets the `[display] show_all` key, which decides whether long
+lists come out whole or truncated. It is system-wide, one key for every
+command that truncates, and `--no-show-all` gives a truncated run back on a
+machine where it is on. See `man urpm`.
 
 ### Server selection
 

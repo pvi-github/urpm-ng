@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: urpm-ng 0.4.1\n"
 "Report-Msgid-Bugs-To: i18n@mageia.org\n"
-"POT-Creation-Date: 2026-10-25 20:16+0100\n"
+"POT-Creation-Date: 2026-11-07 19:58+0100\n"
 "PO-Revision-Date: 2026-02-28 17:14+0100\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -110,7 +110,7 @@ msgstr "Dit helpbericht weergeven en afsluiten"
 msgid "Show program's version number and exit"
 msgstr "Versienummer van het programma weergeven en afsluiten"
 
-#: urpm/cli/main.py:335 urpm/cli/main.py:1268
+#: urpm/cli/main.py:335 urpm/cli/main.py:1272
 msgid "Verbose output"
 msgstr "Uitgebreide uitvoer"
 
@@ -161,11 +161,17 @@ msgstr "JSON-uitvoer voor scripts"
 msgid "Flat output (one item per line, parsable)"
 msgstr "Platte uitvoer (één item per regel, te verwerken door scripts)"
 
-#: urpm/cli/main.py:395
-msgid "Show all items without truncation"
-msgstr "Alle items tonen zonder afkapping"
+#: urpm/cli/main.py:396
+msgid ""
+"Show all items without truncation. Defaults to the [display] show_all config"
+" key (false out of the box); pass --no-show-all to truncate again on a "
+"machine where that key is set."
+msgstr ""
+"Toont alle items zonder afkapping. Standaard volgt dit de "
+"configuratiesleutel [display] show_all (na installatie onwaar); geef --no-"
+"show-all om weer af te kappen op een machine waar die sleutel gezet is."
 
-#: urpm/cli/main.py:404
+#: urpm/cli/main.py:408
 msgid ""
 "Enable debug output (solver, tsrun, orphans, download, timing, distupgrade, "
 "all)"
@@ -173,15 +179,15 @@ msgstr ""
 "Foutopsporingsuitvoer inschakelen (solver, tsrun, orphans, download, timing,"
 " distupgrade, all)"
 
-#: urpm/cli/main.py:410
+#: urpm/cli/main.py:414
 msgid "Watch specific packages during resolution (comma-separated)"
 msgstr "Specifieke pakketten volgen tijdens het oplossen (komma-gescheiden)"
 
-#: urpm/cli/main.py:417
+#: urpm/cli/main.py:421
 msgid "Target architecture (default: current system)"
 msgstr "Doelarchitectuur (standaard: huidig systeem)"
 
-#: urpm/cli/main.py:429
+#: urpm/cli/main.py:433
 #, python-brace-format
 msgid ""
 "Run integrity checks after the transaction. Comma-separated, or \"{all_}\". "
@@ -190,7 +196,7 @@ msgstr ""
 "Integriteitscontroles uitvoeren na de transactie. Kommagescheiden, of "
 "\"{all_}\". Beschikbaar: {names}"
 
-#: urpm/cli/main.py:447
+#: urpm/cli/main.py:451
 msgid ""
 "Write downloaded RPMs to DIR instead of the default cache. Overrides the "
 "download.payload_dir setting."
@@ -198,7 +204,7 @@ msgstr ""
 "Gedownloade RPM's naar DIR schrijven in plaats van de standaardcache. Gaat "
 "voor op de instelling download.payload_dir."
 
-#: urpm/cli/main.py:454
+#: urpm/cli/main.py:458
 msgid ""
 "Use a normally-disabled media for this transaction only. Repeatable, or "
 "comma-separated. The media stays disabled afterwards."
@@ -206,7 +212,7 @@ msgstr ""
 "Een normaal uitgeschakeld medium alleen voor deze transactie gebruiken. "
 "Herhaalbaar, of kommagescheiden. Het medium blijft daarna uitgeschakeld."
 
-#: urpm/cli/main.py:460
+#: urpm/cli/main.py:464
 msgid ""
 "Ignore an enabled media for this transaction only. Repeatable, or comma-"
 "separated."
@@ -214,11 +220,11 @@ msgstr ""
 "Een ingeschakeld medium alleen voor deze transactie negeren. Herhaalbaar, of"
 " kommagescheiden."
 
-#: urpm/cli/main.py:482
+#: urpm/cli/main.py:486
 msgid "Initialize urpm setup (for bootstrap/chroot)"
 msgstr "urpm-installatie initialiseren (voor bootstrap/chroot)"
 
-#: urpm/cli/main.py:485
+#: urpm/cli/main.py:489
 msgid ""
 "Initialize a new urpm setup with standard Mageia media.\n"
 "\n"
@@ -241,31 +247,31 @@ msgstr ""
 "  urpm --urpm-root /tmp/rootfs init --release cauldron --arch x86_64\n"
 "  urpm init --mirrorlist 'https://mirrors.mageia.org/api/mageia.10.x86_64.list'\n"
 
-#: urpm/cli/main.py:501
+#: urpm/cli/main.py:505
 msgid ""
 "URL to fetch mirror list (auto-generated from --release if not provided)"
 msgstr ""
 "URL om de mirrorlijst op te halen (automatisch gegenereerd vanuit --release "
 "indien niet opgegeven)"
 
-#: urpm/cli/main.py:506
+#: urpm/cli/main.py:510
 msgid "Target Mageia version (default: detect from mirrorlist URL or system)"
 msgstr ""
 "Doel-Mageia-versie (standaard: detecteren vanuit mirrorlijst-URL of systeem)"
 
-#: urpm/cli/main.py:511
+#: urpm/cli/main.py:515
 msgid "Non-interactive mode"
 msgstr "Niet-interactieve modus"
 
-#: urpm/cli/main.py:516
+#: urpm/cli/main.py:520
 msgid "Do not sync media after adding (just configure)"
 msgstr "Media niet synchroniseren na toevoegen (alleen configureren)"
 
-#: urpm/cli/main.py:524
+#: urpm/cli/main.py:528
 msgid "Unmount chroot filesystems or migrate legacy scriptlet rows"
 msgstr "Chroot-bestandssystemen afkoppelen of oude scriptlet-rijen migreren"
 
-#: urpm/cli/main.py:526
+#: urpm/cli/main.py:530
 msgid ""
 "Cleanup tasks.\n"
 "\n"
@@ -295,7 +301,7 @@ msgstr ""
 "  urpm cleanup --legacy-scriptlets\n"
 "  urpm cleanup --legacy-scriptlets --dry-run\n"
 
-#: urpm/cli/main.py:543
+#: urpm/cli/main.py:547
 msgid ""
 "Migrate history_scriptlet_output → history_scriptlets (SPEC_DISTUPGRADE "
 "§3.C)"
@@ -303,88 +309,88 @@ msgstr ""
 "history_scriptlet_output → history_scriptlets migreren (SPEC_DISTUPGRADE "
 "§3.C)"
 
-#: urpm/cli/main.py:548
+#: urpm/cli/main.py:552
 msgid "Print what would be migrated without touching the DB"
 msgstr "Tonen wat er gemigreerd zou worden zonder de database aan te raken"
 
-#: urpm/cli/main.py:556
+#: urpm/cli/main.py:560
 msgid "Install packages"
 msgstr "Pakketten installeren"
 
-#: urpm/cli/main.py:562
+#: urpm/cli/main.py:566
 msgid "Package names to install (optional with --buildrequires)"
 msgstr "Namen van te installeren pakketten (optioneel bij --buildrequires)"
 
-#: urpm/cli/main.py:567 urpm/cli/main.py:714 urpm/cli/main.py:1286
-#: urpm/cli/main.py:1733 urpm/cli/main.py:1847 urpm/cli/main.py:2167
-#: urpm/cli/main.py:2691 urpm/cli/main.py:2708 urpm/cli/main.py:2721
+#: urpm/cli/main.py:571 urpm/cli/main.py:718 urpm/cli/main.py:1290
+#: urpm/cli/main.py:1739 urpm/cli/main.py:1853 urpm/cli/main.py:2173
+#: urpm/cli/main.py:2697 urpm/cli/main.py:2714 urpm/cli/main.py:2727
 msgid "No confirmation"
 msgstr "Geen bevestiging"
 
-#: urpm/cli/main.py:572 urpm/cli/main.py:1291
+#: urpm/cli/main.py:576 urpm/cli/main.py:1295
 msgid "Dry run (simulation)"
 msgstr "Simulatie (geen wijzigingen)"
 
-#: urpm/cli/main.py:577 urpm/cli/main.py:719
+#: urpm/cli/main.py:581 urpm/cli/main.py:723
 msgid "Skip recommended packages"
 msgstr "Aanbevolen pakketten overslaan"
 
-#: urpm/cli/main.py:582 urpm/cli/main.py:1767
+#: urpm/cli/main.py:586 urpm/cli/main.py:1773
 msgid "Also install suggested packages"
 msgstr "Ook voorgestelde pakketten installeren"
 
-#: urpm/cli/main.py:587
+#: urpm/cli/main.py:591
 msgid "Install for all matching families (e.g., both php8.4 and php8.5)"
 msgstr ""
 "Installeren voor alle overeenkomende families (bijv. zowel php8.4 als "
 "php8.5)"
 
-#: urpm/cli/main.py:592
+#: urpm/cli/main.py:596
 msgid "Comma-separated preferences for alternatives (e.g., 8.5,fpm,nginx)"
 msgstr "Komma-gescheiden voorkeuren voor alternatieven (bijv. 8.5,fpm,nginx)"
 
-#: urpm/cli/main.py:597 urpm/cli/main.py:1753
+#: urpm/cli/main.py:601 urpm/cli/main.py:1759
 msgid "Skip GPG signature verification (not recommended)"
 msgstr "GPG-handtekeningverificatie overslaan (niet aanbevolen)"
 
-#: urpm/cli/main.py:602
+#: urpm/cli/main.py:606
 msgid "Skip pre/post install scripts (for chroot/container builds)"
 msgstr "Scripts voor/na installatie overslaan (voor chroot/container-builds)"
 
-#: urpm/cli/main.py:607 urpm/cli/main.py:1772
+#: urpm/cli/main.py:611 urpm/cli/main.py:1778
 msgid "Disable P2P download from LAN peers"
 msgstr "P2P-download van LAN-peers uitschakelen"
 
-#: urpm/cli/main.py:612 urpm/cli/main.py:729 urpm/cli/main.py:1777
+#: urpm/cli/main.py:616 urpm/cli/main.py:733 urpm/cli/main.py:1783
 msgid "Only download from LAN peers, no upstream mirrors"
 msgstr "Alleen downloaden van LAN-peers, geen upstream-mirrors"
 
-#: urpm/cli/main.py:617
+#: urpm/cli/main.py:621
 msgid "Force install despite dependency problems or conflicts"
 msgstr "Installatie forceren ondanks afhankelijkheidsproblemen of conflicten"
 
-#: urpm/cli/main.py:622
+#: urpm/cli/main.py:626
 msgid "Reinstall already installed packages (repair)"
 msgstr "Reeds geïnstalleerde pakketten herinstalleren (repareren)"
 
-#: urpm/cli/main.py:627 urpm/cli/main.py:1738
+#: urpm/cli/main.py:631 urpm/cli/main.py:1744
 msgid "Download packages to cache but do not install them"
 msgstr "Pakketten downloaden naar cache maar niet installeren"
 
-#: urpm/cli/main.py:632
+#: urpm/cli/main.py:636
 msgid "Skip dependency resolution (use with --download-only)"
 msgstr ""
 "Afhankelijkheidsoplossing overslaan (gebruik samen met --download-only)"
 
-#: urpm/cli/main.py:639
+#: urpm/cli/main.py:643
 msgid "Install build dependencies from spec file or SRPM"
 msgstr "Bouwafhankelijkheden installeren vanuit spec-bestand of SRPM"
 
-#: urpm/cli/main.py:644
+#: urpm/cli/main.py:648
 msgid "Install source RPM: extract .spec and sources to ~/rpmbuild/"
 msgstr "Bron-RPM installeren: .spec en bronnen uitpakken naar ~/rpmbuild/"
 
-#: urpm/cli/main.py:651
+#: urpm/cli/main.py:655
 msgid ""
 "Allow additional architectures (e.g., --allow-arch i686 for wine/steam). Can"
 " be repeated."
@@ -392,17 +398,17 @@ msgstr ""
 "Extra architecturen toestaan (bijv. --allow-arch i686 voor wine/steam). Kan "
 "worden herhaald."
 
-#: urpm/cli/main.py:655 urpm/cli/main.py:1325 urpm/cli/main.py:1799
+#: urpm/cli/main.py:659 urpm/cli/main.py:1329 urpm/cli/main.py:1805
 msgid "Wait for full completion including post-install triggers"
 msgstr "Wachten tot volledige voltooiing inclusief post-installatie-triggers"
 
-#: urpm/cli/main.py:660
+#: urpm/cli/main.py:664
 msgid ""
 "Do not print post-install README notes (used inside mkimage / image update)"
 msgstr ""
 "Post-install README-notities niet tonen (gebruikt in mkimage / image update)"
 
-#: urpm/cli/main.py:667 urpm/cli/main.py:1795
+#: urpm/cli/main.py:671 urpm/cli/main.py:1801
 msgid ""
 "Config file conflict policy: keep existing (default), replace with package "
 "version, or ask"
@@ -410,7 +416,7 @@ msgstr ""
 "Beleid bij conflicten in configuratiebestanden: bestaande bewaren "
 "(standaard), vervangen door pakketversie, of vragen"
 
-#: urpm/cli/main.py:673
+#: urpm/cli/main.py:677
 msgid ""
 "Mode best-effort : installer ce qui est possible et lister les paquets "
 "écartés avec leur raison (sortie 2 si écarts). Par défaut, install est "
@@ -420,15 +426,15 @@ msgstr ""
 "met hun reden op (exit-code 2 bij afwijkingen). Standaard is install "
 "atomair: alles of niets."
 
-#: urpm/cli/main.py:683
+#: urpm/cli/main.py:687
 msgid "Download packages to cache without installing"
 msgstr "Pakketten downloaden naar cache zonder ze te installeren"
 
-#: urpm/cli/main.py:688
+#: urpm/cli/main.py:692
 msgid "Package names to download (optional with --buildrequires)"
 msgstr "Namen van te downloaden pakketten (optioneel bij --buildrequires)"
 
-#: urpm/cli/main.py:694
+#: urpm/cli/main.py:698
 msgid ""
 "Read package identifiers from FILE (one per line, blanks and lines starting "
 "with # ignored) and merge them with the positional arguments. Pair with "
@@ -439,39 +445,39 @@ msgstr ""
 "argumenten. Te combineren met `urpm distupgrade --export-plan` om een "
 "buurpeer voor te laden."
 
-#: urpm/cli/main.py:702
+#: urpm/cli/main.py:706
 msgid "Target release (e.g., 10, cauldron). Downloads for this release."
 msgstr "Doelrelease (bijv. 10, cauldron). Downloads voor deze release."
 
-#: urpm/cli/main.py:709
+#: urpm/cli/main.py:713
 msgid "Download build dependencies. Auto-detect .spec or specify path."
 msgstr ""
 "Bouwafhankelijkheden downloaden. Automatisch .spec detecteren of pad "
 "opgeven."
 
-#: urpm/cli/main.py:724
+#: urpm/cli/main.py:728
 msgid "Do not use P2P downloads from peers"
 msgstr "Geen P2P-downloads van peers gebruiken"
 
-#: urpm/cli/main.py:734
+#: urpm/cli/main.py:738
 msgid "Download only specified packages, no dependencies"
 msgstr "Alleen opgegeven pakketten downloaden, geen afhankelijkheden"
 
-#: urpm/cli/main.py:741 urpm/cli/main.py:1789
+#: urpm/cli/main.py:745 urpm/cli/main.py:1795
 msgid ""
 "Allow additional architectures (e.g., --allow-arch i686 for wine/steam)"
 msgstr ""
 "Extra architecturen toestaan (bijv. --allow-arch i686 voor wine/steam)"
 
-#: urpm/cli/main.py:749
+#: urpm/cli/main.py:753
 msgid "Manage container images (make, update, list, delete)"
 msgstr "Container-images beheren (make, update, list, delete)"
 
-#: urpm/cli/main.py:759
+#: urpm/cli/main.py:763
 msgid "Create a minimal Docker/Podman image for RPM builds"
 msgstr "Een minimale Docker/Podman-image aanmaken voor RPM-builds"
 
-#: urpm/cli/main.py:762
+#: urpm/cli/main.py:766
 msgid ""
 "Create a minimal Mageia Docker/Podman image for RPM builds.\n"
 "\n"
@@ -501,51 +507,51 @@ msgstr ""
 "  urpm mkimage --release 10 --tag mageia:10-ci --profile ci\n"
 "  urpm mkimage --release cauldron --tag mageia:cauldron-build --runtime podman\n"
 
-#: urpm/cli/main.py:780 urpm/cli/main.py:2269
+#: urpm/cli/main.py:784 urpm/cli/main.py:2275
 msgid "Mageia release (e.g., 10, cauldron)"
 msgstr "Mageia-release (bijv. 10, cauldron)"
 
-#: urpm/cli/main.py:785
+#: urpm/cli/main.py:789
 msgid "Docker/Podman image tag (e.g., mageia:10-build)"
 msgstr "Docker/Podman-image-tag (bijv. mageia:10-build)"
 
-#: urpm/cli/main.py:790
+#: urpm/cli/main.py:794
 msgid "Package profile (default: build). See /usr/share/urpm/profiles/"
 msgstr "Pakketprofiel (standaard: build). Zie /usr/share/urpm/profiles/"
 
-#: urpm/cli/main.py:794
+#: urpm/cli/main.py:798
 msgid "Additional packages to install (comma-separated)"
 msgstr "Extra te installeren pakketten (komma-gescheiden)"
 
-#: urpm/cli/main.py:799
+#: urpm/cli/main.py:803
 msgid "Pre-install BuildRequires from a .spec or .src.rpm file"
 msgstr ""
 "BuildRequires vooraf installeren vanuit een .spec- of .src.rpm-bestand"
 
-#: urpm/cli/main.py:804 urpm/cli/main.py:897 urpm/cli/main.py:929
-#: urpm/cli/main.py:949 urpm/cli/main.py:1057
+#: urpm/cli/main.py:808 urpm/cli/main.py:901 urpm/cli/main.py:933
+#: urpm/cli/main.py:953 urpm/cli/main.py:1061
 msgid "Container runtime (default: auto-detect, prefers podman)"
 msgstr ""
 "Container-runtime (standaard: automatisch detecteren, voorkeur voor podman)"
 
-#: urpm/cli/main.py:809
+#: urpm/cli/main.py:813
 msgid "Keep temporary chroot directory after image creation"
 msgstr "Tijdelijke chroot-map bewaren na het aanmaken van de image"
 
-#: urpm/cli/main.py:813
+#: urpm/cli/main.py:817
 msgid "Working directory for chroot (default: ~/.cache/urpm/mkimage)"
 msgstr "Werkmap voor chroot (standaard: ~/.cache/urpm/mkimage)"
 
-#: urpm/cli/main.py:821
+#: urpm/cli/main.py:825
 msgid "Add a custom media in phase 2 (repeatable): --addmedia NAME URL"
 msgstr ""
 "Een aangepast medium toevoegen in fase 2 (herhaalbaar): --addmedia NAAM URL"
 
-#: urpm/cli/main.py:826
+#: urpm/cli/main.py:830
 msgid "Automatically import GPG keys for --addmedia repositories"
 msgstr "GPG-sleutels automatisch importeren voor --addmedia-repositories"
 
-#: urpm/cli/main.py:832
+#: urpm/cli/main.py:836
 msgid ""
 "Where urpm-ng-core comes from: auto (waterfall: local match > host media), "
 "local (force a local RPM), media (force a host media).  Default: auto."
@@ -553,7 +559,7 @@ msgstr ""
 "Waar urpm-ng-core vandaan komt: auto (waterval: lokale match > host media), "
 "local (forceer lokaal RPM), media (forceer host media). Standaard: auto."
 
-#: urpm/cli/main.py:839 urpm/cli/main.py:910
+#: urpm/cli/main.py:843 urpm/cli/main.py:914
 msgid ""
 "Install urpm-ng-core from this specific RPM file, overriding --urpm-ng-"
 "source and every waterfall rule."
@@ -561,7 +567,7 @@ msgstr ""
 "urpm-ng-core installeren vanaf dit specifieke RPM-bestand, waarbij --urpm-"
 "ng-source en elke watervalregel worden genegeerd."
 
-#: urpm/cli/main.py:845
+#: urpm/cli/main.py:849
 msgid ""
 "With --urpm-ng-source=local, accept a local RPM whose disttag doesn't match "
 "the target release/cauldron's N-1 window.  Use when you know what you're "
@@ -571,7 +577,7 @@ msgstr ""
 "in het N-1-venster van het target/cauldron valt. Bewust gebruiken (cross-"
 "release Python noarch enz.)."
 
-#: urpm/cli/main.py:854
+#: urpm/cli/main.py:858
 msgid ""
 "Forward the host proxy environment (http_proxy, HTTPS_PROXY, no_proxy, all "
 "variants) into the image chroot. Defaults to the [image] forward_proxy "
@@ -585,7 +591,7 @@ msgstr ""
 "draait de chroot in een afgesloten omgeving. Inschakelen wanneer de machine "
 "de Mageia-spiegelservers alleen via een uitgaande HTTP-proxy kan bereiken."
 
-#: urpm/cli/main.py:866
+#: urpm/cli/main.py:870
 msgid ""
 "Remove PKG from the finished image via ``urpm erase --force --keep-orphans "
 "--sync``.  Repeatable.  Useful when a package a spec would refuse to build "
@@ -600,12 +606,12 @@ msgstr ""
 "struikelt over zijn eigen versiepin tegenover de door het systeem "
 "geïnstalleerde."
 
-#: urpm/cli/main.py:879
+#: urpm/cli/main.py:883
 msgid "Update an existing image (sync media + upgrade packages)"
 msgstr ""
 "Een bestaand image bijwerken (media synchroniseren en pakketten bijwerken)"
 
-#: urpm/cli/main.py:881
+#: urpm/cli/main.py:885
 msgid ""
 "Update a container image in-place.\n"
 "\n"
@@ -623,11 +629,11 @@ msgstr ""
 "Voorbeelden:\n"
 "  urpm image update mga10-build\n"
 
-#: urpm/cli/main.py:892
+#: urpm/cli/main.py:896
 msgid "Image tag to update"
 msgstr "Image-tag om bij te werken"
 
-#: urpm/cli/main.py:903
+#: urpm/cli/main.py:907
 msgid ""
 "Where to source urpm-ng-core upgrades: auto (waterfall), local (force a "
 "local RPM), media (force a host media).  Default: auto."
@@ -635,7 +641,7 @@ msgstr ""
 "Waar urpm-ng-core-upgrades vandaan komen: auto (waterval), local (forceer "
 "lokaal RPM), media (forceer host media). Standaard: auto."
 
-#: urpm/cli/main.py:916
+#: urpm/cli/main.py:920
 msgid ""
 "With --urpm-ng-source=local, accept a local RPM whose disttag doesn't match "
 "the image's release/cauldron N-1 window."
@@ -643,27 +649,27 @@ msgstr ""
 "Aanvaardt met --urpm-ng-source=local een lokaal RPM waarvan de disttag niet "
 "in het N-1-venster van de image-release/cauldron valt."
 
-#: urpm/cli/main.py:924
+#: urpm/cli/main.py:928
 msgid "List container images"
 msgstr "Container-images weergeven"
 
-#: urpm/cli/main.py:935
+#: urpm/cli/main.py:939
 msgid "Delete container image(s)"
 msgstr "Container-image(s) verwijderen"
 
-#: urpm/cli/main.py:939
+#: urpm/cli/main.py:943
 msgid "Image tag(s) to delete"
 msgstr "Te verwijderen image-tag(s)"
 
-#: urpm/cli/main.py:944
+#: urpm/cli/main.py:948
 msgid "Force removal"
 msgstr "Verwijdering forceren"
 
-#: urpm/cli/main.py:955
+#: urpm/cli/main.py:959
 msgid "Alias for \"image make\" (deprecated)"
 msgstr "Alias voor \"image make\" (verouderd)"
 
-#: urpm/cli/main.py:958
+#: urpm/cli/main.py:962
 msgid ""
 "Deprecated: use \"urpm image make\" instead.\n"
 "\n"
@@ -673,52 +679,52 @@ msgstr ""
 "\n"
 "Zie: urpm image make --help"
 
-#: urpm/cli/main.py:961
+#: urpm/cli/main.py:965
 msgid "Mageia release"
 msgstr "Mageia-release"
 
-#: urpm/cli/main.py:963
+#: urpm/cli/main.py:967
 msgid "Image tag"
 msgstr "Image-tag"
 
-#: urpm/cli/main.py:965
+#: urpm/cli/main.py:969
 msgid "Package profile"
 msgstr "Pakketnaam"
 
-#: urpm/cli/main.py:967
+#: urpm/cli/main.py:971
 msgid "Additional packages (comma-separated)"
 msgstr "Extra te installeren pakketten (komma-gescheiden)"
 
-#: urpm/cli/main.py:969
+#: urpm/cli/main.py:973
 msgid "Pre-install BuildRequires from .spec/.src.rpm"
 msgstr "BuildRequires vooraf installeren vanuit .spec/.src.rpm"
 
-#: urpm/cli/main.py:971
+#: urpm/cli/main.py:975
 msgid "Container runtime"
 msgstr "Container-runtime"
 
-#: urpm/cli/main.py:973
+#: urpm/cli/main.py:977
 msgid "Keep chroot"
 msgstr "Chroot behouden"
 
-#: urpm/cli/main.py:975
+#: urpm/cli/main.py:979
 msgid "Working directory"
 msgstr "Werkmap"
 
-#: urpm/cli/main.py:978
+#: urpm/cli/main.py:982
 msgid "Add a custom media in phase 2 (repeatable)"
 msgstr ""
 "Toevoegen als aangepaste media met weergavenaam en korte identificatie"
 
-#: urpm/cli/main.py:980
+#: urpm/cli/main.py:984
 msgid "Auto-import GPG keys for --addmedia"
 msgstr "GPG-sleutel importeren vanuit media"
 
-#: urpm/cli/main.py:987
+#: urpm/cli/main.py:991
 msgid "Build RPM package(s) in isolated container"
 msgstr "RPM-pakket(ten) bouwen in een geïsoleerde container"
 
-#: urpm/cli/main.py:989
+#: urpm/cli/main.py:993
 msgid ""
 "Build RPM packages in isolated containers.\n"
 "\n"
@@ -766,11 +772,11 @@ msgstr ""
 "  urpm build -i mageia:10-build SPECS/app.spec \\\n"
 "      -w 'RPMS/x86_64/libfoo*.rpm' -w 'RPMS/x86_64/libbar*.rpm'\n"
 
-#: urpm/cli/main.py:1015
+#: urpm/cli/main.py:1019
 msgid "Source RPM files (.src.rpm) or spec files (.spec) to build"
 msgstr "Bron-RPM-bestanden (.src.rpm) of spec-bestanden (.spec) om te bouwen"
 
-#: urpm/cli/main.py:1023
+#: urpm/cli/main.py:1027
 msgid ""
 "Enable a media inside the build container for this build only. Repeatable, "
 "or comma-separated. Named as the container knows it, not the host."
@@ -779,7 +785,7 @@ msgstr ""
 "Herhaalbaar, of kommagescheiden. Genoemd zoals de container het kent, niet "
 "de host."
 
-#: urpm/cli/main.py:1029
+#: urpm/cli/main.py:1033
 msgid ""
 "Disable a media inside the build container for this build only. Repeatable, "
 "or comma-separated."
@@ -787,26 +793,26 @@ msgstr ""
 "Een medium in de build-container alleen voor deze build uitschakelen. "
 "Herhaalbaar, of kommagescheiden."
 
-#: urpm/cli/main.py:1035
+#: urpm/cli/main.py:1039
 msgid "Docker/Podman image to use for builds"
 msgstr "Docker/Podman-image om te gebruiken voor builds"
 
-#: urpm/cli/main.py:1040
+#: urpm/cli/main.py:1044
 msgid "Output directory for SRPM builds (default: ./build-output)"
 msgstr "Uitvoermap voor SRPM-builds (standaard: ./build-output)"
 
-#: urpm/cli/main.py:1047
+#: urpm/cli/main.py:1051
 msgid ""
 "Pre-install local RPMs in container before build (glob pattern, repeatable)"
 msgstr ""
 "Lokale RPMs vooraf installeren in container vóór de build (glob-patroon, "
 "herhaalbaar)"
 
-#: urpm/cli/main.py:1052
+#: urpm/cli/main.py:1056
 msgid "Skip media sync and package update before building"
 msgstr "Media-synchronisatie en pakketupdate voor het bouwen overslaan"
 
-#: urpm/cli/main.py:1063
+#: urpm/cli/main.py:1067
 msgid ""
 "Isolated multi-container builds (default: 1, otherwise specs chain in a "
 "single shared container)."
@@ -814,11 +820,11 @@ msgstr ""
 "Geïsoleerde multi-container builds (standaard: 1, anders worden de specs "
 "geketend in één gedeelde container)."
 
-#: urpm/cli/main.py:1069
+#: urpm/cli/main.py:1073
 msgid "Keep container after build (for debugging)"
 msgstr "Container bewaren na de build (voor foutopsporing)"
 
-#: urpm/cli/main.py:1074
+#: urpm/cli/main.py:1078
 #, python-format
 msgid ""
 "Tag this build with a sub-release marker so output RPMs become NAME-VERSION-"
@@ -834,7 +840,7 @@ msgstr ""
 "geïnjecteerd en automatisch opgepikt door Mageia-specs die %%mkrel "
 "gebruiken."
 
-#: urpm/cli/main.py:1084
+#: urpm/cli/main.py:1088
 #, python-format
 msgid ""
 "Inject FILE as /root/.rpmmacros inside the build container. Useful to "
@@ -847,7 +853,7 @@ msgstr ""
 " het spec aan te raken. In combinatie met --subrel wordt de %%subrel-regel "
 "als laatste toegevoegd zodat die voorrang heeft."
 
-#: urpm/cli/main.py:1093
+#: urpm/cli/main.py:1097
 msgid ""
 "Stop the chain at the first failing spec instead of trying the remaining "
 "ones (default: continue)."
@@ -855,7 +861,7 @@ msgstr ""
 "De keten stoppen bij het eerste falende spec in plaats van de resterende te "
 "proberen (standaard: doorgaan)."
 
-#: urpm/cli/main.py:1099
+#: urpm/cli/main.py:1103
 msgid ""
 "Roll back each spec's BuildRequires after its build so the next spec starts "
 "from the same shared baseline. The base setup (urpm upgrade, rpm-build "
@@ -866,7 +872,7 @@ msgstr ""
 "upgrade, installatie van rpm-build) blijft behouden — de rollback dekt "
 "alleen spec-specifieke afhankelijkheden. Standaard uitgeschakeld."
 
-#: urpm/cli/main.py:1109
+#: urpm/cli/main.py:1113
 #, python-format
 msgid ""
 "Cap the build parallelism at N threads (translated to rpmbuild %%_smp_mflags"
@@ -877,7 +883,7 @@ msgstr ""
 "%%_smp_mflags = -jN). Standaard: max(1, nproc - 2), zodat er twee kernen "
 "vrij blijven voor interactief werk. --full-throttle voor de hele CPU."
 
-#: urpm/cli/main.py:1117
+#: urpm/cli/main.py:1121
 msgid ""
 "Cap the build container memory (e.g. 8G, 12000M, 16GB). Enforced as podman "
 "--memory / --memory-swap. Default: max(2G, MemTotal - 2G), so the host keeps"
@@ -887,7 +893,7 @@ msgstr ""
 " --memory / --memory-swap. Standaard: max(2G, MemTotal - 2G), zodat de host "
 "~2 GB vrij houdt. --full-throttle verwijdert het plafond."
 
-#: urpm/cli/main.py:1125
+#: urpm/cli/main.py:1129
 msgid ""
 "Shortcut: no CPU cap, no memory cap. The build gets the whole host — expect "
 "it to be sluggish while running. Overrides --build-cpus and --build-memory."
@@ -896,7 +902,7 @@ msgstr ""
 "hele host — verwacht dat hij traag is tijdens het draaien. Overschrijft "
 "--build-cpus en --build-memory."
 
-#: urpm/cli/main.py:1133
+#: urpm/cli/main.py:1137
 #, python-format
 msgid ""
 "How to handle the network during the ``rpmbuild`` phase. ``auto`` (default) "
@@ -918,11 +924,11 @@ msgstr ""
 "momentopnamen, tarballs spiegelen, …). Media-update en de installatie van "
 "BuildRequires houden in elk geval netwerk."
 
-#: urpm/cli/main.py:1148
+#: urpm/cli/main.py:1152
 msgid "Alias for --net-isolation=off, kept for compatibility."
 msgstr "Alias voor --net-isolation=off, behouden voor compatibiliteit."
 
-#: urpm/cli/main.py:1153
+#: urpm/cli/main.py:1157
 msgid ""
 "Answer every confirmation yes. Today that means the id delegation warning: "
 "the recommendation is still printed, the build just no longer stops to ask."
@@ -931,7 +937,7 @@ msgstr ""
 "over de delegatie van identificatoren: de aanbeveling blijft zichtbaar, de "
 "bouw stopt alleen niet meer om te vragen."
 
-#: urpm/cli/main.py:1160
+#: urpm/cli/main.py:1164
 #, python-format
 msgid ""
 "Skip the spec's %%check section entirely (passed to rpmbuild as --nocheck). "
@@ -949,7 +955,7 @@ msgstr ""
 "ontwikkelronde te bekorten. Het geproduceerde pakket is ongetest: meld dat "
 "wanneer u het verspreidt."
 
-#: urpm/cli/main.py:1171
+#: urpm/cli/main.py:1175
 msgid ""
 "Tie --memory-swap to --build-memory so the container has no swap headroom "
 "(podman kills the process on reaching the RAM ceiling). Default is to leave "
@@ -961,7 +967,7 @@ msgstr ""
 "Standaard: swap onbeperkt — afgestemd op mock/systemd-nspawn. Gebruik dit in"
 " CI waar stil swappen niet van een timeout te onderscheiden zou zijn."
 
-#: urpm/cli/main.py:1182
+#: urpm/cli/main.py:1186
 #, python-format
 msgid ""
 "Enable a spec %%bcond, e.g. ``--with debug``. Passed to rpmbuild verbatim.  "
@@ -970,7 +976,7 @@ msgstr ""
 "Een %%bcond uit het spec-bestand inschakelen, bijvoorbeeld ``--with debug``."
 " Wordt ongewijzigd aan rpmbuild doorgegeven.  Herhaalbaar."
 
-#: urpm/cli/main.py:1189
+#: urpm/cli/main.py:1193
 #, python-format
 msgid ""
 "Disable a spec %%bcond, e.g. ``--without unified_build`` to force firefox's "
@@ -980,11 +986,11 @@ msgstr ""
 "unified_build`` om bij firefox vertaaleenheden per bestand af te dwingen.  "
 "Wordt ongewijzigd aan rpmbuild doorgegeven.  Herhaalbaar."
 
-#: urpm/cli/main.py:1199
+#: urpm/cli/main.py:1203
 msgid "Generate media metadata (requires the urpm-ng-genmedia sub-package)"
 msgstr "Media-metadata genereren (vereist het subpakket urpm-ng-genmedia)"
 
-#: urpm/cli/main.py:1201
+#: urpm/cli/main.py:1205
 msgid ""
 "Generate media metadata (hdlist, synthesis, XML, AppStream) from an RPM "
 "directory. Server-side tool: the code lives in the urpm-ng-genmedia sub-"
@@ -994,107 +1000,107 @@ msgstr ""
 "directory. Server-side tool: de code zit in het subpakket urpm-ng-genmedia. "
 "Als het niet is geïnstalleerd, drukt het commando een installatiehint af."
 
-#: urpm/cli/main.py:1208
+#: urpm/cli/main.py:1212
 msgid "Directory containing *.rpm files"
 msgstr "Map met *.rpm-bestanden"
 
-#: urpm/cli/main.py:1212
+#: urpm/cli/main.py:1216
 msgid "Output directory (default: rpms_dir/media_info)"
 msgstr "Uitvoermap (standaard: rpms_dir/media_info)"
 
-#: urpm/cli/main.py:1216
+#: urpm/cli/main.py:1220
 msgid "Compression filter for hdlist (default: .cz:gzip -9)"
 msgstr "Compressiefilter voor hdlist (standaard: .cz:gzip -9)"
 
-#: urpm/cli/main.py:1220
+#: urpm/cli/main.py:1224
 msgid "Compression filter for synthesis (default: .cz:xz -7)"
 msgstr "Compressiefilter voor synthesis (standaard: .cz:xz -7)"
 
-#: urpm/cli/main.py:1224
+#: urpm/cli/main.py:1228
 msgid "Compression filter for XML info (default: .lzma:xz -7)"
 msgstr "Compressiefilter voor XML info (standaard: .lzma:xz -7)"
 
-#: urpm/cli/main.py:1228
+#: urpm/cli/main.py:1232
 msgid "Do not generate hdlist.cz"
 msgstr "Geen hdlist.cz genereren"
 
-#: urpm/cli/main.py:1232
+#: urpm/cli/main.py:1236
 msgid "Do not generate MD5SUM"
 msgstr "Geen MD5SUM genereren"
 
-#: urpm/cli/main.py:1236
+#: urpm/cli/main.py:1240
 msgid "Force generation of XML info files"
 msgstr "Generatie van XML info-bestanden forceren"
 
-#: urpm/cli/main.py:1240
+#: urpm/cli/main.py:1244
 msgid "Generate AppStream metadata"
 msgstr "AppStream-metadata genereren"
 
-#: urpm/cli/main.py:1244
+#: urpm/cli/main.py:1248
 msgid "Full rebuild (do not use incremental mode)"
 msgstr "Volledige herbouw (geen incrementele modus gebruiken)"
 
-#: urpm/cli/main.py:1248
+#: urpm/cli/main.py:1252
 msgid "Prefix output files with timestamp"
 msgstr "Tijdstempel toevoegen aan uitvoerbestandsnamen"
 
-#: urpm/cli/main.py:1252
+#: urpm/cli/main.py:1256
 msgid "Allow empty media (no RPMs)"
 msgstr "Lege media toestaan (geen RPM's)"
 
-#: urpm/cli/main.py:1256
+#: urpm/cli/main.py:1260
 msgid "Do not lock media_info/ directory"
 msgstr "De map media_info/ niet vergrendelen"
 
-#: urpm/cli/main.py:1260
+#: urpm/cli/main.py:1264
 msgid "Skip bad RPMs instead of failing"
 msgstr "Slechte RPM's overslaan in plaats van te falen"
 
-#: urpm/cli/main.py:1264
+#: urpm/cli/main.py:1268
 msgid "Walk Mageia tree (sections/type)"
 msgstr "Mageia-boom doorlopen (secties/type)"
 
-#: urpm/cli/main.py:1276
+#: urpm/cli/main.py:1280
 msgid "Erase (remove) packages"
 msgstr "Pakketten verwijderen"
 
-#: urpm/cli/main.py:1281
+#: urpm/cli/main.py:1285
 msgid "Package names to erase (optional with --auto-orphans)"
 msgstr "Namen van te verwijderen pakketten (optioneel bij --auto-orphans)"
 
-#: urpm/cli/main.py:1296
+#: urpm/cli/main.py:1300
 msgid "Also remove orphan dependencies (implied by -y unless --keep-orphans)"
 msgstr ""
 "Ook verweesde afhankelijkheden verwijderen (impliciet bij -y tenzij --keep-"
 "orphans)"
 
-#: urpm/cli/main.py:1301
+#: urpm/cli/main.py:1305
 msgid "Do not remove orphan dependencies"
 msgstr "Verweesde afhankelijkheden niet verwijderen"
 
-#: urpm/cli/main.py:1306
+#: urpm/cli/main.py:1310
 msgid "Force erase despite dependency problems"
 msgstr "Verwijderen forceren ondanks afhankelijkheidsproblemen"
 
-#: urpm/cli/main.py:1311
+#: urpm/cli/main.py:1315
 msgid "Also erase packages recommended by remaining packages"
 msgstr ""
 "Ook pakketten verwijderen die worden aanbevolen door resterende pakketten"
 
-#: urpm/cli/main.py:1316
+#: urpm/cli/main.py:1320
 msgid "Keep packages suggested by remaining packages"
 msgstr "Pakketten bewaren die worden voorgesteld door resterende pakketten"
 
-#: urpm/cli/main.py:1321
+#: urpm/cli/main.py:1325
 msgid "Enable debug output (solver, tsrun, all)"
 msgstr "Debug-uitvoer inschakelen (solver, tsrun, all)"
 
-#: urpm/cli/main.py:1333
+#: urpm/cli/main.py:1337
 msgid "Full release migration N → N+1 (Mageia dist-upgrade)"
 msgstr ""
 "Volledige migratie van uitgave N naar N+1 (Mageia-distributieopwaardering)"
 
-#: urpm/cli/main.py:1335
+#: urpm/cli/main.py:1339
 msgid ""
 "Migrate the whole system from Mageia N to N+1.\n"
 "\n"
@@ -1112,19 +1118,19 @@ msgstr ""
 "\n"
 "Zie doc/SPEC_DISTUPGRADE.md voor het volledige contract.\n"
 
-#: urpm/cli/main.py:1347
+#: urpm/cli/main.py:1351
 msgid "Resume a previously interrupted distupgrade"
 msgstr "Een eerder onderbroken distupgrade hervatten"
 
-#: urpm/cli/main.py:1355
+#: urpm/cli/main.py:1359
 msgid "Abandon a running or interrupted distupgrade"
 msgstr "Een lopend of onderbroken distupgrade opgeven"
 
-#: urpm/cli/main.py:1359
+#: urpm/cli/main.py:1363
 msgid "Target release identity (e.g. 11, cauldron, cauldron:12)"
 msgstr "Aanduiding van de doeluitgave (bijv. 11, cauldron, cauldron:12)"
 
-#: urpm/cli/main.py:1363
+#: urpm/cli/main.py:1367
 msgid ""
 "Run Stage 0 checks + refresh but skip Phase A upgrade and downstream "
 "mutations"
@@ -1132,18 +1138,19 @@ msgstr ""
 "De controles en de verversing van fase 0 uitvoeren, maar de opwaardering van"
 " fase A en de daaropvolgende wijzigingen overslaan"
 
-#: urpm/cli/main.py:1369
+#: urpm/cli/main.py:1374
 msgid ""
 "Show the full plan (installs, upgrades, removes, orphans...) without "
 "truncation to the first ~10 lines per bucket.  Handy on export-plan runs and"
-" for review before the Stage 2 confirmation prompt."
+" for review before the Stage 2 confirmation prompt.  Defaults to the "
+"[display] show_all config key."
 msgstr ""
 "Het volledige plan tonen (installaties, opwaarderingen, verwijderingen, "
 "wezen...) zonder afkapping tot de eerste ~10 regels per rubriek.  Handig bij"
 " uitvoeringen met export-plan en om na te lezen vóór de bevestiging van fase"
-" 2."
+" 2.  Standaard volgt dit de configuratiesleutel [display] show_all."
 
-#: urpm/cli/main.py:1376
+#: urpm/cli/main.py:1382
 msgid ""
 "Skip the Stage 2 confirmation prompt and proceed straight to "
 "download/install"
@@ -1151,7 +1158,7 @@ msgstr ""
 "De bevestigingsvraag van fase 2 overslaan en meteen doorgaan naar downloaden"
 " en installeren"
 
-#: urpm/cli/main.py:1382
+#: urpm/cli/main.py:1388
 msgid ""
 "Solve the target-release plan and write the NEVRAs to FILE (one per line), "
 "without downloading or mutating the system. Useful to preload a neighbour "
@@ -1161,18 +1168,18 @@ msgstr ""
 " per regel), zonder iets te downloaden of het systeem te wijzigen. Handig om"
 " een buurpeer voor te laden met `urpm download --from-file FILE`."
 
-#: urpm/cli/main.py:1393
+#: urpm/cli/main.py:1399
 msgid "Reconcile transactions interrupted by crash/SIGKILL"
 msgstr "Transacties verrekenen die door een crash of SIGKILL zijn onderbroken"
 
-#: urpm/cli/main.py:1401
+#: urpm/cli/main.py:1407
 msgid ""
 "Report broken symlinks in system directories, grouped by owning package"
 msgstr ""
 "Defecte symbolische koppelingen in systeemmappen melden, gegroepeerd per "
 "eigenaarpakket"
 
-#: urpm/cli/main.py:1403
+#: urpm/cli/main.py:1409
 msgid ""
 "Scan /usr/{lib,lib64,bin,sbin,libexec} for symlinks\n"
 "whose target is missing, and group each finding by the rpm package\n"
@@ -1194,79 +1201,79 @@ msgstr ""
 "lib64proxy1 onder mga10 niet meer meelevert. firefox stierf bij het\n"
 "starten zonder enige diagnose, tenzij men ldd met de hand uitvoerde.\n"
 
-#: urpm/cli/main.py:1420
+#: urpm/cli/main.py:1426
 msgid "Search packages"
 msgstr "Pakketten zoeken"
 
-#: urpm/cli/main.py:1425
+#: urpm/cli/main.py:1431
 msgid "Search pattern (optional with --unavailable)"
 msgstr "Zoekpatroon (optioneel bij --unavailable)"
 
-#: urpm/cli/main.py:1430
+#: urpm/cli/main.py:1436
 msgid "Search only installed packages"
 msgstr "Alleen geïnstalleerde pakketten doorzoeken"
 
-#: urpm/cli/main.py:1435
+#: urpm/cli/main.py:1441
 msgid "List installed packages not available in any media"
 msgstr ""
 "Geïnstalleerde pakketten weergeven die niet beschikbaar zijn in enige media"
 
-#: urpm/cli/main.py:1443
+#: urpm/cli/main.py:1449
 msgid "Show package details"
 msgstr "Pakketdetails tonen"
 
-#: urpm/cli/main.py:1448 urpm/cli/main.py:1487 urpm/cli/main.py:1547
-#: urpm/cli/main.py:1605 urpm/cli/main.py:1644 urpm/cli/main.py:1657
-#: urpm/cli/main.py:1670 urpm/cli/main.py:1683 urpm/cli/main.py:1696
+#: urpm/cli/main.py:1454 urpm/cli/main.py:1493 urpm/cli/main.py:1553
+#: urpm/cli/main.py:1611 urpm/cli/main.py:1650 urpm/cli/main.py:1663
+#: urpm/cli/main.py:1676 urpm/cli/main.py:1689 urpm/cli/main.py:1702
 msgid "Package name"
 msgstr "Pakketnaam"
 
-#: urpm/cli/main.py:1453
+#: urpm/cli/main.py:1459
 msgid "Show file list"
 msgstr "Bestandslijst tonen"
 
-#: urpm/cli/main.py:1458
+#: urpm/cli/main.py:1464
 msgid "Show changelog"
 msgstr "Wijzigingslogboek tonen"
 
-#: urpm/cli/main.py:1466
+#: urpm/cli/main.py:1472
 msgid "List packages"
 msgstr "Pakketten weergeven"
 
-#: urpm/cli/main.py:1474
+#: urpm/cli/main.py:1480
 msgid "Filter type (default: installed)"
 msgstr "Filtertype (standaard: geïnstalleerd)"
 
-#: urpm/cli/main.py:1482
+#: urpm/cli/main.py:1488
 msgid "Show what a package provides"
 msgstr "Tonen wat een pakket biedt"
 
-#: urpm/cli/main.py:1495
+#: urpm/cli/main.py:1501
 msgid "Find packages providing a capability"
 msgstr "Pakketten zoeken die een bepaalde functionaliteit bieden"
 
-#: urpm/cli/main.py:1500
+#: urpm/cli/main.py:1506
 msgid "Capability or file path to search"
 msgstr "Functionaliteit of bestandspad om op te zoeken"
 
-#: urpm/cli/main.py:1508
+#: urpm/cli/main.py:1514
 msgid "Find which package contains a file"
 msgstr "Zoeken welk pakket een bestand bevat"
 
-#: urpm/cli/main.py:1513
+#: urpm/cli/main.py:1519
 msgid "File pattern"
 msgstr "Bestandspatroon"
 
-#: urpm/cli/main.py:1518
+#: urpm/cli/main.py:1524
 msgid "Search only in available packages (default: search both)"
 msgstr "Alleen zoeken in beschikbare pakketten (standaard: beide doorzoeken)"
 
-#: urpm/cli/main.py:1523
+#: urpm/cli/main.py:1529
 msgid "Search only in installed packages (default: search both)"
 msgstr ""
 "Alleen zoeken in geïnstalleerde pakketten (standaard: beide doorzoeken)"
 
-#: urpm/cli/main.py:1528
+#: urpm/cli/main.py:1534
 msgid ""
 "Show every version of every match (default: only the highest version per "
 "package, mimicking what would be installed)"
@@ -1274,27 +1281,27 @@ msgstr ""
 "Elke versie van elke treffer tonen (standaard: alleen de hoogste versie per "
 "pakket, zoals wat zou worden geïnstalleerd)"
 
-#: urpm/cli/main.py:1535
+#: urpm/cli/main.py:1541
 msgid "Maximum number of results (default: 100)"
 msgstr "Maximum aantal resultaten (standaard: 100)"
 
-#: urpm/cli/main.py:1543
+#: urpm/cli/main.py:1549
 msgid "Show package dependencies"
 msgstr "Pakketafhankelijkheden tonen"
 
-#: urpm/cli/main.py:1552 urpm/cli/main.py:1610
+#: urpm/cli/main.py:1558 urpm/cli/main.py:1616
 msgid "Show as recursive tree"
 msgstr "Weergeven als recursieve boomstructuur"
 
-#: urpm/cli/main.py:1557
+#: urpm/cli/main.py:1563
 msgid "Show all dependencies recursively (flat list)"
 msgstr "Alle afhankelijkheden recursief tonen (platte lijst)"
 
-#: urpm/cli/main.py:1562
+#: urpm/cli/main.py:1568
 msgid "Show raw capabilities (like urpmq)"
 msgstr "Ruwe functionaliteiten tonen (zoals urpmq)"
 
-#: urpm/cli/main.py:1567
+#: urpm/cli/main.py:1573
 msgid ""
 "Comma-separated list of preferences for alternatives (e.g., "
 "php8.5,nginx,fpm)"
@@ -1302,100 +1309,100 @@ msgstr ""
 "Komma-gescheiden lijst met voorkeuren voor alternatieven (bijv. "
 "php8.5,nginx,fpm)"
 
-#: urpm/cli/main.py:1572
+#: urpm/cli/main.py:1578
 msgid "Use pager for long output (less)"
 msgstr "Pager gebruiken voor lange uitvoer (less)"
 
-#: urpm/cli/main.py:1577
+#: urpm/cli/main.py:1583
 msgid "Hide library packages (lib*, glibc) in tree view"
 msgstr "Bibliotheekkpakketten verbergen (lib*, glibc) in boomweergave"
 
-#: urpm/cli/main.py:1583 urpm/cli/main.py:1621
+#: urpm/cli/main.py:1589 urpm/cli/main.py:1627
 msgid "Maximum tree depth (default: 5, use --all for unlimited)"
 msgstr "Maximale boomdiepte (standaard: 5, gebruik --all voor onbeperkt)"
 
-#: urpm/cli/main.py:1588 urpm/cli/main.py:1631
+#: urpm/cli/main.py:1594 urpm/cli/main.py:1637
 msgid "Show symbol legend after tree display"
 msgstr "Symboollegenda tonen na de boomweergave"
 
-#: urpm/cli/main.py:1593
+#: urpm/cli/main.py:1599
 msgid "Only show dependencies that are already installed"
 msgstr "Alleen reeds geïnstalleerde afhankelijkheden tonen"
 
-#: urpm/cli/main.py:1601
+#: urpm/cli/main.py:1607
 msgid "Show reverse dependencies"
 msgstr "Omgekeerde afhankelijkheden tonen"
 
-#: urpm/cli/main.py:1615
+#: urpm/cli/main.py:1621
 msgid "Show all reverse dependencies recursively (flat list)"
 msgstr "Alle omgekeerde afhankelijkheden recursief tonen (platte lijst)"
 
-#: urpm/cli/main.py:1626
+#: urpm/cli/main.py:1632
 msgid "Only show installed packages in tree"
 msgstr "Alleen geïnstalleerde pakketten tonen in boomstructuur"
 
-#: urpm/cli/main.py:1639
+#: urpm/cli/main.py:1645
 msgid "Show packages recommended by a package"
 msgstr "Pakketten tonen die worden aanbevolen door een pakket"
 
-#: urpm/cli/main.py:1652
+#: urpm/cli/main.py:1658
 msgid "Show packages that recommend a package"
 msgstr "Pakketten tonen die een pakket aanbevelen"
 
-#: urpm/cli/main.py:1665
+#: urpm/cli/main.py:1671
 msgid "Show packages suggested by a package"
 msgstr "Pakketten tonen die worden voorgesteld door een pakket"
 
-#: urpm/cli/main.py:1678
+#: urpm/cli/main.py:1684
 msgid "Show packages that suggest a package"
 msgstr "Pakketten tonen die een pakket voorstellen"
 
-#: urpm/cli/main.py:1691
+#: urpm/cli/main.py:1697
 msgid "Explain why a package is installed"
 msgstr "Uitleggen waarom een pakket is geïnstalleerd"
 
-#: urpm/cli/main.py:1704
+#: urpm/cli/main.py:1710
 msgid "Update media metadata (apt-style: use \"upgrade\" for packages)"
 msgstr "Media-metadata bijwerken (apt-stijl: gebruik \"upgrade\" voor pakketten)"
 
-#: urpm/cli/main.py:1709
+#: urpm/cli/main.py:1715
 msgid "Media name to update (default: all)"
 msgstr "Naam van te updaten media (standaard: alle)"
 
-#: urpm/cli/main.py:1714 urpm/cli/main.py:2133
+#: urpm/cli/main.py:1720 urpm/cli/main.py:2139
 msgid "Re-download and re-parse even if metadata is unchanged"
 msgstr "Opnieuw downloaden en parsen, ook als de metadata ongewijzigd is"
 
-#: urpm/cli/main.py:1722
+#: urpm/cli/main.py:1728
 msgid "Upgrade packages (all if none specified)"
 msgstr "Pakketten bijwerken (alle als er geen zijn opgegeven)"
 
-#: urpm/cli/main.py:1728
+#: urpm/cli/main.py:1734
 msgid "Packages to upgrade (empty = all)"
 msgstr "Te upgraden pakketten (leeg = alle)"
 
-#: urpm/cli/main.py:1743
+#: urpm/cli/main.py:1749
 msgid "Keep orphaned dependencies (do not remove them)"
 msgstr "Verweesde afhankelijkheden bewaren (niet verwijderen)"
 
-#: urpm/cli/main.py:1748
+#: urpm/cli/main.py:1754
 msgid "Dry run - show what would be done"
 msgstr "Simulatie - tonen wat er zou worden gedaan"
 
-#: urpm/cli/main.py:1757
+#: urpm/cli/main.py:1763
 msgid "Resume a previously interrupted upgrade (Phase D)"
 msgstr "Een eerder onderbroken opwaardering hervatten (fase D)"
 
-#: urpm/cli/main.py:1762
+#: urpm/cli/main.py:1768
 msgid "Install recommended packages (not installed by default for upgrades)"
 msgstr ""
 "Aanbevolen pakketten installeren (standaard niet geïnstalleerd bij upgrades)"
 
-#: urpm/cli/main.py:1782
+#: urpm/cli/main.py:1788
 msgid "Force upgrade despite dependency problems or conflicts"
 msgstr "Upgrade forceren ondanks afhankelijkheidsproblemen of conflicten"
 
-#: urpm/cli/main.py:1805
+#: urpm/cli/main.py:1811
 msgid ""
 "Mode strict : annuler toute la transaction si un paquet ne peut pas être mis"
 " à jour. Par défaut, upgrade est best-effort : les paquets non mis à jour "
@@ -1406,32 +1413,32 @@ msgstr ""
 "pakketten worden met hun reden opgesomd (exit-code 2 bij afwijkingen). "
 "Aanbevolen op servers."
 
-#: urpm/cli/main.py:1816
+#: urpm/cli/main.py:1822
 msgid "Remove orphaned packages, old kernels, or failed deps"
 msgstr ""
 "Verweesde pakketten, oude kernels of mislukte afhankelijkheden verwijderen"
 
-#: urpm/cli/main.py:1822
+#: urpm/cli/main.py:1828
 msgid "Remove orphaned packages (default if no selector)"
 msgstr "Verweesde pakketten verwijderen (standaard als er geen selector is)"
 
-#: urpm/cli/main.py:1827
+#: urpm/cli/main.py:1833
 msgid "Remove old kernels (keeps running + N recent)"
 msgstr "Oude kernels verwijderen (actieve + N recente worden bewaard)"
 
-#: urpm/cli/main.py:1832
+#: urpm/cli/main.py:1838
 msgid "Remove orphan deps from interrupted transactions"
 msgstr "Verweesde afhankelijkheden verwijderen van onderbroken transacties"
 
-#: urpm/cli/main.py:1837
+#: urpm/cli/main.py:1843
 msgid "All of the above"
 msgstr "Alle bovenstaande"
 
-#: urpm/cli/main.py:1842
+#: urpm/cli/main.py:1848
 msgid "Remove packages installed as build dependencies"
 msgstr "geïnstalleerd als afhankelijkheid"
 
-#: urpm/cli/main.py:1852
+#: urpm/cli/main.py:1858
 msgid ""
 "Interactive triage of orphans: keep/remove/skip per package, with categories"
 " (previous-release relics, SONAME sublibs, userland) and composable filters."
@@ -1441,7 +1448,7 @@ msgstr ""
 "met categorieën (resten vorige release, SONAME-sublibs, userland) en samen "
 "te stellen filters. Impliceert --orphans."
 
-#: urpm/cli/main.py:1862
+#: urpm/cli/main.py:1868
 msgid ""
 "Filter expression for --interactive (repeatable, or comma-separated). "
 "Examples: disttag=mga9  kind=sublib  size>10M  installed<30d  name~=^lib64.*"
@@ -1450,87 +1457,87 @@ msgstr ""
 "Voorbeelden: disttag=mga9  kind=sublib  size>10M  installed<30d  "
 "name~=^lib64.*"
 
-#: urpm/cli/main.py:1873
+#: urpm/cli/main.py:1879
 msgid "Mark packages as manual or auto-installed"
 msgstr "Pakketten markeren als handmatig of automatisch geïnstalleerd"
 
-#: urpm/cli/main.py:1883
+#: urpm/cli/main.py:1889
 msgid "Mark package as manually installed (protects from autoremove)"
 msgstr ""
 "Pakket markeren als handmatig geïnstalleerd (beschermt tegen automatisch "
 "verwijderen)"
 
-#: urpm/cli/main.py:1887
+#: urpm/cli/main.py:1893
 msgid "Package names to mark as manual"
 msgstr "Namen van pakketten om als handmatig te markeren"
 
-#: urpm/cli/main.py:1892
+#: urpm/cli/main.py:1898
 msgid "Mark package as auto-installed (can be autoremoved)"
 msgstr ""
 "Pakket markeren als automatisch geïnstalleerd (kan automatisch worden "
 "verwijderd)"
 
-#: urpm/cli/main.py:1896
+#: urpm/cli/main.py:1902
 msgid "Package names to mark as auto"
 msgstr "Namen van pakketten om als automatisch te markeren"
 
-#: urpm/cli/main.py:1901
+#: urpm/cli/main.py:1907
 msgid "Show install reason for packages"
 msgstr "Installatiereden tonen voor pakketten"
 
-#: urpm/cli/main.py:1905
+#: urpm/cli/main.py:1911
 msgid "Package names to check (or all if empty)"
 msgstr "Namen van te controleren pakketten (of alle als leeg)"
 
-#: urpm/cli/main.py:1924
+#: urpm/cli/main.py:1930
 msgid "Hold installed packages at the version they are at"
 msgstr "Geïnstalleerde pakketten vergrendelen op hun huidige versie"
 
-#: urpm/cli/main.py:1931
+#: urpm/cli/main.py:1937
 msgid "Hold packages"
 msgstr "Pakketten vergrendelen"
 
-#: urpm/cli/main.py:1934
+#: urpm/cli/main.py:1940
 msgid "Installed package names to hold"
 msgstr "Namen van de te vergrendelen geïnstalleerde pakketten"
 
-#: urpm/cli/main.py:1938
+#: urpm/cli/main.py:1944
 msgid "Reason for holding the package"
 msgstr "Reden voor het vergrendelen van het pakket"
 
-#: urpm/cli/main.py:1942
+#: urpm/cli/main.py:1948
 msgid "Release held packages"
 msgstr "Vergrendeling van pakketten opheffen"
 
-#: urpm/cli/main.py:1945
+#: urpm/cli/main.py:1951
 msgid "Package names to release"
 msgstr "Namen van de pakketten waarvan de vergrendeling opgeheven wordt"
 
-#: urpm/cli/main.py:1949
+#: urpm/cli/main.py:1955
 msgid "List held packages"
 msgstr "De vergrendelde pakketten opsommen"
 
-#: urpm/cli/main.py:1953
+#: urpm/cli/main.py:1959
 msgid "Remove hold from packages (alias of `hold remove`)"
 msgstr "Vergrendeling van pakketten opheffen (alias van 'hold remove')"
 
-#: urpm/cli/main.py:1958
+#: urpm/cli/main.py:1964
 msgid "Package names to unhold"
 msgstr "Namen van de pakketten waarvan de vergrendeling opgeheven wordt"
 
-#: urpm/cli/main.py:1963
+#: urpm/cli/main.py:1969
 msgid "Mask packages from the media, as urpmi's skip.list does"
 msgstr "Pakketten uit de media maskeren, zoals de skip.list van urpmi"
 
-#: urpm/cli/main.py:1970
+#: urpm/cli/main.py:1976
 msgid "Mask packages"
 msgstr "Pakketten maskeren"
 
-#: urpm/cli/main.py:1971
+#: urpm/cli/main.py:1977
 msgid "Stop masking packages"
 msgstr "Pakketten niet meer maskeren"
 
-#: urpm/cli/main.py:1977
+#: urpm/cli/main.py:1983
 msgid ""
 "A package name, or a regular expression between slashes matched against "
 "name-version-release.arch"
@@ -1538,35 +1545,35 @@ msgstr ""
 "Een pakketnaam, of een reguliere expressie tussen schuine strepen vergeleken"
 " met naam-versie-release.arch"
 
-#: urpm/cli/main.py:1982
+#: urpm/cli/main.py:1988
 msgid "List to edit (default: /etc/urpmi/skip.list)"
 msgstr "Te wijzigen lijst (standaard: /etc/urpmi/skip.list)"
 
-#: urpm/cli/main.py:1986
+#: urpm/cli/main.py:1992
 msgid "List masked entries"
 msgstr "De gemaskeerde regels opsommen"
 
-#: urpm/cli/main.py:1989
+#: urpm/cli/main.py:1995
 msgid "List to read (default: /etc/urpmi/skip.list)"
 msgstr "Te lezen lijst (standaard: /etc/urpmi/skip.list)"
 
-#: urpm/cli/main.py:1997
+#: urpm/cli/main.py:2003
 msgid "Manage media sources"
 msgstr "Mediabronnen beheren"
 
-#: urpm/cli/main.py:2008
+#: urpm/cli/main.py:2014
 msgid "List media sources"
 msgstr "Mediabronnen weergeven"
 
-#: urpm/cli/main.py:2013
+#: urpm/cli/main.py:2019
 msgid "Show all media (including disabled)"
 msgstr "Alle media tonen (inclusief uitgeschakelde)"
 
-#: urpm/cli/main.py:2019
+#: urpm/cli/main.py:2025
 msgid "Add media source"
 msgstr "Mediabron toevoegen"
 
-#: urpm/cli/main.py:2021
+#: urpm/cli/main.py:2027
 msgid ""
 "Add a media source.\n"
 "\n"
@@ -1592,19 +1599,19 @@ msgstr ""
 "Beide kunnen uitdrukkelijk worden opgelegd :\n"
 "  urpm media add --custom https://example.com/repo/ --name \"Mijn bron\" --shortname mijnbron\n"
 
-#: urpm/cli/main.py:2034
+#: urpm/cli/main.py:2040
 msgid "Media URL"
 msgstr "Media-URL"
 
-#: urpm/cli/main.py:2037
+#: urpm/cli/main.py:2043
 msgid "Explicit display name (override auto-generation)."
 msgstr "Expliciete weergavenaam (vervangt automatische generatie)."
 
-#: urpm/cli/main.py:2041
+#: urpm/cli/main.py:2047
 msgid "Explicit short identifier (override auto-generation)."
 msgstr "Expliciete korte identificatie (vervangt automatische generatie)."
 
-#: urpm/cli/main.py:2046
+#: urpm/cli/main.py:2052
 msgid ""
 "Add as custom media ; display name and short identifier are auto-generated "
 "from the URL unless --name / --shortname are given."
@@ -1612,43 +1619,43 @@ msgstr ""
 "Toevoegen als aangepast medium ; weergavenaam en korte identificatie worden "
 "uit de URL afgeleid, tenzij --name / --shortname zijn opgegeven."
 
-#: urpm/cli/main.py:2053
+#: urpm/cli/main.py:2059
 msgid "Mark as update media"
 msgstr "Markeren als updatemedia"
 
-#: urpm/cli/main.py:2058 urpm/cli/main.py:2414
+#: urpm/cli/main.py:2064 urpm/cli/main.py:2420
 msgid "Add as disabled"
 msgstr "Toevoegen als uitgeschakeld"
 
-#: urpm/cli/main.py:2063
+#: urpm/cli/main.py:2069
 msgid "Non-interactive mode (auto-confirm prompts)"
 msgstr "Niet-interactieve modus (automatisch bevestigen)"
 
-#: urpm/cli/main.py:2068
+#: urpm/cli/main.py:2074
 msgid "Import GPG key from media"
 msgstr "GPG-sleutel importeren vanuit media"
 
-#: urpm/cli/main.py:2073
+#: urpm/cli/main.py:2079
 msgid "Allow unsigned packages (custom media only)"
 msgstr "Niet-ondertekende pakketten toestaan (alleen voor aangepaste media)"
 
-#: urpm/cli/main.py:2077
+#: urpm/cli/main.py:2083
 msgid "Target Mageia version (custom media only, e.g. 9, 10, cauldron)"
 msgstr "Mageia-release (bijv. 10, cauldron)"
 
-#: urpm/cli/main.py:2083
+#: urpm/cli/main.py:2089
 msgid "Remove media source"
 msgstr "Mediabron verwijderen"
 
-#: urpm/cli/main.py:2087
+#: urpm/cli/main.py:2093
 msgid "Media name(s); optional when --all is passed"
 msgstr "Medianaam/-namen; optioneel wanneer --all wordt meegegeven"
 
-#: urpm/cli/main.py:2092
+#: urpm/cli/main.py:2098
 msgid "Remove every configured media source (asks for confirmation)"
 msgstr "Elke geconfigureerde mediabron verwijderen (vraagt bevestiging)"
 
-#: urpm/cli/main.py:2097
+#: urpm/cli/main.py:2103
 msgid ""
 "Remove every mga N media that distupgrade replaced by its mga N+1 "
 "counterpart (rows with disabled_by=distupgrade).  Orphan rows without a "
@@ -1658,74 +1665,74 @@ msgstr ""
 "mga N+1-tegenhanger (rijen met disabled_by=distupgrade).  Verweesde rijen "
 "zonder tegenhanger blijven ongemoeid."
 
-#: urpm/cli/main.py:2104 urpm/cli/main.py:2875
+#: urpm/cli/main.py:2110 urpm/cli/main.py:2892
 msgid "Skip the confirmation prompt"
 msgstr "Bevestigingsprompt overslaan"
 
-#: urpm/cli/main.py:2110
+#: urpm/cli/main.py:2116
 msgid "Enable media source"
 msgstr "Mediabron inschakelen"
 
-#: urpm/cli/main.py:2112 urpm/cli/main.py:2119 urpm/cli/main.py:2175
-#: urpm/cli/main.py:2217 urpm/cli/main.py:2238
+#: urpm/cli/main.py:2118 urpm/cli/main.py:2125 urpm/cli/main.py:2181
+#: urpm/cli/main.py:2223 urpm/cli/main.py:2244
 msgid "Media name"
 msgstr "Medianaam"
 
-#: urpm/cli/main.py:2117
+#: urpm/cli/main.py:2123
 msgid "Disable media source"
 msgstr "Mediabron uitschakelen"
 
-#: urpm/cli/main.py:2124
+#: urpm/cli/main.py:2130
 msgid "Update media metadata"
 msgstr "Media-metadata bijwerken"
 
-#: urpm/cli/main.py:2128
+#: urpm/cli/main.py:2134
 msgid "Media name (empty = all)"
 msgstr "Medianaam (leeg = alle)"
 
-#: urpm/cli/main.py:2138
+#: urpm/cli/main.py:2144
 msgid "Skip AppStream metadata sync"
 msgstr "AppStream-metadatasynchronisatie overslaan"
 
-#: urpm/cli/main.py:2144
+#: urpm/cli/main.py:2150
 msgid "Import media from urpmi.cfg"
 msgstr "Media importeren vanuit urpmi.cfg"
 
-#: urpm/cli/main.py:2149
+#: urpm/cli/main.py:2155
 msgid "Path to urpmi.cfg (default: /etc/urpmi/urpmi.cfg)"
 msgstr "Pad naar urpmi.cfg (standaard: /etc/urpmi/urpmi.cfg)"
 
-#: urpm/cli/main.py:2154
+#: urpm/cli/main.py:2160
 msgid "Replace existing media with same name"
 msgstr "Bestaande media met dezelfde naam vervangen"
 
-#: urpm/cli/main.py:2158
+#: urpm/cli/main.py:2164
 msgid ""
 "Mageia version for mirrorlist-based entries (default: /etc/mageia-release)"
 msgstr ""
 "Mageia-versie voor mirrorlist-gebaseerde items (standaard: /etc/mageia-"
 "release)"
 
-#: urpm/cli/main.py:2162
+#: urpm/cli/main.py:2168
 msgid ""
 "Target architecture for mirrorlist-based entries (default: system arch)"
 msgstr ""
 "Doelarchitectuur voor mirrorlist-gebaseerde items (standaard: "
 "systeemarchitectuur)"
 
-#: urpm/cli/main.py:2173
+#: urpm/cli/main.py:2179
 msgid "Modify media settings"
 msgstr "Media-instellingen wijzigen"
 
-#: urpm/cli/main.py:2179
+#: urpm/cli/main.py:2185
 msgid "Enable/disable sharing this media with peers"
 msgstr "Delen van deze media met peers in- of uitschakelen"
 
-#: urpm/cli/main.py:2184
+#: urpm/cli/main.py:2190
 msgid "Replication policy: none, on_demand, seed"
 msgstr "Replicatiebeleid: none, on_demand, seed"
 
-#: urpm/cli/main.py:2189
+#: urpm/cli/main.py:2195
 msgid ""
 "rpmsrate sections for seed replication (comma-separated), e.g., "
 "INSTALL,CAT_PLASMA5,CAT_GNOME"
@@ -1733,27 +1740,27 @@ msgstr ""
 "rpmsrate-secties voor seed-replicatie (komma-gescheiden), bijv. "
 "INSTALL,CAT_PLASMA5,CAT_GNOME"
 
-#: urpm/cli/main.py:2194
+#: urpm/cli/main.py:2200
 msgid "Per-media quota (e.g., 5G, 500M)"
 msgstr "Quota per media (bijv. 5G, 500M)"
 
-#: urpm/cli/main.py:2199
+#: urpm/cli/main.py:2205
 msgid "Days to keep cached packages"
 msgstr "Aantal dagen om gecachte pakketten te bewaren"
 
-#: urpm/cli/main.py:2204
+#: urpm/cli/main.py:2210
 msgid "Media priority (higher = preferred)"
 msgstr "Mediaprioriteit (hoger = voorkeur)"
 
-#: urpm/cli/main.py:2213
+#: urpm/cli/main.py:2219
 msgid "Show seed set info for a media"
 msgstr "Seed-setinformatie tonen voor een media"
 
-#: urpm/cli/main.py:2223
+#: urpm/cli/main.py:2229
 msgid "Link/unlink servers to a media"
 msgstr "Servers koppelen aan of loskoppelen van een media"
 
-#: urpm/cli/main.py:2225
+#: urpm/cli/main.py:2231
 msgid ""
 "Link or unlink servers to a media source.\n"
 "\n"
@@ -1779,17 +1786,17 @@ msgstr ""
 "  urpm media link \"Core Release\" +all\n"
 "  urpm media link \"Core Release\" -all +preferred_mirror\n"
 
-#: urpm/cli/main.py:2241
+#: urpm/cli/main.py:2247
 msgid "Server changes: +name to add, -name to remove, +all/-all for all"
 msgstr ""
 "Serverwijzigingen: +naam om toe te voegen, -naam om te verwijderen, "
 "+all/-all voor alle"
 
-#: urpm/cli/main.py:2247
+#: urpm/cli/main.py:2253
 msgid "Auto-add official Mageia media for a release"
 msgstr "Officiële Mageia-media automatisch toevoegen voor een release"
 
-#: urpm/cli/main.py:2250
+#: urpm/cli/main.py:2256
 msgid ""
 "Auto-configure all official Mageia media for a release.\n"
 "\n"
@@ -1818,24 +1825,24 @@ msgstr ""
 "  urpm media autoconfig -r cauldron\n"
 "  urpm media ac -r 10   # Verkorte vorm\n"
 
-#: urpm/cli/main.py:2274 urpm/cli/main.py:2360 urpm/cli/main.py:2514
+#: urpm/cli/main.py:2280 urpm/cli/main.py:2366 urpm/cli/main.py:2520
 msgid "Show what would be added without making changes"
 msgstr "Tonen wat er zou worden toegevoegd zonder wijzigingen door te voeren"
 
-#: urpm/cli/main.py:2279
+#: urpm/cli/main.py:2285
 msgid "Skip nonfree media"
 msgstr "Niet-vrije media overslaan"
 
-#: urpm/cli/main.py:2284
+#: urpm/cli/main.py:2290
 msgid "Skip tainted media"
 msgstr "Tainted-media overslaan"
 
-#: urpm/cli/main.py:2289
+#: urpm/cli/main.py:2295
 msgid "Use a mounted disc as a source for the media it carries"
 msgstr ""
 "Een aangekoppelde schijf gebruiken als bron voor de media die erop staan"
 
-#: urpm/cli/main.py:2291
+#: urpm/cli/main.py:2297
 msgid ""
 "Use a mounted disc as a media source.\n"
 "\n"
@@ -1868,15 +1875,15 @@ msgstr ""
 "  urpm media add-cdrom --dry-run    tonen wat de schijf bevat,\n"
 "                                    zonder iets te schrijven\n"
 
-#: urpm/cli/main.py:2309
+#: urpm/cli/main.py:2315
 msgid "Show what the disc carries without writing anything"
 msgstr "Tonen wat de schijf bevat, zonder iets te schrijven"
 
-#: urpm/cli/main.py:2314
+#: urpm/cli/main.py:2320
 msgid "Discover media from a repository via media.cfg"
 msgstr "Media van een pakketbron ontdekken via media.cfg"
 
-#: urpm/cli/main.py:2316
+#: urpm/cli/main.py:2322
 msgid ""
 "Discover and add all media from a repository's media.cfg.\n"
 "\n"
@@ -1915,30 +1922,30 @@ msgstr ""
 "  urpm media discover --with all https://mirror.example.org/.../media/\n"
 "  urpm media disc -n https://mirror.example.org/.../media/\n"
 
-#: urpm/cli/main.py:2337
+#: urpm/cli/main.py:2343
 msgid "Media root URL (must contain media_info/media.cfg)"
 msgstr "Hoofd-URL van het medium (moet media_info/media.cfg bevatten)"
 
-#: urpm/cli/main.py:2341
+#: urpm/cli/main.py:2347
 msgid "Force-enable categories (comma-separated: nonfree,tainted,32bit,all)"
 msgstr ""
 "Categorieën geforceerd inschakelen (kommagescheiden: "
 "nonfree,tainted,32bit,all)"
 
-#: urpm/cli/main.py:2345
+#: urpm/cli/main.py:2351
 msgid "Force-disable categories (comma-separated: nonfree,tainted,32bit)"
 msgstr ""
 "Categorieën geforceerd uitschakelen (kommagescheiden: nonfree,tainted,32bit)"
 
-#: urpm/cli/main.py:2350
+#: urpm/cli/main.py:2356
 msgid "Include source (SRPMS) media"
 msgstr "Bronmedia (SRPMS) opnemen"
 
-#: urpm/cli/main.py:2355
+#: urpm/cli/main.py:2361
 msgid "Include debug media"
 msgstr "Debug-media opnemen"
 
-#: urpm/cli/main.py:2365
+#: urpm/cli/main.py:2371
 msgid ""
 "Walk each discovered media, fetch its GPG pubkey, and offer to import every "
 "unique key before touching the DB"
@@ -1946,23 +1953,23 @@ msgstr ""
 "Elk ontdekt medium doorlopen, zijn GPG-sleutel ophalen en aanbieden elke "
 "unieke sleutel te importeren voordat de database wordt gewijzigd"
 
-#: urpm/cli/main.py:2374
+#: urpm/cli/main.py:2380
 msgid "Manage servers"
 msgstr "Servers beheren"
 
-#: urpm/cli/main.py:2385
+#: urpm/cli/main.py:2391
 msgid "List servers"
 msgstr "Servers weergeven"
 
-#: urpm/cli/main.py:2390
+#: urpm/cli/main.py:2396
 msgid "Show all servers (including disabled)"
 msgstr "Alle servers tonen (inclusief uitgeschakelde)"
 
-#: urpm/cli/main.py:2396
+#: urpm/cli/main.py:2402
 msgid "Add a server"
 msgstr "Een server toevoegen"
 
-#: urpm/cli/main.py:2398
+#: urpm/cli/main.py:2404
 msgid ""
 "Add a mirror server.\n"
 "\n"
@@ -1976,73 +1983,73 @@ msgstr ""
 "  urpm server add \"Belnet\" https://ftp.belnet.be/mageia/distrib/\n"
 "  urpm server add \"Lokaal\" file:///mnt/repo/\n"
 
-#: urpm/cli/main.py:2405
+#: urpm/cli/main.py:2411
 msgid "Server display name"
 msgstr "Weergavenaam van de server"
 
-#: urpm/cli/main.py:2406
+#: urpm/cli/main.py:2412
 msgid "Server base URL (https://host/path/ or file:///path/)"
 msgstr "Basis-URL van de server (https://host/pad/ of file:///pad/)"
 
-#: urpm/cli/main.py:2409
+#: urpm/cli/main.py:2415
 msgid "Server priority (higher = preferred, default: 50)"
 msgstr "Serverprioriteit (hoger = voorkeur, standaard: 50)"
 
-#: urpm/cli/main.py:2419
+#: urpm/cli/main.py:2425
 msgid "Mark as non-official server"
 msgstr "Markeren als niet-officiële server"
 
-#: urpm/cli/main.py:2425
+#: urpm/cli/main.py:2431
 msgid "Remove a server"
 msgstr "Een server verwijderen"
 
-#: urpm/cli/main.py:2427
+#: urpm/cli/main.py:2433
 msgid "Server name(s)"
 msgstr "Servernaam"
 
-#: urpm/cli/main.py:2432
+#: urpm/cli/main.py:2438
 msgid "Enable a server"
 msgstr "Een server inschakelen"
 
-#: urpm/cli/main.py:2434 urpm/cli/main.py:2441 urpm/cli/main.py:2448
-#: urpm/cli/main.py:2466 urpm/cli/main.py:2477 urpm/cli/main.py:2484
-#: urpm/cli/main.py:2491 urpm/cli/main.py:2498
+#: urpm/cli/main.py:2440 urpm/cli/main.py:2447 urpm/cli/main.py:2454
+#: urpm/cli/main.py:2472 urpm/cli/main.py:2483 urpm/cli/main.py:2490
+#: urpm/cli/main.py:2497 urpm/cli/main.py:2504
 msgid "Server name"
 msgstr "Servernaam"
 
-#: urpm/cli/main.py:2439
+#: urpm/cli/main.py:2445
 msgid "Disable a server"
 msgstr "Een server uitschakelen"
 
-#: urpm/cli/main.py:2446
+#: urpm/cli/main.py:2452
 msgid "Set server priority"
 msgstr "Serverprioriteit instellen"
 
-#: urpm/cli/main.py:2449
+#: urpm/cli/main.py:2455
 msgid "Priority (higher = preferred)"
 msgstr "Prioriteit (hoger = voorkeur)"
 
-#: urpm/cli/main.py:2454
+#: urpm/cli/main.py:2460
 msgid "Test server connectivity and detect IP mode"
 msgstr "Serververbinding testen en IP-modus detecteren"
 
-#: urpm/cli/main.py:2458
+#: urpm/cli/main.py:2464
 msgid "Server name (empty = test all enabled servers)"
 msgstr "Servernaam (leeg = alle ingeschakelde servers testen)"
 
-#: urpm/cli/main.py:2464
+#: urpm/cli/main.py:2470
 msgid "Set server IP mode manually"
 msgstr "IP-modus van de server handmatig instellen"
 
-#: urpm/cli/main.py:2469
+#: urpm/cli/main.py:2475
 msgid "IP mode: auto, ipv4, ipv6, or dual (dual = prefer ipv4)"
 msgstr "IP-modus: auto, ipv4, ipv6 of dual (dual = voorkeur voor ipv4)"
 
-#: urpm/cli/main.py:2475
+#: urpm/cli/main.py:2481
 msgid "Show measured performance statistics for a server"
 msgstr "Gemeten prestatiestatistieken van een server weergeven"
 
-#: urpm/cli/main.py:2481
+#: urpm/cli/main.py:2487
 msgid ""
 "Show full status of a server including security blacklist and reputation "
 "history"
@@ -2050,7 +2057,7 @@ msgstr ""
 "Volledige status van een server tonen inclusief beveiligings-blacklist en "
 "reputatiegeschiedenis"
 
-#: urpm/cli/main.py:2488
+#: urpm/cli/main.py:2494
 msgid ""
 "Clear the security blacklist on a server (root, requires manual "
 "confirmation)"
@@ -2058,7 +2065,7 @@ msgstr ""
 "De beveiligings-blacklist op een server wissen (root, vereist handmatige "
 "bevestiging)"
 
-#: urpm/cli/main.py:2495
+#: urpm/cli/main.py:2501
 msgid ""
 "Acknowledge a blacklist alert so the persistent reminder stops nagging at "
 "every CLI invocation"
@@ -2066,12 +2073,12 @@ msgstr ""
 "Een blacklist-waarschuwing erkennen zodat de aanhoudende herinnering bij "
 "elke CLI-aanroep ophoudt"
 
-#: urpm/cli/main.py:2502
+#: urpm/cli/main.py:2508
 msgid "Auto-discover and add servers from Mageia mirrorlist"
 msgstr ""
 "Servers automatisch ontdekken en toevoegen vanuit de Mageia-mirrorlijst"
 
-#: urpm/cli/main.py:2504
+#: urpm/cli/main.py:2510
 msgid ""
 "Auto-discover and add servers from the Mageia mirror API.\n"
 "\n"
@@ -2085,142 +2092,142 @@ msgstr ""
 "toegepast vanuit de sectie [server] in /etc/urpm/conf.d/10-server.cfg.\n"
 "Stel auto_add = false in om alle automatische servertoevoeging uit te schakelen.\n"
 
-#: urpm/cli/main.py:2518
+#: urpm/cli/main.py:2524
 msgid "Override detected Mageia version (e.g., 9)"
 msgstr "Gedetecteerde Mageia-versie overschrijven (bijv. 9)"
 
-#: urpm/cli/main.py:2526
+#: urpm/cli/main.py:2532
 msgid "Manage local package mirroring"
 msgstr "Lokale pakketspiegeling beheren"
 
-#: urpm/cli/main.py:2536
+#: urpm/cli/main.py:2542
 msgid "Show mirror status and quotas"
 msgstr "Mirrorstatus en quota's tonen"
 
-#: urpm/cli/main.py:2539
+#: urpm/cli/main.py:2545
 msgid "Enable mirroring (serve packages to peers)"
 msgstr "Spiegeling inschakelen (pakketten aanbieden aan peers)"
 
-#: urpm/cli/main.py:2542
+#: urpm/cli/main.py:2548
 msgid "Disable mirroring"
 msgstr "Spiegeling uitschakelen"
 
-#: urpm/cli/main.py:2545
+#: urpm/cli/main.py:2551
 msgid "Set global cache quota"
 msgstr "Globaal cache-quota instellen"
 
-#: urpm/cli/main.py:2548
+#: urpm/cli/main.py:2554
 msgid "Quota size (e.g., 10G, 500M) or empty to show current"
 msgstr "Quotagrootte (bijv. 10G, 500M) of leeg om het huidige te tonen"
 
-#: urpm/cli/main.py:2554
+#: urpm/cli/main.py:2560
 msgid "Stop serving a Mageia version to peers"
 msgstr "Stoppen met het aanbieden van een Mageia-versie aan peers"
 
-#: urpm/cli/main.py:2558
+#: urpm/cli/main.py:2564
 msgid "Comma-separated version numbers (e.g., 8,9)"
 msgstr "Komma-gescheiden versienummers (bijv. 8,9)"
 
-#: urpm/cli/main.py:2564
+#: urpm/cli/main.py:2570
 msgid "Resume serving a Mageia version to peers"
 msgstr "Hervatten van het aanbieden van een Mageia-versie aan peers"
 
-#: urpm/cli/main.py:2568
+#: urpm/cli/main.py:2574
 msgid "Comma-separated version numbers (e.g., 9)"
 msgstr "Komma-gescheiden versienummers (bijv. 9)"
 
-#: urpm/cli/main.py:2574
+#: urpm/cli/main.py:2580
 msgid "Enforce quotas and retention policies"
 msgstr "Quota's en bewaarbeleid afdwingen"
 
-#: urpm/cli/main.py:2578
+#: urpm/cli/main.py:2584
 msgid "Show what would be deleted without deleting"
 msgstr ""
 "Tonen wat er zou worden verwijderd zonder daadwerkelijk te verwijderen"
 
-#: urpm/cli/main.py:2584
+#: urpm/cli/main.py:2590
 msgid "Force sync according to replication policies"
 msgstr "Synchronisatie forceren volgens replicatiebeleid"
 
-#: urpm/cli/main.py:2588
+#: urpm/cli/main.py:2594
 msgid "Specific media to sync (default: all with seed policy)"
 msgstr "Specifieke te synchroniseren media (standaard: alle met seed-beleid)"
 
-#: urpm/cli/main.py:2592
+#: urpm/cli/main.py:2598
 msgid "Only download latest version of each package (smaller, DVD-like)"
 msgstr ""
 "Alleen de laatste versie van elk pakket downloaden (kleiner, dvd-achtig)"
 
-#: urpm/cli/main.py:2598
+#: urpm/cli/main.py:2604
 msgid "Configure rate limiting"
 msgstr "Bandbreedtebeperking configureren"
 
-#: urpm/cli/main.py:2603
+#: urpm/cli/main.py:2609
 msgid "on, off, or N/min (e.g., 60/min)"
 msgstr "on, off of N/min (bijv. 60/min)"
 
-#: urpm/cli/main.py:2611
+#: urpm/cli/main.py:2617
 msgid "Manage cache"
 msgstr "Cache beheren"
 
-#: urpm/cli/main.py:2619
+#: urpm/cli/main.py:2625
 msgid "Cache information"
 msgstr "Cache-informatie"
 
-#: urpm/cli/main.py:2621
+#: urpm/cli/main.py:2627
 msgid "Clean orphan RPMs from cache"
 msgstr "Verweesde RPMs uit de cache verwijderen"
 
-#: urpm/cli/main.py:2624 urpm/cli/main.py:2640
+#: urpm/cli/main.py:2630 urpm/cli/main.py:2646
 msgid "Show what would be removed without removing"
 msgstr ""
 "Tonen wat er zou worden verwijderd zonder daadwerkelijk te verwijderen"
 
-#: urpm/cli/main.py:2628 urpm/cli/main.py:2643
+#: urpm/cli/main.py:2634 urpm/cli/main.py:2649
 msgid "Do not ask for confirmation"
 msgstr "Niet om bevestiging vragen"
 
-#: urpm/cli/main.py:2632
+#: urpm/cli/main.py:2638
 msgid "List all orphan files"
 msgstr "Alle verweesde bestanden weergeven"
 
-#: urpm/cli/main.py:2637
+#: urpm/cli/main.py:2643
 msgid "Remove every cached RPM payload (keeps metadata)"
 msgstr "Alle RPM-payloads in de cache verwijderen (metagegevens blijven)"
 
-#: urpm/cli/main.py:2645
+#: urpm/cli/main.py:2651
 msgid "Rebuild database from synthesis files"
 msgstr "Database opnieuw opbouwen vanuit synthesebestanden"
 
-#: urpm/cli/main.py:2646
+#: urpm/cli/main.py:2652
 msgid "Detailed cache statistics"
 msgstr "Gedetailleerde cache-statistieken"
 
-#: urpm/cli/main.py:2653
+#: urpm/cli/main.py:2659
 msgid "Show transaction history"
 msgstr "Transactiegeschiedenis tonen"
 
-#: urpm/cli/main.py:2658
+#: urpm/cli/main.py:2664
 msgid "Number of transactions to show (default: 20)"
 msgstr "Aantal te tonen transacties (standaard: 20)"
 
-#: urpm/cli/main.py:2662
+#: urpm/cli/main.py:2668
 msgid "Show only install transactions"
 msgstr "Alleen installatietransacties tonen"
 
-#: urpm/cli/main.py:2666
+#: urpm/cli/main.py:2672
 msgid "Show only remove transactions"
 msgstr "Alleen verwijderingstransacties tonen"
 
-#: urpm/cli/main.py:2670
+#: urpm/cli/main.py:2676
 msgid "Show details of transaction ID"
 msgstr "Details van transactie-ID tonen"
 
-#: urpm/cli/main.py:2674
+#: urpm/cli/main.py:2680
 msgid "Delete transaction(s) from history"
 msgstr "Transactie(s) uit de geschiedenis verwijderen"
 
-#: urpm/cli/main.py:2682
+#: urpm/cli/main.py:2688
 msgid ""
 "Rollback transactions: \"rollback 5\" (last 5), \"rollback to 42\" (to #42),"
 " \"rollback to 26/11/2025\""
@@ -2228,19 +2235,19 @@ msgstr ""
 "Transacties terugdraaien: \"rollback 5\" (laatste 5), \"rollback to 42\" "
 "(naar #42), \"rollback to 26/11/2025\""
 
-#: urpm/cli/main.py:2687
+#: urpm/cli/main.py:2693
 msgid "N (last N transactions), or \"to N\" (to transaction #N), or \"to DATE\""
 msgstr "N (laatste N transacties), of \"to N\" (naar transactie #N), of \"to DATUM\""
 
-#: urpm/cli/main.py:2699
+#: urpm/cli/main.py:2705
 msgid "Undo last transaction, or a specific one"
 msgstr "Laatste transactie ongedaan maken, of een specifieke"
 
-#: urpm/cli/main.py:2704
+#: urpm/cli/main.py:2710
 msgid "Transaction ID to undo (default: last)"
 msgstr "Te herroepen transactie-ID (standaard: laatste)"
 
-#: urpm/cli/main.py:2716
+#: urpm/cli/main.py:2722
 msgid ""
 "Remove orphan deps from interrupted transactions (alias: autoremove "
 "--faildeps)"
@@ -2248,64 +2255,64 @@ msgstr ""
 "Verweesde afhankelijkheden verwijderen van onderbroken transacties (alias: "
 "autoremove --faildeps)"
 
-#: urpm/cli/main.py:2729
+#: urpm/cli/main.py:2735
 msgid "Manage urpm configuration"
 msgstr "urpm-configuratie beheren"
 
-#: urpm/cli/main.py:2737
+#: urpm/cli/main.py:2743
 msgid "Manage blacklist (critical packages never removed)"
 msgstr "Zwarte lijst beheren (kritieke pakketten die nooit worden verwijderd)"
 
-#: urpm/cli/main.py:2741
+#: urpm/cli/main.py:2747
 msgid "Show blacklist"
 msgstr "Zwarte lijst tonen"
 
-#: urpm/cli/main.py:2742
+#: urpm/cli/main.py:2748
 msgid "Add package to blacklist"
 msgstr "Pakket aan de zwarte lijst toevoegen"
 
-#: urpm/cli/main.py:2743 urpm/cli/main.py:2756
+#: urpm/cli/main.py:2749 urpm/cli/main.py:2762
 msgid "Package name to add"
 msgstr "Toe te voegen pakketnaam"
 
-#: urpm/cli/main.py:2744
+#: urpm/cli/main.py:2750
 msgid "Remove package from blacklist"
 msgstr "Pakket van de zwarte lijst verwijderen"
 
-#: urpm/cli/main.py:2745 urpm/cli/main.py:2758
+#: urpm/cli/main.py:2751 urpm/cli/main.py:2764
 msgid "Package name to remove"
 msgstr "Te verwijderen pakketnaam"
 
-#: urpm/cli/main.py:2750
+#: urpm/cli/main.py:2756
 msgid "Manage redlist (packages requiring confirmation)"
 msgstr "Rode lijst beheren (pakketten waarvoor bevestiging vereist is)"
 
-#: urpm/cli/main.py:2754
+#: urpm/cli/main.py:2760
 msgid "Show redlist"
 msgstr "Rode lijst tonen"
 
-#: urpm/cli/main.py:2755
+#: urpm/cli/main.py:2761
 msgid "Add package to redlist"
 msgstr "Pakket aan de rode lijst toevoegen"
 
-#: urpm/cli/main.py:2757
+#: urpm/cli/main.py:2763
 msgid "Remove package from redlist"
 msgstr "Pakket van de rode lijst verwijderen"
 
-#: urpm/cli/main.py:2763
+#: urpm/cli/main.py:2769
 msgid "Number of old kernels to keep (in addition to running)"
 msgstr "Aantal te bewaren oude kernels (naast de actieve)"
 
-#: urpm/cli/main.py:2765
+#: urpm/cli/main.py:2771
 msgid "Number of kernels to keep (show current if omitted)"
 msgstr "Aantal te bewaren kernels (huidig getal tonen als weggelaten)"
 
-#: urpm/cli/main.py:2770
+#: urpm/cli/main.py:2776
 msgid "Choose between system version and cauldron when both are enabled"
 msgstr ""
 "Kiezen tussen de systeemversie en cauldron als beide zijn ingeschakeld"
 
-#: urpm/cli/main.py:2774
+#: urpm/cli/main.py:2780
 msgid ""
 "system=use system version, cauldron=use cauldron, auto=remove preference "
 "(show current if omitted)"
@@ -2313,90 +2320,95 @@ msgstr ""
 "system=systeemversie gebruiken, cauldron=cauldron gebruiken, auto=voorkeur "
 "verwijderen (huidig tonen als weggelaten)"
 
-#: urpm/cli/main.py:2778
+#: urpm/cli/main.py:2784
 msgid "Show effective configuration from config files"
 msgstr "Effectieve configuratie tonen uit configuratiebestanden"
 
-#: urpm/cli/main.py:2784
+#: urpm/cli/main.py:2790
 msgid "Control GNOME Software automatic updates"
 msgstr "Automatische updates van GNOME Software beheren"
 
-#: urpm/cli/main.py:2789 urpm/cli/main.py:2800 urpm/cli/main.py:2811
+#: urpm/cli/main.py:2795 urpm/cli/main.py:2806 urpm/cli/main.py:2817
+#: urpm/cli/main.py:2828
 msgid "yes/no (show current if omitted)"
 msgstr "Aantal te bewaren kernels (huidig getal tonen als weggelaten)"
 
-#: urpm/cli/main.py:2795
+#: urpm/cli/main.py:2801
 msgid "Control KDE Discover automatic updates"
 msgstr "Automatische updates van KDE Discover beheren"
 
-#: urpm/cli/main.py:2806
+#: urpm/cli/main.py:2812
 msgid "Control PackageKit offline automatic updates"
 msgstr "Automatische offline-updates van PackageKit beheren"
 
-#: urpm/cli/main.py:2815
+#: urpm/cli/main.py:2823
+msgid "Print long lists whole by default ([display] show_all)"
+msgstr "Lange lijsten standaard volledig uitvoeren ([display] show_all)"
+
+#: urpm/cli/main.py:2832
 msgid "Edit config file with $EDITOR"
 msgstr "Configuratiebestand bewerken met $EDITOR"
 
-#: urpm/cli/main.py:2819
+#: urpm/cli/main.py:2836
 msgid "Drop-in file to edit (e.g. 00-urpmi-compat); edits urpm.cfg if omitted"
 msgstr ""
 "Drop-in-bestand om te bewerken (bijv. 00-urpmi-compat); zonder opgave wordt "
 "urpm.cfg bewerkt"
 
-#: urpm/cli/main.py:2827
+#: urpm/cli/main.py:2844
 msgid "Manage GPG keys for package verification"
 msgstr "GPG-sleutels beheren voor pakketverificatie"
 
-#: urpm/cli/main.py:2832
+#: urpm/cli/main.py:2849
 msgid "List installed GPG keys"
 msgstr "Geïnstalleerde GPG-sleutels weergeven"
 
-#: urpm/cli/main.py:2834
+#: urpm/cli/main.py:2851
 msgid "Import GPG key"
 msgstr "GPG-sleutel importeren"
 
-#: urpm/cli/main.py:2835
+#: urpm/cli/main.py:2852
 msgid "Path to key file or HTTPS URL"
 msgstr "Pad naar sleutelbestand of HTTPS-URL"
 
-#: urpm/cli/main.py:2837
+#: urpm/cli/main.py:2854
 msgid "Remove GPG key"
 msgstr "GPG-sleutel verwijderen"
 
-#: urpm/cli/main.py:2838
+#: urpm/cli/main.py:2855
 msgid "Key ID to remove (e.g., 80420f66)"
 msgstr "Te verwijderen sleutel-ID (bijv. 80420f66)"
 
-#: urpm/cli/main.py:2845
+#: urpm/cli/main.py:2862
 msgid "Export / import a machine profile (packages + media + servers)"
 msgstr ""
 "Een machineprofiel exporteren of importeren (pakketten, media en servers)"
 
-#: urpm/cli/main.py:2856
+#: urpm/cli/main.py:2873
 msgid "Write current system state to JSON"
 msgstr "De huidige systeemtoestand als JSON wegschrijven"
 
-#: urpm/cli/main.py:2860
+#: urpm/cli/main.py:2877
 msgid "Destination file (default: ~/system-<hostname>-<UTC-timestamp>.json)"
 msgstr "Doelbestand (standaard: ~/system-<hostname>-<UTC-timestamp>.json)"
 
-#: urpm/cli/main.py:2867
+#: urpm/cli/main.py:2884
 msgid "Reconcile this system against a profile JSON"
 msgstr "Dit systeem verrekenen met een JSON-profiel"
 
-#: urpm/cli/main.py:2871
+#: urpm/cli/main.py:2888
 msgid "Profile file to import"
 msgstr "Te importeren profielbestand"
 
-#: urpm/cli/main.py:2879
+#: urpm/cli/main.py:2896
 msgid "Skip the automatic backup of the current state"
 msgstr "De automatische reservekopie van de huidige toestand overslaan"
 
-#: urpm/cli/main.py:2883
+#: urpm/cli/main.py:2900
 msgid "Show the plan but do not apply anything"
 msgstr "Het plan tonen zonder iets toe te passen"
 
-#: urpm/cli/main.py:2887
+#: urpm/cli/main.py:2904
 msgid ""
 "Keep local media/servers not in the profile (default: replace — remove local"
 " extras)"
@@ -2404,7 +2416,7 @@ msgstr ""
 "Lokale media en servers behouden die niet in het profiel staan (standaard: "
 "vervangen, dus lokale extra's verwijderen)"
 
-#: urpm/cli/main.py:2892
+#: urpm/cli/main.py:2909
 msgid ""
 "Skip pre-flight gaps without interactive confirmation (packages in the "
 "profile that are not in the pool or not currently installed are silently "
@@ -2414,7 +2426,7 @@ msgstr ""
 "het profiel die niet in de pool zitten of niet geïnstalleerd zijn, "
 "verdwijnen stilzwijgend uit de installatie- en verwijderlijsten)"
 
-#: urpm/cli/main.py:2899
+#: urpm/cli/main.py:2916
 msgid ""
 "Reproduce the source profile literally even when it leaves kept packages "
 "with unmet deps.  Skips the dep-rescue safety net AND pushes the erase "
@@ -2428,7 +2440,7 @@ msgstr ""
 "(omzeilt de RPM-voorcontrole).  Bedoeld om een fout getrouw na te bootsen; "
 "het resulterende systeem heeft kapotte afhankelijkheden."
 
-#: urpm/cli/main.py:2908
+#: urpm/cli/main.py:2925
 msgid ""
 "Non-interactive mode : preserve hardware-specific packages (DKMS modules, "
 "X11 drivers, guest tools, firmware, microcode) even when they are absent "
@@ -2447,167 +2459,171 @@ msgstr ""
 "stuurprogramma van de doelmachine weg, het distupgrade brengt een nieuwe "
 "kernel, DKMS bouwt niets opnieuw en de grafische laag breekt »."
 
-#: urpm/cli/main.py:2925
+#: urpm/cli/main.py:2942
 msgid "Manage P2P peers (provenance, blacklist)"
 msgstr "P2P-peers beheren (herkomst, zwarte lijst)"
 
-#: urpm/cli/main.py:2936
+#: urpm/cli/main.py:2953
 msgid "List peers and download statistics"
 msgstr "Peers en downloadstatistieken weergeven"
 
-#: urpm/cli/main.py:2942
+#: urpm/cli/main.py:2959
 msgid "List packages downloaded from peers"
 msgstr "Van peers gedownloade pakketten weergeven"
 
-#: urpm/cli/main.py:2946
+#: urpm/cli/main.py:2963
 msgid "Filter by peer host (optional)"
 msgstr "Filteren op peer-host (optioneel)"
 
-#: urpm/cli/main.py:2950
+#: urpm/cli/main.py:2967
 msgid "Max entries to show (default: 50)"
 msgstr "Maximaal aantal te tonen vermeldingen (standaard: 50)"
 
-#: urpm/cli/main.py:2956
+#: urpm/cli/main.py:2973
 msgid "Blacklist a peer"
 msgstr "Een peer op de zwarte lijst plaatsen"
 
-#: urpm/cli/main.py:2958
+#: urpm/cli/main.py:2975
 msgid "Peer host to blacklist"
 msgstr "Op de zwarte lijst te plaatsen peer-host"
 
-#: urpm/cli/main.py:2961 urpm/cli/main.py:2976
+#: urpm/cli/main.py:2978 urpm/cli/main.py:2993
 msgid "Specific port (default: all ports)"
 msgstr "Specifieke poort (standaard: alle poorten)"
 
-#: urpm/cli/main.py:2965
+#: urpm/cli/main.py:2982
 msgid "Reason for blacklisting"
 msgstr "Reden voor plaatsing op de zwarte lijst"
 
-#: urpm/cli/main.py:2971
+#: urpm/cli/main.py:2988
 msgid "Remove peer from blacklist"
 msgstr "Peer van de zwarte lijst verwijderen"
 
-#: urpm/cli/main.py:2973
+#: urpm/cli/main.py:2990
 msgid "Peer host to unblacklist"
 msgstr "Van de zwarte lijst te verwijderen peer-host"
 
-#: urpm/cli/main.py:2982
+#: urpm/cli/main.py:2999
 msgid "Delete RPMs downloaded from a peer (use after blacklist)"
 msgstr ""
 "RPMs verwijderen die van een peer zijn gedownload (gebruik na zwarte-"
 "lijstplaatsing)"
 
-#: urpm/cli/main.py:2984
+#: urpm/cli/main.py:3001
 msgid "Peer host to clean"
 msgstr "Te reinigen peer-host"
 
-#: urpm/cli/main.py:2988
+#: urpm/cli/main.py:3005
 msgid "Do not prompt for confirmation"
 msgstr "Niet om bevestiging vragen"
 
-#: urpm/cli/main.py:2993
-msgid "Show all files (do not truncate list)"
-msgstr "Alle bestanden tonen (lijst niet afkappen)"
+#: urpm/cli/main.py:3011
+msgid ""
+"Show all files (do not truncate list). Defaults to the [display] show_all "
+"config key."
+msgstr ""
+"Alle bestanden tonen (lijst niet afkappen). Standaard volgt dit de "
+"configuratiesleutel [display] show_all."
 
-#: urpm/cli/main.py:3001
+#: urpm/cli/main.py:3020
 msgid ""
 "Manage AppStream metadata for software centers (Discover, GNOME Software)"
 msgstr ""
 "AppStream-metadata beheren voor softwarecentra (Discover, GNOME Software)"
 
-#: urpm/cli/main.py:3011
+#: urpm/cli/main.py:3030
 msgid "Generate AppStream catalog from package database"
 msgstr "AppStream-catalogus genereren vanuit de pakketdatabase"
 
-#: urpm/cli/main.py:3015
+#: urpm/cli/main.py:3034
 #, python-brace-format
 msgid ""
 "Output file (default: /var/cache/swcatalog/xml/mageia-{version}.xml.gz)"
 msgstr ""
 "Uitvoerbestand (standaard: /var/cache/swcatalog/xml/mageia-{version}.xml.gz)"
 
-#: urpm/cli/main.py:3020
+#: urpm/cli/main.py:3039
 msgid "Do not gzip the output file"
 msgstr "Het uitvoerbestand niet gzippen"
 
-#: urpm/cli/main.py:3024
+#: urpm/cli/main.py:3043
 msgid "Generate for specific media only"
 msgstr "Alleen genereren voor specifieke media"
 
-#: urpm/cli/main.py:3030
+#: urpm/cli/main.py:3049
 msgid "Show AppStream status for all media"
 msgstr "AppStream-status tonen voor alle media"
 
-#: urpm/cli/main.py:3036
+#: urpm/cli/main.py:3055
 msgid "Merge per-media AppStream files into unified catalog"
 msgstr ""
 "AppStream-bestanden per media samenvoegen tot een gecombineerde catalogus"
 
-#: urpm/cli/main.py:3041
+#: urpm/cli/main.py:3060
 msgid "Also refresh system AppStream cache"
 msgstr "Ook de systeem-AppStream-cache vernieuwen"
 
-#: urpm/cli/main.py:3047
+#: urpm/cli/main.py:3066
 msgid ""
 "Create OS metainfo file for AppStream (required for Discover/GNOME Software)"
 msgstr ""
 "OS-metainfobestand aanmaken voor AppStream (vereist voor Discover/GNOME "
 "Software)"
 
-#: urpm/cli/main.py:3052
+#: urpm/cli/main.py:3071
 msgid "Overwrite existing metainfo file"
 msgstr "Bestaand metainfobestand overschrijven"
 
-#: urpm/cli/main.py:3060
+#: urpm/cli/main.py:3079
 msgid "Show progress of background transaction"
 msgstr "Details van transactie-ID tonen"
 
-#: urpm/cli/main.py:3064
+#: urpm/cli/main.py:3083
 msgid "Continuously watch until completion"
 msgstr "Continu volgen tot voltooiing"
 
-#: urpm/cli/main.py:3072
+#: urpm/cli/main.py:3091
 msgid "Show README messages from transactions"
 msgstr "Details van transactie-ID tonen"
 
-#: urpm/cli/main.py:3076
+#: urpm/cli/main.py:3095
 msgid "Show README from the last transaction (default)"
 msgstr "README van de laatste transactie tonen (standaard)"
 
-#: urpm/cli/main.py:3080
+#: urpm/cli/main.py:3099
 msgid "Show README from a specific transaction ID"
 msgstr "Details van transactie-ID tonen"
 
-#: urpm/cli/main.py:3084
+#: urpm/cli/main.py:3103
 msgid "List transactions that have README messages"
 msgstr "Transacties met README-berichten weergeven"
 
-#: urpm/cli/main.py:3096
+#: urpm/cli/main.py:3115
 #, python-brace-format
 msgid "Command '{command}' not yet implemented"
 msgstr "Opdracht '{command}' is nog niet geïmplementeerd"
 
-#: urpm/cli/main.py:3131
+#: urpm/cli/main.py:3168
 #, python-brace-format
 msgid "unrecognized arguments: {args}"
 msgstr "onbekende argumenten: {args}"
 
-#: urpm/cli/main.py:3321
+#: urpm/cli/main.py:3362
 msgid "urpm genmedia is not installed on this system."
 msgstr "urpm genmedia is niet geïnstalleerd op dit systeem."
 
-#: urpm/cli/main.py:3325
+#: urpm/cli/main.py:3366
 msgid "Install the urpm-ng-genmedia subpackage:"
 msgstr "Installeer het subpakket urpm-ng-genmedia:"
 
-#: urpm/cli/main.py:3553
+#: urpm/cli/main.py:3594
 msgid "Interrupted"
 msgstr "Onderbroken"
 
-#: urpm/cli/main.py:3561 urpm/cli/commands/install.py:258
-#: urpm/cli/commands/install.py:261 urpm/cli/commands/install.py:1243
-#: urpm/cli/commands/install.py:1246 urpm/cli/commands/history.py:640
-#: urpm/cli/commands/config.py:425 urpm/cli/commands/build.py:2148
+#: urpm/cli/main.py:3602 urpm/cli/commands/install.py:258
+#: urpm/cli/commands/install.py:261 urpm/cli/commands/install.py:1244
+#: urpm/cli/commands/install.py:1247 urpm/cli/commands/history.py:641
+#: urpm/cli/commands/config.py:480 urpm/cli/commands/build.py:2148
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "Fout: {error}"
@@ -2759,24 +2775,24 @@ msgstr ""
 "  --nodeps: afhankelijkheidsresolutie overgeslagen (exact de gevraagde "
 "pakketten geïnstalleerd)"
 
-#: urpm/cli/commands/install.py:219 urpm/cli/commands/install.py:1204
+#: urpm/cli/commands/install.py:219 urpm/cli/commands/install.py:1205
 msgid "Multiple .spec files found:"
 msgstr "Meerdere .spec-bestanden gevonden:"
 
-#: urpm/cli/commands/install.py:223 urpm/cli/commands/install.py:1208
+#: urpm/cli/commands/install.py:223 urpm/cli/commands/install.py:1209
 msgid "Error: Multiple .spec files found. Specify which one to use."
 msgstr "Fout: meerdere .spec-bestanden gevonden. Geef aan welk te gebruiken."
 
-#: urpm/cli/commands/install.py:226 urpm/cli/commands/install.py:1211
+#: urpm/cli/commands/install.py:226 urpm/cli/commands/install.py:1212
 msgid "Select spec file (number): "
 msgstr "Selecteer spec-bestand (nummer): "
 
-#: urpm/cli/commands/install.py:231 urpm/cli/commands/install.py:1216
+#: urpm/cli/commands/install.py:231 urpm/cli/commands/install.py:1217
 msgid "Invalid choice"
 msgstr "Ongeldige keuze"
 
-#: urpm/cli/commands/install.py:234 urpm/cli/commands/install.py:1219
-#: urpm/cli/commands/install.py:1431 urpm/cli/commands/upgrade.py:343
+#: urpm/cli/commands/install.py:234 urpm/cli/commands/install.py:1220
+#: urpm/cli/commands/install.py:1432 urpm/cli/commands/upgrade.py:343
 #: urpm/cli/commands/distupgrade.py:568 urpm/cli/commands/distupgrade.py:793
 #: urpm/cli/commands/distupgrade.py:810 urpm/cli/commands/distupgrade.py:834
 #: urpm/cli/commands/system.py:720 urpm/cli/commands/system.py:776
@@ -2789,12 +2805,12 @@ msgstr ""
 "\n"
 "Afgebroken."
 
-#: urpm/cli/commands/install.py:247 urpm/cli/commands/install.py:1232
+#: urpm/cli/commands/install.py:247 urpm/cli/commands/install.py:1233
 #, python-brace-format
 msgid "Build dependencies from: {source}"
 msgstr "Bouwafhankelijkheden van: {source}"
 
-#: urpm/cli/commands/install.py:248 urpm/cli/commands/install.py:1233
+#: urpm/cli/commands/install.py:248 urpm/cli/commands/install.py:1234
 #, python-brace-format
 msgid "Found {count} BuildRequires"
 msgstr "{count} BuildRequires gevonden"
@@ -2804,7 +2820,7 @@ msgid "Spec has no BuildRequires — nothing to install."
 msgstr "Het spec-bestand heeft geen BuildRequires, niets te installeren."
 
 #: urpm/cli/commands/install.py:268 urpm/cli/commands/install.py:275
-#: urpm/cli/commands/install.py:1250
+#: urpm/cli/commands/install.py:1251
 msgid "Error: No packages specified"
 msgstr "Fout: geen pakketten opgegeven"
 
@@ -2817,7 +2833,7 @@ msgid "Usage: urpm install <packages> or urpm install --buildrequires <spec>"
 msgstr ""
 "Gebruik: urpm install <pakketten> of urpm install --buildrequires <spec>"
 
-#: urpm/cli/commands/install.py:298 urpm/cli/commands/config.py:435
+#: urpm/cli/commands/install.py:298 urpm/cli/commands/config.py:490
 #, python-brace-format
 msgid "Error: file not found: {path}"
 msgstr "Fout: bestand niet gevonden: {path}"
@@ -2846,7 +2862,7 @@ msgstr "{count} verwante RPM's gevonden (beschikbaar voor afhankelijkheden)"
 msgid "Local RPM files ({count}):"
 msgstr "Lokale RPM-bestanden ({count}):"
 
-#: urpm/cli/commands/install.py:410 urpm/cli/commands/install.py:1428
+#: urpm/cli/commands/install.py:410 urpm/cli/commands/install.py:1429
 #: urpm/cli/commands/remove.py:187 urpm/cli/commands/remove.py:190
 #: urpm/cli/commands/upgrade.py:340 urpm/cli/commands/distupgrade.py:796
 #: urpm/cli/commands/distupgrade.py:813 urpm/cli/commands/distupgrade.py:837
@@ -2856,12 +2872,12 @@ msgstr "Lokale RPM-bestanden ({count}):"
 msgid "Aborted."
 msgstr "Afgebroken."
 
-#: urpm/cli/commands/install.py:470 urpm/cli/commands/install.py:1355
+#: urpm/cli/commands/install.py:470 urpm/cli/commands/install.py:1356
 #, python-brace-format
 msgid "Packages not found ({count}):"
 msgstr "Pakketten niet gevonden ({count}):"
 
-#: urpm/cli/commands/install.py:474 urpm/cli/commands/history.py:142
+#: urpm/cli/commands/install.py:474 urpm/cli/commands/history.py:143
 #: urpm/cli/commands/mirror.py:514 urpm/cli/helpers/failure_report.py:72
 #, python-brace-format
 msgid "... and {count} more"
@@ -2907,9 +2923,9 @@ msgstr "Aanbevolen pakketten installeren? [J/n] "
 #: urpm/cli/commands/install.py:875 urpm/cli/commands/media.py:564
 #: urpm/cli/commands/media.py:985 urpm/cli/commands/media.py:1168
 #: urpm/cli/commands/media.py:1200 urpm/cli/commands/media.py:2723
-#: urpm/cli/commands/cache.py:104 urpm/cli/commands/history.py:297
-#: urpm/cli/commands/history.py:762 urpm/cli/commands/config.py:480
-#: urpm/cli/commands/peer.py:207 urpm/cli/commands/cleanup.py:1041
+#: urpm/cli/commands/cache.py:104 urpm/cli/commands/history.py:298
+#: urpm/cli/commands/history.py:763 urpm/cli/commands/config.py:535
+#: urpm/cli/commands/peer.py:206 urpm/cli/commands/cleanup.py:1041
 #: urpm/cli/commands/build.py:1095 urpm/cli/helpers/suggests.py:141
 #: urpm/cli/helpers/suggests.py:158
 msgid ""
@@ -2928,7 +2944,7 @@ msgstr "Voorgestelde pakketten ({count})"
 msgid "Install suggested packages? [Y/n] "
 msgstr "Voorgestelde pakketten installeren? [J/n] "
 
-#: urpm/cli/commands/install.py:766 urpm/cli/commands/install.py:1373
+#: urpm/cli/commands/install.py:766 urpm/cli/commands/install.py:1374
 #: urpm/cli/commands/remove.py:77 urpm/cli/commands/upgrade.py:159
 msgid "Resolution failed:"
 msgstr "Oplossing mislukt:"
@@ -2990,8 +3006,8 @@ msgstr ""
 #: urpm/cli/commands/media.py:982 urpm/cli/commands/media.py:1171
 #: urpm/cli/commands/media.py:1203 urpm/cli/commands/media.py:2720
 #: urpm/cli/commands/cache.py:101 urpm/cli/commands/cache.py:314
-#: urpm/cli/commands/history.py:294 urpm/cli/commands/history.py:759
-#: urpm/cli/commands/config.py:477 urpm/cli/commands/peer.py:204
+#: urpm/cli/commands/history.py:295 urpm/cli/commands/history.py:760
+#: urpm/cli/commands/config.py:532 urpm/cli/commands/peer.py:203
 #: urpm/cli/commands/depends.py:112 urpm/cli/commands/cleanup.py:1038
 #: urpm/cli/commands/build.py:1099 urpm/cli/helpers/alternatives.py:424
 #: urpm/cli/helpers/alternatives.py:564 urpm/cli/helpers/alternatives.py:949
@@ -3028,7 +3044,7 @@ msgstr ""
 "Niet genoeg mirrors voor {n} parallelle downloads (er zijn er {had}, "
 "{needed} nodig)"
 
-#: urpm/cli/commands/install.py:926 urpm/cli/commands/install.py:1439
+#: urpm/cli/commands/install.py:926 urpm/cli/commands/install.py:1440
 msgid ""
 "\n"
 "Downloading packages..."
@@ -3036,7 +3052,7 @@ msgstr ""
 "\n"
 "Bezig met downloaden van pakketten..."
 
-#: urpm/cli/commands/install.py:961 urpm/cli/commands/install.py:1470
+#: urpm/cli/commands/install.py:961 urpm/cli/commands/install.py:1471
 #: urpm/cli/commands/upgrade.py:420
 #, python-brace-format
 msgid "{count} download failed:"
@@ -3044,14 +3060,14 @@ msgid_plural "{count} downloads failed:"
 msgstr[0] "{count} download mislukt:"
 msgstr[1] "{count} downloads mislukt:"
 
-#: urpm/cli/commands/install.py:976 urpm/cli/commands/install.py:1502
+#: urpm/cli/commands/install.py:976 urpm/cli/commands/install.py:1503
 #: urpm/cli/commands/upgrade.py:432
 #, python-brace-format
 msgid "{downloaded} ({sources}), {cached} from cache in {time}"
 msgstr "{downloaded} ({sources}), {cached} uit cache in {time}"
 
 #: urpm/cli/commands/install.py:977 urpm/cli/commands/install.py:980
-#: urpm/cli/commands/install.py:1503 urpm/cli/commands/upgrade.py:433
+#: urpm/cli/commands/install.py:1504 urpm/cli/commands/upgrade.py:433
 #: urpm/cli/commands/upgrade.py:437
 #, python-brace-format
 msgid "{count} downloaded"
@@ -3083,51 +3099,51 @@ msgstr ""
 "Herstart van het systeem vereist ({packages}) — triggers worden in synchrone"
 " modus uitgevoerd."
 
-#: urpm/cli/commands/install.py:1103 urpm/cli/commands/history.py:513
+#: urpm/cli/commands/install.py:1103 urpm/cli/commands/history.py:514
 #, python-brace-format
 msgid "Installing {count} package..."
 msgid_plural "Installing {count} packages..."
 msgstr[0] "Installeren van {count} pakket..."
 msgstr[1] "Installeren van {count} pakketten..."
 
-#: urpm/cli/commands/install.py:1189
+#: urpm/cli/commands/install.py:1190
 #, python-brace-format
 msgid "Cannot read --from-file {path}: {err}"
 msgstr "Kan --from-file {path} niet lezen : {err}"
 
-#: urpm/cli/commands/install.py:1236
+#: urpm/cli/commands/install.py:1237
 msgid "Spec has no BuildRequires — nothing to download."
 msgstr "Het spec-bestand heeft geen BuildRequires, niets te downloaden."
 
-#: urpm/cli/commands/install.py:1251
+#: urpm/cli/commands/install.py:1252
 msgid "Usage: urpm download [packages...] [--buildrequires [spec]]"
 msgstr "Gebruik: urpm download [pakketten...] [--buildrequires [spec]]"
 
-#: urpm/cli/commands/install.py:1276
+#: urpm/cli/commands/install.py:1277
 msgid "Resolving packages for download..."
 msgstr "Oplossen van pakketten voor download..."
 
-#: urpm/cli/commands/install.py:1278
+#: urpm/cli/commands/install.py:1279
 #, python-brace-format
 msgid "Target release: {release}"
 msgstr "Doelrelease: {release}"
 
-#: urpm/cli/commands/install.py:1279
+#: urpm/cli/commands/install.py:1280
 #, python-brace-format
 msgid "Target arch: {arch}"
 msgstr "Doelarchitectuur: {arch}"
 
-#: urpm/cli/commands/install.py:1280
+#: urpm/cli/commands/install.py:1281
 #, python-brace-format
 msgid "Packages: {packages}"
 msgstr "Pakketten: {packages}"
 
-#: urpm/cli/commands/install.py:1280
+#: urpm/cli/commands/install.py:1281
 #, python-brace-format
 msgid " ... (+{count} more)"
 msgstr " ... (+{count} meer)"
 
-#: urpm/cli/commands/install.py:1339
+#: urpm/cli/commands/install.py:1340
 #, python-brace-format
 msgid ""
 "Skipping {count} NEVRA(s) not found in the peer's pool (mirror divergence or"
@@ -3136,13 +3152,13 @@ msgstr ""
 "{count} NEVRA(s) overgeslagen, niet in de peer-pool (mirror-divergentie of "
 "uitgeschakelde testing-repo's):"
 
-#: urpm/cli/commands/install.py:1346 urpm/cli/commands/install.py:1361
-#: urpm/cli/commands/install.py:1419
+#: urpm/cli/commands/install.py:1347 urpm/cli/commands/install.py:1362
+#: urpm/cli/commands/install.py:1420
 #, python-brace-format
 msgid "... and {count} more (use --show-all to list them)"
 msgstr "... en nog {count} (gebruik --show-all om ze op te sommen)"
 
-#: urpm/cli/commands/install.py:1350
+#: urpm/cli/commands/install.py:1351
 msgid ""
 "No package from the plan could be resolved. Check the peer's enabled media "
 "set."
@@ -3150,16 +3166,16 @@ msgstr ""
 "Geen enkel pakket uit het plan kon worden opgelost. Controleer de "
 "ingeschakelde media van de peer."
 
-#: urpm/cli/commands/install.py:1382
+#: urpm/cli/commands/install.py:1383
 msgid "Nothing to download - all packages already available."
 msgstr "Niets te downloaden - alle pakketten al beschikbaar."
 
-#: urpm/cli/commands/install.py:1412
+#: urpm/cli/commands/install.py:1413
 #, python-brace-format
 msgid "Packages to download ({count}):"
 msgstr "Te downloaden pakketten ({count}):"
 
-#: urpm/cli/commands/install.py:1426
+#: urpm/cli/commands/install.py:1427
 msgid ""
 "\n"
 "Proceed with download? [Y/n] "
@@ -3167,51 +3183,51 @@ msgstr ""
 "\n"
 "Doorgaan met downloaden? [J/n] "
 
-#: urpm/cli/commands/install.py:1435
+#: urpm/cli/commands/install.py:1436
 msgid "No packages to download"
 msgstr "Geen pakketten om te downloaden"
 
-#: urpm/cli/commands/install.py:1485
+#: urpm/cli/commands/install.py:1486
 #, python-brace-format
 msgid "{count} downloaded package failed signature verification:"
 msgid_plural "{count} downloaded packages failed signature verification:"
 msgstr[0] "{count} gedownload pakket faalde de handtekeningverificatie:"
 msgstr[1] "{count} gedownloade pakketten faalden de handtekeningverificatie:"
 
-#: urpm/cli/commands/install.py:1492
+#: urpm/cli/commands/install.py:1493
 msgid "Corrupt files have been removed from cache."
 msgstr "Corrupte bestanden zijn uit de cache verwijderd."
 
-#: urpm/cli/commands/install.py:1500
+#: urpm/cli/commands/install.py:1501
 msgid "Download complete"
 msgstr "Download voltooid"
 
-#: urpm/cli/commands/install.py:1506
+#: urpm/cli/commands/install.py:1507
 #, python-brace-format
 msgid "{downloaded} downloaded, {cached} from cache in {time}"
 msgstr "{downloaded} gedownload, {cached} uit cache in {time}"
 
-#: urpm/cli/commands/install.py:1512
+#: urpm/cli/commands/install.py:1513
 msgid "Packages saved to cache. Use 'urpm install' to install them."
 msgstr ""
 "Pakketten opgeslagen in cache. Gebruik 'urpm install' om ze te installeren."
 
-#: urpm/cli/commands/install.py:1542
+#: urpm/cli/commands/install.py:1543
 #, python-brace-format
 msgid "Error: cannot find source RPM for '{pkg}'"
 msgstr "Fout: kan RPM-bestand niet lezen: {pkg}"
 
-#: urpm/cli/commands/install.py:1558
+#: urpm/cli/commands/install.py:1559
 #, python-brace-format
 msgid "Extracting source RPM: {srpm}"
 msgstr "Bron-RPM uitpakken: {srpm}"
 
-#: urpm/cli/commands/install.py:1570
+#: urpm/cli/commands/install.py:1571
 #, python-brace-format
 msgid "Error: rpm -i failed for {srpm}"
 msgstr "Fout: rpm -i is mislukt voor {srpm}"
 
-#: urpm/cli/commands/install.py:1581
+#: urpm/cli/commands/install.py:1582
 #, python-brace-format
 msgid ""
 "  Extracted {specs} spec file(s) and {sources} source file(s) to {dest}"
@@ -3327,22 +3343,22 @@ msgid_plural "Erasing {count} packages..."
 msgstr[0] "Wissen van {count} pakket..."
 msgstr[1] "Wissen van {count} pakketten..."
 
-#: urpm/cli/commands/remove.py:240 urpm/cli/commands/history.py:318
-#: urpm/cli/commands/history.py:783 urpm/cli/commands/cleanup.py:343
+#: urpm/cli/commands/remove.py:240 urpm/cli/commands/history.py:319
+#: urpm/cli/commands/history.py:784 urpm/cli/commands/cleanup.py:343
 #: urpm/cli/commands/cleanup.py:591 urpm/cli/commands/cleanup.py:1112
 #: urpm/cli/commands/_install_pipeline.py:169
 msgid "  RPM database is locked by another process."
 msgstr " RPM-database is vergrendeld door een ander proces."
 
-#: urpm/cli/commands/remove.py:241 urpm/cli/commands/history.py:319
-#: urpm/cli/commands/history.py:784 urpm/cli/commands/cleanup.py:344
+#: urpm/cli/commands/remove.py:241 urpm/cli/commands/history.py:320
+#: urpm/cli/commands/history.py:785 urpm/cli/commands/cleanup.py:344
 #: urpm/cli/commands/cleanup.py:592 urpm/cli/commands/cleanup.py:1113
 #: urpm/cli/commands/_install_pipeline.py:171
 msgid "  Waiting for lock... (Ctrl+C to cancel)"
 msgstr " Wachten op vergrendeling... (Ctrl+C om te annuleren)"
 
-#: urpm/cli/commands/remove.py:330 urpm/cli/commands/history.py:353
-#: urpm/cli/commands/history.py:545 urpm/cli/commands/history.py:818
+#: urpm/cli/commands/remove.py:330 urpm/cli/commands/history.py:354
+#: urpm/cli/commands/history.py:546 urpm/cli/commands/history.py:819
 #: urpm/cli/commands/cleanup.py:376 urpm/cli/commands/cleanup.py:622
 #: urpm/cli/commands/cleanup.py:1150
 #: urpm/cli/commands/_install_pipeline.py:209
@@ -3652,7 +3668,7 @@ msgid "  {n} candidate(s) held :"
 msgstr "  {n} kandida(a)t(en) tegengehouden :"
 
 #: urpm/cli/commands/distupgrade.py:439 urpm/cli/commands/distupgrade.py:1042
-#: urpm/cli/commands/distupgrade.py:1576 urpm/cli/commands/distupgrade.py:1592
+#: urpm/cli/commands/distupgrade.py:1579 urpm/cli/commands/distupgrade.py:1595
 #: urpm/cli/commands/system.py:387 urpm/cli/commands/system.py:398
 #: urpm/cli/commands/system.py:924
 #, python-brace-format
@@ -4143,14 +4159,14 @@ msgstr "    Bekijk verweeskandidaten met :  urpm autoremove --show-all"
 msgid "Third-party media without a mga{tgt} equivalent ({n}) - disabled:"
 msgstr "Media van derden zonder mga{tgt}-equivalent ({n}) - uitgeschakeld :"
 
-#: urpm/cli/commands/distupgrade.py:1578
+#: urpm/cli/commands/distupgrade.py:1581
 msgid ""
 "    Wait for a maintainer rebuild, or `urpm media remove <short_name>`."
 msgstr ""
 "    Wacht op een herbouw door de onderhouder, of `urpm media remove "
 "<short_name>`."
 
-#: urpm/cli/commands/distupgrade.py:1584
+#: urpm/cli/commands/distupgrade.py:1587
 #, python-brace-format
 msgid ""
 "Old mga{src} repositories replaced by their mga{tgt} counterpart ({n}) - now"
@@ -4159,7 +4175,7 @@ msgstr ""
 "Oude mga{src}-repositories vervangen door hun mga{tgt}-tegenhanger ({n}) - "
 "nu verouderd :"
 
-#: urpm/cli/commands/distupgrade.py:1615
+#: urpm/cli/commands/distupgrade.py:1618
 msgid ""
 "No .rpmnew, no failed scriptlet, no residual, no orphan media, no broken "
 "symlink — clean upgrade."
@@ -4167,18 +4183,18 @@ msgstr ""
 "Geen .rpmnew, geen mislukte scriptlet, geen restanten, geen verweesde media,"
 " geen verbroken link — schone upgrade."
 
-#: urpm/cli/commands/distupgrade.py:1623
+#: urpm/cli/commands/distupgrade.py:1626
 msgid "Next :  reboot so the post-boot adjustments run on next startup."
 msgstr ""
 "Volgende :  herstart om de post-boot-aanpassingen bij volgende opstart uit "
 "te voeren."
 
-#: urpm/cli/commands/distupgrade.py:1658
+#: urpm/cli/commands/distupgrade.py:1661
 #, python-brace-format
 msgid "{n} orphan packages detected after the distupgrade."
 msgstr "{n} verweesde pakketten aangetroffen na het distupgrade."
 
-#: urpm/cli/commands/distupgrade.py:1661
+#: urpm/cli/commands/distupgrade.py:1664
 msgid ""
 "  A mix of previous-release relics (safe to remove), SONAME sublibs (usually"
 " safe), and user-facing packages worth reviewing one by one."
@@ -4187,15 +4203,15 @@ msgstr ""
 " SONAME-subbibliotheken (meestal veilig) en gebruikerspakketten die stuk "
 "voor stuk bekeken horen te worden."
 
-#: urpm/cli/commands/distupgrade.py:1666
+#: urpm/cli/commands/distupgrade.py:1669
 msgid "  Enter interactive triage now ? [y/N] "
 msgstr "  Nu de interactieve triage starten? [j/N] "
 
-#: urpm/cli/commands/distupgrade.py:1672
+#: urpm/cli/commands/distupgrade.py:1675
 msgid "    Skipped ; run later with :  urpm autoremove --interactive"
 msgstr "    Overgeslagen; later uitvoeren met:  urpm autoremove --interactive"
 
-#: urpm/cli/commands/distupgrade.py:1697
+#: urpm/cli/commands/distupgrade.py:1700
 #, python-brace-format
 msgid ""
 "Interactive triage failed : {err}. Run manually with :  urpm autoremove "
@@ -4204,7 +4220,7 @@ msgstr ""
 "Interactieve triage mislukt : {err}. Voer handmatig uit met :  urpm "
 "autoremove --interactive"
 
-#: urpm/cli/commands/distupgrade.py:1718
+#: urpm/cli/commands/distupgrade.py:1721
 #, python-brace-format
 msgid ""
 "  --yes / --auto : dropping the {n} old repositories without prompting."
@@ -4212,16 +4228,16 @@ msgstr ""
 "  --yes / --auto : de {n} oude repositories worden zonder bevestiging "
 "verwijderd."
 
-#: urpm/cli/commands/distupgrade.py:1724
+#: urpm/cli/commands/distupgrade.py:1727
 msgid "  Drop these old repositories now ? [y/N] "
 msgstr "  Deze oude repositories nu verwijderen ? [j/N] "
 
-#: urpm/cli/commands/distupgrade.py:1730
+#: urpm/cli/commands/distupgrade.py:1733
 msgid "    Kept ; drop later with :  urpm media remove --distupgraded"
 msgstr ""
 "    Behouden ; later verwijderen met :  urpm media remove --distupgraded"
 
-#: urpm/cli/commands/distupgrade.py:1761
+#: urpm/cli/commands/distupgrade.py:1764
 #, python-brace-format
 msgid "Flagged {n} old repository for post-reboot cleanup."
 msgid_plural "Flagged {n} old repositories for post-reboot cleanup."
@@ -4867,7 +4883,7 @@ msgstr "Pakket {name} biedt ({count}):"
 msgid "No package provides '{capability}'"
 msgstr "Geen pakket biedt '{capability}'"
 
-#: urpm/cli/commands/query.py:701 urpm/cli/commands/query.py:996
+#: urpm/cli/commands/query.py:701 urpm/cli/commands/query.py:997
 msgid "Installed:"
 msgstr "Geïnstalleerd:"
 
@@ -4897,34 +4913,34 @@ msgid "Run 'urpm media update' to fetch the missing file indexes."
 msgstr ""
 "Voer 'urpm media update' uit om de ontbrekende bestandsindexen op te halen."
 
-#: urpm/cli/commands/query.py:904
+#: urpm/cli/commands/query.py:905
 msgid "file index not downloaded"
 msgstr "bestandsindex niet gedownload"
 
-#: urpm/cli/commands/query.py:908
+#: urpm/cli/commands/query.py:909
 #, python-brace-format
 msgid "file index unreadable ({reason})"
 msgstr "bestandsindex onleesbaar ({reason})"
 
-#: urpm/cli/commands/query.py:913
+#: urpm/cli/commands/query.py:914
 msgid "medium carries no files"
 msgstr "het medium bevat geen bestanden"
 
-#: urpm/cli/commands/query.py:932
+#: urpm/cli/commands/query.py:933
 #, python-brace-format
 msgid "No package contains '{pattern}'"
 msgstr "Geen pakket bevat '{pattern}'"
 
-#: urpm/cli/commands/query.py:987
+#: urpm/cli/commands/query.py:988
 #, python-brace-format
 msgid "({count} more)"
 msgstr "({count} meer)"
 
-#: urpm/cli/commands/query.py:1010
+#: urpm/cli/commands/query.py:1011
 msgid "Available (not installed):"
 msgstr "Beschikbaar (niet geïnstalleerd):"
 
-#: urpm/cli/commands/query.py:1018
+#: urpm/cli/commands/query.py:1019
 #, python-brace-format
 msgid "{count} files hidden (use --show-all to see all)"
 msgstr "{count} bestanden verborgen (gebruik --show-all om alles te zien)"
@@ -5576,7 +5592,7 @@ msgstr "alle {count} media up-to-date in {elapsed}"
 msgid "packages from {count} media in {elapsed}"
 msgstr "pakketten van {count} media in {elapsed}"
 
-#: urpm/cli/commands/media.py:1717 urpm/cli/commands/config.py:275
+#: urpm/cli/commands/media.py:1717 urpm/cli/commands/config.py:279
 #, python-brace-format
 msgid "File not found: {path}"
 msgstr "Bestand niet gevonden: {path}"
@@ -5985,13 +6001,13 @@ msgstr "{n} media gevonden voor {branch} {version} ({arch}):"
 
 #: urpm/cli/commands/media.py:2637 urpm/cli/commands/server.py:40
 #: urpm/cli/commands/server.py:957 urpm/cli/commands/cache.py:204
-#: urpm/cli/commands/config.py:337 urpm/cli/commands/mirror.py:23
+#: urpm/cli/commands/config.py:392 urpm/cli/commands/mirror.py:23
 msgid "enabled"
 msgstr "ingeschakeld"
 
 #: urpm/cli/commands/media.py:2637 urpm/cli/commands/server.py:42
 #: urpm/cli/commands/server.py:959 urpm/cli/commands/cache.py:204
-#: urpm/cli/commands/config.py:337 urpm/cli/commands/mirror.py:23
+#: urpm/cli/commands/config.py:392 urpm/cli/commands/mirror.py:23
 msgid "disabled"
 msgstr "uitgeschakeld"
 
@@ -6164,7 +6180,7 @@ msgstr "Latentie"
 
 #: urpm/cli/commands/server.py:31 urpm/cli/commands/server.py:446
 #: urpm/cli/commands/server.py:957 urpm/cli/commands/server.py:959
-#: urpm/cli/commands/history.py:181 urpm/cli/commands/peer.py:67
+#: urpm/cli/commands/history.py:182 urpm/cli/commands/peer.py:67
 msgid "Status"
 msgstr "Status"
 
@@ -6746,8 +6762,8 @@ msgstr "  De metagegevens blijven ; alleen de pakket-payloads verdwijnen."
 msgid "  --dry-run : nothing removed."
 msgstr "  --dry-run : er is niets verwijderd."
 
-#: urpm/cli/commands/cache.py:309 urpm/cli/commands/history.py:292
-#: urpm/cli/commands/history.py:757
+#: urpm/cli/commands/cache.py:309 urpm/cli/commands/history.py:293
+#: urpm/cli/commands/history.py:758
 msgid ""
 "\n"
 "Proceed? [y/N] "
@@ -6760,123 +6776,123 @@ msgstr ""
 msgid "Freed {size} ({count} file(s))"
 msgstr "{size} vrijgemaakt ({count} bestand(en))"
 
-#: urpm/cli/commands/history.py:90 urpm/cli/commands/history.py:113
-#: urpm/cli/commands/history.py:239
+#: urpm/cli/commands/history.py:91 urpm/cli/commands/history.py:114
+#: urpm/cli/commands/history.py:240
 #, python-brace-format
 msgid "Transaction #{tid} not found"
 msgstr "Transactie #{tid} niet gevonden"
 
-#: urpm/cli/commands/history.py:100
+#: urpm/cli/commands/history.py:101
 #, python-brace-format
 msgid "Deleted transaction #{tid}"
 msgstr "Transactie #{tid} verwijderd"
 
-#: urpm/cli/commands/history.py:104
+#: urpm/cli/commands/history.py:105
 #, python-brace-format
 msgid "{count} transaction deleted"
 msgid_plural "{count} transactions deleted"
 msgstr[0] "{count} transactie verwijderd"
 msgstr[1] "{count} transacties verwijderd"
 
-#: urpm/cli/commands/history.py:118
+#: urpm/cli/commands/history.py:119
 #, python-brace-format
 msgid "Transaction #{tid}"
 msgstr "Transactie #{tid}"
 
-#: urpm/cli/commands/history.py:119
+#: urpm/cli/commands/history.py:120
 msgid "Action:"
 msgstr "Actie:"
 
-#: urpm/cli/commands/history.py:120
+#: urpm/cli/commands/history.py:121
 msgid "Status:"
 msgstr "Status:"
 
-#: urpm/cli/commands/history.py:122
+#: urpm/cli/commands/history.py:123
 msgid "Command:"
 msgstr "Opdracht:"
 
-#: urpm/cli/commands/history.py:124
+#: urpm/cli/commands/history.py:125
 msgid "Undone by:"
 msgstr "Ongedaan gemaakt door:"
 
-#: urpm/cli/commands/history.py:128
+#: urpm/cli/commands/history.py:129
 #, python-brace-format
 msgid "Explicit ({count}):"
 msgstr "Expliciet ({count}):"
 
-#: urpm/cli/commands/history.py:135
+#: urpm/cli/commands/history.py:136
 #, python-brace-format
 msgid "Dependencies ({count}):"
 msgstr "Afhankelijkheden ({count}):"
 
-#: urpm/cli/commands/history.py:151
+#: urpm/cli/commands/history.py:152
 #, python-brace-format
 msgid "Scriptlet output ({count}):"
 msgstr "Expliciet ({count}):"
 
-#: urpm/cli/commands/history.py:160
+#: urpm/cli/commands/history.py:161
 msgid "(pre-install)"
 msgstr "(voor-installatie)"
 
-#: urpm/cli/commands/history.py:178
+#: urpm/cli/commands/history.py:179
 msgid "No transaction history"
 msgstr "Geen transacties in geschiedenis"
 
-#: urpm/cli/commands/history.py:181
+#: urpm/cli/commands/history.py:182
 msgid "ID"
 msgstr "ID"
 
-#: urpm/cli/commands/history.py:181 urpm/cli/commands/peer.py:122
+#: urpm/cli/commands/history.py:182 urpm/cli/commands/peer.py:122
 msgid "Date"
 msgstr "Datum"
 
-#: urpm/cli/commands/history.py:181
+#: urpm/cli/commands/history.py:182
 msgid "Action"
 msgstr "Actie"
 
-#: urpm/cli/commands/history.py:181
+#: urpm/cli/commands/history.py:182
 msgid "Packages"
 msgstr "Pakketten"
 
-#: urpm/cli/commands/history.py:199
+#: urpm/cli/commands/history.py:200
 #, python-brace-format
 msgid "(+{count} deps)"
 msgstr "(+{count} afh.)"
 
-#: urpm/cli/commands/history.py:232
+#: urpm/cli/commands/history.py:233
 msgid "No undoable transaction found in history"
 msgstr "Geen ongedaan te maken transactie gevonden in geschiedenis"
 
-#: urpm/cli/commands/history.py:243
+#: urpm/cli/commands/history.py:244
 #, python-brace-format
 msgid "Transaction #{tid} is not complete (status: {status})"
 msgstr "Transactie #{tid} niet volledig (status: {status})"
 
-#: urpm/cli/commands/history.py:247
+#: urpm/cli/commands/history.py:248
 #, python-brace-format
 msgid "Transaction #{tid} was already undone by #{undone_by}"
 msgstr "Transactie #{tid} al ongedaan gemaakt door #{undone_by}"
 
-#: urpm/cli/commands/history.py:274
+#: urpm/cli/commands/history.py:275
 #, python-brace-format
 msgid "Undo transaction #{tid}"
 msgstr "Transactie #{tid} ongedaan maken"
 
-#: urpm/cli/commands/history.py:277 urpm/cli/commands/history.py:742
+#: urpm/cli/commands/history.py:278 urpm/cli/commands/history.py:743
 #, python-brace-format
 msgid "Packages to remove ({count}):"
 msgstr "Te verwijderen pakketten ({count}):"
 
-#: urpm/cli/commands/history.py:282 urpm/cli/commands/history.py:747
+#: urpm/cli/commands/history.py:283 urpm/cli/commands/history.py:748
 #, python-brace-format
 msgid "Packages to reinstall ({count}):"
 msgstr "Te herinstalleren pakketten ({count}):"
 
-#: urpm/cli/commands/history.py:287
+#: urpm/cli/commands/history.py:288
 msgid "Nothing to undo"
 msgstr "Niets ongedaan te maken"
 
-#: urpm/cli/commands/history.py:305 urpm/cli/commands/history.py:770
+#: urpm/cli/commands/history.py:306 urpm/cli/commands/history.py:771
 msgid ""
 "\n"
 "Interrupted! Finishing current operation..."
@@ -6884,7 +6900,7 @@ msgstr ""
 "\n"
 "Onderbroken! Huidige bewerking afronden..."
 
-#: urpm/cli/commands/history.py:324 urpm/cli/commands/history.py:789
+#: urpm/cli/commands/history.py:325 urpm/cli/commands/history.py:790
 #: urpm/cli/commands/cleanup.py:334
 #, python-brace-format
 msgid "Removing {count} package..."
@@ -6892,13 +6908,13 @@ msgid_plural "Removing {count} packages..."
 msgstr[0] "Verwijderen van {count} pakket..."
 msgstr[1] "Verwijderen van {count} pakketten..."
 
-#: urpm/cli/commands/history.py:338 urpm/cli/commands/history.py:533
-#: urpm/cli/commands/history.py:803
+#: urpm/cli/commands/history.py:339 urpm/cli/commands/history.py:534
+#: urpm/cli/commands/history.py:804
 #, python-brace-format
 msgid "Running: {script_name}"
 msgstr "Uitvoeren: {script_name}"
 
-#: urpm/cli/commands/history.py:356 urpm/cli/commands/history.py:821
+#: urpm/cli/commands/history.py:357 urpm/cli/commands/history.py:822
 msgid ""
 "\n"
 "Erase failed:"
@@ -6906,14 +6922,14 @@ msgstr ""
 "\n"
 "Wissen mislukt:"
 
-#: urpm/cli/commands/history.py:365
+#: urpm/cli/commands/history.py:366
 #, python-brace-format
 msgid "Undo interrupted after {count} package"
 msgid_plural "Undo interrupted after {count} packages"
 msgstr[0] "Ongedaan maken onderbroken na {count} pakket"
 msgstr[1] "Ongedaan maken onderbroken na {count} pakketten"
 
-#: urpm/cli/commands/history.py:376 urpm/cli/commands/history.py:841
+#: urpm/cli/commands/history.py:377 urpm/cli/commands/history.py:842
 #: urpm/cli/commands/cleanup.py:391 urpm/cli/commands/cleanup.py:638
 #, python-brace-format
 msgid "{count} package removed"
@@ -6921,71 +6937,71 @@ msgid_plural "{count} packages removed"
 msgstr[0] "{count} pakket verwijderd"
 msgstr[1] "{count} pakketten verwijderd"
 
-#: urpm/cli/commands/history.py:383 urpm/cli/commands/history.py:848
+#: urpm/cli/commands/history.py:384 urpm/cli/commands/history.py:849
 #, python-brace-format
 msgid "Reinstalling {count} package..."
 msgid_plural "Reinstalling {count} packages..."
 msgstr[0] "Herinstalleren van {count} pakket..."
 msgstr[1] "Herinstalleren van {count} pakketten..."
 
-#: urpm/cli/commands/history.py:419 urpm/cli/commands/history.py:432
-#: urpm/cli/commands/history.py:443 urpm/cli/commands/history.py:483
+#: urpm/cli/commands/history.py:420 urpm/cli/commands/history.py:433
+#: urpm/cli/commands/history.py:444 urpm/cli/commands/history.py:484
 msgid "Warning:"
 msgstr "Waarschuwing:"
 
-#: urpm/cli/commands/history.py:419
+#: urpm/cli/commands/history.py:420
 #, python-brace-format
 msgid "cannot parse NEVRA: {nevra}"
 msgstr "kan NEVRA niet ontleden: {nevra}"
 
-#: urpm/cli/commands/history.py:432
+#: urpm/cli/commands/history.py:433
 #, python-brace-format
 msgid "{nevra} not found in repositories"
 msgstr "{nevra} niet gevonden in repositories"
 
-#: urpm/cli/commands/history.py:443
+#: urpm/cli/commands/history.py:444
 #, python-brace-format
 msgid "media not found for {nevra}"
 msgstr "media niet gevonden voor {nevra}"
 
-#: urpm/cli/commands/history.py:483
+#: urpm/cli/commands/history.py:484
 #, python-brace-format
 msgid "no URL or servers for {nevra}"
 msgstr "geen URL of servers voor {nevra}"
 
-#: urpm/cli/commands/history.py:498
+#: urpm/cli/commands/history.py:499
 msgid "Downloading"
 msgstr "Downloaden"
 
-#: urpm/cli/commands/history.py:501
+#: urpm/cli/commands/history.py:502
 #, python-brace-format
 msgid "{downloaded} downloaded, {cached} from cache"
 msgstr "{downloaded} gedownload, {cached} uit cache"
 
-#: urpm/cli/commands/history.py:508
+#: urpm/cli/commands/history.py:509
 msgid "Failed:"
 msgstr "Mislukt:"
 
-#: urpm/cli/commands/history.py:520
+#: urpm/cli/commands/history.py:521
 msgid "  Waiting for RPM lock..."
 msgstr " Wachten op RPM-vergrendeling..."
 
-#: urpm/cli/commands/history.py:548
+#: urpm/cli/commands/history.py:549
 msgid "  Reinstall failed:"
 msgstr " Herinstallatie mislukt:"
 
-#: urpm/cli/commands/history.py:560
+#: urpm/cli/commands/history.py:561
 #, python-brace-format
 msgid "{count} package reinstalled"
 msgid_plural "{count} packages reinstalled"
 msgstr[0] "{count} pakket hergeïnstalleerd"
 msgstr[1] "{count} pakketten hergeïnstalleerd"
 
-#: urpm/cli/commands/history.py:565
+#: urpm/cli/commands/history.py:566
 msgid "Could not reinstall: packages not found in repositories"
 msgstr "Kon niet herinstalleren: pakketten niet gevonden in repositories"
 
-#: urpm/cli/commands/history.py:569
+#: urpm/cli/commands/history.py:570
 msgid ""
 "\n"
 "Undo interrupted"
@@ -6993,68 +7009,68 @@ msgstr ""
 "\n"
 "Ongedaan maken onderbroken"
 
-#: urpm/cli/commands/history.py:583
+#: urpm/cli/commands/history.py:584
 #, python-brace-format
 msgid "Undo complete (transaction #{tid})"
 msgstr "Ongedaan maken voltooid (transactie #{tid})"
 
-#: urpm/cli/commands/history.py:588
+#: urpm/cli/commands/history.py:589
 #, python-brace-format
 msgid "Undo failed: {error}"
 msgstr "Ongedaan maken mislukt: {error}"
 
-#: urpm/cli/commands/history.py:629 urpm/cli/commands/history.py:641
+#: urpm/cli/commands/history.py:630 urpm/cli/commands/history.py:642
 msgid "Usage: rollback to <transaction_id|date>"
 msgstr "Gebruik: rollback to <transactie_id|datum>"
 
-#: urpm/cli/commands/history.py:642
+#: urpm/cli/commands/history.py:643
 msgid "Date formats: DD/MM/YYYY, DD/MM/YYYY HH:MM, YYYY-MM-DD"
 msgstr "Datumformaten: DD/MM/JJJJ, DD/MM/JJJJ UU:MM, JJJJ-MM-DD"
 
-#: urpm/cli/commands/history.py:649
+#: urpm/cli/commands/history.py:650
 msgid "Count must be at least 1"
 msgstr "Aantal moet minstens 1 zijn"
 
-#: urpm/cli/commands/history.py:652
+#: urpm/cli/commands/history.py:653
 #, python-brace-format
 msgid "Invalid argument: {argument}"
 msgstr "Ongeldig argument: {argument}"
 
-#: urpm/cli/commands/history.py:653
+#: urpm/cli/commands/history.py:654
 msgid "Usage: rollback [N] | rollback to <id|date>"
 msgstr "Gebruik: rollback [N] | rollback to <id|datum>"
 
-#: urpm/cli/commands/history.py:659
+#: urpm/cli/commands/history.py:660
 msgid "No transactions in history"
 msgstr "Geen transacties in geschiedenis"
 
-#: urpm/cli/commands/history.py:667
+#: urpm/cli/commands/history.py:668
 msgid "No completed transactions to rollback"
 msgstr "Geen voltooide transacties om terug te draaien"
 
-#: urpm/cli/commands/history.py:677
+#: urpm/cli/commands/history.py:678
 #, python-brace-format
 msgid "Already at or before transaction #{tid}"
 msgstr "Al bij of voor transactie #{tid}"
 
-#: urpm/cli/commands/history.py:686
+#: urpm/cli/commands/history.py:687
 #, python-brace-format
 msgid "No transactions after {date}"
 msgstr "Geen transacties na {date}"
 
-#: urpm/cli/commands/history.py:729
+#: urpm/cli/commands/history.py:730
 #, python-brace-format
 msgid "Rollback to {target}"
 msgstr "Terugdraaien naar {target}"
 
-#: urpm/cli/commands/history.py:731
+#: urpm/cli/commands/history.py:732
 #, python-brace-format
 msgid "Undoing {count} transaction:"
 msgid_plural "Undoing {count} transactions:"
 msgstr[0] "Ongedaan maken van {count} transactie:"
 msgstr[1] "Ongedaan maken van {count} transacties:"
 
-#: urpm/cli/commands/history.py:752
+#: urpm/cli/commands/history.py:753
 msgid ""
 "\n"
 "Nothing to do"
@@ -7062,23 +7078,23 @@ msgstr ""
 "\n"
 "Niets te doen"
 
-#: urpm/cli/commands/history.py:830
+#: urpm/cli/commands/history.py:831
 #, python-brace-format
 msgid "Rollback interrupted after {count} package"
 msgid_plural "Rollback interrupted after {count} packages"
 msgstr[0] "Terugdraaien onderbroken na {count} pakket"
 msgstr[1] "Terugdraaien onderbroken na {count} pakketten"
 
-#: urpm/cli/commands/history.py:854
+#: urpm/cli/commands/history.py:855
 msgid "Note:"
 msgstr "Opmerking:"
 
-#: urpm/cli/commands/history.py:854
+#: urpm/cli/commands/history.py:855
 #, python-brace-format
 msgid "{nevra} needs to be downloaded/installed"
 msgstr "{nevra} moet worden gedownload/geïnstalleerd"
 
-#: urpm/cli/commands/history.py:859
+#: urpm/cli/commands/history.py:860
 msgid ""
 "\n"
 "Rollback interrupted"
@@ -7086,51 +7102,51 @@ msgstr ""
 "\n"
 "Terugdraaien onderbroken"
 
-#: urpm/cli/commands/history.py:874
+#: urpm/cli/commands/history.py:875
 #, python-brace-format
 msgid "Rollback complete (transaction #{tid})"
 msgstr "Terugdraaien voltooid (transactie #{tid})"
 
-#: urpm/cli/commands/history.py:879
+#: urpm/cli/commands/history.py:880
 #, python-brace-format
 msgid "Rollback failed: {error}"
 msgstr "Terugdraaien mislukt: {error}"
 
-#: urpm/cli/commands/history.py:923
+#: urpm/cli/commands/history.py:924
 msgid "history_scriptlet_output already migrated — nothing to do."
 msgstr "history_scriptlet_output al gemigreerd, niets te doen."
 
-#: urpm/cli/commands/history.py:934
+#: urpm/cli/commands/history.py:935
 msgid "history_scriptlet_output is empty — dropping the legacy table."
 msgstr "history_scriptlet_output is leeg, de oude tabel wordt verwijderd."
 
-#: urpm/cli/commands/history.py:941
+#: urpm/cli/commands/history.py:942
 #, python-brace-format
 msgid "Migrating {n} legacy scriptlet row(s) → history_scriptlets{suffix}..."
 msgstr ""
 "Bezig met migreren van {n} oude scriptlet-rij(en) → "
 "history_scriptlets{suffix}..."
 
-#: urpm/cli/commands/history.py:944
+#: urpm/cli/commands/history.py:945
 msgid " (dry-run)"
 msgstr " (proefdraaien)"
 
-#: urpm/cli/commands/history.py:953
+#: urpm/cli/commands/history.py:954
 #, python-brace-format
 msgid "  … and {n} more"
 msgstr "  … en nog {n}"
 
-#: urpm/cli/commands/history.py:955
+#: urpm/cli/commands/history.py:956
 msgid "dry-run : source table would be dropped after successful migration."
 msgstr ""
 "proefdraaien: de brontabel zou na een geslaagde migratie worden verwijderd."
 
-#: urpm/cli/commands/history.py:978
+#: urpm/cli/commands/history.py:979
 #, python-brace-format
 msgid "Migration failed (rolled back): {error}"
 msgstr "Migratie mislukt (teruggedraaid): {error}"
 
-#: urpm/cli/commands/history.py:982
+#: urpm/cli/commands/history.py:983
 #, python-brace-format
 msgid "Migrated {n} row(s); legacy table dropped."
 msgstr "{n} rij(en) gemigreerd; oude tabel verwijderd."
@@ -7185,22 +7201,26 @@ msgid "  packagekit-auto-upgrades  Control PackageKit offline auto-updates"
 msgstr ""
 "  packagekit-auto-upgrades  Offline auto-updates van PackageKit beheren"
 
-#: urpm/cli/commands/config.py:60
+#: urpm/cli/commands/config.py:34
+msgid "  show-all                Print long lists whole by default"
+msgstr "  show-all                Lange lijsten standaard volledig uitvoeren"
+
+#: urpm/cli/commands/config.py:64
 msgid "version-mode preference removed (auto-detection)"
 msgstr "version-mode voorkeur verwijderd (autodetectie)"
 
-#: urpm/cli/commands/config.py:76
+#: urpm/cli/commands/config.py:80
 msgid ""
 "Cannot determine system version — /etc/os-release is missing or unreadable."
 msgstr ""
 "Kan systeemversie niet bepalen — /etc/os-release ontbreekt of is onleesbaar."
 
-#: urpm/cli/commands/config.py:81
+#: urpm/cli/commands/config.py:85
 #, python-brace-format
 msgid "Unknown mode '{mode}' — use system|cauldron|auto"
 msgstr "Onbekende modus '{mode}' — gebruik system|cauldron|auto"
 
-#: urpm/cli/commands/config.py:96
+#: urpm/cli/commands/config.py:100
 #, python-brace-format
 msgid ""
 "No enabled media carry identity {id} — nothing for the resolver to pick "
@@ -7209,12 +7229,12 @@ msgstr ""
 "Geen ingeschakeld medium draagt identiteit {id} — de resolver heeft niets te"
 " verwerken."
 
-#: urpm/cli/commands/config.py:99
+#: urpm/cli/commands/config.py:103
 #, python-brace-format
 msgid "    Add them first: urpm media autoconfig -r {id}"
 msgstr "    Voeg ze eerst toe: urpm media autoconfig -r {id}"
 
-#: urpm/cli/commands/config.py:105
+#: urpm/cli/commands/config.py:109
 #, python-brace-format
 msgid ""
 "{n} enabled media stay tagged with a different identity and will drop out of"
@@ -7223,12 +7243,12 @@ msgstr ""
 "{n} ingeschakelde media houden een andere identiteit en vallen uit het zicht"
 " van de resolver:"
 
-#: urpm/cli/commands/config.py:112
+#: urpm/cli/commands/config.py:116
 #, python-brace-format
 msgid "    ... and {n} more"
 msgstr "    … en nog {n}"
 
-#: urpm/cli/commands/config.py:114
+#: urpm/cli/commands/config.py:118
 #, python-brace-format
 msgid ""
 "  Disable them with 'urpm media disable NAME' or re-run 'urpm media "
@@ -7237,133 +7257,133 @@ msgstr ""
 "  Schakel ze uit met 'urpm media disable NAME' of voer 'urpm media "
 "autoconfig' voor {id} opnieuw uit."
 
-#: urpm/cli/commands/config.py:119
+#: urpm/cli/commands/config.py:123
 #, python-brace-format
 msgid "version-mode set to '{mode}'"
 msgstr "version-mode ingesteld op '{mode}'"
 
-#: urpm/cli/commands/config.py:132
+#: urpm/cli/commands/config.py:136
 #, python-brace-format
 msgid "/etc/version branch set to '{branch}'"
 msgstr "tak in /etc/version ingesteld op « {branch} »"
 
-#: urpm/cli/commands/config.py:141
+#: urpm/cli/commands/config.py:145
 #, python-brace-format
 msgid "System version: {version}"
 msgstr "Systeemversie: {version}"
 
-#: urpm/cli/commands/config.py:141
+#: urpm/cli/commands/config.py:145
 msgid "unknown"
 msgstr "onbekend"
 
-#: urpm/cli/commands/config.py:142
+#: urpm/cli/commands/config.py:146
 #, python-brace-format
 msgid "Configured preference: {pref}"
 msgstr "Geconfigureerde voorkeur: {pref}"
 
-#: urpm/cli/commands/config.py:142
+#: urpm/cli/commands/config.py:146
 msgid "auto (none set)"
 msgstr "auto (geen ingesteld)"
 
-#: urpm/cli/commands/config.py:145 urpm/cli/commands/config.py:148
+#: urpm/cli/commands/config.py:149 urpm/cli/commands/config.py:152
 #, python-brace-format
 msgid " (+{count} more)"
 msgstr " (+{count} meer)"
 
-#: urpm/cli/commands/config.py:146
+#: urpm/cli/commands/config.py:150
 #, python-brace-format
 msgid "Cauldron media: {media}"
 msgstr "Cauldron-media: {media}"
 
-#: urpm/cli/commands/config.py:149
+#: urpm/cli/commands/config.py:153
 #, python-brace-format
 msgid "System version media: {media}"
 msgstr "Systeemversie-media: {media}"
 
-#: urpm/cli/commands/config.py:152
+#: urpm/cli/commands/config.py:156
 #, python-brace-format
 msgid "Conflict: Both {version} and cauldron media are enabled."
 msgstr "Conflict: zowel {version} als cauldron-media zijn ingeschakeld."
 
-#: urpm/cli/commands/config.py:153
+#: urpm/cli/commands/config.py:157
 msgid "Use 'urpm config version-mode <system|cauldron>' to choose."
 msgstr "Gebruik 'urpm config version-mode <system|cauldron>' om te kiezen."
 
-#: urpm/cli/commands/config.py:155
+#: urpm/cli/commands/config.py:159
 #, python-brace-format
 msgid "Active version filter: {versions}"
 msgstr "Actief versie-filter: {versions}"
 
-#: urpm/cli/commands/config.py:175
+#: urpm/cli/commands/config.py:179
 msgid "Error: kernel-keep must be >= 0"
 msgstr "Fout: kernel-keep moet >= 0 zijn"
 
-#: urpm/cli/commands/config.py:179
+#: urpm/cli/commands/config.py:183
 #, python-brace-format
 msgid "kernel-keep set to {count}"
 msgstr "kernel-keep ingesteld op {count}"
 
-#: urpm/cli/commands/config.py:183
+#: urpm/cli/commands/config.py:187
 #, python-brace-format
 msgid "kernel-keep = {count}"
 msgstr "kernel-keep = {count}"
 
-#: urpm/cli/commands/config.py:194
+#: urpm/cli/commands/config.py:198
 #, python-brace-format
 msgid "Unknown config command: {command}"
 msgstr "Onbekende config-opdracht: {command}"
 
-#: urpm/cli/commands/config.py:202
+#: urpm/cli/commands/config.py:206
 #, python-brace-format
 msgid "{name} (built-in):"
 msgstr "{name} (ingebouwd):"
 
-#: urpm/cli/commands/config.py:207
+#: urpm/cli/commands/config.py:211
 #, python-brace-format
 msgid "{name} (user-configured):"
 msgstr "{name} (gebruiker-geconfigureerd):"
 
-#: urpm/cli/commands/config.py:211
+#: urpm/cli/commands/config.py:215
 #, python-brace-format
 msgid "No user-configured {name} entries"
 msgstr "Geen gebruiker-geconfigureerde {name}-items"
 
-#: urpm/cli/commands/config.py:219
+#: urpm/cli/commands/config.py:223
 #, python-brace-format
 msgid "{pkg} is already in the built-in {name}"
 msgstr "{pkg} zit al in de ingebouwde {name}"
 
-#: urpm/cli/commands/config.py:222
+#: urpm/cli/commands/config.py:226
 #, python-brace-format
 msgid "{pkg} is already in the user {name}"
 msgstr "{pkg} zit al in de gebruiker {name}"
 
-#: urpm/cli/commands/config.py:226
+#: urpm/cli/commands/config.py:230
 #, python-brace-format
 msgid "Added {pkg} to {name}"
 msgstr "{pkg} toegevoegd aan {name}"
 
-#: urpm/cli/commands/config.py:233
+#: urpm/cli/commands/config.py:237
 #, python-brace-format
 msgid "Error: {pkg} is in the built-in {name} and cannot be removed"
 msgstr "Fout: {pkg} zit in de ingebouwde {name} en kan niet verwijderd worden"
 
-#: urpm/cli/commands/config.py:236
+#: urpm/cli/commands/config.py:240
 #, python-brace-format
 msgid "{pkg} is not in the user {name}"
 msgstr "{pkg} zit niet in de gebruiker {name}"
 
-#: urpm/cli/commands/config.py:240
+#: urpm/cli/commands/config.py:244
 #, python-brace-format
 msgid "Removed {pkg} from {name}"
 msgstr "{pkg} verwijderd uit {name}"
 
-#: urpm/cli/commands/config.py:245
+#: urpm/cli/commands/config.py:249
 #, python-brace-format
 msgid "Usage: urpm config {name} <list|add|remove> [package]"
 msgstr "Gebruik: urpm config {name} <list|add|remove> [pakket]"
 
-#: urpm/cli/commands/config.py:281
+#: urpm/cli/commands/config.py:285
 #, python-brace-format
 msgid ""
 "\n"
@@ -7372,36 +7392,78 @@ msgstr ""
 "\n"
 "Beschikbare drop-in-bestanden in {dir}:"
 
-#: urpm/cli/commands/config.py:321
+#: urpm/cli/commands/config.py:311
+msgid "show-all: on, long lists are printed whole"
+msgstr "show-all: aan, lange lijsten komen volledig uit"
+
+#: urpm/cli/commands/config.py:313
+msgid "show-all: off, long lists are truncated (the default)"
+msgstr "show-all: uit, lange lijsten worden afgekapt (de standaard)"
+
+#: urpm/cli/commands/config.py:316
+#, python-brace-format
+msgid "  configuration read from: {files}"
+msgstr "  configuratie gelezen uit: {files}"
+
+#: urpm/cli/commands/config.py:319
+msgid "  no configuration file found, built-in default"
+msgstr "  geen configuratiebestand gevonden, ingebouwde standaard"
+
+#: urpm/cli/commands/config.py:329
+#, python-brace-format
+msgid "Cannot write {file}: {error}"
+msgstr "Kan {file} niet schrijven: {error}"
+
+#: urpm/cli/commands/config.py:335
+msgid ""
+"show-all: on, long lists are printed whole. Pass --no-show-all for a "
+"truncated run."
+msgstr ""
+"show-all: aan, lange lijsten komen volledig uit. Geef --no-show-all voor een"
+" afgekapte uitvoering."
+
+#: urpm/cli/commands/config.py:338
+msgid ""
+"show-all: off, long lists are truncated. Pass --show-all for a full run."
+msgstr ""
+"show-all: uit, lange lijsten worden afgekapt. Geef --show-all voor een "
+"volledige uitvoering."
+
+#: urpm/cli/commands/config.py:340
+#, python-brace-format
+msgid "  written to {path}"
+msgstr "  geschreven naar {path}"
+
+#: urpm/cli/commands/config.py:376
 #, python-brace-format
 msgid "{label}: not installed"
 msgstr "{label}: niet geïnstalleerd"
 
-#: urpm/cli/commands/config.py:323
+#: urpm/cli/commands/config.py:378
 #, python-brace-format
 msgid "{label}: auto-upgrades enabled"
 msgstr "{label}: auto-updates ingeschakeld"
 
-#: urpm/cli/commands/config.py:325
+#: urpm/cli/commands/config.py:380
 #, python-brace-format
 msgid "{label}: auto-upgrades disabled"
 msgstr "{label}: auto-updates uitgeschakeld"
 
-#: urpm/cli/commands/config.py:334
+#: urpm/cli/commands/config.py:389
 #, python-brace-format
 msgid "{label}: not installed, nothing to configure"
 msgstr "{label}: niet geïnstalleerd, niets te configureren"
 
-#: urpm/cli/commands/config.py:338
+#: urpm/cli/commands/config.py:393
 #, python-brace-format
 msgid "{label}: auto-upgrades {state}"
 msgstr "{label}: auto-updates {state}"
 
-#: urpm/cli/commands/config.py:347
+#: urpm/cli/commands/config.py:402
 msgid "Usage: urpm key <list|import|remove> ..."
 msgstr "Gebruik: urpm key <list|import|remove> ..."
 
-#: urpm/cli/commands/config.py:348
+#: urpm/cli/commands/config.py:403
 msgid ""
 "\n"
 "Commands:"
@@ -7409,84 +7471,84 @@ msgstr ""
 "\n"
 "Opdrachten:"
 
-#: urpm/cli/commands/config.py:349
+#: urpm/cli/commands/config.py:404
 msgid "  list            List installed GPG keys"
 msgstr " list Geïnstalleerde GPG-sleutels tonen"
 
-#: urpm/cli/commands/config.py:350
+#: urpm/cli/commands/config.py:405
 msgid "  import <file>   Import GPG key from file or HTTPS URL"
 msgstr " import <bestand> GPG-sleutel importeren van bestand of HTTPS-URL"
 
-#: urpm/cli/commands/config.py:351
+#: urpm/cli/commands/config.py:406
 msgid "  remove <keyid>  Remove GPG key"
 msgstr " remove <keyid> GPG-sleutel verwijderen"
 
-#: urpm/cli/commands/config.py:371
+#: urpm/cli/commands/config.py:426
 msgid "No GPG keys installed"
 msgstr "Geen GPG-sleutels geïnstalleerd"
 
-#: urpm/cli/commands/config.py:374
+#: urpm/cli/commands/config.py:429
 #, python-brace-format
 msgid "Installed GPG keys ({count}):"
 msgstr "Geïnstalleerde GPG-sleutels ({count}):"
 
-#: urpm/cli/commands/config.py:386
+#: urpm/cli/commands/config.py:441
 msgid "Usage: urpm key import <keyfile|url>"
 msgstr "Gebruik: urpm key import <sleutelbestand|url>"
 
-#: urpm/cli/commands/config.py:397
+#: urpm/cli/commands/config.py:452
 #, python-brace-format
 msgid "Downloading key from {source}..."
 msgstr "Downloaden van sleutel van {source}..."
 
-#: urpm/cli/commands/config.py:413 urpm/cli/commands/config.py:443
+#: urpm/cli/commands/config.py:468 urpm/cli/commands/config.py:498
 #, python-brace-format
 msgid "Key imported from {source}"
 msgstr "Sleutel geïmporteerd van {source}"
 
-#: urpm/cli/commands/config.py:416 urpm/cli/commands/config.py:446
+#: urpm/cli/commands/config.py:471 urpm/cli/commands/config.py:501
 #, python-brace-format
 msgid "Failed to import key: {error}"
 msgstr "Importeren van sleutel mislukt: {error}"
 
-#: urpm/cli/commands/config.py:422
+#: urpm/cli/commands/config.py:477
 #, python-brace-format
 msgid "Error: failed to download key: {error}"
 msgstr "Fout: downloaden van sleutel mislukt: {error}"
 
-#: urpm/cli/commands/config.py:429
+#: urpm/cli/commands/config.py:484
 msgid "Error: HTTP URLs are not allowed for security reasons. Use HTTPS."
 msgstr ""
 "Fout: HTTP-URL's niet toegestaan om veiligheidsredenen. Gebruik HTTPS."
 
-#: urpm/cli/commands/config.py:468
+#: urpm/cli/commands/config.py:523
 #, python-brace-format
 msgid "Key not found: {keyid}"
 msgstr "Sleutel niet gevonden: {keyid}"
 
-#: urpm/cli/commands/config.py:469
+#: urpm/cli/commands/config.py:524
 msgid "Use 'urpm key list' to see installed keys"
 msgstr "Gebruik 'urpm key list' om geïnstalleerde sleutels te zien"
 
-#: urpm/cli/commands/config.py:473
+#: urpm/cli/commands/config.py:528
 #, python-brace-format
 msgid "Removing key: {key}"
 msgstr "Verwijderen van sleutel: {key}"
 
-#: urpm/cli/commands/config.py:475
+#: urpm/cli/commands/config.py:530
 msgid "Are you sure? [y/N] "
 msgstr "Weet je het zeker? [j/N] "
 
-#: urpm/cli/commands/config.py:488
+#: urpm/cli/commands/config.py:543
 msgid "Key removed"
 msgstr "Sleutel verwijderd"
 
-#: urpm/cli/commands/config.py:491
+#: urpm/cli/commands/config.py:546
 #, python-brace-format
 msgid "Failed to remove key: {error}"
 msgstr "Verwijderen van sleutel mislukt: {error}"
 
-#: urpm/cli/commands/config.py:495
+#: urpm/cli/commands/config.py:550
 #, python-brace-format
 msgid "Unknown key command: {command}"
 msgstr "Onbekende key-opdracht: {command}"
@@ -7612,7 +7674,7 @@ msgstr "{count} records gevonden van peer {host}"
 msgid "{count} files still exist on disk"
 msgstr "{count} bestanden bestaan nog op schijf"
 
-#: urpm/cli/commands/peer.py:189 urpm/cli/commands/peer.py:225
+#: urpm/cli/commands/peer.py:189 urpm/cli/commands/peer.py:224
 #, python-brace-format
 msgid "Removed {count} download records."
 msgstr "{count} downloadrecords verwijderd."
@@ -7621,24 +7683,24 @@ msgstr "{count} downloadrecords verwijderd."
 msgid "Files to delete:"
 msgstr "Te verwijderen bestanden:"
 
-#: urpm/cli/commands/peer.py:200
+#: urpm/cli/commands/peer.py:199
 #, python-brace-format
 msgid "Delete {count} file? [y/N] "
 msgid_plural "Delete {count} files? [y/N] "
 msgstr[0] "{count} bestand verwijderen? [j/N] "
 msgstr[1] "{count} bestanden verwijderen? [j/N] "
 
-#: urpm/cli/commands/peer.py:218
+#: urpm/cli/commands/peer.py:217
 #, python-brace-format
 msgid "Error deleting {path}: {error}"
 msgstr "Fout bij verwijderen van {path}: {error}"
 
-#: urpm/cli/commands/peer.py:224
+#: urpm/cli/commands/peer.py:223
 #, python-brace-format
 msgid "Deleted {deleted} files ({errors} errors)"
 msgstr "{deleted} bestanden verwijderd ({errors} fouten)"
 
-#: urpm/cli/commands/peer.py:229
+#: urpm/cli/commands/peer.py:228
 #, python-brace-format
 msgid "Unknown peer command: {command}"
 msgstr "Onbekende peer-opdracht: {command}"
@@ -10235,49 +10297,49 @@ msgstr ""
 "een Mageia-distributieopwaardering staat in fase ‘{stage}’ (transactie onderbroken).\n"
 "Ga verder met `urpm distupgrade --resume`, of geef ze op met `urpm distupgrade --abort`."
 
-#: urpm/cli/helpers/hook_report.py:99
+#: urpm/cli/helpers/hook_report.py:119
 #, python-brace-format
 msgid "{n} action will run once this command has finished:"
 msgid_plural "{n} actions will run once this command has finished:"
 msgstr[0] "{n} actie wordt uitgevoerd nadat dit commando klaar is:"
 msgstr[1] "{n} acties worden uitgevoerd nadat dit commando klaar is:"
 
-#: urpm/cli/helpers/hook_report.py:137
+#: urpm/cli/helpers/hook_report.py:157
 #, python-brace-format
 msgid "This service is running replaced code: {services}"
 msgid_plural "These services are running replaced code: {services}"
 msgstr[0] "Deze dienst draait vervangen code: {services}"
 msgstr[1] "Deze diensten draaien vervangen code: {services}"
 
-#: urpm/cli/helpers/hook_report.py:141
+#: urpm/cli/helpers/hook_report.py:161
 msgid "Restart it when convenient:"
 msgid_plural "Restart them when convenient:"
 msgstr[0] "Start hem opnieuw wanneer het uitkomt:"
 msgstr[1] "Start ze opnieuw wanneer het uitkomt:"
 
-#: urpm/cli/helpers/hook_report.py:158
+#: urpm/cli/helpers/hook_report.py:178
 #, python-brace-format
 msgid "Rule {rule} asked for a restart without naming a service"
 msgstr "Regel {rule} vraagt om een herstart zonder een dienst te noemen"
 
-#: urpm/cli/helpers/hook_report.py:179
+#: urpm/cli/helpers/hook_report.py:199
 #, python-brace-format
 msgid "Could not move urpmi's media to Mageia {tgt}: {reason}"
 msgstr "Kan de media van urpmi niet naar Mageia {tgt} verplaatsen: {reason}"
 
-#: urpm/cli/helpers/hook_report.py:186
+#: urpm/cli/helpers/hook_report.py:206
 #, python-brace-format
 msgid "urpmi: {n} medium URL moved to Mageia {tgt}"
 msgid_plural "urpmi: {n} media URLs moved to Mageia {tgt}"
 msgstr[0] "urpmi: {n} media-URL verplaatst naar Mageia {tgt}"
 msgstr[1] "urpmi: {n} media-URL's verplaatst naar Mageia {tgt}"
 
-#: urpm/cli/helpers/hook_report.py:192
+#: urpm/cli/helpers/hook_report.py:212
 #, python-brace-format
 msgid "urpmi's previous configuration kept as {path}"
 msgstr "vorige urpmi-configuratie bewaard als {path}"
 
-#: urpm/cli/helpers/hook_report.py:199
+#: urpm/cli/helpers/hook_report.py:219
 #, python-brace-format
 msgid "{n} entry still names Mageia {src} and was left alone:"
 msgid_plural "{n} entries still name Mageia {src} and were left alone:"
@@ -10286,7 +10348,7 @@ msgstr[0] ""
 msgstr[1] ""
 "{n} vermeldingen noemen nog steeds Mageia {src} en zijn ongemoeid gelaten:"
 
-#: urpm/cli/helpers/hook_report.py:211
+#: urpm/cli/helpers/hook_report.py:231
 #, python-brace-format
 msgid "{n} medium has nothing published for Mageia {tgt} and was disabled:"
 msgid_plural ""
@@ -10298,14 +10360,14 @@ msgstr[1] ""
 "Voor {n} media is niets gepubliceerd voor Mageia {tgt}, ze zijn "
 "uitgeschakeld:"
 
-#: urpm/cli/helpers/hook_report.py:224
+#: urpm/cli/helpers/hook_report.py:244
 #, python-brace-format
 msgid "{n} local medium now points at a path that is not there:"
 msgid_plural "{n} local media now point at paths that are not there:"
 msgstr[0] "{n} lokaal medium wijst nu naar een pad dat er niet is:"
 msgstr[1] "{n} lokale media wijzen nu naar paden die er niet zijn:"
 
-#: urpm/cli/helpers/hook_report.py:230
+#: urpm/cli/helpers/hook_report.py:250
 msgid ""
 "A disc medium only needs its disc mounted; otherwise the path is to be "
 "corrected by hand."
@@ -10313,28 +10375,28 @@ msgstr ""
 "Een medium op schijf heeft alleen zijn gemonteerde schijf nodig; anders moet"
 " het pad met de hand worden gecorrigeerd."
 
-#: urpm/cli/helpers/hook_report.py:243
+#: urpm/cli/helpers/hook_report.py:263
 #, python-brace-format
 msgid "not restarting {service} (context = distupgrade)"
 msgstr "{service} wordt niet herstart (context: distupgrade)"
 
-#: urpm/cli/helpers/hook_report.py:248
+#: urpm/cli/helpers/hook_report.py:268
 #, python-brace-format
 msgid "{service} restarted"
 msgstr "{service} opnieuw gestart"
 
-#: urpm/cli/helpers/hook_report.py:252
+#: urpm/cli/helpers/hook_report.py:272
 #, python-brace-format
 msgid "{service} was not running, left alone"
 msgstr "{service} draaide niet en is ongemoeid gelaten"
 
-#: urpm/cli/helpers/hook_report.py:257
+#: urpm/cli/helpers/hook_report.py:277
 #, python-brace-format
 msgid "Cannot restart {service}: no service command on this system"
 msgstr ""
 "Kan {service} niet opnieuw starten: geen service-opdracht op dit systeem"
 
-#: urpm/cli/helpers/hook_report.py:261
+#: urpm/cli/helpers/hook_report.py:281
 #, python-brace-format
 msgid "Could not restart {service}, try: service {service} restart"
 msgstr ""
@@ -10487,7 +10549,7 @@ msgstr "de URL benoemt geen .rpm-bestand"
 msgid "download failed"
 msgstr "download mislukt"
 
-#: urpm/core/transaction_queue.py:1058
+#: urpm/core/transaction_queue.py:1075
 msgid "Waiting for scriptlets to complete..."
 msgstr "Wachten tot scriptlets voltooid zijn..."
 
@@ -10900,6 +10962,9 @@ msgstr "Voer uit: {cmd}"
 #: urpm/auth/privileges.py:142
 msgid "Try one of:"
 msgstr "Probeer één van:"
+
+#~ msgid "Show all items without truncation"
+#~ msgstr "Alle items tonen zonder afkapping"
 
 #~ msgid ""
 #~ "  Host has no media providing urpm-ng-core for this target.\n"
